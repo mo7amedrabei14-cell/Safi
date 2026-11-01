@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "title": "SafiData v5.0 Gold Master — 23 Engineering Skills & Tools Honest Status Manifest (Section 20.1)",
+  "tools": [
+    {
+      "id": 1,
+      "name": "React Bits",
+      "source": "reactbits.dev",
+      "spec_path": "packages/ui/src/react-bits/",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T1.13",
+      "slice": "S1",
+      "notes": "Deferred to T1.13 (packages/ui core & React Bits) to avoid T1.00 scope creep."
+    },
+    {
+      "id": 2,
+      "name": "DavidHDev/react-bits",
+      "source": "github.com/DavidHDev/react-bits",
+      "spec_path": "packages/ui/src/react-bits/",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T1.13",
+      "slice": "S1",
+      "notes": "Deferred to T1.13 alongside Tailwind CSS v4 Design Tokens (T1.01)."
+    },
+    {
+      "id": 3,
+      "name": "GSAP 3.12",
+      "source": "github.com/greensock/GSAP",
+      "spec_path": "packages/motion/src/gsap-timelines.ts",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T1.14",
+      "slice": "S1",
+      "notes": "gsap@3.12.7 pinned in @safi/motion; timeline implementation deferred to T1.14."
+    },
+    {
+      "id": 4,
+      "name": "Lenis Smooth Scroll",
+      "source": "github.com/darkroomengineering/lenis",
+      "spec_path": "packages/motion/src/lenis-provider.tsx",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T1.14",
+      "slice": "S1",
+      "notes": "lenis@1.2.3 pinned in @safi/motion; provider implementation deferred to T1.14."
+    },
+    {
+      "id": 5,
+      "name": "Prompt Motion",
+      "source": "prompt-motion.com",
+      "spec_path": "tools/brand-export/prompt-motion/",
+      "active_path": "tools/brand-export/prompt-motion/scene-manifest.json",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Scene specification manifest created in tools/brand-export/prompt-motion/ per Section 19.4."
+    },
+    {
+      "id": 6,
+      "name": "Graphify",
+      "source": "github.com/Graphify-Labs/graphify",
+      "spec_path": "packages/chart-studio/src/graphify/",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T3.14",
+      "slice": "S3",
+      "notes": "Lineage (N11) and table relations (U10) implementation deferred to Slice S3 (T3.14)."
+    },
+    {
+      "id": 7,
+      "name": "UI/UX Pro Max Skill",
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "spec_path": ".agents/skills/ui-ux-pro-max/",
+      "active_path": ".agents/skills/ui-ux-pro-max/SKILL.md",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Agent skill instructions configured in .agents/skills/ui-ux-pro-max/SKILL.md."
+    },
+    {
+      "id": 8,
+      "name": "I-Have-ADHD Skill",
+      "source": "ayghri/i-have-adhd",
+      "spec_path": ".agents/skills/i-have-adhd/",
+      "active_path": ".agents/skills/i-have-adhd/SKILL.md",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Agent skill instructions configured in .agents/skills/i-have-adhd/SKILL.md."
+    },
+    {
+      "id": 9,
+      "name": "DQNamo",
+      "source": "dqnamo.com",
+      "spec_path": "apps/site/src/components/live-playground/",
+      "active_path": ".agents/dqnamo.json",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T6.10",
+      "slice": "S6",
+      "adr": "ADR-0001",
+      "notes": "apps/site deferred to Slice S6 per Section 19.4; staged config in .agents/dqnamo.json."
+    },
+    {
+      "id": 10,
+      "name": "Vercel Labs Skills",
+      "source": "github.com/vercel-labs/skills",
+      "spec_path": ".agents/skills/vercel-core/",
+      "active_path": ".agents/skills/vercel-core/SKILL.md",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Modular skill loading rules configured in .agents/skills/vercel-core/SKILL.md."
+    },
+    {
+      "id": 11,
+      "name": "Claudex Loop",
+      "source": "github.com/chaseai-yt/claudex-loop",
+      "spec_path": ".agents/claudex-loop.yaml",
+      "active_path": ".agents/claudex-loop.yaml",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Workflow loop configuration active in .agents/claudex-loop.yaml."
+    },
+    {
+      "id": 12,
+      "name": "Ruflo Swarm",
+      "source": "github.com/ruvnet/ruflo",
+      "spec_path": ".agents/ruflo-swarm.yaml",
+      "active_path": ".agents/ruflo-swarm.yaml",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "4-agent role allocation configuration created in .agents/ruflo-swarm.yaml."
+    },
+    {
+      "id": 13,
+      "name": "Smart Task Router",
+      "source": "celiktech24-cell/smart-task-router",
+      "spec_path": "server/ai-proxy/src/router.rs",
+      "active_path": ".agents/router-config.json",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T6.04",
+      "slice": "S4/S6",
+      "adr": "ADR-0001",
+      "notes": "Agent routing config in .agents/router-config.json; server/ai-proxy deferred per Section 19.4."
+    },
+    {
+      "id": 14,
+      "name": "Headroom (headroomlabs-ai)",
+      "source": "github.com/headroomlabs-ai/headroom",
+      "spec_path": ".agents/headroom.toml",
+      "active_path": ".agents/headroom.toml",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Context compression configuration created in .agents/headroom.toml."
+    },
+    {
+      "id": 15,
+      "name": "Headroom (chopratejas)",
+      "source": "github.com/chopratejas/headroom",
+      "spec_path": "server/ai-proxy/src/compressor.rs",
+      "active_path": ".agents/headroom.toml",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T6.04",
+      "slice": "S4/S6",
+      "adr": "ADR-0001",
+      "notes": "server/ai-proxy/src/compressor.rs deferred per Section 19.4."
+    },
+    {
+      "id": 16,
+      "name": "Ponytail",
+      "source": "github.com/DietrichGebert/ponytail",
+      "spec_path": ".agents/ponytail/",
+      "active_path": ".agents/ponytail/config.toml",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "ADR tracking configuration created in .agents/ponytail/config.toml."
+    },
+    {
+      "id": 17,
+      "name": "Codeburn",
+      "source": "github.com/getagentseal/codeburn",
+      "spec_path": "tools/codeburn/burn.sh",
+      "active_path": "tools/codeburn/burn.sh",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Wrapper gate script in tools/codeburn/burn.sh; full proptest/mutation suite expands in T1.06/T1.20."
+    },
+    {
+      "id": 18,
+      "name": "Anthropic Knowledge Plugins",
+      "source": "anthropics/knowledge-work-plugins",
+      "spec_path": ".agents/skills/knowledge-work/",
+      "active_path": ".agents/skills/knowledge-work/SKILL.md",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Templates for U8, D11, and 3W/4W N3 configured in .agents/skills/knowledge-work/SKILL.md."
+    },
+    {
+      "id": 19,
+      "name": "No-Cost AI",
+      "source": "github.com/zebbern/no-cost-ai",
+      "spec_path": "tools/seed-data/no-cost-gen.py",
+      "active_path": "tools/seed-data/no-cost-gen.py",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T1.20",
+      "slice": "S1",
+      "notes": "CLI entrypoint created in tools/seed-data/no-cost-gen.py per Section 19.4; golden dataset generation deferred to T1.20."
+    },
+    {
+      "id": 20,
+      "name": "Awesome Free LLM APIs",
+      "source": "github.com/mnfst/awesome-free-llm-apis",
+      "spec_path": "server/ai-proxy/free-providers.json",
+      "active_path": ".agents/free-providers.json",
+      "status": "deferred_to_task_or_slice",
+      "target_task": "T6.04",
+      "slice": "S4/S6",
+      "adr": "ADR-0001",
+      "notes": "Provider matrix staged in .agents/free-providers.json; server/ai-proxy deferred per Section 19.4."
+    },
+    {
+      "id": 21,
+      "name": "Cloudflare Security Skill",
+      "source": "cloudflare/security-audit-skill",
+      "spec_path": ".agents/skills/cloudflare-security/",
+      "active_path": ".agents/skills/cloudflare-security/SKILL.md",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Security skill rules in .agents/skills/cloudflare-security/SKILL.md + verification in tools/verify-security.py."
+    },
+    {
+      "id": 22,
+      "name": "Strix AI Pentesting",
+      "source": "github.com/usestrix/strix",
+      "spec_path": "tests/security/strix-runner.yaml",
+      "active_path": "tests/security/strix-runner.yaml",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Security suite manifest configured in tests/security/strix-runner.yaml; active fuzzing/pentesting expands in T1.19/T4.14."
+    },
+    {
+      "id": 23,
+      "name": "Ponytail Session Sync",
+      "source": "github.com/DietrichGebert/ponytail",
+      "spec_path": ".agents/ponytail/sync.json",
+      "active_path": ".agents/ponytail/sync.json",
+      "status": "configured_in_t1_00",
+      "slice": "S1",
+      "notes": "Session state manifest configured in .agents/ponytail/sync.json."
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "name": "safi-smart-task-router",
+  "source": "celiktech24-cell/smart-task-router",
+  "spec_reference": "Section 20.1 #13 & Section 19.4",
+  "deferred_server_target": "server/ai-proxy/src/router.rs",
+  "deferred_slice": "S4",
+  "egypt_default_mode": "local_only",
+  "agent_routing": {
+    "spec_lookup": "headroom-local-index",
+    "unit_and_property_tests": "codeburn-runner",
+    "ui_and_rtl_review": "ui-ux-pro-max",
+    "security_gate": "cloudflare-security-and-strix"
+  },
+  "product_runtime_routing": {
+    "tier_1_local": {
+      "provider": "webllm-webgpu",
+      "tasks": ["column_type_hint", "simple_category_cluster", "date_format_disambiguation"],
+      "cost_micro_usd": 0,
+      "requires_cloud_consent": false
+    },
+    "tier_2_free_fallback": {
+      "provider_manifest": ".agents/free-providers.json",
+      "tasks": ["synthetic_seed_generation", "level_b_translation_draft"],
+      "cost_micro_usd": 0,
+      "requires_cloud_consent": true
+    },
+    "tier_3_complex": {
+      "provider": "claude-api-via-safi-proxy",
+      "tasks": [
+        "recipe_from_example_n16",
+        "natural_language_recipe_edit_n17",
+        "chart_spec_from_prompt_v3"
+      ],
+      "requires_headroom_compression": true,
+      "requires_masked_samples": true,
+      "requires_cloud_consent": true,
+      "strict_json_schema_output": true
+    }
+  }
+}

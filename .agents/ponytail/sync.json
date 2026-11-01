@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "tool": "ponytail-session-sync",
+  "source": "github.com/DietrichGebert/ponytail",
+  "spec_reference": "Section 20.1 #23",
+  "project": "safi",
+  "current_slice": "S1",
+  "active_task": "T1.00",
+  "synced_artifacts": {
+    "adr_primary": "docs/DECISIONS.md",
+    "commands_primary": "docs/COMMANDS.md",
+    "changelog_primary": "CHANGELOG.md",
+    "owner_decisions": "OWNER_DECISIONS.md",
+    "tasks": ["docs/tasks/T0.01.md", "docs/tasks/T1.00.md"],
+    "plans": ["docs/plans/T1.00.md"],
+    "reports": ["docs/reports/T1.00.md"]
+  },
+  "recorded_adrs": ["ADR-0001", "ADR-0002", "ADR-0003"]
+}

@@ -1,0 +1,53 @@
+[SF-IMP-001]
+severity = "error"
+title_ar = "تعذّر فتح الملف"
+action_ar = "تأكد أن الملف غير تالف وبصيغة مدعومة ثم أعد المحاولة."
+owner_note = "Container is corrupt or unsupported."
+
+[SF-IMP-002]
+severity = "warn"
+title_ar = "لم نتعرف على ترميز الملف"
+action_ar = "اختر الترميز المناسب من القائمة لنعرض النص بشكل صحيح."
+owner_note = "Encoding detection confidence below threshold."
+
+[SF-IMP-003]
+severity = "error"
+title_ar = "الملف أكبر من الحد المسموح على هذا الجهاز"
+action_ar = "جرّب نسخة سطح المكتب أو قسّم الملف."
+owner_note = "Size limit exceeded for this platform."
+
+[SF-IMP-004]
+severity = "error"
+title_ar = "الملف محمي بكلمة سر"
+action_ar = "أدخل كلمة السر لفتحه. لن نحفظها."
+owner_note = "Encrypted container."
+
+[SF-IMP-005]
+severity = "error"
+title_ar = "رفضنا الملف لأسباب أمنية"
+action_ar = "الملف مضغوط بشكل غير معتاد. افتحه في Excel وأعد حفظه ثم جرّب مجددًا."
+owner_note = "Decompression ratio or size limit exceeded (possible zip bomb)."
+
+[SF-PRF-001]
+severity = "info"
+title_ar = "لسنا متأكدين من نوع هذا العمود"
+action_ar = "راجع الاقتراح أو اشرح لنا معنى العمود."
+owner_note = "Type confidence below threshold."
+
+[SF-CLN-001]
+severity = "warn"
+title_ar = "تواريخ غامضة"
+action_ar = "اختر هل الصيغة يوم/شهر أم شهر/يوم."
+owner_note = "Day/month ambiguity not resolvable from column."
+
+[SF-EXP-001]
+severity = "error"
+title_ar = "تعذّر حفظ الملف"
+action_ar = "تأكد من وجود مساحة كافية وأن الملف غير مفتوح في برنامج آخر."
+owner_note = "Atomic write failed."
+
+[SF-UNK-001]
+severity = "error"
+title_ar = "حدث خطأ غير متوقع"
+action_ar = "أرسل تقريرًا للدعم مع رمز التشخيص."
+owner_note = "Uncaught error. Full details in log. Triage priority."

@@ -1,0 +1,23 @@
+# Headroom Context & Payload Compression — SafiData v5.0 Gold Master (Section 20.1 #14 & #15)
+
+[agent_context]
+# Tool #14: Headroom (github.com/headroomlabs-ai/headroom)
+enabled = true
+source = "github.com/headroomlabs-ai/headroom"
+target_reduction_ratio = 0.65
+load_only_referenced_spec_sections = true
+spec_directory = "docs/spec"
+strip_redundant_logs = true
+
+[runtime_ai_proxy]
+# Tool #15: Headroom (github.com/chopratejas/headroom)
+# Staged in .agents/headroom.toml during S1; wired into server/ai-proxy/src/compressor.rs in Slice S4/S6 (per ADR-0001)
+enabled = true
+source = "github.com/chopratejas/headroom"
+deferred_server_target = "server/ai-proxy/src/compressor.rs"
+active_from_slice = "S4"
+max_masked_sample_rows = 10
+schema_dictionary_encoding = true
+min_compression_ratio_pct = 65.0
+forbid_raw_pii = true
+egypt_default_cloud_ai_enabled = false

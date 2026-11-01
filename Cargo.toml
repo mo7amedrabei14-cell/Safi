@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sf-core",
+    "crates/sf-io",
+    "crates/sf-arabic",
+    "crates/sf-profile",
+    "crates/sf-clean",
+    "crates/sf-recipe",
+    "crates/sf-report",
+    "crates/sf-wasm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Proprietary"
+authors = ["SafiData Engineering"]
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "deny"
+unreachable_pub = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"

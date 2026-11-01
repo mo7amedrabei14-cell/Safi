@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "safi-dqnamo-live-playground",
+  "source": "dqnamo.com",
+  "spec_reference": "Section 20.1 #9 & Section 19.4",
+  "deferred_app_target": "apps/site/src/components/live-playground/",
+  "deferred_slice": "S6",
+  "wasm_engine_crate": "crates/sf-wasm",
+  "features": {
+    "zero_signup_browser_cleaning": true,
+    "isolated_web_worker": true,
+    "rtl_canvas_preview": true,
+    "max_playground_file_bytes": 10485760
+  }
+}

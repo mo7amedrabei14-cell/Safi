@@ -1,0 +1,7 @@
+node_modules/
+dist/
+target/
+pnpm-lock.yaml
+Cargo.lock
+docs/spec-full.md
+docs/spec/

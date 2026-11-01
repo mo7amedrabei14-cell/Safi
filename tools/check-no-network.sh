@@ -83,14 +83,14 @@ if grep -RInE '(\buse\s+std::net\b|\bstd::net::|\buse\s+core::net\b|\bcore::net:
 fi
 
 # 2. Check Cargo.toml files and full resolved Cargo dependency graph via cargo metadata
-METADATA_JSON="$(cargo metadata --format-version 1)"
 FORBIDDEN_CSV="$(IFS=,; echo "${FORBIDDEN_CRATES[*]}")"
 
-METADATA_JSON="$METADATA_JSON" FORBIDDEN_CSV="$FORBIDDEN_CSV" run_python - <<'PY'
+FORBIDDEN_CSV="$FORBIDDEN_CSV" run_python - <<'PY'
 import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 forbidden = set(os.environ["FORBIDDEN_CSV"].split(","))
@@ -107,8 +107,13 @@ for cargo_toml in sorted(pathlib.Path("crates").glob("sf-*/Cargo.toml")):
             )
             sys.exit(1)
 
-# B. Full transitive graph traversal via cargo metadata
-metadata = json.loads(os.environ["METADATA_JSON"])
+# B. Full transitive graph traversal via cargo metadata (read via pipe to avoid Linux MAX_ARG_STRLEN 128KB env limit)
+metadata_raw = subprocess.check_output(
+    ["cargo", "metadata", "--format-version", "1"],
+    text=True,
+    encoding="utf-8",
+)
+metadata = json.loads(metadata_raw)
 packages_by_id = {pkg["id"]: pkg["name"] for pkg in metadata.get("packages", [])}
 resolve_nodes = {
     node["id"]: node.get("deps", [])

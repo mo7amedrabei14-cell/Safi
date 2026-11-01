@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint \"packages/*/src/**/*.{ts,tsx}\" \"apps/*/src/**/*.{ts,tsx}\"",
     "test": "vitest run",
+    "check:contrast": "pnpm --filter @safi/design-tokens run check:contrast && pnpm --filter @safi/design-tokens run check:contrast:self-test",
     "format": "prettier --write \"packages/**/*.{ts,tsx,json}\" \"apps/**/*.{ts,tsx,json}\" \".agents/**/*.json\" \"package.json\" \"tsconfig.base.json\"",
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,json}\" \"apps/**/*.{ts,tsx,json}\" \".agents/**/*.json\" \"package.json\" \"tsconfig.base.json\""
   },

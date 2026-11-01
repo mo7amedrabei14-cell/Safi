@@ -8,7 +8,7 @@ PYTHON_BIN := $(shell if command -v python3 >/dev/null 2>&1 && python3 -c "impor
 all: check
 
 check: check-no-network check-contrast fmt-check lint test build codeburn security
-	@echo "[make check] ALL GATES PASSED SUCCESSFULLY (SafiData v5.0 Gold Master -- T1.01)."
+	@echo "[make check] ALL GATES PASSED SUCCESSFULLY (SafiData v5.0 Gold Master -- T1.02)."
 
 check-no-network:
 	bash tools/check-no-network.sh

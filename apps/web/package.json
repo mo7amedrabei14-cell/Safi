@@ -1,0 +1,22 @@
+{
+  "name": "@safi/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@safi/brand": "workspace:*",
+    "@safi/chart-studio": "workspace:*",
+    "@safi/design-tokens": "workspace:*",
+    "@safi/i18n": "workspace:*",
+    "@safi/icons": "workspace:*",
+    "@safi/motion": "workspace:*",
+    "@safi/ui": "workspace:*",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  }
+}

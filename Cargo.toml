@@ -19,6 +19,9 @@ license = "Proprietary"
 authors = ["SafiData Engineering"]
 publish = false
 
+[workspace.dependencies]
+rust_decimal = { version = "=1.36.0", default-features = false, features = ["std"] }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "deny"

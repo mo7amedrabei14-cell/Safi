@@ -1,0 +1,11 @@
+[package]
+name = "sf-server"
+version = "5.0.0"
+edition = "2021"
+
+[dependencies]
+uuid = { version = "=1.29.0", features = ["v4"] }
+tokio = { version = "=1.54.1", features = ["full"] }
+axum = "=0.8.4"
+serde = { version = "=1.0.217", features = ["derive"] }
+serde_json = "=1.0.135"

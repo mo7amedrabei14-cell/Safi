@@ -252,8 +252,8 @@ impl std::error::Error for ErrorCodeParseError {}
 /// Validated error code in the canonical `SF-<DOMAIN>-<NNN>` format (Section 15.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErrorCode {
-    domain: ErrorDomain,
-    number: u16,
+    pub(crate) domain: ErrorDomain,
+    pub(crate) number: u16,
 }
 
 impl ErrorCode {
@@ -261,57 +261,6 @@ impl ErrorCode {
     pub const MIN_NUMBER: u16 = 1;
     /// Maximum valid error number (`999`).
     pub const MAX_NUMBER: u16 = 999;
-
-    /// Standard error codes referenced in core engine invariants.
-    pub const SF_IMP_001: Self = Self {
-        domain: ErrorDomain::Imp,
-        number: 1,
-    };
-    /// Encoding confidence below threshold (`SF-IMP-002`).
-    pub const SF_IMP_002: Self = Self {
-        domain: ErrorDomain::Imp,
-        number: 2,
-    };
-    /// Platform file size or row count limit exceeded (`SF-IMP-003`).
-    pub const SF_IMP_003: Self = Self {
-        domain: ErrorDomain::Imp,
-        number: 3,
-    };
-    /// Password-protected container (`SF-IMP-004`).
-    pub const SF_IMP_004: Self = Self {
-        domain: ErrorDomain::Imp,
-        number: 4,
-    };
-    /// Archive decompression ratio / zip bomb limit exceeded (`SF-IMP-005`).
-    pub const SF_IMP_005: Self = Self {
-        domain: ErrorDomain::Imp,
-        number: 5,
-    };
-    /// Column type confidence below threshold (`SF-PRF-001`).
-    pub const SF_PRF_001: Self = Self {
-        domain: ErrorDomain::Prf,
-        number: 1,
-    };
-    /// Invalid confidence score value outside `[0.0, 1.0]` (`SF-PRF-002`).
-    pub const SF_PRF_002: Self = Self {
-        domain: ErrorDomain::Prf,
-        number: 2,
-    };
-    /// Ambiguous date format (`SF-CLN-001`).
-    pub const SF_CLN_001: Self = Self {
-        domain: ErrorDomain::Cln,
-        number: 1,
-    };
-    /// Table / column structural mismatch (`SF-SYS-001`).
-    pub const SF_SYS_001: Self = Self {
-        domain: ErrorDomain::Sys,
-        number: 1,
-    };
-    /// Uncaught / unexpected fallback error (`SF-UNK-001`).
-    pub const SF_UNK_001: Self = Self {
-        domain: ErrorDomain::Unk,
-        number: 1,
-    };
 
     /// Constructs a validated `ErrorCode` from a domain and a number in `1..=999`.
     pub const fn new(domain: ErrorDomain, number: u16) -> Result<Self, ErrorCodeParseError> {

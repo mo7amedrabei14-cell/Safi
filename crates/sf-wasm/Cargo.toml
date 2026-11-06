@@ -15,6 +15,13 @@ sf-profile = { path = "../sf-profile", version = "=0.1.0" }
 sf-clean = { path = "../sf-clean", version = "=0.1.0" }
 sf-recipe = { path = "../sf-recipe", version = "=0.1.0" }
 sf-report = { path = "../sf-report", version = "=0.1.0" }
+wasm-bindgen = { version = "=0.2.99" }
+serde = { version = "=1.0.217", features = ["derive"] }
+serde_json = { version = "=1.0.135" }
+serde-wasm-bindgen = { version = "=0.6.5" }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [lints]
 workspace = true

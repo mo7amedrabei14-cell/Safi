@@ -5,6 +5,7 @@
 
 pub mod column;
 pub mod error;
+pub mod generated_errors;
 pub mod limits;
 pub mod table;
 pub mod value;
@@ -19,6 +20,7 @@ pub use crate::error::{
     DiagnosticToken, ErrorCode, ErrorCodeParseError, ErrorDomain, ErrorSeverity,
     SafeEngineLogRecord, SafeLogContext, SafeLogMetrics, SafiError,
 };
+pub use crate::generated_errors::{ErrorCatalogEntry, OFFICIAL_ERROR_CATALOG};
 pub use crate::limits::{
     DESKTOP_CLI_MAX_FILE_BYTES, DESKTOP_CLI_MAX_ROWS, ONE_GIB_BYTES, ONE_MIB_BYTES, PlatformLimits,
     PlatformTarget, WEB_PWA_MAX_FILE_BYTES, WEB_PWA_MAX_ROWS,

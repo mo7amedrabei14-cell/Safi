@@ -43,7 +43,7 @@ export function parseHexToRgb(hex: string): readonly [number, number, number] {
   const match = HEX_COLOR_RE.exec(hex.trim());
   const digits = match?.[1];
   if (!digits) {
-    throw new Error(`Invalid 6-digit hex color: "${hex}"`);
+    throw new Error(`[SF-SYS-001] Invalid 6-digit hex color: "${hex}"`);
   }
   const r = Number.parseInt(digits.slice(0, 2), 16);
   const g = Number.parseInt(digits.slice(2, 4), 16);

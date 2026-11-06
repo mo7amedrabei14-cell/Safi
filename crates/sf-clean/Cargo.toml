@@ -9,6 +9,12 @@ publish.workspace = true
 
 [dependencies]
 sf-core = { path = "../sf-core", version = "=0.1.0" }
+sf-arabic = { path = "../sf-arabic", version = "=0.1.0" }
+sf-profile = { path = "../sf-profile", version = "=0.1.0" }
+rust_decimal = { workspace = true }
+
+[dev-dependencies]
+proptest = "=1.5.0"
 
 [lints]
 workspace = true

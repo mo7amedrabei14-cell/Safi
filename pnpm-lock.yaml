@@ -79,7 +79,7 @@ importers:
         version: 19.1.0(react@19.1.0)
     devDependencies:
       '@types/node':
-        specifier: '22'
+        specifier: 22.20.5
         version: 22.20.5
 
   packages/brand: {}

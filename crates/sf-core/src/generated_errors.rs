@@ -22,6 +22,31 @@ impl ErrorCode {
         domain: ErrorDomain::Auth,
         number: 1,
     };
+    /// Registered error code `SF-AUTH-002`.
+    pub const SF_AUTH_002: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 2,
+    };
+    /// Registered error code `SF-AUTH-003`.
+    pub const SF_AUTH_003: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 3,
+    };
+    /// Registered error code `SF-AUTH-004`.
+    pub const SF_AUTH_004: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 4,
+    };
+    /// Registered error code `SF-AUTH-005`.
+    pub const SF_AUTH_005: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 5,
+    };
+    /// Registered error code `SF-AUTH-006`.
+    pub const SF_AUTH_006: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 6,
+    };
     /// Registered error code `SF-CHT-001`.
     pub const SF_CHT_001: Self = Self {
         domain: ErrorDomain::Cht,
@@ -151,6 +176,11 @@ impl ErrorCode {
     /// Complete array of all officially registered error codes.
     pub const ALL_REGISTERED: &[Self] = &[
         Self::SF_AUTH_001,
+        Self::SF_AUTH_002,
+        Self::SF_AUTH_003,
+        Self::SF_AUTH_004,
+        Self::SF_AUTH_005,
+        Self::SF_AUTH_006,
         Self::SF_CHT_001,
         Self::SF_CHT_002,
         Self::SF_CHT_003,
@@ -210,6 +240,56 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Authentication failed",
         action_en: "Sign in again or check your credentials, then try again.",
         owner_note: "Authentication failure; details are never logged to protect user data.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_002,
+        code_str: "SF-AUTH-002",
+        severity: ErrorSeverity::Error,
+        title_ar: "انتهت صلاحية الدخول",
+        action_ar: "أنشئ جلسة جديدة أو أصدر مفتاح API جديدًا ثم أعد المحاولة.",
+        title_en: "Credential expired",
+        action_en: "Create a new session or issue a new API key, then try again.",
+        owner_note: "API key or session passed its expires_at; never log the credential value.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_003,
+        code_str: "SF-AUTH-003",
+        severity: ErrorSeverity::Error,
+        title_ar: "تم إبطال بيانات الدخول",
+        action_ar: "استخدم مفتاحًا أو جلسة أخرى، أو تواصل مع مالك المساحة.",
+        title_en: "Credential revoked",
+        action_en: "Use another key or session, or contact the workspace owner.",
+        owner_note: "API key or session was revoked; revocation must also evict the Valkey cache entry.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_004,
+        code_str: "SF-AUTH-004",
+        severity: ErrorSeverity::Error,
+        title_ar: "ليس لديك صلاحية لهذا الإجراء",
+        action_ar: "اطلب من مالك المساحة منح مفتاحك النطاق المطلوب.",
+        title_en: "Insufficient permission",
+        action_en: "Ask the workspace owner to grant your key the required scope.",
+        owner_note: "Scope check failed after successful authentication (read/write/admin).",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_005,
+        code_str: "SF-AUTH-005",
+        severity: ErrorSeverity::Error,
+        title_ar: "خدمة الدخول غير متاحة مؤقتًا",
+        action_ar: "أعد المحاولة بعد لحظات. بياناتك لم تتأثر.",
+        title_en: "Authentication backend unavailable",
+        action_en: "Retry in a moment. Your data was not affected.",
+        owner_note: "Database or Valkey failure inside the auth layer; return 503, never fall back to unauthenticated access.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_006,
+        code_str: "SF-AUTH-006",
+        severity: ErrorSeverity::Error,
+        title_ar: "طلب الدخول غير صالح",
+        action_ar: "تحقق من اسم الجهاز المطلوب ثم أعد المحاولة.",
+        title_en: "Invalid authentication request",
+        action_en: "Check the requested device name, then try again.",
+        owner_note: "Malformed auth request body (e.g. blank device_name or over 120 chars).",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_CHT_001,

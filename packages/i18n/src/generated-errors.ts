@@ -3,6 +3,11 @@
 
 export type SafiErrorCode =
   | "SF-AUTH-001"
+  | "SF-AUTH-002"
+  | "SF-AUTH-003"
+  | "SF-AUTH-004"
+  | "SF-AUTH-005"
+  | "SF-AUTH-006"
   | "SF-CHT-001"
   | "SF-CHT-002"
   | "SF-CHT-003"
@@ -32,6 +37,16 @@ export type SafiErrorCode =
 export type SafiErrorTranslationKey =
   | "error.SF-AUTH-001.title"
   | "error.SF-AUTH-001.action"
+  | "error.SF-AUTH-002.title"
+  | "error.SF-AUTH-002.action"
+  | "error.SF-AUTH-003.title"
+  | "error.SF-AUTH-003.action"
+  | "error.SF-AUTH-004.title"
+  | "error.SF-AUTH-004.action"
+  | "error.SF-AUTH-005.title"
+  | "error.SF-AUTH-005.action"
+  | "error.SF-AUTH-006.title"
+  | "error.SF-AUTH-006.action"
   | "error.SF-CHT-001.title"
   | "error.SF-CHT-001.action"
   | "error.SF-CHT-002.title"
@@ -95,6 +110,11 @@ export interface SafiErrorCatalogEntry {
 
 export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-AUTH-001",
+  "SF-AUTH-002",
+  "SF-AUTH-003",
+  "SF-AUTH-004",
+  "SF-AUTH-005",
+  "SF-AUTH-006",
   "SF-CHT-001",
   "SF-CHT-002",
   "SF-CHT-003",
@@ -131,6 +151,52 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     titleEn: "Authentication failed",
     actionEn: "Sign in again or check your credentials, then try again.",
     ownerNote: "Authentication failure; details are never logged to protect user data."
+  },
+  "SF-AUTH-002": {
+    code: "SF-AUTH-002",
+    severity: "error",
+    titleAr: "انتهت صلاحية الدخول",
+    actionAr: "أنشئ جلسة جديدة أو أصدر مفتاح API جديدًا ثم أعد المحاولة.",
+    titleEn: "Credential expired",
+    actionEn: "Create a new session or issue a new API key, then try again.",
+    ownerNote: "API key or session passed its expires_at; never log the credential value."
+  },
+  "SF-AUTH-003": {
+    code: "SF-AUTH-003",
+    severity: "error",
+    titleAr: "تم إبطال بيانات الدخول",
+    actionAr: "استخدم مفتاحًا أو جلسة أخرى، أو تواصل مع مالك المساحة.",
+    titleEn: "Credential revoked",
+    actionEn: "Use another key or session, or contact the workspace owner.",
+    ownerNote: "API key or session was revoked; revocation must also evict the Valkey cache entry."
+  },
+  "SF-AUTH-004": {
+    code: "SF-AUTH-004",
+    severity: "error",
+    titleAr: "ليس لديك صلاحية لهذا الإجراء",
+    actionAr: "اطلب من مالك المساحة منح مفتاحك النطاق المطلوب.",
+    titleEn: "Insufficient permission",
+    actionEn: "Ask the workspace owner to grant your key the required scope.",
+    ownerNote: "Scope check failed after successful authentication (read/write/admin)."
+  },
+  "SF-AUTH-005": {
+    code: "SF-AUTH-005",
+    severity: "error",
+    titleAr: "خدمة الدخول غير متاحة مؤقتًا",
+    actionAr: "أعد المحاولة بعد لحظات. بياناتك لم تتأثر.",
+    titleEn: "Authentication backend unavailable",
+    actionEn: "Retry in a moment. Your data was not affected.",
+    ownerNote:
+      "Database or Valkey failure inside the auth layer; return 503, never fall back to unauthenticated access."
+  },
+  "SF-AUTH-006": {
+    code: "SF-AUTH-006",
+    severity: "error",
+    titleAr: "طلب الدخول غير صالح",
+    actionAr: "تحقق من اسم الجهاز المطلوب ثم أعد المحاولة.",
+    titleEn: "Invalid authentication request",
+    actionEn: "Check the requested device name, then try again.",
+    ownerNote: "Malformed auth request body (e.g. blank device_name or over 120 chars)."
   },
   "SF-CHT-001": {
     code: "SF-CHT-001",
@@ -366,6 +432,16 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
 export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-AUTH-001.title": "فشل التحقق من الهوية",
   "error.SF-AUTH-001.action": "أعد تسجيل الدخول أو تحقق من بيانات الاعتماد ثم أعد المحاولة.",
+  "error.SF-AUTH-002.title": "انتهت صلاحية الدخول",
+  "error.SF-AUTH-002.action": "أنشئ جلسة جديدة أو أصدر مفتاح API جديدًا ثم أعد المحاولة.",
+  "error.SF-AUTH-003.title": "تم إبطال بيانات الدخول",
+  "error.SF-AUTH-003.action": "استخدم مفتاحًا أو جلسة أخرى، أو تواصل مع مالك المساحة.",
+  "error.SF-AUTH-004.title": "ليس لديك صلاحية لهذا الإجراء",
+  "error.SF-AUTH-004.action": "اطلب من مالك المساحة منح مفتاحك النطاق المطلوب.",
+  "error.SF-AUTH-005.title": "خدمة الدخول غير متاحة مؤقتًا",
+  "error.SF-AUTH-005.action": "أعد المحاولة بعد لحظات. بياناتك لم تتأثر.",
+  "error.SF-AUTH-006.title": "طلب الدخول غير صالح",
+  "error.SF-AUTH-006.action": "تحقق من اسم الجهاز المطلوب ثم أعد المحاولة.",
   "error.SF-CHT-001.title": "إصدار مواصفة المخطط مفقود",
   "error.SF-CHT-001.action": "أضف إصدارًا صحيحًا لمواصفة المخطط ثم أعد المحاولة.",
   "error.SF-CHT-002.title": "نوع المخطط مفقود",
@@ -425,6 +501,16 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
 export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-AUTH-001.title": "Authentication failed",
   "error.SF-AUTH-001.action": "Sign in again or check your credentials, then try again.",
+  "error.SF-AUTH-002.title": "Credential expired",
+  "error.SF-AUTH-002.action": "Create a new session or issue a new API key, then try again.",
+  "error.SF-AUTH-003.title": "Credential revoked",
+  "error.SF-AUTH-003.action": "Use another key or session, or contact the workspace owner.",
+  "error.SF-AUTH-004.title": "Insufficient permission",
+  "error.SF-AUTH-004.action": "Ask the workspace owner to grant your key the required scope.",
+  "error.SF-AUTH-005.title": "Authentication backend unavailable",
+  "error.SF-AUTH-005.action": "Retry in a moment. Your data was not affected.",
+  "error.SF-AUTH-006.title": "Invalid authentication request",
+  "error.SF-AUTH-006.action": "Check the requested device name, then try again.",
   "error.SF-CHT-001.title": "Chart specification version is missing",
   "error.SF-CHT-001.action": "Add a valid chart specification version, then try again.",
   "error.SF-CHT-002.title": "Chart type is missing",

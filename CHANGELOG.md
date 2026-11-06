@@ -2,6 +2,11 @@
 
 جميع التغييرات المهمة في مشروع **«صافي البيانات | SafiData»** تُوثَّق هنا بالعربية البسيطة وفق القسم 11.2.
 
+## [0.1.0-alpha.47] — 2026-11-06 (المهمة `T4.02` — ترحيلات PostgreSQL 18 ومصادقة مفاتيح API وجلسات Valkey)
+- إضافة ترحيل PostgreSQL 18 الأصلي (`0001_s4_core`) لجداول `users` و`workspaces` و`memberships` و`api_keys` و`sessions` و`audit_log`، مع `uuidv7()` وVirtual Generated Columns وRLS وتقسيم `pg_partman` المشروط، وترحيل هابط كامل (القسم 9.2).
+- بناء طبقة مصادقة مفاتيح API بصيغة `sfk_live_*` وتخزين بصمة BLAKE3 فقط، وفحص نطاقات `read/write/admin`، وإدارة جلسات `sfs_*` عبر Valkey 8 بنمط cache-aside مع إبطال فوري (القسم 9.1، 9.3).
+- ربط المسارات `/v1/auth/whoami` و`/v1/auth/sessions` في Axum 0.8 مع استجابات `problem+json` و`X-Request-ID`، و25 اختبارًا آليًا، وفاحص ترحيلات في `make check`.
+
 ## [0.1.0-alpha.46] — 2026-11-05 (المهمة `T4.01` — بدء الشريحة الرابعة S4)
 - إنشاء حزمة الخادم `sf-server` وهيكل أساسي لـ Axum مع توليد `X-Request-ID` ونقاط الصحة (القسم 9، 15.7)، مع اختبارات الوحدة في Rust.
 

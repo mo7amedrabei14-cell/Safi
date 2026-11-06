@@ -202,6 +202,46 @@ title_en = "Authentication failed"
 action_en = "Sign in again or check your credentials, then try again."
 owner_note = "Authentication failure; details are never logged to protect user data."
 
+[SF-AUTH-002]
+severity = "error"
+title_ar = "انتهت صلاحية الدخول"
+action_ar = "أنشئ جلسة جديدة أو أصدر مفتاح API جديدًا ثم أعد المحاولة."
+title_en = "Credential expired"
+action_en = "Create a new session or issue a new API key, then try again."
+owner_note = "API key or session passed its expires_at; never log the credential value."
+
+[SF-AUTH-003]
+severity = "error"
+title_ar = "تم إبطال بيانات الدخول"
+action_ar = "استخدم مفتاحًا أو جلسة أخرى، أو تواصل مع مالك المساحة."
+title_en = "Credential revoked"
+action_en = "Use another key or session, or contact the workspace owner."
+owner_note = "API key or session was revoked; revocation must also evict the Valkey cache entry."
+
+[SF-AUTH-004]
+severity = "error"
+title_ar = "ليس لديك صلاحية لهذا الإجراء"
+action_ar = "اطلب من مالك المساحة منح مفتاحك النطاق المطلوب."
+title_en = "Insufficient permission"
+action_en = "Ask the workspace owner to grant your key the required scope."
+owner_note = "Scope check failed after successful authentication (read/write/admin)."
+
+[SF-AUTH-005]
+severity = "error"
+title_ar = "خدمة الدخول غير متاحة مؤقتًا"
+action_ar = "أعد المحاولة بعد لحظات. بياناتك لم تتأثر."
+title_en = "Authentication backend unavailable"
+action_en = "Retry in a moment. Your data was not affected."
+owner_note = "Database or Valkey failure inside the auth layer; return 503, never fall back to unauthenticated access."
+
+[SF-AUTH-006]
+severity = "error"
+title_ar = "طلب الدخول غير صالح"
+action_ar = "تحقق من اسم الجهاز المطلوب ثم أعد المحاولة."
+title_en = "Invalid authentication request"
+action_en = "Check the requested device name, then try again."
+owner_note = "Malformed auth request body (e.g. blank device_name or over 120 chars)."
+
 [SF-UNK-001]
 severity = "fatal"
 title_ar = "حدث خطأ غير متوقع"

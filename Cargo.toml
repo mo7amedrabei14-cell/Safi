@@ -9,6 +9,7 @@ members = [
     "crates/sf-recipe",
     "crates/sf-report",
     "crates/sf-wasm",
+    "crates/sf-server",
 ]
 
 [workspace.package]

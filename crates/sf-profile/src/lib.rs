@@ -1,5 +1,11 @@
-//! Foundational Cargo workspace crate boundary for `sf-profile` (`T1.00`).
-//! Column type detection, confidence thresholds, and evidence generation are implemented in `T1.07`.
+//! `sf-profile` — Column profiling, type inference, confidence scoring, and understanding contract
+//! adhering to Specification Sections 4.3 and 16.1.
+//!
+//! Zero network dependencies (`AGENTS.md` Rule #7).
+
+pub mod profiler;
+
+pub use profiler::{ColumnProfile, ProfileActionStatus, profile_column, profile_table};
 
 /// Canonical Cargo crate identifier within the `safi` workspace.
 pub const CRATE_ID: &str = "sf-profile";

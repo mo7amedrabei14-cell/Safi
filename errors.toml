@@ -2,52 +2,210 @@
 severity = "error"
 title_ar = "تعذّر فتح الملف"
 action_ar = "تأكد أن الملف غير تالف وبصيغة مدعومة ثم أعد المحاولة."
+title_en = "Could not open file"
+action_en = "Make sure the file is not corrupted and uses a supported format, then try again."
 owner_note = "Container is corrupt or unsupported."
 
 [SF-IMP-002]
 severity = "warn"
 title_ar = "لم نتعرف على ترميز الملف"
 action_ar = "اختر الترميز المناسب من القائمة لنعرض النص بشكل صحيح."
+title_en = "Could not detect file encoding"
+action_en = "Select the appropriate encoding from the list to display the text properly."
 owner_note = "Encoding detection confidence below threshold."
 
 [SF-IMP-003]
 severity = "error"
 title_ar = "الملف أكبر من الحد المسموح على هذا الجهاز"
 action_ar = "جرّب نسخة سطح المكتب أو قسّم الملف."
+title_en = "File exceeds the allowed limit on this device"
+action_en = "Try the desktop app or split the file into smaller parts."
 owner_note = "Size limit exceeded for this platform."
 
 [SF-IMP-004]
 severity = "error"
 title_ar = "الملف محمي بكلمة سر"
 action_ar = "أدخل كلمة السر لفتحه. لن نحفظها."
+title_en = "File is password-protected"
+action_en = "Enter the password to open it. We will not save it."
 owner_note = "Encrypted container."
 
 [SF-IMP-005]
 severity = "error"
 title_ar = "رفضنا الملف لأسباب أمنية"
 action_ar = "الملف مضغوط بشكل غير معتاد. افتحه في Excel وأعد حفظه ثم جرّب مجددًا."
+title_en = "File rejected for security reasons"
+action_en = "The file is unusually compressed. Open it in Excel, save it again, and retry."
 owner_note = "Decompression ratio or size limit exceeded (possible zip bomb)."
+
+[SF-IMP-014]
+severity = "error"
+title_ar = "ترميز الملف غير مدعوم"
+action_ar = "احفظ الملف بترميز UTF-8 أو اختر ترميزًا آخر من القائمة ثم أعد المحاولة."
+title_en = "Unsupported file encoding"
+action_en = "Save the file as UTF-8 or select another encoding from the list, then try again."
+owner_note = "UnsupportedEncoding encountered during file import."
 
 [SF-PRF-001]
 severity = "info"
 title_ar = "لسنا متأكدين من نوع هذا العمود"
 action_ar = "راجع الاقتراح أو اشرح لنا معنى العمود."
+title_en = "We are not sure about this column's type"
+action_en = "Review the suggestion or tell us what this column represents."
 owner_note = "Type confidence below threshold."
+
+[SF-PRF-002]
+severity = "error"
+title_ar = "قيمة درجة الثقة غير صالحة"
+action_ar = "أعد تشغيل فحص الأعمدة أو تواصل مع الدعم إن تكرر ذلك."
+title_en = "Invalid confidence score value"
+action_en = "Re-run column profiling or contact support if the problem persists."
+owner_note = "ConfidenceScore outside [0.0, 1.0] or non-finite."
 
 [SF-CLN-001]
 severity = "warn"
 title_ar = "تواريخ غامضة"
 action_ar = "اختر هل الصيغة يوم/شهر أم شهر/يوم."
+title_en = "Ambiguous dates"
+action_en = "Choose whether the date format is day/month or month/day."
 owner_note = "Day/month ambiguity not resolvable from column."
 
 [SF-EXP-001]
 severity = "error"
 title_ar = "تعذّر حفظ الملف"
 action_ar = "تأكد من وجود مساحة كافية وأن الملف غير مفتوح في برنامج آخر."
+title_en = "Could not save file"
+action_en = "Check that there is enough disk space and the file is not open in another program."
 owner_note = "Atomic write failed."
 
-[SF-UNK-001]
+[SF-SYS-001]
 severity = "error"
+title_ar = "خلل في بنية الجدول الداخلي"
+action_ar = "أعد استيراد الملف أو تواصل مع الدعم مع رمز التشخيص."
+title_en = "Internal table structure mismatch"
+action_en = "Re-import the file or contact support with the diagnostic code."
+owner_note = "Column row counts do not match across table columns."
+
+[SF-RCP-001]
+severity = "error"
+title_ar = "إصدار الوصفة غير مدعوم أو تالف"
+action_ar = "تأكد من صحة ملف الوصفة أو قم بتحديثه للإصدار المتوافق مع المنصة."
+title_en = "Unsupported or corrupted recipe schema version"
+action_en = "Ensure the recipe file is valid or update it to a compatible platform version."
+owner_note = "Recipe schema version unsupported or migration failed."
+
+[SF-RCP-002]
+severity = "error"
+title_ar = "فشل فك تشفير الوصفة"
+action_ar = "تأكد من صحة عبارة السر وأعد المحاولة."
+title_en = "Recipe decryption failed"
+action_en = "Make sure the passphrase is correct and try again."
+owner_note = "Decryption failed for password-protected recipe or storage."
+
+[SF-RCP-003]
+severity = "warn"
+title_ar = "تغيّر شكل الملف أو الأعمدة"
+action_ar = "راجع المطابقة المقترحة للأعمدة الجديدة أو الناقصة قبل تطبيق الوصفة."
+title_en = "File schema or column structure changed"
+action_en = "Review the suggested column mapping for added or missing columns before applying the recipe."
+owner_note = "Recipe column matcher detected schema drift between recipe source and new file."
+
+
+
+
+
+[SF-CLN-014]
+severity = "error"
+title_ar = "طول الرقم القومي غير صحيح"
+action_ar = "تأكد أن الرقم القومي يتكون من 14 رقمًا بالضبط ثم أعد المحاولة."
+title_en = "National ID length is invalid"
+action_en = "Make sure the national ID is exactly 14 digits, then try again."
+owner_note = "Egyptian national ID validator: length or non-digit input."
+
+[SF-CLN-015]
+severity = "error"
+title_ar = "رمز القرن في الرقم القومي غير صالح"
+action_ar = "راجع الرقم القومي؛ يجب أن يبدأ بـ 2 (مواليد 1900s) أو 3 (مواليد 2000s)."
+title_en = "National ID century digit is invalid"
+action_en = "Check the national ID; it must start with 2 (born in the 1900s) or 3 (born in the 2000s)."
+owner_note = "Egyptian national ID validator: century digit is not 2 or 3."
+
+[SF-CLN-016]
+severity = "error"
+title_ar = "تاريخ الميلاد داخل الرقم القومي غير صحيح"
+action_ar = "راجع تاريخ الميلاد المشفّر في الرقم القومي ثم أعد المحاولة."
+title_en = "National ID birth date is invalid"
+action_en = "Check the birth date encoded in the national ID, then try again."
+owner_note = "Egyptian national ID validator: encoded date is not a real calendar date."
+
+[SF-CLN-017]
+severity = "error"
+title_ar = "كود المحافظة داخل الرقم القومي غير معتمد"
+action_ar = "راجع كود المحافظة في الرقم القومي؛ يجب أن يكون من رموز المحافظات الرسمية."
+title_en = "National ID governorate code is not recognized"
+action_en = "Check the governorate code in the national ID; it must be an official governorate code."
+owner_note = "Egyptian national ID validator: governorate code absent from the official list."
+
+[SF-CHT-001]
+severity = "error"
+title_ar = "إصدار مواصفة المخطط مفقود"
+action_ar = "أضف إصدارًا صحيحًا لمواصفة المخطط ثم أعد المحاولة."
+title_en = "Chart specification version is missing"
+action_en = "Add a valid chart specification version, then try again."
+owner_note = "Chart-Spec validator: version field is empty."
+
+[SF-CHT-002]
+severity = "error"
+title_ar = "نوع المخطط مفقود"
+action_ar = "اختر نوع المخطط (أعمدة، خط، مساحة، دائري، نقاط، توزيع، مؤشر) ثم أعد المحاولة."
+title_en = "Chart type is missing"
+action_en = "Choose a chart type (bar, line, area, pie, scatter, histogram, KPI), then try again."
+owner_note = "Chart-Spec validator: type field is empty."
+
+[SF-CHT-003]
+severity = "error"
+title_ar = "بيانات المخطط مفقودة أو غير صالحة"
+action_ar = "تأكد أن بيانات المخطط مصفوفة صفوف صالحة ثم أعد المحاولة."
+title_en = "Chart data is missing or invalid"
+action_en = "Make sure the chart data is a valid array of rows, then try again."
+owner_note = "Chart-Spec validator: data is absent or not an array."
+
+[SF-CHT-004]
+severity = "error"
+title_ar = "مفتاح المحور السيني مفقود"
+action_ar = "اختر العمود الذي يمثل المحور السيني ثم أعد المحاولة."
+title_en = "X-axis key is missing"
+action_en = "Choose the column for the X axis, then try again."
+owner_note = "Chart-Spec validator: xAxisKey is empty."
+
+[SF-CHT-005]
+severity = "error"
+title_ar = "مفتاح المحور الصادي مفقود"
+action_ar = "اختر العمود الذي يمثل المحور الصادي ثم أعد المحاولة."
+title_en = "Y-axis key is missing"
+action_en = "Choose the column for the Y axis, then try again."
+owner_note = "Chart-Spec validator: yAxisKey is empty."
+
+[SF-CHT-006]
+severity = "warn"
+title_ar = "المخطط قد يوحي بفروق مبالغ فيها"
+action_ar = "نفضل بدء المحور الصادي من الصفر لضمان التمثيل البصري العادل."
+title_en = "Chart may exaggerate differences"
+action_en = "Prefer starting the Y axis at zero for a fair visual representation."
+owner_note = "Credibility guard: bar chart Y axis starts above zero; warning only, never blocks."
+
+[SF-AUTH-001]
+severity = "error"
+title_ar = "فشل التحقق من الهوية"
+action_ar = "أعد تسجيل الدخول أو تحقق من بيانات الاعتماد ثم أعد المحاولة."
+title_en = "Authentication failed"
+action_en = "Sign in again or check your credentials, then try again."
+owner_note = "Authentication failure; details are never logged to protect user data."
+
+[SF-UNK-001]
+severity = "fatal"
 title_ar = "حدث خطأ غير متوقع"
-action_ar = "أرسل تقريرًا للدعم مع رمز التشخيص."
-owner_note = "Uncaught error. Full details in log. Triage priority."
+action_ar = "أعد تشغيل التطبيق. إن تكرر الخطأ فأرسل رمز التشخيص للدعم."
+title_en = "An unexpected error occurred"
+action_en = "Restart the app. If the error repeats, send the diagnostic code to support."
+owner_note = "Uncaught panic or unexpected fallback path."

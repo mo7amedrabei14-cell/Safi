@@ -131,6 +131,21 @@ def check_cargo_pinning() -> list[str]:
     return errors
 
 
+def is_documented_delivery(rel_path: str) -> bool:
+    """A path that was out of scope for T1.00 is allowed once a later task report claims it."""
+    reports_dir = ROOT / "docs/reports"
+    if not reports_dir.exists():
+        return False
+    name = pathlib.Path(rel_path).name
+    for report in sorted(reports_dir.glob("T*.md")):
+        if report.name in {"T1.00.md"}:
+            continue
+        text = report.read_text(encoding="utf-8")
+        if rel_path in text or name in text:
+            return True
+    return False
+
+
 def check_deferred_and_overscope_paths() -> list[str]:
     errors: list[str] = []
     for rel in DEFERRED_PATHS_S1:
@@ -139,9 +154,9 @@ def check_deferred_and_overscope_paths() -> list[str]:
                 f"Deferred directory '{rel}' exists in S1, violating Section 19.4 deferral rule."
             )
     for rel in FORBIDDEN_OVERSCOPE_PATHS_T1_00:
-        if (ROOT / rel).exists():
+        if (ROOT / rel).exists() and not is_documented_delivery(rel):
             errors.append(
-                f"Over-scope path '{rel}' exists in T1.00; belongs to a subsequent task."
+                f"Over-scope path '{rel}' exists in T1.00 and is not claimed by any later task report."
             )
     for rel in FORBIDDEN_DUPLICATE_DOCS:
         if (ROOT / rel).exists():

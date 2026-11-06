@@ -1,8 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { PACKAGE_ID } from "./index.ts";
+import { describe, it, expect } from "vitest";
+import arDict from "../locales/ar.json";
+import enDict from "../locales/en.json";
 
-describe("@safi/i18n workspace boundary", () => {
-  it("exports canonical package identifier", () => {
-    expect(PACKAGE_ID).toBe("@safi/i18n");
+describe("i18n Dictionaries & ICU Parity", () => {
+  it("has identical keys in ar.json and en.json", () => {
+    const arKeys = Object.keys(arDict).sort();
+    const enKeys = Object.keys(enDict).sort();
+    expect(arKeys).toEqual(enKeys);
+  });
+
+  it("contains no empty strings", () => {
+    for (const val of Object.values(arDict)) {
+      expect(val.trim().length).toBeGreaterThan(0);
+    }
+    for (const val of Object.values(enDict)) {
+      expect(val.trim().length).toBeGreaterThan(0);
+    }
   });
 });

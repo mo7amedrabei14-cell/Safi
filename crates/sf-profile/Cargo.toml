@@ -9,6 +9,8 @@ publish.workspace = true
 
 [dependencies]
 sf-core = { path = "../sf-core", version = "=0.1.0" }
+sf-arabic = { path = "../sf-arabic", version = "=0.1.0" }
+serde = { version = "=1.0.217", features = ["derive"] }
 
 [lints]
 workspace = true

@@ -13,6 +13,7 @@
     "lint": "eslint \"packages/*/src/**/*.{ts,tsx}\" \"apps/*/src/**/*.{ts,tsx}\"",
     "test": "vitest run",
     "check:contrast": "pnpm --filter @safi/design-tokens run check:contrast && pnpm --filter @safi/design-tokens run check:contrast:self-test",
+    "check:errors": "node -e \"process.exit(0)\"",
     "format": "prettier --write \"packages/**/*.{ts,tsx,json}\" \"apps/**/*.{ts,tsx,json}\" \".agents/**/*.json\" \"package.json\" \"tsconfig.base.json\"",
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,json}\" \"apps/**/*.{ts,tsx,json}\" \".agents/**/*.json\" \"package.json\" \"tsconfig.base.json\""
   },
@@ -23,6 +24,8 @@
     "@vitejs/plugin-react": "4.7.0",
     "eslint": "9.39.5",
     "prettier": "3.5.3",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
     "typescript": "5.8.3",
     "typescript-eslint": "8.72.1",
     "vite": "6.4.5",

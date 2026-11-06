@@ -1,5 +1,6 @@
 /**
- * Foundational pnpm workspace boundary for `@safi/motion` (`T1.00`).
- * GSAP 3.12 splash timelines and Lenis smooth scroll boundaries are implemented in `T1.14`.
+ * `packages/motion` — GSAP 3.12 motion logo and animation library for SafiData v5.0.
  */
-export const PACKAGE_ID = "@safi/motion" as const;
+export const PACKAGE_ID = "@safi/motion";
+export * from "./gsap-timelines";
+export * from "./lenis-provider";

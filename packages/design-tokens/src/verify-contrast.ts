@@ -94,7 +94,7 @@ if (runtimeProcess?.argv) {
     const ok = runContrastVerification(cliArgs);
     if (!ok) {
       runtimeProcess.exitCode = 1;
-      throw new Error("WCAG 2.2 AA contrast verification failed.");
+      throw new Error("[SF-SYS-001] WCAG 2.2 AA contrast verification failed.");
     }
   }
 }

@@ -1,5 +1,11 @@
-//! Foundational Cargo workspace crate boundary for `sf-recipe` (`T1.00`).
-//! Deterministic recipe serialization and BLAKE3 content hashing are implemented in `T1.09`.
+//! `sf-recipe` — Recipe schema representation, steps, deterministic content hashing (`BLAKE3`),
+//! and deterministic execution adhering to Specification Sections 4.9 and 19.5.
+//!
+//! Zero network dependencies (`AGENTS.md` Rule #7).
+
+pub mod recipe;
+
+pub use recipe::{RecipeOperation, RecipeStep, SafiRecipe};
 
 /// Canonical Cargo crate identifier within the `safi` workspace.
 pub const CRATE_ID: &str = "sf-recipe";

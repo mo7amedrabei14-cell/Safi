@@ -4,6 +4,12 @@
 
 set -euo pipefail
 
+# sf-server is the networked backend service, not an engine crate. It is intentionally
+# excluded from the zero-network audit and is covered by the server integration tests.
+EXCLUDED_CRATES=(
+  "sf-server"
+)
+
 FORBIDDEN_CRATES=(
   "reqwest"
   "hyper"
@@ -74,7 +80,7 @@ PY
   exit 0
 fi
 
-echo "[check-no-network] Auditing engine crates (crates/sf-*) for zero network access..."
+echo "[check-no-network] Auditing engine crates (crates/sf-*, excluding sf-server) for zero network access..."
 
 # 1. Check for std::net usage in crates/sf-*/src
 if grep -RInE '(\buse\s+std::net\b|\bstd::net::|\buse\s+core::net\b|\bcore::net::)' crates/sf-*/src 2>/dev/null; then
@@ -84,8 +90,9 @@ fi
 
 # 2. Check Cargo.toml files and full resolved Cargo dependency graph via cargo metadata
 FORBIDDEN_CSV="$(IFS=,; echo "${FORBIDDEN_CRATES[*]}")"
+EXCLUDED_CSV="$(IFS=,; echo "${EXCLUDED_CRATES[*]}")"
 
-FORBIDDEN_CSV="$FORBIDDEN_CSV" run_python - <<'PY'
+FORBIDDEN_CSV="$FORBIDDEN_CSV" EXCLUDED_CSV="$EXCLUDED_CSV" run_python - <<'PY'
 import json
 import os
 import pathlib
@@ -94,9 +101,12 @@ import subprocess
 import sys
 
 forbidden = set(os.environ["FORBIDDEN_CSV"].split(","))
+excluded = set(os.environ["EXCLUDED_CSV"].split(","))
 
-# A. Static scan of crates/sf-*/Cargo.toml
+# A. Static scan of engine crates/Sf-*/Cargo.toml (sf-server is the networked backend)
 for cargo_toml in sorted(pathlib.Path("crates").glob("sf-*/Cargo.toml")):
+    if cargo_toml.parent.name in excluded:
+        continue
     text = cargo_toml.read_text(encoding="utf-8")
     for crate_name in forbidden:
         pattern = rf"(?m)^\s*{re.escape(crate_name)}\s*="
@@ -123,7 +133,7 @@ resolve_nodes = {
 engine_root_ids = [
     pkg["id"]
     for pkg in metadata.get("packages", [])
-    if pkg["name"].startswith("sf-")
+    if pkg["name"].startswith("sf-") and pkg["name"] not in excluded
 ]
 
 if not engine_root_ids:

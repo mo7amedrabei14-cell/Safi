@@ -14,5 +14,9 @@
     "@safi/i18n": "workspace:*",
     "@safi/icons": "workspace:*",
     "react": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/react-dom": "19.1.2",
+    "react-dom": "19.1.0"
   }
 }

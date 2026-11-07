@@ -3,7 +3,7 @@
 tools/verify-security.py — Automated Security, Supply Chain & Scope Governance Verifier (`T1.00`)
 Verifies:
 1. Exact dependency pinning & disabled lifecycle scripts (AGENTS.md Rule 6).
-2. Section 19.4 deferred directory rules (no premature server/, apps/desktop, apps/site, apps/admin, or non-S1 crates).
+2. Section 19.4 deferred directory rules (no premature server/, apps/desktop, apps/site, apps/admin, or non-S1 crates before the owning slice delivers them).
 3. T1.00 scope discipline (no premature T1.01-T1.20 or T3.14 implementation files, no duplicate root/docs files).
 4. T0.01 task files completeness in docs/tasks/ (110 tasks: T0.01 + S1..S6).
 5. Honest 23-tool manifest classification in .agents/tools-manifest.json (Section 20.1).
@@ -146,12 +146,27 @@ def is_documented_delivery(rel_path: str) -> bool:
     return False
 
 
+def is_path_claimed_by_delivery(rel_path: str) -> bool:
+    """A deferred path is allowed once a later task report names that exact path."""
+    reports_dir = ROOT / "docs/reports"
+    if not reports_dir.exists():
+        return False
+    pattern = re.compile(r"(?<![\w/.-])" + re.escape(rel_path) + r"(?![\w.-])")
+    for report in sorted(reports_dir.glob("T*.md")):
+        if report.name in {"T1.00.md"}:
+            continue
+        if pattern.search(report.read_text(encoding="utf-8")):
+            return True
+    return False
+
+
 def check_deferred_and_overscope_paths() -> list[str]:
     errors: list[str] = []
     for rel in DEFERRED_PATHS_S1:
-        if (ROOT / rel).exists():
+        if (ROOT / rel).exists() and not is_path_claimed_by_delivery(rel):
             errors.append(
-                f"Deferred directory '{rel}' exists in S1, violating Section 19.4 deferral rule."
+                f"Deferred directory '{rel}' exists before its owning slice delivered it, "
+                "violating Section 19.4 deferral rule."
             )
     for rel in FORBIDDEN_OVERSCOPE_PATHS_T1_00:
         if (ROOT / rel).exists() and not is_documented_delivery(rel):

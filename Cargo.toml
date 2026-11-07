@@ -10,6 +10,7 @@ members = [
     "crates/sf-report",
     "crates/sf-wasm",
     "crates/sf-server",
+    "crates/sf-desktop",
 ]
 
 [workspace.package]

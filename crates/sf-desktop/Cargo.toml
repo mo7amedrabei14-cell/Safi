@@ -1,0 +1,18 @@
+[package]
+name = "sf-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "SafiData desktop shell security policy: local-only content, deep-link allowlist, IPC limits (sections 8.6 and 10.2)."
+
+[dependencies]
+serde = { version = "=1.0.217", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "=1.0.135"
+
+[lints]
+workspace = true

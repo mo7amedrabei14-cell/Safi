@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod error;
 pub mod routes;
+pub mod updater;
 
 use std::sync::Arc;
 

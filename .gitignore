@@ -40,3 +40,6 @@ test-results/
 
 # Local agent scratch/analysis artifacts
 .ua/
+
+# Tauri generated schemas (rebuilt by tauri-build)
+apps/desktop/src-tauri/gen/

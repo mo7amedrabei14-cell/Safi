@@ -1756,6 +1756,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sf-desktop"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sf-io"
 version = "0.1.0"
 dependencies = [

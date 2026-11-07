@@ -31,10 +31,12 @@ check-migrations:
 
 fmt:
 	cargo fmt --all
+	cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
 	pnpm run format
 
 fmt-check:
 	cargo fmt --all -- --check
+	cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
 	pnpm run format:check
 
 lint:

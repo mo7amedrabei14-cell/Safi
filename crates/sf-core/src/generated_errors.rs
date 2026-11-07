@@ -167,6 +167,56 @@ impl ErrorCode {
         domain: ErrorDomain::Sys,
         number: 1,
     };
+    /// Registered error code `SF-SYS-002`.
+    pub const SF_SYS_002: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 2,
+    };
+    /// Registered error code `SF-SYS-003`.
+    pub const SF_SYS_003: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 3,
+    };
+    /// Registered error code `SF-SYS-004`.
+    pub const SF_SYS_004: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 4,
+    };
+    /// Registered error code `SF-SYS-005`.
+    pub const SF_SYS_005: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 5,
+    };
+    /// Registered error code `SF-SYS-006`.
+    pub const SF_SYS_006: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 6,
+    };
+    /// Registered error code `SF-SYS-007`.
+    pub const SF_SYS_007: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 7,
+    };
+    /// Registered error code `SF-SYS-008`.
+    pub const SF_SYS_008: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 8,
+    };
+    /// Registered error code `SF-SYS-009`.
+    pub const SF_SYS_009: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 9,
+    };
+    /// Registered error code `SF-SYS-010`.
+    pub const SF_SYS_010: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 10,
+    };
+    /// Registered error code `SF-SYS-011`.
+    pub const SF_SYS_011: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 11,
+    };
     /// Registered error code `SF-UNK-001`.
     pub const SF_UNK_001: Self = Self {
         domain: ErrorDomain::Unk,
@@ -205,6 +255,16 @@ impl ErrorCode {
         Self::SF_RCP_002,
         Self::SF_RCP_003,
         Self::SF_SYS_001,
+        Self::SF_SYS_002,
+        Self::SF_SYS_003,
+        Self::SF_SYS_004,
+        Self::SF_SYS_005,
+        Self::SF_SYS_006,
+        Self::SF_SYS_007,
+        Self::SF_SYS_008,
+        Self::SF_SYS_009,
+        Self::SF_SYS_010,
+        Self::SF_SYS_011,
         Self::SF_UNK_001,
     ];
 
@@ -530,6 +590,106 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Internal table structure mismatch",
         action_en: "Re-import the file or contact support with the diagnostic code.",
         owner_note: "Column row counts do not match across table columns.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_002,
+        code_str: "SF-SYS-002",
+        severity: ErrorSeverity::Error,
+        title_ar: "رابط عميق غير صالح",
+        action_ar: "افتح الملف من داخل التطبيق، أو تأكد من صيغة الرابط ثم أعد المحاولة.",
+        title_en: "Invalid deep link",
+        action_en: "Open the file from inside the app, or check the link format and try again.",
+        owner_note: "Desktop deep link failed structural validation (scheme, fragment, control chars, length).",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_003,
+        code_str: "SF-SYS-003",
+        severity: ErrorSeverity::Error,
+        title_ar: "هذا الفعل في الرابط غير مسموح",
+        action_ar: "استخدم رابطًا من التطبيق نفسه، فهو لا يدعم هذا الفعل.",
+        title_en: "Deep link action is not allowed",
+        action_en: "Use a link produced by the app; this action is not supported.",
+        owner_note: "Deep link action absent from the command allowlist.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_004,
+        code_str: "SF-SYS-004",
+        severity: ErrorSeverity::Error,
+        title_ar: "معامل الرابط غير مسموح",
+        action_ar: "أعد إنشاء الرابط من التطبيق بدل تعديله يدويًا.",
+        title_en: "Deep link parameter is not allowed",
+        action_en: "Regenerate the link from the app instead of editing it manually.",
+        owner_note: "Deep link parameter failed the per-action allowlist, uniqueness, decoding, or path checks.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_005,
+        code_str: "SF-SYS-005",
+        severity: ErrorSeverity::Error,
+        title_ar: "حجبنا محتوى بعيدًا لأسباب أمنية",
+        action_ar: "التطبيق لا يحمّل إلا محتواه المحلي. أعد تشغيله إن تكرر ذلك.",
+        title_en: "Remote content was blocked",
+        action_en: "The app only loads its own local content. Restart it if this repeats.",
+        owner_note: "Navigation to a non-local origin or a path-traversal sequence was blocked.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_006,
+        code_str: "SF-SYS-006",
+        severity: ErrorSeverity::Error,
+        title_ar: "طلب التطبيق إذنًا غير مسموح",
+        action_ar: "أعد تشغيل التطبيق. إن تكرر الخطأ فحدّثه إلى أحدث إصدار.",
+        title_en: "The app requested a permission outside its allowlist",
+        action_en: "Restart the app. If it repeats, update to the latest version.",
+        owner_note: "A Tauri capability permission was not in the desktop allowlist.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_007,
+        code_str: "SF-SYS-007",
+        severity: ErrorSeverity::Error,
+        title_ar: "الرسالة أكبر من الحد المسموح",
+        action_ar: "قسّم الملف إلى أجزاء أصغر ثم أعد المحاولة.",
+        title_en: "Message exceeds the allowed size",
+        action_en: "Split the file into smaller parts, then try again.",
+        owner_note: "IPC payload exceeded the 1 MiB desktop bridge limit.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_008,
+        code_str: "SF-SYS-008",
+        severity: ErrorSeverity::Error,
+        title_ar: "إعدادات تطبيق سطح المكتب غير صالحة",
+        action_ar: "أعد تثبيت التطبيق أو حدّثه. بياناتك لم تتأثر.",
+        title_en: "Desktop shell configuration is invalid",
+        action_en: "Reinstall or update the app. Your data was not affected.",
+        owner_note: "tauri.conf.json, capability file, or shell wiring failed the conformance test.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_009,
+        code_str: "SF-SYS-009",
+        severity: ErrorSeverity::Error,
+        title_ar: "رابط خارجي مرفوض",
+        action_ar: "لا يفتح التطبيق إلا روابط https الآمنة. انسخ العنوان وافتحه في متصفحك.",
+        title_en: "External link was rejected",
+        action_en: "The app only opens safe https links. Copy the address and open it in your browser.",
+        owner_note: "External link was not https, carried credentials, or pointed at a loopback/IP host.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_010,
+        code_str: "SF-SYS-010",
+        severity: ErrorSeverity::Error,
+        title_ar: "أمر غير مسموح في جسر التطبيق",
+        action_ar: "أعد تشغيل التطبيق. إن تكرر الخطأ فحدّثه إلى أحدث إصدار.",
+        title_en: "Command is not allowed on the desktop bridge",
+        action_en: "Restart the app. If it repeats, update to the latest version.",
+        owner_note: "IPC command name was absent from ALLOWED_COMMANDS.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_011,
+        code_str: "SF-SYS-011",
+        severity: ErrorSeverity::Error,
+        title_ar: "تعذّر فتح حوار الملفات",
+        action_ar: "أعد المحاولة، وإن تكرر الخطأ فأعد تشغيل التطبيق.",
+        title_en: "Could not open the file dialog",
+        action_en: "Try again; if the error repeats, restart the app.",
+        owner_note: "The native dialog bridge thread failed while picking an input or output file.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_UNK_001,

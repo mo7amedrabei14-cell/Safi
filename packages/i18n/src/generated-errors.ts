@@ -32,6 +32,16 @@ export type SafiErrorCode =
   | "SF-RCP-002"
   | "SF-RCP-003"
   | "SF-SYS-001"
+  | "SF-SYS-002"
+  | "SF-SYS-003"
+  | "SF-SYS-004"
+  | "SF-SYS-005"
+  | "SF-SYS-006"
+  | "SF-SYS-007"
+  | "SF-SYS-008"
+  | "SF-SYS-009"
+  | "SF-SYS-010"
+  | "SF-SYS-011"
   | "SF-UNK-001";
 
 export type SafiErrorTranslationKey =
@@ -95,6 +105,26 @@ export type SafiErrorTranslationKey =
   | "error.SF-RCP-003.action"
   | "error.SF-SYS-001.title"
   | "error.SF-SYS-001.action"
+  | "error.SF-SYS-002.title"
+  | "error.SF-SYS-002.action"
+  | "error.SF-SYS-003.title"
+  | "error.SF-SYS-003.action"
+  | "error.SF-SYS-004.title"
+  | "error.SF-SYS-004.action"
+  | "error.SF-SYS-005.title"
+  | "error.SF-SYS-005.action"
+  | "error.SF-SYS-006.title"
+  | "error.SF-SYS-006.action"
+  | "error.SF-SYS-007.title"
+  | "error.SF-SYS-007.action"
+  | "error.SF-SYS-008.title"
+  | "error.SF-SYS-008.action"
+  | "error.SF-SYS-009.title"
+  | "error.SF-SYS-009.action"
+  | "error.SF-SYS-010.title"
+  | "error.SF-SYS-010.action"
+  | "error.SF-SYS-011.title"
+  | "error.SF-SYS-011.action"
   | "error.SF-UNK-001.title"
   | "error.SF-UNK-001.action";
 
@@ -139,6 +169,16 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-RCP-002",
   "SF-RCP-003",
   "SF-SYS-001",
+  "SF-SYS-002",
+  "SF-SYS-003",
+  "SF-SYS-004",
+  "SF-SYS-005",
+  "SF-SYS-006",
+  "SF-SYS-007",
+  "SF-SYS-008",
+  "SF-SYS-009",
+  "SF-SYS-010",
+  "SF-SYS-011",
   "SF-UNK-001"
 ] as const;
 
@@ -418,6 +458,98 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Re-import the file or contact support with the diagnostic code.",
     ownerNote: "Column row counts do not match across table columns."
   },
+  "SF-SYS-002": {
+    code: "SF-SYS-002",
+    severity: "error",
+    titleAr: "رابط عميق غير صالح",
+    actionAr: "افتح الملف من داخل التطبيق، أو تأكد من صيغة الرابط ثم أعد المحاولة.",
+    titleEn: "Invalid deep link",
+    actionEn: "Open the file from inside the app, or check the link format and try again.",
+    ownerNote:
+      "Desktop deep link failed structural validation (scheme, fragment, control chars, length)."
+  },
+  "SF-SYS-003": {
+    code: "SF-SYS-003",
+    severity: "error",
+    titleAr: "هذا الفعل في الرابط غير مسموح",
+    actionAr: "استخدم رابطًا من التطبيق نفسه، فهو لا يدعم هذا الفعل.",
+    titleEn: "Deep link action is not allowed",
+    actionEn: "Use a link produced by the app; this action is not supported.",
+    ownerNote: "Deep link action absent from the command allowlist."
+  },
+  "SF-SYS-004": {
+    code: "SF-SYS-004",
+    severity: "error",
+    titleAr: "معامل الرابط غير مسموح",
+    actionAr: "أعد إنشاء الرابط من التطبيق بدل تعديله يدويًا.",
+    titleEn: "Deep link parameter is not allowed",
+    actionEn: "Regenerate the link from the app instead of editing it manually.",
+    ownerNote:
+      "Deep link parameter failed the per-action allowlist, uniqueness, decoding, or path checks."
+  },
+  "SF-SYS-005": {
+    code: "SF-SYS-005",
+    severity: "error",
+    titleAr: "حجبنا محتوى بعيدًا لأسباب أمنية",
+    actionAr: "التطبيق لا يحمّل إلا محتواه المحلي. أعد تشغيله إن تكرر ذلك.",
+    titleEn: "Remote content was blocked",
+    actionEn: "The app only loads its own local content. Restart it if this repeats.",
+    ownerNote: "Navigation to a non-local origin or a path-traversal sequence was blocked."
+  },
+  "SF-SYS-006": {
+    code: "SF-SYS-006",
+    severity: "error",
+    titleAr: "طلب التطبيق إذنًا غير مسموح",
+    actionAr: "أعد تشغيل التطبيق. إن تكرر الخطأ فحدّثه إلى أحدث إصدار.",
+    titleEn: "The app requested a permission outside its allowlist",
+    actionEn: "Restart the app. If it repeats, update to the latest version.",
+    ownerNote: "A Tauri capability permission was not in the desktop allowlist."
+  },
+  "SF-SYS-007": {
+    code: "SF-SYS-007",
+    severity: "error",
+    titleAr: "الرسالة أكبر من الحد المسموح",
+    actionAr: "قسّم الملف إلى أجزاء أصغر ثم أعد المحاولة.",
+    titleEn: "Message exceeds the allowed size",
+    actionEn: "Split the file into smaller parts, then try again.",
+    ownerNote: "IPC payload exceeded the 1 MiB desktop bridge limit."
+  },
+  "SF-SYS-008": {
+    code: "SF-SYS-008",
+    severity: "error",
+    titleAr: "إعدادات تطبيق سطح المكتب غير صالحة",
+    actionAr: "أعد تثبيت التطبيق أو حدّثه. بياناتك لم تتأثر.",
+    titleEn: "Desktop shell configuration is invalid",
+    actionEn: "Reinstall or update the app. Your data was not affected.",
+    ownerNote: "tauri.conf.json, capability file, or shell wiring failed the conformance test."
+  },
+  "SF-SYS-009": {
+    code: "SF-SYS-009",
+    severity: "error",
+    titleAr: "رابط خارجي مرفوض",
+    actionAr: "لا يفتح التطبيق إلا روابط https الآمنة. انسخ العنوان وافتحه في متصفحك.",
+    titleEn: "External link was rejected",
+    actionEn: "The app only opens safe https links. Copy the address and open it in your browser.",
+    ownerNote: "External link was not https, carried credentials, or pointed at a loopback/IP host."
+  },
+  "SF-SYS-010": {
+    code: "SF-SYS-010",
+    severity: "error",
+    titleAr: "أمر غير مسموح في جسر التطبيق",
+    actionAr: "أعد تشغيل التطبيق. إن تكرر الخطأ فحدّثه إلى أحدث إصدار.",
+    titleEn: "Command is not allowed on the desktop bridge",
+    actionEn: "Restart the app. If it repeats, update to the latest version.",
+    ownerNote: "IPC command name was absent from ALLOWED_COMMANDS."
+  },
+  "SF-SYS-011": {
+    code: "SF-SYS-011",
+    severity: "error",
+    titleAr: "تعذّر فتح حوار الملفات",
+    actionAr: "أعد المحاولة، وإن تكرر الخطأ فأعد تشغيل التطبيق.",
+    titleEn: "Could not open the file dialog",
+    actionEn: "Try again; if the error repeats, restart the app.",
+    ownerNote: "The native dialog bridge thread failed while picking an input or output file."
+  },
   "SF-UNK-001": {
     code: "SF-UNK-001",
     severity: "fatal",
@@ -494,6 +626,27 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-RCP-003.action": "راجع المطابقة المقترحة للأعمدة الجديدة أو الناقصة قبل تطبيق الوصفة.",
   "error.SF-SYS-001.title": "خلل في بنية الجدول الداخلي",
   "error.SF-SYS-001.action": "أعد استيراد الملف أو تواصل مع الدعم مع رمز التشخيص.",
+  "error.SF-SYS-002.title": "رابط عميق غير صالح",
+  "error.SF-SYS-002.action": "افتح الملف من داخل التطبيق، أو تأكد من صيغة الرابط ثم أعد المحاولة.",
+  "error.SF-SYS-003.title": "هذا الفعل في الرابط غير مسموح",
+  "error.SF-SYS-003.action": "استخدم رابطًا من التطبيق نفسه، فهو لا يدعم هذا الفعل.",
+  "error.SF-SYS-004.title": "معامل الرابط غير مسموح",
+  "error.SF-SYS-004.action": "أعد إنشاء الرابط من التطبيق بدل تعديله يدويًا.",
+  "error.SF-SYS-005.title": "حجبنا محتوى بعيدًا لأسباب أمنية",
+  "error.SF-SYS-005.action": "التطبيق لا يحمّل إلا محتواه المحلي. أعد تشغيله إن تكرر ذلك.",
+  "error.SF-SYS-006.title": "طلب التطبيق إذنًا غير مسموح",
+  "error.SF-SYS-006.action": "أعد تشغيل التطبيق. إن تكرر الخطأ فحدّثه إلى أحدث إصدار.",
+  "error.SF-SYS-007.title": "الرسالة أكبر من الحد المسموح",
+  "error.SF-SYS-007.action": "قسّم الملف إلى أجزاء أصغر ثم أعد المحاولة.",
+  "error.SF-SYS-008.title": "إعدادات تطبيق سطح المكتب غير صالحة",
+  "error.SF-SYS-008.action": "أعد تثبيت التطبيق أو حدّثه. بياناتك لم تتأثر.",
+  "error.SF-SYS-009.title": "رابط خارجي مرفوض",
+  "error.SF-SYS-009.action":
+    "لا يفتح التطبيق إلا روابط https الآمنة. انسخ العنوان وافتحه في متصفحك.",
+  "error.SF-SYS-010.title": "أمر غير مسموح في جسر التطبيق",
+  "error.SF-SYS-010.action": "أعد تشغيل التطبيق. إن تكرر الخطأ فحدّثه إلى أحدث إصدار.",
+  "error.SF-SYS-011.title": "تعذّر فتح حوار الملفات",
+  "error.SF-SYS-011.action": "أعد المحاولة، وإن تكرر الخطأ فأعد تشغيل التطبيق.",
   "error.SF-UNK-001.title": "حدث خطأ غير متوقع",
   "error.SF-UNK-001.action": "أعد تشغيل التطبيق. إن تكرر الخطأ فأرسل رمز التشخيص للدعم."
 } as const;
@@ -569,6 +722,29 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
     "Review the suggested column mapping for added or missing columns before applying the recipe.",
   "error.SF-SYS-001.title": "Internal table structure mismatch",
   "error.SF-SYS-001.action": "Re-import the file or contact support with the diagnostic code.",
+  "error.SF-SYS-002.title": "Invalid deep link",
+  "error.SF-SYS-002.action":
+    "Open the file from inside the app, or check the link format and try again.",
+  "error.SF-SYS-003.title": "Deep link action is not allowed",
+  "error.SF-SYS-003.action": "Use a link produced by the app; this action is not supported.",
+  "error.SF-SYS-004.title": "Deep link parameter is not allowed",
+  "error.SF-SYS-004.action": "Regenerate the link from the app instead of editing it manually.",
+  "error.SF-SYS-005.title": "Remote content was blocked",
+  "error.SF-SYS-005.action":
+    "The app only loads its own local content. Restart it if this repeats.",
+  "error.SF-SYS-006.title": "The app requested a permission outside its allowlist",
+  "error.SF-SYS-006.action": "Restart the app. If it repeats, update to the latest version.",
+  "error.SF-SYS-007.title": "Message exceeds the allowed size",
+  "error.SF-SYS-007.action": "Split the file into smaller parts, then try again.",
+  "error.SF-SYS-008.title": "Desktop shell configuration is invalid",
+  "error.SF-SYS-008.action": "Reinstall or update the app. Your data was not affected.",
+  "error.SF-SYS-009.title": "External link was rejected",
+  "error.SF-SYS-009.action":
+    "The app only opens safe https links. Copy the address and open it in your browser.",
+  "error.SF-SYS-010.title": "Command is not allowed on the desktop bridge",
+  "error.SF-SYS-010.action": "Restart the app. If it repeats, update to the latest version.",
+  "error.SF-SYS-011.title": "Could not open the file dialog",
+  "error.SF-SYS-011.action": "Try again; if the error repeats, restart the app.",
   "error.SF-UNK-001.title": "An unexpected error occurred",
   "error.SF-UNK-001.action":
     "Restart the app. If the error repeats, send the diagnostic code to support."

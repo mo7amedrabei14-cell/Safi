@@ -6,10 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 publish.workspace = true
-description = "SafiData desktop shell security policy: local-only content, deep-link allowlist, IPC limits (sections 8.6 and 10.2)."
+description = "SafiData desktop shell security policy: local-only content, deep-link allowlist, IPC limits, SQLCipher vault (sections 8.3, 8.6, 10.2, H4)."
 
 [dependencies]
 serde = { version = "=1.0.217", features = ["derive"] }
+zeroize = { version = "1.8", features = ["zeroize_derive"] }
 
 [dev-dependencies]
 serde_json = "=1.0.135"

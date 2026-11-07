@@ -5,3 +5,4 @@ pub mod deep_link;
 pub mod engine_bridge;
 pub mod error;
 pub mod vault;
+pub mod watcher;

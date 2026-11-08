@@ -99,6 +99,12 @@ impl IsolatedSigner {
     }
 }
 
+impl Default for UpdateServerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -130,6 +130,12 @@ impl AuditLogCenter {
     }
 }
 
+impl Default for AuditLogCenter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

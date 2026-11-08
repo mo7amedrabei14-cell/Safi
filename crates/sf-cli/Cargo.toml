@@ -14,5 +14,4 @@ sf-report = { path = "../sf-report" }
 sf-desktop = { path = "../sf-desktop" }
 serde = { version = "=1.0.217", features = ["derive"] }
 serde_json = "=1.0.135"
-tokio = { version = "=1.54.1", features = ["full"] }
 uuid = { version = "=1.10.0", features = ["serde", "v7"] }

@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 
 export const OwnerDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<string>("overview");
   const [statusMessage, setStatusMessage] = useState<string>("كل شيء سليم — النظام يعمل بكفاءة تامة");
   const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
 

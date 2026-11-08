@@ -68,7 +68,10 @@ mod tests {
     #[test]
     fn test_vault_key_derivation_and_encryption() {
         let salt = [1u8; 16];
-        let key = crate::test_result(VaultKey::derive_from_passphrase("secure-master-pass", &salt));
+        let key = crate::test_result(VaultKey::derive_from_passphrase(
+            "secure-master-pass",
+            &salt,
+        ));
         let plain = b"SafiData Secret Local Storage Data";
 
         let cipher = crate::test_result(encrypt_vault_payload(&key, plain));
@@ -79,8 +82,14 @@ mod tests {
     #[test]
     fn test_vault_wrong_key_rejection() {
         let salt = [1u8; 16];
-        let key1 = crate::test_result(VaultKey::derive_from_passphrase("secure-master-pass-1", &salt));
-        let key2 = crate::test_result(VaultKey::derive_from_passphrase("secure-master-pass-2", &salt));
+        let key1 = crate::test_result(VaultKey::derive_from_passphrase(
+            "secure-master-pass-1",
+            &salt,
+        ));
+        let key2 = crate::test_result(VaultKey::derive_from_passphrase(
+            "secure-master-pass-2",
+            &salt,
+        ));
         let plain = b"Confidential Data";
 
         let cipher = crate::test_result(encrypt_vault_payload(&key1, plain));

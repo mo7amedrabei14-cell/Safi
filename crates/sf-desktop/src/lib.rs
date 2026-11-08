@@ -11,7 +11,6 @@ pub mod updater;
 pub mod vault;
 pub mod watcher;
 
-
 #[cfg(test)]
 #[track_caller]
 pub(crate) fn test_result<T, E: std::fmt::Debug>(result: Result<T, E>) -> T {

@@ -13,5 +13,8 @@ describe("Owner Dashboard & Log Center Verification (T5.11 & T5.13)", () => {
     expect(content).toContain("4. أعلام الميزات والإعدادات");
     expect(content).toContain("5. الدعم والتشخيص");
     expect(content).toContain("6. الأمان وسجل التدقيق");
+    expect(content).toContain('className: "safi-glass"');
+    expect(content).toContain('backgroundColor: "var(--bg-elevated)"');
+    expect(content).toContain('color: "var(--text-primary)"');
   });
 });

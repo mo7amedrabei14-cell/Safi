@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { WCAG_AA_UI_GRAPHIC_MIN_RATIO, contrastRatio } from "@safi/design-tokens";
 import { CleaningStudio, SAMPLE_CLEANING_TEXT } from "./CleaningStudio";
 import { RecipesStudio } from "./RecipesStudio";
-import { ChartsStudio, SAMPLE_CHART_SPEC, extractSvgFills } from "./ChartsStudio";
+import { ChartsStudio, SAMPLE_CHART_SPEC, extractSvgColors } from "./ChartsStudio";
 import { LibraryStudio } from "./LibraryStudio";
 import { generateDeterministicSvg } from "../../charts/chart-spec";
 import { normalizeLines } from "../../lib/arabic-normalize";
@@ -46,15 +46,20 @@ describe("UI-Phase-5 Recipes studio", () => {
 });
 
 describe("UI-Phase-5 Chart studio", () => {
-  it("audits the real SVG colours against WCAG 2.2 AA", () => {
-    const svg = generateDeterministicSvg(SAMPLE_CHART_SPEC);
-    const fills = extractSvgFills(svg);
+  it.each(["bar", "line", "pie", "donut"] as const)(
+    "audits the real %s SVG colours against WCAG 2.2 AA",
+    (type) => {
+      const svg = generateDeterministicSvg({ ...SAMPLE_CHART_SPEC, type });
+      const colors = extractSvgColors(svg);
 
-    expect(fills.length).toBeGreaterThanOrEqual(3);
-    for (const fill of fills) {
-      expect(contrastRatio(fill, "#ffffff")).toBeGreaterThanOrEqual(WCAG_AA_UI_GRAPHIC_MIN_RATIO);
+      expect(colors.length).toBeGreaterThanOrEqual(3);
+      for (const color of colors) {
+        expect(contrastRatio(color, "#ffffff")).toBeGreaterThanOrEqual(
+          WCAG_AA_UI_GRAPHIC_MIN_RATIO
+        );
+      }
     }
-  });
+  );
 
   it("renders the preview, credibility guard and contrast table", () => {
     const html = renderToString(createElement(ChartsStudio, null));

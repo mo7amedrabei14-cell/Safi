@@ -1834,7 +1834,6 @@ dependencies = [
  "sf-profile",
  "sf-recipe",
  "sf-report",
- "tokio",
  "uuid",
 ]
 

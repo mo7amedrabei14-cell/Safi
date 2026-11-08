@@ -10,12 +10,12 @@ export const OwnerDashboard: React.FC = () => {
     "div",
     {
       style: {
-        fontFamily: "IBM Plex Sans Arabic, sans-serif",
+        fontFamily: "var(--font-arabic)",
         direction: "rtl",
         padding: "32px",
-        backgroundColor: "#F8FAFC",
+        backgroundColor: "var(--bg-elevated)",
         minHeight: "100vh",
-        color: "#0F172A"
+        color: "var(--text-primary)"
       }
     },
     [
@@ -25,8 +25,10 @@ export const OwnerDashboard: React.FC = () => {
         {
           key: "status-bar",
           style: {
-            backgroundColor: maintenanceMode ? "#FEF2F2" : "#F0FDF4",
-            border: `1px solid ${maintenanceMode ? "#FCA5A5" : "#BBF7D0"}`,
+            backgroundColor: maintenanceMode
+              ? "rgba(220, 38, 38, 0.14)"
+              : "rgba(16, 185, 129, 0.12)",
+            border: `1px solid ${maintenanceMode ? "rgba(248, 113, 113, 0.45)" : "rgba(52, 211, 153, 0.35)"}`,
             borderRadius: "12px",
             padding: "16px 24px",
             marginBottom: "24px",
@@ -46,7 +48,7 @@ export const OwnerDashboard: React.FC = () => {
                   width: "12px",
                   height: "12px",
                   borderRadius: "50%",
-                  backgroundColor: maintenanceMode ? "#DC2626" : "#16A34A",
+                  backgroundColor: maintenanceMode ? "#F87171" : "var(--accent-emerald)",
                   display: "inline-block"
                 }
               }),
@@ -70,10 +72,11 @@ export const OwnerDashboard: React.FC = () => {
                 );
               },
               style: {
-                backgroundColor: maintenanceMode ? "#DC2626" : "#0F172A",
-                color: "#FFFFFF",
+                backgroundColor: maintenanceMode ? "#F87171" : "var(--accent-emerald)",
+                color: "var(--bg-obsidian)",
                 border: "none",
                 padding: "8px 16px",
+                minHeight: "44px",
                 borderRadius: "8px",
                 cursor: "pointer",
                 fontWeight: 600,
@@ -94,7 +97,7 @@ export const OwnerDashboard: React.FC = () => {
         ),
         React.createElement(
           "p",
-          { key: "p", style: { color: "#64748B", margin: "4px 0 0 0" } },
+          { key: "p", style: { color: "var(--text-muted)", margin: "4px 0 0 0" } },
           "الوضع البسيط بست بطاقات (I-Have-ADHD) — تحكم كامل ومباشر بدون تعقيد"
         )
       ]),
@@ -181,15 +184,12 @@ function renderCard(title: string, desc: string, btnText: string, onClick: () =>
     "div",
     {
       key: title,
+      className: "safi-glass",
       style: {
-        backgroundColor: "#FFFFFF",
-        border: "1px solid #E2E8F0",
-        borderRadius: "16px",
         padding: "24px",
         display: "flex",
         flexDirection: "column",
-        justifyContent: "space-between",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
+        justifyContent: "space-between"
       }
     },
     [
@@ -198,13 +198,21 @@ function renderCard(title: string, desc: string, btnText: string, onClick: () =>
           "h3",
           {
             key: "t",
-            style: { fontSize: "18px", fontWeight: 700, margin: "0 0 8px 0", color: "#0F172A" }
+            style: {
+              fontSize: "18px",
+              fontWeight: 700,
+              margin: "0 0 8px 0",
+              color: "var(--text-primary)"
+            }
           },
           title
         ),
         React.createElement(
           "p",
-          { key: "d", style: { fontSize: "14px", color: "#475569", lineHeight: 1.6, margin: 0 } },
+          {
+            key: "d",
+            style: { fontSize: "14px", color: "var(--text-muted)", lineHeight: 1.6, margin: 0 }
+          },
           desc
         )
       ]),
@@ -220,6 +228,7 @@ function renderCard(title: string, desc: string, btnText: string, onClick: () =>
               color: "#FFFFFF",
               border: "none",
               padding: "10px 20px",
+              minHeight: "44px",
               borderRadius: "8px",
               cursor: "pointer",
               fontWeight: 600,

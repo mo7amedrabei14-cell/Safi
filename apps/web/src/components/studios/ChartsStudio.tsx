@@ -68,16 +68,16 @@ const CHART_TYPE_LABELS: Readonly<Record<ChartType, string>> = {
 
 const WHITE_CANVAS = "#ffffff";
 
-/** Unique fill colours used by the generated SVG, excluding the canvas itself. */
-export function extractSvgFills(svg: string): string[] {
-  const fills = new Set<string>();
-  for (const match of svg.matchAll(/fill="(#[0-9a-fA-F]{6})"/g)) {
+/** Unique fill and stroke colours used by the generated SVG, excluding the canvas itself. */
+export function extractSvgColors(svg: string): string[] {
+  const colors = new Set<string>();
+  for (const match of svg.matchAll(/(?:fill|stroke)="(#[0-9a-fA-F]{6})"/g)) {
     const value = match[1];
     if (value !== undefined && value.toLowerCase() !== WHITE_CANVAS) {
-      fills.add(value.toUpperCase());
+      colors.add(value.toUpperCase());
     }
   }
-  return [...fills];
+  return [...colors];
 }
 
 export function ChartsStudio(): ReactNode {
@@ -109,7 +109,7 @@ export function ChartsStudio(): ReactNode {
 
   const svgAudit = useMemo(
     () =>
-      extractSvgFills(svg).map((colour) => ({
+      extractSvgColors(svg).map((colour) => ({
         colour,
         background: WHITE_CANVAS,
         ratio: contrastRatio(colour, WHITE_CANVAS),
@@ -166,7 +166,10 @@ export function ChartsStudio(): ReactNode {
             ))}
           </div>
 
-          {chartType === "bar" ? (
+          {chartType === "bar" ||
+          chartType === "line" ||
+          chartType === "pie" ||
+          chartType === "donut" ? (
             <img
               src={imageUri}
               alt={SAMPLE_CHART_SPEC.titleAr}
@@ -175,8 +178,9 @@ export function ChartsStudio(): ReactNode {
             />
           ) : (
             <p className="safi-hint" role="status">
-              المعاينة الحتمية SVG لهذه النسخة ترسم مخطط الأعمدة. أما {CHART_TYPE_LABELS[chartType]}{" "}
-              فتُصدَّر عبر مواصفة Vega-Lite في نواة التقارير بنفس البيانات والمواصفة.
+              المعاينة الحتمية SVG لهذه النسخة تدعم الأعمدة والخطي والدائري والحلقي. أما{" "}
+              {CHART_TYPE_LABELS[chartType]} فتُصدَّر عبر مواصفة Vega-Lite في نواة التقارير بنفس
+              البيانات والمواصفة.
             </p>
           )}
 

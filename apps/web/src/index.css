@@ -4,7 +4,6 @@
  * Motion is expressed through CSS variables only; the hero animations live in
  * `components/motion` and read the same tokens.
  */
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 
 @property --star-angle {
   syntax: "<angle>";

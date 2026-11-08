@@ -27,7 +27,7 @@ pub fn run_cli_action(args: &[String]) -> Result<i32, String> {
         }
         "clean" => {
             if args.len() < 4 || args[2] != "--out" {
-                return Err("الاستخدام الصحيح: safi clean <input> --out <output> (SF-IMP-001)".to_string());
+                return Err("الاستخدام الصحيح: safi clean <input> --out <output> (SF-SYS-030)".to_string());
             }
             let input = &args[1];
             let output = &args[3];
@@ -49,7 +49,7 @@ pub fn run_cli_action(args: &[String]) -> Result<i32, String> {
         }
         "profile" => {
             if args.len() < 2 {
-                return Err("الاستخدام الصحيح: safi profile <input> (SF-PRF-001)".to_string());
+                return Err("الاستخدام الصحيح: safi profile <input> (SF-SYS-030)".to_string());
             }
             let input = &args[1];
             if !std::path::Path::new(input).exists() {
@@ -62,7 +62,7 @@ pub fn run_cli_action(args: &[String]) -> Result<i32, String> {
         }
         "report" => {
             if args.len() < 2 {
-                return Err("الاستخدام الصحيح: safi report <input> (SF-RPT-001)".to_string());
+                return Err("الاستخدام الصحيح: safi report <input> (SF-SYS-030)".to_string());
             }
             let input = &args[1];
             if !std::path::Path::new(input).exists() {
@@ -74,7 +74,7 @@ pub fn run_cli_action(args: &[String]) -> Result<i32, String> {
         }
         _ => {
             print_help();
-            Err(format!("SF-SYS-004: أمر غير معروف: {}", args[0]))
+            Err(format!("SF-SYS-030: أمر غير معروف: {}", args[0]))
         }
     }
 }

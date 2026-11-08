@@ -54,27 +54,27 @@ impl LicenseVerifier {
     ) -> Result<LicenseStatus, &'static str> {
         // 1. Clock rollback detection
         if current_time_secs < last_seen_time_secs {
-            return Err("SF-AUTH-008: تم رصد إرجاع ساعة النظام للوراء بشكل مشبوه");
+            return Err("SF-LIC-001: تم رصد إرجاع ساعة النظام للوراء بشكل مشبوه");
         }
 
         // 2. Decode Ed25519 signature
         let sig_bytes = hex::decode(&signed.signature_hex)
-            .map_err(|_| "SF-AUTH-001: توقيع الترخيص تالف أو غير صالح")?;
+            .map_err(|_| "SF-LIC-002: توقيع الترخيص تالف أو غير صالح")?;
         let signature = Signature::from_slice(&sig_bytes)
-            .map_err(|_| "SF-AUTH-001: بصمة توقيع الترخيص غير صالحة")?;
+            .map_err(|_| "SF-LIC-002: بصمة توقيع الترخيص غير صالحة")?;
 
         // 3. Serialize payload for verification
         let payload_bytes = serde_json::to_vec(&signed.payload)
-            .map_err(|_| "SF-AUTH-001: تعذّر قراءة بيانات الترخيص")?;
+            .map_err(|_| "SF-LIC-002: تعذّر قراءة بيانات الترخيص")?;
 
         // 4. Verify cryptographic signature
         self.verifying_key
             .verify(&payload_bytes, &signature)
-            .map_err(|_| "SF-AUTH-002: توقيع الترخيص الرقمي غير مطابق أو مزوّر")?;
+            .map_err(|_| "SF-LIC-003: توقيع الترخيص الرقمي غير مطابق أو مزوّر")?;
 
         // 5. Verify device fingerprint binding
         if signed.payload.device_fingerprint != device_fingerprint {
-            return Err("SF-AUTH-003: الترخيص مرتبط بجهاز مختلف");
+            return Err("SF-LIC-004: الترخيص مرتبط بجهاز مختلف");
         }
 
         // 6. Check expiration and grace period

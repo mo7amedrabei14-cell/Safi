@@ -26,6 +26,10 @@ export type SafiErrorCode =
   | "SF-IMP-004"
   | "SF-IMP-005"
   | "SF-IMP-014"
+  | "SF-LIC-001"
+  | "SF-LIC-002"
+  | "SF-LIC-003"
+  | "SF-LIC-004"
   | "SF-PRF-001"
   | "SF-PRF-002"
   | "SF-RCP-001"
@@ -42,7 +46,26 @@ export type SafiErrorCode =
   | "SF-SYS-009"
   | "SF-SYS-010"
   | "SF-SYS-011"
-  | "SF-UNK-001";
+  | "SF-SYS-012"
+  | "SF-SYS-013"
+  | "SF-SYS-014"
+  | "SF-SYS-020"
+  | "SF-SYS-021"
+  | "SF-SYS-022"
+  | "SF-SYS-023"
+  | "SF-SYS-024"
+  | "SF-SYS-025"
+  | "SF-SYS-026"
+  | "SF-SYS-030"
+  | "SF-UNK-001"
+  | "SF-UPD-001"
+  | "SF-UPD-002"
+  | "SF-UPD-003"
+  | "SF-UPD-004"
+  | "SF-UPD-005"
+  | "SF-UPD-006"
+  | "SF-UPD-007"
+  | "SF-UPD-008";
 
 export type SafiErrorTranslationKey =
   | "error.SF-AUTH-001.title"
@@ -93,6 +116,14 @@ export type SafiErrorTranslationKey =
   | "error.SF-IMP-005.action"
   | "error.SF-IMP-014.title"
   | "error.SF-IMP-014.action"
+  | "error.SF-LIC-001.title"
+  | "error.SF-LIC-001.action"
+  | "error.SF-LIC-002.title"
+  | "error.SF-LIC-002.action"
+  | "error.SF-LIC-003.title"
+  | "error.SF-LIC-003.action"
+  | "error.SF-LIC-004.title"
+  | "error.SF-LIC-004.action"
   | "error.SF-PRF-001.title"
   | "error.SF-PRF-001.action"
   | "error.SF-PRF-002.title"
@@ -125,8 +156,46 @@ export type SafiErrorTranslationKey =
   | "error.SF-SYS-010.action"
   | "error.SF-SYS-011.title"
   | "error.SF-SYS-011.action"
+  | "error.SF-SYS-012.title"
+  | "error.SF-SYS-012.action"
+  | "error.SF-SYS-013.title"
+  | "error.SF-SYS-013.action"
+  | "error.SF-SYS-014.title"
+  | "error.SF-SYS-014.action"
+  | "error.SF-SYS-020.title"
+  | "error.SF-SYS-020.action"
+  | "error.SF-SYS-021.title"
+  | "error.SF-SYS-021.action"
+  | "error.SF-SYS-022.title"
+  | "error.SF-SYS-022.action"
+  | "error.SF-SYS-023.title"
+  | "error.SF-SYS-023.action"
+  | "error.SF-SYS-024.title"
+  | "error.SF-SYS-024.action"
+  | "error.SF-SYS-025.title"
+  | "error.SF-SYS-025.action"
+  | "error.SF-SYS-026.title"
+  | "error.SF-SYS-026.action"
+  | "error.SF-SYS-030.title"
+  | "error.SF-SYS-030.action"
   | "error.SF-UNK-001.title"
-  | "error.SF-UNK-001.action";
+  | "error.SF-UNK-001.action"
+  | "error.SF-UPD-001.title"
+  | "error.SF-UPD-001.action"
+  | "error.SF-UPD-002.title"
+  | "error.SF-UPD-002.action"
+  | "error.SF-UPD-003.title"
+  | "error.SF-UPD-003.action"
+  | "error.SF-UPD-004.title"
+  | "error.SF-UPD-004.action"
+  | "error.SF-UPD-005.title"
+  | "error.SF-UPD-005.action"
+  | "error.SF-UPD-006.title"
+  | "error.SF-UPD-006.action"
+  | "error.SF-UPD-007.title"
+  | "error.SF-UPD-007.action"
+  | "error.SF-UPD-008.title"
+  | "error.SF-UPD-008.action";
 
 export interface SafiErrorCatalogEntry {
   readonly code: SafiErrorCode;
@@ -163,6 +232,10 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-IMP-004",
   "SF-IMP-005",
   "SF-IMP-014",
+  "SF-LIC-001",
+  "SF-LIC-002",
+  "SF-LIC-003",
+  "SF-LIC-004",
   "SF-PRF-001",
   "SF-PRF-002",
   "SF-RCP-001",
@@ -179,7 +252,26 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-SYS-009",
   "SF-SYS-010",
   "SF-SYS-011",
-  "SF-UNK-001"
+  "SF-SYS-012",
+  "SF-SYS-013",
+  "SF-SYS-014",
+  "SF-SYS-020",
+  "SF-SYS-021",
+  "SF-SYS-022",
+  "SF-SYS-023",
+  "SF-SYS-024",
+  "SF-SYS-025",
+  "SF-SYS-026",
+  "SF-SYS-030",
+  "SF-UNK-001",
+  "SF-UPD-001",
+  "SF-UPD-002",
+  "SF-UPD-003",
+  "SF-UPD-004",
+  "SF-UPD-005",
+  "SF-UPD-006",
+  "SF-UPD-007",
+  "SF-UPD-008",
 ] as const;
 
 export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = {
@@ -403,6 +495,44 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Save the file as UTF-8 or select another encoding from the list, then try again.",
     ownerNote: "UnsupportedEncoding encountered during file import."
   },
+  "SF-LIC-001": {
+    code: "SF-LIC-001",
+    severity: "error",
+    titleAr: "رُصد تراجع مريب في ساعة النظام",
+    actionAr: "تحقق من تاريخ الجهاز ووقته ثم أعد التحقق من الترخيص.",
+    titleEn: "Suspicious system clock rollback detected",
+    actionEn: "Verify the device date and time, then validate the license again.",
+    ownerNote:
+      "License validation detected that the local clock moved behind the last trusted timestamp.",
+  },
+  "SF-LIC-002": {
+    code: "SF-LIC-002",
+    severity: "error",
+    titleAr: "بيانات توقيع الترخيص غير صالحة",
+    actionAr: "أعد إصدار الترخيص من المصدر الرسمي ثم أعد المحاولة.",
+    titleEn: "License signature data is invalid",
+    actionEn: "Reissue the license from the official source and try again.",
+    ownerNote:
+      "License signature bytes could not be decoded, parsed, or serialized for verification.",
+  },
+  "SF-LIC-003": {
+    code: "SF-LIC-003",
+    severity: "error",
+    titleAr: "توقيع الترخيص الرقمي غير صحيح",
+    actionAr: "تحقق من مصدر الترخيص واطلب إصدارًا صحيحًا.",
+    titleEn: "License digital signature is invalid",
+    actionEn: "Verify the license source and request a valid license.",
+    ownerNote: "Ed25519 verification failed for the signed license payload.",
+  },
+  "SF-LIC-004": {
+    code: "SF-LIC-004",
+    severity: "error",
+    titleAr: "الترخيص مرتبط بجهاز آخر",
+    actionAr: "استخدم الترخيص على الجهاز المسجل أو اطلب نقل الترخيص.",
+    titleEn: "License is bound to another device",
+    actionEn: "Use the license on its registered device or request a license transfer.",
+    ownerNote: "The device fingerprint in the signed license does not match the current device.",
+  },
   "SF-PRF-001": {
     code: "SF-PRF-001",
     severity: "info",
@@ -550,6 +680,108 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Try again; if the error repeats, restart the app.",
     ownerNote: "The native dialog bridge thread failed while picking an input or output file."
   },
+  "SF-SYS-012": {
+    code: "SF-SYS-012",
+    severity: "error",
+    titleAr: "عملية المحرك غير صالحة",
+    actionAr: "اختر عملية مدعومة ثم أعد المحاولة.",
+    titleEn: "Invalid engine operation",
+    actionEn: "Choose a supported engine operation and try again.",
+    ownerNote: "The desktop engine bridge rejected a missing or overlong operation identifier.",
+  },
+  "SF-SYS-013": {
+    code: "SF-SYS-013",
+    severity: "error",
+    titleAr: "حجم حمولة المحرك غير صالح",
+    actionAr: "تأكد أن الملف غير فارغ ولا يتجاوز 250 MiB.",
+    titleEn: "Invalid engine payload size",
+    actionEn: "Use a non-empty file no larger than 250 MiB.",
+    ownerNote: "The engine bridge rejects empty payloads and payloads above the 250 MiB limit.",
+  },
+  "SF-SYS-014": {
+    code: "SF-SYS-014",
+    severity: "error",
+    titleAr: "تعذّر فرض منع نافذة الأوامر",
+    actionAr: "أعد تشغيل التطبيق أو استخدم إصدار سطح المكتب المعتمد.",
+    titleEn: "Console-window suppression could not be enforced",
+    actionEn: "Restart the app or use an approved desktop release.",
+    ownerNote:
+      "The desktop engine bridge failed to enforce the no-console process creation policy.",
+  },
+  "SF-SYS-020": {
+    code: "SF-SYS-020",
+    severity: "error",
+    titleAr: "كلمة سر الخزنة قصيرة جدًا",
+    actionAr: "استخدم عبارة سر لا تقل عن 8 أحرف.",
+    titleEn: "Vault passphrase is too short",
+    actionEn: "Use a passphrase with at least 8 characters.",
+    ownerNote: "Vault key derivation rejected a passphrase shorter than the required minimum.",
+  },
+  "SF-SYS-021": {
+    code: "SF-SYS-021",
+    severity: "error",
+    titleAr: "ملح التشفير غير صالح",
+    actionAr: "أعد إنشاء الخزنة باستخدام إعدادات تشفير سليمة.",
+    titleEn: "Encryption salt is invalid",
+    actionEn: "Recreate the vault with valid encryption parameters.",
+    ownerNote: "Vault key derivation received a salt shorter than the required 16 bytes.",
+  },
+  "SF-SYS-022": {
+    code: "SF-SYS-022",
+    severity: "error",
+    titleAr: "بيانات الخزنة فارغة",
+    actionAr: "تحقق من محتوى البيانات قبل تشفير الخزنة.",
+    titleEn: "Vault payload is empty",
+    actionEn: "Check the vault data before encrypting it.",
+    ownerNote: "Vault encryption was requested with an empty plaintext payload.",
+  },
+  "SF-SYS-023": {
+    code: "SF-SYS-023",
+    severity: "error",
+    titleAr: "بيانات الخزنة المشفرة تالفة",
+    actionAr: "استعد نسخة احتياطية سليمة من الخزنة.",
+    titleEn: "Encrypted vault payload is invalid",
+    actionEn: "Restore a valid backup of the vault.",
+    ownerNote: "Vault decryption rejected a ciphertext payload that is too short to be valid.",
+  },
+  "SF-SYS-024": {
+    code: "SF-SYS-024",
+    severity: "error",
+    titleAr: "مفتاح فك تشفير الخزنة غير مطابق",
+    actionAr: "تحقق من عبارة السر المستخدمة لفتح هذه الخزنة.",
+    titleEn: "Vault decryption key does not match",
+    actionEn: "Verify the passphrase used to open this vault.",
+    ownerNote:
+      "The supplied vault key does not match the key identifier embedded in the ciphertext.",
+  },
+  "SF-SYS-025": {
+    code: "SF-SYS-025",
+    severity: "error",
+    titleAr: "تم حظر رابط رمزي داخل المجلد المراقَب",
+    actionAr: "أزل الرابط الرمزي واختر مجلدًا عاديًا للمراقبة.",
+    titleEn: "Symbolic link blocked in watched folder",
+    actionEn: "Remove the symbolic link and choose a regular folder to watch.",
+    ownerNote:
+      "The file watcher rejected a symbolic link to prevent access outside the watched directory.",
+  },
+  "SF-SYS-026": {
+    code: "SF-SYS-026",
+    severity: "error",
+    titleAr: "تم حظر محاولة الخروج من المجلد المراقَب",
+    actionAr: "استخدم مسارًا يقع بالكامل داخل المجلد المراقَب.",
+    titleEn: "Path traversal outside watched folder was blocked",
+    actionEn: "Use a path that remains entirely inside the watched folder.",
+    ownerNote: "The file watcher rejected a normalized path that escapes the watched directory.",
+  },
+  "SF-SYS-030": {
+    code: "SF-SYS-030",
+    severity: "error",
+    titleAr: "أمر سطر الأوامر أو معاملاته غير صالحة",
+    actionAr: "راجع صيغة الأمر والمعاملات المطلوبة ثم أعد المحاولة.",
+    titleEn: "CLI command or arguments are invalid",
+    actionEn: "Check the command syntax and required arguments, then retry.",
+    ownerNote: "The CLI received an unknown command or missing or invalid required arguments.",
+  },
   "SF-UNK-001": {
     code: "SF-UNK-001",
     severity: "fatal",
@@ -558,7 +790,82 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     titleEn: "An unexpected error occurred",
     actionEn: "Restart the app. If the error repeats, send the diagnostic code to support.",
     ownerNote: "Uncaught panic or unexpected fallback path."
-  }
+  },
+  "SF-UPD-001": {
+    code: "SF-UPD-001",
+    severity: "error",
+    titleAr: "محاولة تثبيت إصدار أقدم مرفوضة",
+    actionAr: "ثبّت الإصدار الحالي أو إصدارًا أحدث معتمدًا.",
+    titleEn: "Downgrade attempt was rejected",
+    actionEn: "Install the current release or a newer approved version.",
+    ownerNote:
+      "The updater anti-downgrade floor rejected a release older than the current version.",
+  },
+  "SF-UPD-002": {
+    code: "SF-UPD-002",
+    severity: "error",
+    titleAr: "الإصدار موضوع في قائمة الحظر المؤقت",
+    actionAr: "استخدم إصدارًا سليمًا أحدث أو تواصل مع الدعم.",
+    titleEn: "Release is temporarily quarantined",
+    actionEn: "Use a newer healthy release or contact support.",
+    ownerNote: "The requested build is quarantined after repeated startup failures.",
+  },
+  "SF-UPD-003": {
+    code: "SF-UPD-003",
+    severity: "error",
+    titleAr: "إصدار التحديث أقل من الحد الإجباري",
+    actionAr: "راجع ملف الإصدار وثبّت تحديثًا يحقق الحد الأدنى المطلوب.",
+    titleEn: "Update release is below the required minimum",
+    actionEn: "Use an update release that satisfies the required minimum version.",
+    ownerNote: "The update manifest version is below its declared minimum required version.",
+  },
+  "SF-UPD-004": {
+    code: "SF-UPD-004",
+    severity: "error",
+    titleAr: "لا يوجد تحديث بانتظار تأكيد التشغيل",
+    actionAr: "ابدأ التحديث من جديد ثم أكمل فحص سلامة التشغيل.",
+    titleEn: "No update is awaiting boot confirmation",
+    actionEn: "Restart the update flow and complete the boot health check.",
+    ownerNote:
+      "Boot health confirmation was requested without a pending update verification state.",
+  },
+  "SF-UPD-005": {
+    code: "SF-UPD-005",
+    severity: "error",
+    titleAr: "تعذّر التراجع الآمن عن التحديث",
+    actionAr: "أعد تشغيل الجهاز وتحقق من حالة التحديث قبل المحاولة.",
+    titleEn: "Safe update rollback is not available",
+    actionEn: "Restart the device and verify the update state before retrying.",
+    ownerNote: "The updater cannot roll back because the boot state is not pending verification.",
+  },
+  "SF-UPD-006": {
+    code: "SF-UPD-006",
+    severity: "error",
+    titleAr: "بصمة SHA-256 للملف التنفيذي غير صالحة",
+    actionAr: "أعد تنزيل الملف من مصدر موثوق ثم تحقق من سلامته.",
+    titleEn: "Executable SHA-256 hash is invalid",
+    actionEn: "Download the binary again from a trusted source and verify it.",
+    ownerNote:
+      "The executable SHA-256 digest is missing, malformed, or invalid during signing or update validation.",
+  },
+  "SF-UPD-007": {
+    code: "SF-UPD-007",
+    severity: "error",
+    titleAr: "الملف التنفيذي غير موقّع رقميًا",
+    actionAr: "استخدم ملفًا تنفيذيًا موقّعًا من ناشر موثوق.",
+    titleEn: "Executable binary is not digitally signed",
+    actionEn: "Use an executable signed by a trusted publisher.",
+    ownerNote: "The executable signature verifier found no Authenticode signature.",
+  },
+  "SF-UPD-008": {
+    code: "SF-UPD-008",
+    severity: "error",
+    titleAr: "شهادة توقيع الملف غير موثوقة",
+    actionAr: "استخدم إصدارًا بشهادة توقيع صالحة وموثوقة.",
+    titleEn: "Executable signing certificate is not trusted",
+    actionEn: "Use a release with a valid and trusted signing certificate.",
+    ownerNote: "The executable signing certificate is expired or cannot be trusted.",
+  },
 } as const;
 
 export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
@@ -614,6 +921,14 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-IMP-014.title": "ترميز الملف غير مدعوم",
   "error.SF-IMP-014.action":
     "احفظ الملف بترميز UTF-8 أو اختر ترميزًا آخر من القائمة ثم أعد المحاولة.",
+  "error.SF-LIC-001.title": "رُصد تراجع مريب في ساعة النظام",
+  "error.SF-LIC-001.action": "تحقق من تاريخ الجهاز ووقته ثم أعد التحقق من الترخيص.",
+  "error.SF-LIC-002.title": "بيانات توقيع الترخيص غير صالحة",
+  "error.SF-LIC-002.action": "أعد إصدار الترخيص من المصدر الرسمي ثم أعد المحاولة.",
+  "error.SF-LIC-003.title": "توقيع الترخيص الرقمي غير صحيح",
+  "error.SF-LIC-003.action": "تحقق من مصدر الترخيص واطلب إصدارًا صحيحًا.",
+  "error.SF-LIC-004.title": "الترخيص مرتبط بجهاز آخر",
+  "error.SF-LIC-004.action": "استخدم الترخيص على الجهاز المسجل أو اطلب نقل الترخيص.",
   "error.SF-PRF-001.title": "لسنا متأكدين من نوع هذا العمود",
   "error.SF-PRF-001.action": "راجع الاقتراح أو اشرح لنا معنى العمود.",
   "error.SF-PRF-002.title": "قيمة درجة الثقة غير صالحة",
@@ -647,8 +962,46 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-SYS-010.action": "أعد تشغيل التطبيق. إن تكرر الخطأ فحدّثه إلى أحدث إصدار.",
   "error.SF-SYS-011.title": "تعذّر فتح حوار الملفات",
   "error.SF-SYS-011.action": "أعد المحاولة، وإن تكرر الخطأ فأعد تشغيل التطبيق.",
+  "error.SF-SYS-012.title": "عملية المحرك غير صالحة",
+  "error.SF-SYS-012.action": "اختر عملية مدعومة ثم أعد المحاولة.",
+  "error.SF-SYS-013.title": "حجم حمولة المحرك غير صالح",
+  "error.SF-SYS-013.action": "تأكد أن الملف غير فارغ ولا يتجاوز 250 MiB.",
+  "error.SF-SYS-014.title": "تعذّر فرض منع نافذة الأوامر",
+  "error.SF-SYS-014.action": "أعد تشغيل التطبيق أو استخدم إصدار سطح المكتب المعتمد.",
+  "error.SF-SYS-020.title": "كلمة سر الخزنة قصيرة جدًا",
+  "error.SF-SYS-020.action": "استخدم عبارة سر لا تقل عن 8 أحرف.",
+  "error.SF-SYS-021.title": "ملح التشفير غير صالح",
+  "error.SF-SYS-021.action": "أعد إنشاء الخزنة باستخدام إعدادات تشفير سليمة.",
+  "error.SF-SYS-022.title": "بيانات الخزنة فارغة",
+  "error.SF-SYS-022.action": "تحقق من محتوى البيانات قبل تشفير الخزنة.",
+  "error.SF-SYS-023.title": "بيانات الخزنة المشفرة تالفة",
+  "error.SF-SYS-023.action": "استعد نسخة احتياطية سليمة من الخزنة.",
+  "error.SF-SYS-024.title": "مفتاح فك تشفير الخزنة غير مطابق",
+  "error.SF-SYS-024.action": "تحقق من عبارة السر المستخدمة لفتح هذه الخزنة.",
+  "error.SF-SYS-025.title": "تم حظر رابط رمزي داخل المجلد المراقَب",
+  "error.SF-SYS-025.action": "أزل الرابط الرمزي واختر مجلدًا عاديًا للمراقبة.",
+  "error.SF-SYS-026.title": "تم حظر محاولة الخروج من المجلد المراقَب",
+  "error.SF-SYS-026.action": "استخدم مسارًا يقع بالكامل داخل المجلد المراقَب.",
+  "error.SF-SYS-030.title": "أمر سطر الأوامر أو معاملاته غير صالحة",
+  "error.SF-SYS-030.action": "راجع صيغة الأمر والمعاملات المطلوبة ثم أعد المحاولة.",
   "error.SF-UNK-001.title": "حدث خطأ غير متوقع",
-  "error.SF-UNK-001.action": "أعد تشغيل التطبيق. إن تكرر الخطأ فأرسل رمز التشخيص للدعم."
+  "error.SF-UNK-001.action": "أعد تشغيل التطبيق. إن تكرر الخطأ فأرسل رمز التشخيص للدعم.",
+  "error.SF-UPD-001.title": "محاولة تثبيت إصدار أقدم مرفوضة",
+  "error.SF-UPD-001.action": "ثبّت الإصدار الحالي أو إصدارًا أحدث معتمدًا.",
+  "error.SF-UPD-002.title": "الإصدار موضوع في قائمة الحظر المؤقت",
+  "error.SF-UPD-002.action": "استخدم إصدارًا سليمًا أحدث أو تواصل مع الدعم.",
+  "error.SF-UPD-003.title": "إصدار التحديث أقل من الحد الإجباري",
+  "error.SF-UPD-003.action": "راجع ملف الإصدار وثبّت تحديثًا يحقق الحد الأدنى المطلوب.",
+  "error.SF-UPD-004.title": "لا يوجد تحديث بانتظار تأكيد التشغيل",
+  "error.SF-UPD-004.action": "ابدأ التحديث من جديد ثم أكمل فحص سلامة التشغيل.",
+  "error.SF-UPD-005.title": "تعذّر التراجع الآمن عن التحديث",
+  "error.SF-UPD-005.action": "أعد تشغيل الجهاز وتحقق من حالة التحديث قبل المحاولة.",
+  "error.SF-UPD-006.title": "بصمة SHA-256 للملف التنفيذي غير صالحة",
+  "error.SF-UPD-006.action": "أعد تنزيل الملف من مصدر موثوق ثم تحقق من سلامته.",
+  "error.SF-UPD-007.title": "الملف التنفيذي غير موقّع رقميًا",
+  "error.SF-UPD-007.action": "استخدم ملفًا تنفيذيًا موقّعًا من ناشر موثوق.",
+  "error.SF-UPD-008.title": "شهادة توقيع الملف غير موثوقة",
+  "error.SF-UPD-008.action": "استخدم إصدارًا بشهادة توقيع صالحة وموثوقة.",
 } as const;
 
 export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
@@ -708,6 +1061,15 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-IMP-014.title": "Unsupported file encoding",
   "error.SF-IMP-014.action":
     "Save the file as UTF-8 or select another encoding from the list, then try again.",
+  "error.SF-LIC-001.title": "Suspicious system clock rollback detected",
+  "error.SF-LIC-001.action": "Verify the device date and time, then validate the license again.",
+  "error.SF-LIC-002.title": "License signature data is invalid",
+  "error.SF-LIC-002.action": "Reissue the license from the official source and try again.",
+  "error.SF-LIC-003.title": "License digital signature is invalid",
+  "error.SF-LIC-003.action": "Verify the license source and request a valid license.",
+  "error.SF-LIC-004.title": "License is bound to another device",
+  "error.SF-LIC-004.action":
+    "Use the license on its registered device or request a license transfer.",
   "error.SF-PRF-001.title": "We are not sure about this column's type",
   "error.SF-PRF-001.action": "Review the suggestion or tell us what this column represents.",
   "error.SF-PRF-002.title": "Invalid confidence score value",
@@ -745,9 +1107,47 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-SYS-010.action": "Restart the app. If it repeats, update to the latest version.",
   "error.SF-SYS-011.title": "Could not open the file dialog",
   "error.SF-SYS-011.action": "Try again; if the error repeats, restart the app.",
+  "error.SF-SYS-012.title": "Invalid engine operation",
+  "error.SF-SYS-012.action": "Choose a supported engine operation and try again.",
+  "error.SF-SYS-013.title": "Invalid engine payload size",
+  "error.SF-SYS-013.action": "Use a non-empty file no larger than 250 MiB.",
+  "error.SF-SYS-014.title": "Console-window suppression could not be enforced",
+  "error.SF-SYS-014.action": "Restart the app or use an approved desktop release.",
+  "error.SF-SYS-020.title": "Vault passphrase is too short",
+  "error.SF-SYS-020.action": "Use a passphrase with at least 8 characters.",
+  "error.SF-SYS-021.title": "Encryption salt is invalid",
+  "error.SF-SYS-021.action": "Recreate the vault with valid encryption parameters.",
+  "error.SF-SYS-022.title": "Vault payload is empty",
+  "error.SF-SYS-022.action": "Check the vault data before encrypting it.",
+  "error.SF-SYS-023.title": "Encrypted vault payload is invalid",
+  "error.SF-SYS-023.action": "Restore a valid backup of the vault.",
+  "error.SF-SYS-024.title": "Vault decryption key does not match",
+  "error.SF-SYS-024.action": "Verify the passphrase used to open this vault.",
+  "error.SF-SYS-025.title": "Symbolic link blocked in watched folder",
+  "error.SF-SYS-025.action": "Remove the symbolic link and choose a regular folder to watch.",
+  "error.SF-SYS-026.title": "Path traversal outside watched folder was blocked",
+  "error.SF-SYS-026.action": "Use a path that remains entirely inside the watched folder.",
+  "error.SF-SYS-030.title": "CLI command or arguments are invalid",
+  "error.SF-SYS-030.action": "Check the command syntax and required arguments, then retry.",
   "error.SF-UNK-001.title": "An unexpected error occurred",
   "error.SF-UNK-001.action":
-    "Restart the app. If the error repeats, send the diagnostic code to support."
+    "Restart the app. If the error repeats, send the diagnostic code to support.",
+  "error.SF-UPD-001.title": "Downgrade attempt was rejected",
+  "error.SF-UPD-001.action": "Install the current release or a newer approved version.",
+  "error.SF-UPD-002.title": "Release is temporarily quarantined",
+  "error.SF-UPD-002.action": "Use a newer healthy release or contact support.",
+  "error.SF-UPD-003.title": "Update release is below the required minimum",
+  "error.SF-UPD-003.action": "Use an update release that satisfies the required minimum version.",
+  "error.SF-UPD-004.title": "No update is awaiting boot confirmation",
+  "error.SF-UPD-004.action": "Restart the update flow and complete the boot health check.",
+  "error.SF-UPD-005.title": "Safe update rollback is not available",
+  "error.SF-UPD-005.action": "Restart the device and verify the update state before retrying.",
+  "error.SF-UPD-006.title": "Executable SHA-256 hash is invalid",
+  "error.SF-UPD-006.action": "Download the binary again from a trusted source and verify it.",
+  "error.SF-UPD-007.title": "Executable binary is not digitally signed",
+  "error.SF-UPD-007.action": "Use an executable signed by a trusted publisher.",
+  "error.SF-UPD-008.title": "Executable signing certificate is not trusted",
+  "error.SF-UPD-008.action": "Use a release with a valid and trusted signing certificate.",
 } as const;
 
 export function isRegisteredErrorCode(code: string): code is SafiErrorCode {

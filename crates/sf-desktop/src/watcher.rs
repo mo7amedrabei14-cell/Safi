@@ -72,7 +72,7 @@ impl WatchedFolder {
             if meta.file_type().is_symlink() {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
-                    "SF-SEC-021: الروابط الرمزية (Symlinks) محظورة في المجلد المراقَب امنياً",
+                    "SF-SYS-025: الروابط الرمزية (Symlinks) محظورة في المجلد المراقَب امنياً",
                 ));
             }
         }
@@ -97,7 +97,7 @@ impl WatchedFolder {
         if !canonical_target.starts_with(&self.base_dir) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "SF-SEC-022: محاولة خروج من المجلد المراقَب (Path Traversal محظور)",
+                "SF-SYS-026: محاولة خروج من المجلد المراقَب (Path Traversal محظور)",
             ));
         }
 

@@ -24,16 +24,16 @@ pub struct SignatureVerifier;
 impl SignatureVerifier {
     pub fn verify(info: &BinarySignatureInfo) -> Result<SignatureStatus, &'static str> {
         if !info.is_signed {
-            return Err("SF-SYS-012: الملف التنفيذي غير موقّع رقميًا (Authenticode مفقود)");
+            return Err("SF-UPD-007: الملف التنفيذي غير موقّع رقميًا (Authenticode مفقود)");
         }
         if !info.certificate_valid {
-            return Err("SF-SYS-013: شهادة التوقيع الرقمي منتهية أو غير موثوقة");
+            return Err("SF-UPD-008: شهادة التوقيع الرقمي منتهية أو غير موثوقة");
         }
         if !info.has_rfc3161_timestamp {
             return Ok(SignatureStatus::MissingTimestamp);
         }
         if info.sha256_hash.len() != 64 || !info.sha256_hash.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err("SF-SYS-014: بصمة SHA-256 للملف غير صالحة أو متلاعب بها");
+            return Err("SF-UPD-006: بصمة SHA-256 للملف غير صالحة أو متلاعب بها");
         }
 
         Ok(SignatureStatus::Valid)

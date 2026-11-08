@@ -26,7 +26,7 @@ impl AuditLogCenter {
     pub fn new() -> Self {
         let mut center = Self { entries: Vec::new() };
         center.record("INFO", None, "SYSTEM_START", "owner_system", "بدء تشغيل النظام الأمني والخادم بنجاح");
-        center.record("WARN", Some("SF-SEC-001".to_string()), "ZERO_TRUST_PROBE", "external_ip_proxy", "محاولة وصول بدون ترويسات Zero Trust مطابقة");
+        center.record("WARN", Some("SF-AUTH-001".to_string()), "ZERO_TRUST_PROBE", "external_ip_proxy", "محاولة وصول بدون ترويسات Zero Trust مطابقة");
         center.record("CRITICAL", Some("SF-AUTH-002".to_string()), "HARDWARE_TOKEN_REJECT", "yubikey_fips", "رفض محاولة توقيع بمفتاح مادي غير مصرح به أو بصمة خاطئة");
         center
     }

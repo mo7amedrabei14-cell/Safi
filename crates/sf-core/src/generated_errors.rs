@@ -137,6 +137,26 @@ impl ErrorCode {
         domain: ErrorDomain::Imp,
         number: 14,
     };
+    /// Registered error code `SF-LIC-001`.
+    pub const SF_LIC_001: Self = Self {
+        domain: ErrorDomain::Lic,
+        number: 1,
+    };
+    /// Registered error code `SF-LIC-002`.
+    pub const SF_LIC_002: Self = Self {
+        domain: ErrorDomain::Lic,
+        number: 2,
+    };
+    /// Registered error code `SF-LIC-003`.
+    pub const SF_LIC_003: Self = Self {
+        domain: ErrorDomain::Lic,
+        number: 3,
+    };
+    /// Registered error code `SF-LIC-004`.
+    pub const SF_LIC_004: Self = Self {
+        domain: ErrorDomain::Lic,
+        number: 4,
+    };
     /// Registered error code `SF-PRF-001`.
     pub const SF_PRF_001: Self = Self {
         domain: ErrorDomain::Prf,
@@ -217,12 +237,107 @@ impl ErrorCode {
         domain: ErrorDomain::Sys,
         number: 11,
     };
+    /// Registered error code `SF-SYS-012`.
+    pub const SF_SYS_012: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 12,
+    };
+    /// Registered error code `SF-SYS-013`.
+    pub const SF_SYS_013: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 13,
+    };
+    /// Registered error code `SF-SYS-014`.
+    pub const SF_SYS_014: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 14,
+    };
+    /// Registered error code `SF-SYS-020`.
+    pub const SF_SYS_020: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 20,
+    };
+    /// Registered error code `SF-SYS-021`.
+    pub const SF_SYS_021: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 21,
+    };
+    /// Registered error code `SF-SYS-022`.
+    pub const SF_SYS_022: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 22,
+    };
+    /// Registered error code `SF-SYS-023`.
+    pub const SF_SYS_023: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 23,
+    };
+    /// Registered error code `SF-SYS-024`.
+    pub const SF_SYS_024: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 24,
+    };
+    /// Registered error code `SF-SYS-025`.
+    pub const SF_SYS_025: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 25,
+    };
+    /// Registered error code `SF-SYS-026`.
+    pub const SF_SYS_026: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 26,
+    };
+    /// Registered error code `SF-SYS-030`.
+    pub const SF_SYS_030: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 30,
+    };
     /// Registered error code `SF-UNK-001`.
     pub const SF_UNK_001: Self = Self {
         domain: ErrorDomain::Unk,
         number: 1,
     };
 
+    /// Registered error code `SF-UPD-001`.
+    pub const SF_UPD_001: Self = Self {
+        domain: ErrorDomain::Upd,
+        number: 1,
+    };
+    /// Registered error code `SF-UPD-002`.
+    pub const SF_UPD_002: Self = Self {
+        domain: ErrorDomain::Upd,
+        number: 2,
+    };
+    /// Registered error code `SF-UPD-003`.
+    pub const SF_UPD_003: Self = Self {
+        domain: ErrorDomain::Upd,
+        number: 3,
+    };
+    /// Registered error code `SF-UPD-004`.
+    pub const SF_UPD_004: Self = Self {
+        domain: ErrorDomain::Upd,
+        number: 4,
+    };
+    /// Registered error code `SF-UPD-005`.
+    pub const SF_UPD_005: Self = Self {
+        domain: ErrorDomain::Upd,
+        number: 5,
+    };
+    /// Registered error code `SF-UPD-006`.
+    pub const SF_UPD_006: Self = Self {
+        domain: ErrorDomain::Upd,
+        number: 6,
+    };
+    /// Registered error code `SF-UPD-007`.
+    pub const SF_UPD_007: Self = Self {
+        domain: ErrorDomain::Upd,
+        number: 7,
+    };
+    /// Registered error code `SF-UPD-008`.
+    pub const SF_UPD_008: Self = Self {
+        domain: ErrorDomain::Upd,
+        number: 8,
+    };
     /// Complete array of all officially registered error codes.
     pub const ALL_REGISTERED: &[Self] = &[
         Self::SF_AUTH_001,
@@ -249,6 +364,10 @@ impl ErrorCode {
         Self::SF_IMP_004,
         Self::SF_IMP_005,
         Self::SF_IMP_014,
+        Self::SF_LIC_001,
+        Self::SF_LIC_002,
+        Self::SF_LIC_003,
+        Self::SF_LIC_004,
         Self::SF_PRF_001,
         Self::SF_PRF_002,
         Self::SF_RCP_001,
@@ -265,7 +384,26 @@ impl ErrorCode {
         Self::SF_SYS_009,
         Self::SF_SYS_010,
         Self::SF_SYS_011,
+        Self::SF_SYS_012,
+        Self::SF_SYS_013,
+        Self::SF_SYS_014,
+        Self::SF_SYS_020,
+        Self::SF_SYS_021,
+        Self::SF_SYS_022,
+        Self::SF_SYS_023,
+        Self::SF_SYS_024,
+        Self::SF_SYS_025,
+        Self::SF_SYS_026,
+        Self::SF_SYS_030,
         Self::SF_UNK_001,
+        Self::SF_UPD_001,
+        Self::SF_UPD_002,
+        Self::SF_UPD_003,
+        Self::SF_UPD_004,
+        Self::SF_UPD_005,
+        Self::SF_UPD_006,
+        Self::SF_UPD_007,
+        Self::SF_UPD_008,
     ];
 
     /// Returns `true` if this error code is officially registered in `errors.toml`.
@@ -532,6 +670,46 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         owner_note: "UnsupportedEncoding encountered during file import.",
     },
     ErrorCatalogEntry {
+        code: ErrorCode::SF_LIC_001,
+        code_str: "SF-LIC-001",
+        severity: ErrorSeverity::Error,
+        title_ar: "رُصد تراجع مريب في ساعة النظام",
+        action_ar: "تحقق من تاريخ الجهاز ووقته ثم أعد التحقق من الترخيص.",
+        title_en: "Suspicious system clock rollback detected",
+        action_en: "Verify the device date and time, then validate the license again.",
+        owner_note: "License validation detected that the local clock moved behind the last trusted timestamp.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_LIC_002,
+        code_str: "SF-LIC-002",
+        severity: ErrorSeverity::Error,
+        title_ar: "بيانات توقيع الترخيص غير صالحة",
+        action_ar: "أعد إصدار الترخيص من المصدر الرسمي ثم أعد المحاولة.",
+        title_en: "License signature data is invalid",
+        action_en: "Reissue the license from the official source and try again.",
+        owner_note: "License signature bytes could not be decoded, parsed, or serialized for verification.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_LIC_003,
+        code_str: "SF-LIC-003",
+        severity: ErrorSeverity::Error,
+        title_ar: "توقيع الترخيص الرقمي غير صحيح",
+        action_ar: "تحقق من مصدر الترخيص واطلب إصدارًا صحيحًا.",
+        title_en: "License digital signature is invalid",
+        action_en: "Verify the license source and request a valid license.",
+        owner_note: "Ed25519 verification failed for the signed license payload.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_LIC_004,
+        code_str: "SF-LIC-004",
+        severity: ErrorSeverity::Error,
+        title_ar: "الترخيص مرتبط بجهاز آخر",
+        action_ar: "استخدم الترخيص على الجهاز المسجل أو اطلب نقل الترخيص.",
+        title_en: "License is bound to another device",
+        action_en: "Use the license on its registered device or request a license transfer.",
+        owner_note: "The device fingerprint in the signed license does not match the current device.",
+    },
+    ErrorCatalogEntry {
         code: ErrorCode::SF_PRF_001,
         code_str: "SF-PRF-001",
         severity: ErrorSeverity::Info,
@@ -692,6 +870,116 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         owner_note: "The native dialog bridge thread failed while picking an input or output file.",
     },
     ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_012,
+        code_str: "SF-SYS-012",
+        severity: ErrorSeverity::Error,
+        title_ar: "عملية المحرك غير صالحة",
+        action_ar: "اختر عملية مدعومة ثم أعد المحاولة.",
+        title_en: "Invalid engine operation",
+        action_en: "Choose a supported engine operation and try again.",
+        owner_note: "The desktop engine bridge rejected a missing or overlong operation identifier.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_013,
+        code_str: "SF-SYS-013",
+        severity: ErrorSeverity::Error,
+        title_ar: "حجم حمولة المحرك غير صالح",
+        action_ar: "تأكد أن الملف غير فارغ ولا يتجاوز 250 MiB.",
+        title_en: "Invalid engine payload size",
+        action_en: "Use a non-empty file no larger than 250 MiB.",
+        owner_note: "The engine bridge rejects empty payloads and payloads above the 250 MiB limit.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_014,
+        code_str: "SF-SYS-014",
+        severity: ErrorSeverity::Error,
+        title_ar: "تعذّر فرض منع نافذة الأوامر",
+        action_ar: "أعد تشغيل التطبيق أو استخدم إصدار سطح المكتب المعتمد.",
+        title_en: "Console-window suppression could not be enforced",
+        action_en: "Restart the app or use an approved desktop release.",
+        owner_note: "The desktop engine bridge failed to enforce the no-console process creation policy.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_020,
+        code_str: "SF-SYS-020",
+        severity: ErrorSeverity::Error,
+        title_ar: "كلمة سر الخزنة قصيرة جدًا",
+        action_ar: "استخدم عبارة سر لا تقل عن 8 أحرف.",
+        title_en: "Vault passphrase is too short",
+        action_en: "Use a passphrase with at least 8 characters.",
+        owner_note: "Vault key derivation rejected a passphrase shorter than the required minimum.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_021,
+        code_str: "SF-SYS-021",
+        severity: ErrorSeverity::Error,
+        title_ar: "ملح التشفير غير صالح",
+        action_ar: "أعد إنشاء الخزنة باستخدام إعدادات تشفير سليمة.",
+        title_en: "Encryption salt is invalid",
+        action_en: "Recreate the vault with valid encryption parameters.",
+        owner_note: "Vault key derivation received a salt shorter than the required 16 bytes.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_022,
+        code_str: "SF-SYS-022",
+        severity: ErrorSeverity::Error,
+        title_ar: "بيانات الخزنة فارغة",
+        action_ar: "تحقق من محتوى البيانات قبل تشفير الخزنة.",
+        title_en: "Vault payload is empty",
+        action_en: "Check the vault data before encrypting it.",
+        owner_note: "Vault encryption was requested with an empty plaintext payload.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_023,
+        code_str: "SF-SYS-023",
+        severity: ErrorSeverity::Error,
+        title_ar: "بيانات الخزنة المشفرة تالفة",
+        action_ar: "استعد نسخة احتياطية سليمة من الخزنة.",
+        title_en: "Encrypted vault payload is invalid",
+        action_en: "Restore a valid backup of the vault.",
+        owner_note: "Vault decryption rejected a ciphertext payload that is too short to be valid.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_024,
+        code_str: "SF-SYS-024",
+        severity: ErrorSeverity::Error,
+        title_ar: "مفتاح فك تشفير الخزنة غير مطابق",
+        action_ar: "تحقق من عبارة السر المستخدمة لفتح هذه الخزنة.",
+        title_en: "Vault decryption key does not match",
+        action_en: "Verify the passphrase used to open this vault.",
+        owner_note: "The supplied vault key does not match the key identifier embedded in the ciphertext.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_025,
+        code_str: "SF-SYS-025",
+        severity: ErrorSeverity::Error,
+        title_ar: "تم حظر رابط رمزي داخل المجلد المراقَب",
+        action_ar: "أزل الرابط الرمزي واختر مجلدًا عاديًا للمراقبة.",
+        title_en: "Symbolic link blocked in watched folder",
+        action_en: "Remove the symbolic link and choose a regular folder to watch.",
+        owner_note: "The file watcher rejected a symbolic link to prevent access outside the watched directory.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_026,
+        code_str: "SF-SYS-026",
+        severity: ErrorSeverity::Error,
+        title_ar: "تم حظر محاولة الخروج من المجلد المراقَب",
+        action_ar: "استخدم مسارًا يقع بالكامل داخل المجلد المراقَب.",
+        title_en: "Path traversal outside watched folder was blocked",
+        action_en: "Use a path that remains entirely inside the watched folder.",
+        owner_note: "The file watcher rejected a normalized path that escapes the watched directory.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_030,
+        code_str: "SF-SYS-030",
+        severity: ErrorSeverity::Error,
+        title_ar: "أمر سطر الأوامر أو معاملاته غير صالحة",
+        action_ar: "راجع صيغة الأمر والمعاملات المطلوبة ثم أعد المحاولة.",
+        title_en: "CLI command or arguments are invalid",
+        action_en: "Check the command syntax and required arguments, then retry.",
+        owner_note: "The CLI received an unknown command or missing or invalid required arguments.",
+    },
+    ErrorCatalogEntry {
         code: ErrorCode::SF_UNK_001,
         code_str: "SF-UNK-001",
         severity: ErrorSeverity::Fatal,
@@ -700,5 +988,85 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "An unexpected error occurred",
         action_en: "Restart the app. If the error repeats, send the diagnostic code to support.",
         owner_note: "Uncaught panic or unexpected fallback path.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_UPD_001,
+        code_str: "SF-UPD-001",
+        severity: ErrorSeverity::Error,
+        title_ar: "محاولة تثبيت إصدار أقدم مرفوضة",
+        action_ar: "ثبّت الإصدار الحالي أو إصدارًا أحدث معتمدًا.",
+        title_en: "Downgrade attempt was rejected",
+        action_en: "Install the current release or a newer approved version.",
+        owner_note: "The updater anti-downgrade floor rejected a release older than the current version.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_UPD_002,
+        code_str: "SF-UPD-002",
+        severity: ErrorSeverity::Error,
+        title_ar: "الإصدار موضوع في قائمة الحظر المؤقت",
+        action_ar: "استخدم إصدارًا سليمًا أحدث أو تواصل مع الدعم.",
+        title_en: "Release is temporarily quarantined",
+        action_en: "Use a newer healthy release or contact support.",
+        owner_note: "The requested build is quarantined after repeated startup failures.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_UPD_003,
+        code_str: "SF-UPD-003",
+        severity: ErrorSeverity::Error,
+        title_ar: "إصدار التحديث أقل من الحد الإجباري",
+        action_ar: "راجع ملف الإصدار وثبّت تحديثًا يحقق الحد الأدنى المطلوب.",
+        title_en: "Update release is below the required minimum",
+        action_en: "Use an update release that satisfies the required minimum version.",
+        owner_note: "The update manifest version is below its declared minimum required version.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_UPD_004,
+        code_str: "SF-UPD-004",
+        severity: ErrorSeverity::Error,
+        title_ar: "لا يوجد تحديث بانتظار تأكيد التشغيل",
+        action_ar: "ابدأ التحديث من جديد ثم أكمل فحص سلامة التشغيل.",
+        title_en: "No update is awaiting boot confirmation",
+        action_en: "Restart the update flow and complete the boot health check.",
+        owner_note: "Boot health confirmation was requested without a pending update verification state.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_UPD_005,
+        code_str: "SF-UPD-005",
+        severity: ErrorSeverity::Error,
+        title_ar: "تعذّر التراجع الآمن عن التحديث",
+        action_ar: "أعد تشغيل الجهاز وتحقق من حالة التحديث قبل المحاولة.",
+        title_en: "Safe update rollback is not available",
+        action_en: "Restart the device and verify the update state before retrying.",
+        owner_note: "The updater cannot roll back because the boot state is not pending verification.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_UPD_006,
+        code_str: "SF-UPD-006",
+        severity: ErrorSeverity::Error,
+        title_ar: "بصمة SHA-256 للملف التنفيذي غير صالحة",
+        action_ar: "أعد تنزيل الملف من مصدر موثوق ثم تحقق من سلامته.",
+        title_en: "Executable SHA-256 hash is invalid",
+        action_en: "Download the binary again from a trusted source and verify it.",
+        owner_note: "The executable SHA-256 digest is missing, malformed, or invalid during signing or update validation.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_UPD_007,
+        code_str: "SF-UPD-007",
+        severity: ErrorSeverity::Error,
+        title_ar: "الملف التنفيذي غير موقّع رقميًا",
+        action_ar: "استخدم ملفًا تنفيذيًا موقّعًا من ناشر موثوق.",
+        title_en: "Executable binary is not digitally signed",
+        action_en: "Use an executable signed by a trusted publisher.",
+        owner_note: "The executable signature verifier found no Authenticode signature.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_UPD_008,
+        code_str: "SF-UPD-008",
+        severity: ErrorSeverity::Error,
+        title_ar: "شهادة توقيع الملف غير موثوقة",
+        action_ar: "استخدم إصدارًا بشهادة توقيع صالحة وموثوقة.",
+        title_en: "Executable signing certificate is not trusted",
+        action_en: "Use a release with a valid and trusted signing certificate.",
+        owner_note: "The executable signing certificate is expired or cannot be trusted.",
     },
 ];

@@ -10,10 +10,10 @@ pub struct VaultKey {
 impl VaultKey {
     pub fn derive_from_passphrase(passphrase: &str, salt: &[u8]) -> Result<Self, &'static str> {
         if passphrase.chars().count() < 8 {
-            return Err("SF-SEC-016: كلمة سر الخزنة قصيرة جداً (8 أحرف على الأقل)");
+            return Err("SF-SYS-020: كلمة سر الخزنة قصيرة جداً (8 أحرف على الأقل)");
         }
         if salt.len() < 16 {
-            return Err("SF-SEC-017: ملح التشفير (Salt) غير صالح أو قصير");
+            return Err("SF-SYS-021: ملح التشفير (Salt) غير صالح أو قصير");
         }
 
         // Argon2id key derivation simulation with zeroize buffer
@@ -41,7 +41,7 @@ impl Drop for VaultKey {
 
 pub fn encrypt_vault_payload(key: &VaultKey, plaintext: &[u8]) -> Result<Vec<u8>, &'static str> {
     if plaintext.is_empty() {
-        return Err("SF-SEC-018: بيانات الخزنة فارغة");
+        return Err("SF-SYS-022: بيانات الخزنة فارغة");
     }
     // Encrypted vault simulation using derived key bytes
     let mut ciphertext = Vec::with_capacity(plaintext.len() + 32);
@@ -52,11 +52,11 @@ pub fn encrypt_vault_payload(key: &VaultKey, plaintext: &[u8]) -> Result<Vec<u8>
 
 pub fn decrypt_vault_payload(key: &VaultKey, ciphertext: &[u8]) -> Result<Vec<u8>, &'static str> {
     if ciphertext.len() <= 32 {
-        return Err("SF-SEC-019: حمولة الخزنة تالفة أو غير صالحة");
+        return Err("SF-SYS-023: حمولة الخزنة تالفة أو غير صالحة");
     }
     let (stored_key, encrypted_data) = ciphertext.split_at(32);
     if stored_key != key.as_bytes() {
-        return Err("SF-SEC-020: مفتاح فك التشفير غير صحيح أو البيانات مصدّرة بكلمة سر مختلفة");
+        return Err("SF-SYS-024: مفتاح فك التشفير غير صحيح أو البيانات مصدّرة بكلمة سر مختلفة");
     }
     Ok(encrypted_data.to_vec())
 }

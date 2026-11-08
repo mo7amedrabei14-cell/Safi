@@ -43,13 +43,13 @@ impl SecureUpdater {
     /// Check manifest and apply anti-downgrade and quarantine rules.
     pub fn evaluate_manifest(&self, manifest: &ReleaseManifest) -> Result<UpdateStatus, &'static str> {
         if manifest.version < self.current_version {
-            return Err("SF-SYS-015: محاولة رجوع لإصدار أقدم مرفوضة سياسياً وتقنياً (Anti-Downgrade Floor)");
+            return Err("SF-UPD-001: محاولة رجوع لإصدار أقدم مرفوضة سياسياً وتقنياً (Anti-Downgrade Floor)");
         }
         if manifest.version == self.current_version {
             return Ok(UpdateStatus::UpToDate);
         }
         if self.quarantined_builds.contains(&manifest.version) {
-            return Err("SF-SYS-016: الإصدار المستهدف موضوع في قائمة الحظر المؤقت لتكرار فشل الإقلاع (Quarantined Build)");
+            return Err("SF-UPD-002: الإصدار المستهدف موضوع في قائمة الحظر المؤقت لتكرار فشل الإقلاع (Quarantined Build)");
         }
         if manifest.version < manifest.min_required_version {
             return Ok(UpdateStatus::RequiredUpdateBlocked);
@@ -73,7 +73,7 @@ impl SecureUpdater {
                 Ok(())
             }
             UpdateStatus::RequiredUpdateBlocked => {
-                Err("SF-SYS-017: الإصدار الحالي أقل من الحد الأدنى الإجباري؛ شاشة 'تحديث مطلوب' مفعلة")
+                Err("SF-UPD-003: الإصدار الحالي أقل من الحد الأدنى الإجباري؛ شاشة 'تحديث مطلوب' مفعلة")
             }
             _ => Ok(()),
         }
@@ -82,7 +82,7 @@ impl SecureUpdater {
     /// Confirm boot health successfully; commits the update and raises anti-downgrade floor.
     pub fn confirm_boot_health(&mut self) -> Result<(), &'static str> {
         if self.boot_state != UpdateStatus::PendingVerification {
-            return Err("SF-SYS-018: لا يوجد تحديث معلق بانتظار تأكيد الإقلاع");
+            return Err("SF-UPD-004: لا يوجد تحديث معلق بانتظار تأكيد الإقلاع");
         }
         self.boot_state = UpdateStatus::Committed;
         Ok(())
@@ -91,7 +91,7 @@ impl SecureUpdater {
     /// Simulate boot failure during PendingVerification: auto-rollback to previous slot and quarantine.
     pub fn handle_boot_failure(&mut self) -> Result<(), &'static str> {
         if self.boot_state != UpdateStatus::PendingVerification {
-            return Err("SF-SYS-019: حالة النظام لا تسمح بالتراجع الآمن الحالي");
+            return Err("SF-UPD-005: حالة النظام لا تسمح بالتراجع الآمن الحالي");
         }
         let failed_version = self.current_version;
         self.quarantined_builds.insert(failed_version);

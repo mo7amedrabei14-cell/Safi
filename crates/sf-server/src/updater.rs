@@ -66,11 +66,11 @@ impl IsolatedSigner {
     pub fn sign_release(&mut self, req: &SigningRequest) -> Result<SigningResponse, &'static str> {
         if req.owner_token != self.authorized_owner_token {
             self.audit_log.push(format!("REJECTED_SIGNING_UNAUTHORIZED_VERSION_{}", req.version));
-            return Err("SF-AUTH-002: محاولة توقيع مرفوضة؛ يتطلب مفتاح أمان المالك (Hardware YubiKey FIPS)");
+            return Err("SF-AUTH-004: محاولة توقيع مرفوضة؛ يتطلب مفتاح أمان المالك (Hardware YubiKey FIPS)");
         }
         if req.binary_sha256.len() != 64 || !req.binary_sha256.chars().all(|c| c.is_ascii_hexdigit()) {
             self.audit_log.push(format!("REJECTED_SIGNING_INVALID_HASH_{}", req.version));
-            return Err("SF-SYS-014: بصمة SHA-256 للملف التنفيذي غير صالحة");
+            return Err("SF-UPD-006: بصمة SHA-256 للملف التنفيذي غير صالحة");
         }
 
         let sig = format!("ed25519_sig_verified_{}_{}", req.version, &req.binary_sha256[..12]);

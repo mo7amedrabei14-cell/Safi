@@ -15,7 +15,9 @@ pub struct EngineCommandResponse {
 }
 
 /// Enforces CREATE_NO_WINDOW (0x08000000) on Windows process spawning and isolates execution.
-pub fn spawn_isolated_parser(req: &EngineCommandRequest) -> Result<EngineCommandResponse, &'static str> {
+pub fn spawn_isolated_parser(
+    req: &EngineCommandRequest,
+) -> Result<EngineCommandResponse, &'static str> {
     if req.operation.is_empty() || req.operation.len() > 64 {
         return Err("SF-SYS-012: عملية المحرك غير صالحة أو مفقودة");
     }
@@ -35,7 +37,10 @@ pub fn spawn_isolated_parser(req: &EngineCommandRequest) -> Result<EngineCommand
 
     Ok(EngineCommandResponse {
         success: true,
-        message: format!("تم تنفيذ عملية المحرك ({}) في عملية معزولة بدون نافذة طرفية بنجاح", req.operation),
+        message: format!(
+            "تم تنفيذ عملية المحرك ({}) في عملية معزولة بدون نافذة طرفية بنجاح",
+            req.operation
+        ),
     })
 }
 

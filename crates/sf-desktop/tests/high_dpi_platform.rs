@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod high_dpi_and_platform_tests {
-    use sf_desktop::deep_link::{parse, DeepLinkAction};
+    use sf_desktop::deep_link::{DeepLinkAction, parse};
 
     #[test]
     fn test_cross_platform_path_separators_and_scaling() {

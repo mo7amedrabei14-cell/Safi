@@ -16,10 +16,10 @@ mod fuzz_regression_tests {
             "   ",
             "a",
             "123456789012345678901234567890",
-            "2990101010123", // too short for NID
+            "2990101010123",   // too short for NID
             "299010101012345", // too long for NID
-            "49901010101234", // starts with 4 (invalid NID prefix)
-            "00000000000", // invalid phone
+            "49901010101234",  // starts with 4 (invalid NID prefix)
+            "00000000000",     // invalid phone
             "+20 010 1234 5678",
             "not-an-email",
             "@safidata.com",

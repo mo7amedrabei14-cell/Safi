@@ -1,6 +1,6 @@
 //! HTTP surface for health, authentication, updates, and Zero Trust Owner Console (Sections 9.3, 9.6, and 9.8).
 
-use axum::extract::{Extension, State, Query};
+use axum::extract::{Extension, Query, State};
 use axum::http::StatusCode;
 use axum::middleware::from_fn_with_state;
 use axum::routing::{get, post};
@@ -110,18 +110,19 @@ pub struct UpdateQuery {
 }
 
 /// `GET /v1/updates/latest` — fetch latest release manifest for client desktop app.
-pub async fn get_latest_update(
-    Query(query): Query<UpdateQuery>,
-) -> Json<ReleaseManifestRecord> {
+pub async fn get_latest_update(Query(query): Query<UpdateQuery>) -> Json<ReleaseManifestRecord> {
     let channel = query.channel.unwrap_or_else(|| "stable".to_string());
-    let platform = query.platform.unwrap_or_else(|| "windows-x86_64".to_string());
+    let platform = query
+        .platform
+        .unwrap_or_else(|| "windows-x86_64".to_string());
 
     Json(ReleaseManifestRecord {
         version: 105,
         channel,
         platform,
         min_required_version: 100,
-        delta_checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+        delta_checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            .to_string(),
         signature_hex: "ed25519_verified_signature_manifest".to_string(),
         is_mandatory: false,
         release_notes: "تحديث الأداء والأمان الاستقرار الشامل".to_string(),
@@ -204,8 +205,7 @@ pub fn build_router(state: AppState) -> Router {
             require_session,
         ));
 
-    let updates_route = Router::new()
-        .route("/v1/updates/latest", get(get_latest_update));
+    let updates_route = Router::new().route("/v1/updates/latest", get(get_latest_update));
 
     let owner_route = Router::new()
         .route("/v1/owner/stats", get(owner_stats))

@@ -24,10 +24,30 @@ pub struct AuditLogCenter {
 
 impl AuditLogCenter {
     pub fn new() -> Self {
-        let mut center = Self { entries: Vec::new() };
-        center.record("INFO", None, "SYSTEM_START", "owner_system", "بدء تشغيل النظام الأمني والخادم بنجاح");
-        center.record("WARN", Some("SF-AUTH-001".to_string()), "ZERO_TRUST_PROBE", "external_ip_proxy", "محاولة وصول بدون ترويسات Zero Trust مطابقة");
-        center.record("CRITICAL", Some("SF-AUTH-002".to_string()), "HARDWARE_TOKEN_REJECT", "yubikey_fips", "رفض محاولة توقيع بمفتاح مادي غير مصرح به أو بصمة خاطئة");
+        let mut center = Self {
+            entries: Vec::new(),
+        };
+        center.record(
+            "INFO",
+            None,
+            "SYSTEM_START",
+            "owner_system",
+            "بدء تشغيل النظام الأمني والخادم بنجاح",
+        );
+        center.record(
+            "WARN",
+            Some("SF-AUTH-001".to_string()),
+            "ZERO_TRUST_PROBE",
+            "external_ip_proxy",
+            "محاولة وصول بدون ترويسات Zero Trust مطابقة",
+        );
+        center.record(
+            "CRITICAL",
+            Some("SF-AUTH-002".to_string()),
+            "HARDWARE_TOKEN_REJECT",
+            "yubikey_fips",
+            "رفض محاولة توقيع بمفتاح مادي غير مصرح به أو بصمة خاطئة",
+        );
         center
     }
 
@@ -84,7 +104,8 @@ impl AuditLogCenter {
             return true;
         }
 
-        let mut expected_prev = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+        let mut expected_prev =
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string();
 
         for entry in &self.entries {
             if entry.previous_hash != expected_prev {
@@ -116,15 +137,30 @@ mod tests {
     #[test]
     fn test_audit_log_chain_integrity() {
         let mut center = AuditLogCenter::new();
-        assert!(center.verify_integrity(), "Initial audit log chain must be valid");
+        assert!(
+            center.verify_integrity(),
+            "Initial audit log chain must be valid"
+        );
 
-        center.record("INFO", None, "CONFIG_CHANGE", "admin_user", "تعديل إعدادات النظام");
-        assert!(center.verify_integrity(), "Chain must remain valid after new record");
+        center.record(
+            "INFO",
+            None,
+            "CONFIG_CHANGE",
+            "admin_user",
+            "تعديل إعدادات النظام",
+        );
+        assert!(
+            center.verify_integrity(),
+            "Chain must remain valid after new record"
+        );
 
         // Tamper with an entry to test integrity detection
         if let Some(entry) = center.entries.get_mut(1) {
             entry.details = "تم التلاعب بالبيانات سرا".to_string();
         }
-        assert!(!center.verify_integrity(), "Chain verification must fail if tampered");
+        assert!(
+            !center.verify_integrity(),
+            "Chain verification must fail if tampered"
+        );
     }
 }

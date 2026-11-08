@@ -3,12 +3,12 @@
 //! Enforces Zero Trust tunnel headers, WebAuthn/FIDO2 hardware token challenge-response validation,
 //! strict replay protection via nonces, session age limits (30 minutes), and audit logging.
 
-use std::collections::HashSet;
-use std::sync::Mutex;
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::Mutex;
 
 /// Zero Trust and Hardware Security Guard State
 #[derive(Clone)]
@@ -53,8 +53,12 @@ pub async fn require_zero_trust_and_hardware_token(
     let headers = request.headers();
 
     // 1. Enforce Zero Trust tunnel headers
-    let zt_token = headers.get("X-Safi-Zero-Trust-Token").and_then(|v| v.to_str().ok());
-    let device_attest = headers.get("X-Safi-Device-Attestation").and_then(|v| v.to_str().ok());
+    let zt_token = headers
+        .get("X-Safi-Zero-Trust-Token")
+        .and_then(|v| v.to_str().ok());
+    let device_attest = headers
+        .get("X-Safi-Device-Attestation")
+        .and_then(|v| v.to_str().ok());
 
     if zt_token.is_none() || device_attest.is_none() {
         return Err(axum::http::StatusCode::FORBIDDEN);
@@ -65,8 +69,12 @@ pub async fn require_zero_trust_and_hardware_token(
     }
 
     // 2. Enforce YubiKey FIDO2 / WebAuthn Hardware Token signature & Nonce Replay Protection
-    let hw_sig = headers.get("X-Safi-Hardware-Signature").and_then(|v| v.to_str().ok());
-    let nonce = headers.get("X-Safi-Challenge-Nonce").and_then(|v| v.to_str().ok());
+    let hw_sig = headers
+        .get("X-Safi-Hardware-Signature")
+        .and_then(|v| v.to_str().ok());
+    let nonce = headers
+        .get("X-Safi-Challenge-Nonce")
+        .and_then(|v| v.to_str().ok());
 
     if hw_sig.is_none() || nonce.is_none() {
         return Err(axum::http::StatusCode::UNAUTHORIZED);
@@ -74,7 +82,11 @@ pub async fn require_zero_trust_and_hardware_token(
 
     let nonce_str = nonce.unwrap();
     {
-        let mut nonces = guard_state.used_nonces.0.lock().map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut nonces = guard_state
+            .used_nonces
+            .0
+            .lock()
+            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
         if nonces.contains(nonce_str) {
             // Replay attack detected!
             return Err(axum::http::StatusCode::UNAUTHORIZED);

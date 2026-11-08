@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 
 export const OwnerDashboard: React.FC = () => {
-  const [statusMessage, setStatusMessage] = useState<string>("كل شيء سليم — النظام يعمل بكفاءة تامة");
+  const [statusMessage, setStatusMessage] = useState<string>(
+    "كل شيء سليم — النظام يعمل بكفاءة تامة"
+  );
   const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
 
   return React.createElement(
@@ -34,26 +36,38 @@ export const OwnerDashboard: React.FC = () => {
           }
         },
         [
-          React.createElement("div", { key: "status-text", style: { display: "flex", alignItems: "center", gap: "12px" } }, [
-            React.createElement("span", {
-              key: "dot",
-              style: {
-                width: "12px",
-                height: "12px",
-                borderRadius: "50%",
-                backgroundColor: maintenanceMode ? "#DC2626" : "#16A34A",
-                display: "inline-block"
-              }
-            }),
-            React.createElement("span", { key: "msg", style: { fontWeight: 600, fontSize: "15px" } }, statusMessage)
-          ]),
+          React.createElement(
+            "div",
+            { key: "status-text", style: { display: "flex", alignItems: "center", gap: "12px" } },
+            [
+              React.createElement("span", {
+                key: "dot",
+                style: {
+                  width: "12px",
+                  height: "12px",
+                  borderRadius: "50%",
+                  backgroundColor: maintenanceMode ? "#DC2626" : "#16A34A",
+                  display: "inline-block"
+                }
+              }),
+              React.createElement(
+                "span",
+                { key: "msg", style: { fontWeight: 600, fontSize: "15px" } },
+                statusMessage
+              )
+            ]
+          ),
           React.createElement(
             "button",
             {
               key: "maint-btn",
               onClick: () => {
                 setMaintenanceMode(!maintenanceMode);
-                setStatusMessage(!maintenanceMode ? "وضع الصيانة مفعل حاليًا" : "كل شيء سليم — النظام يعمل بكفاءة تامة");
+                setStatusMessage(
+                  !maintenanceMode
+                    ? "وضع الصيانة مفعل حاليًا"
+                    : "كل شيء سليم — النظام يعمل بكفاءة تامة"
+                );
               },
               style: {
                 backgroundColor: maintenanceMode ? "#DC2626" : "#0F172A",
@@ -73,8 +87,16 @@ export const OwnerDashboard: React.FC = () => {
 
       // Header
       React.createElement("header", { key: "header", style: { marginBottom: "32px" } }, [
-        React.createElement("h1", { key: "h1", style: { fontSize: "28px", fontWeight: 700, margin: 0 } }, "لوحة تحكم المالك (Owner Console v1)"),
-        React.createElement("p", { key: "p", style: { color: "#64748B", margin: "4px 0 0 0" } }, "الوضع البسيط بست بطاقات (I-Have-ADHD) — تحكم كامل ومباشر بدون تعقيد")
+        React.createElement(
+          "h1",
+          { key: "h1", style: { fontSize: "28px", fontWeight: 700, margin: 0 } },
+          "لوحة تحكم المالك (Owner Console v1)"
+        ),
+        React.createElement(
+          "p",
+          { key: "p", style: { color: "#64748B", margin: "4px 0 0 0" } },
+          "الوضع البسيط بست بطاقات (I-Have-ADHD) — تحكم كامل ومباشر بدون تعقيد"
+        )
       ]),
 
       // 6 Cards Grid
@@ -90,34 +112,64 @@ export const OwnerDashboard: React.FC = () => {
         },
         [
           // Card 1: Publish Update
-          renderCard("1. انشر تحديثًا", "معالج بثلاث خطوات: اختر الإصدار، حدد القناة والشرائح، واعتمد بمفتاح الأمان (YubiKey FIPS).", "نشر تحديث جديد", () => {
-            alert("معالج نشر التحديث: تم التحقق من سلامة الإصدار ومفاتيح التوقيع بنجاح.");
-          }),
+          renderCard(
+            "1. انشر تحديثًا",
+            "معالج بثلاث خطوات: اختر الإصدار، حدد القناة والشرائح، واعتمد بمفتاح الأمان (YubiKey FIPS).",
+            "نشر تحديث جديد",
+            () => {
+              alert("معالج نشر التحديث: تم التحقق من سلامة الإصدار ومفاتيح التوقيع بنجاح.");
+            }
+          ),
 
           // Card 2: Send Message
-          renderCard("2. أرسل رسالة للمستخدمين", "إرسال رسائل داخل التطبيق أو بريد إلكتروني موّجه ومجدول حسب الشريحة أو اللغة.", "إرسال رسالة", () => {
-            alert("تم إرسال رسالة التوجيه بنجاح للمستخدمين المستهدفين.");
-          }),
+          renderCard(
+            "2. أرسل رسالة للمستخدمين",
+            "إرسال رسائل داخل التطبيق أو بريد إلكتروني موّجه ومجدول حسب الشريحة أو اللغة.",
+            "إرسال رسالة",
+            () => {
+              alert("تم إرسال رسالة التوجيه بنجاح للمستخدمين المستهدفين.");
+            }
+          ),
 
           // Card 3: Users & Subscriptions
-          renderCard("3. المستخدمون والاشتراكات", "البحث، حالة الحساب، تعليق وتفعيل، وإدارة الحقوق والخطط بوصفية تامة.", "إدارة المستخدمين", () => {
-            alert("عرض لوحة المستخدمين والاشتراكات النشطة.");
-          }),
+          renderCard(
+            "3. المستخدمون والاشتراكات",
+            "البحث، حالة الحساب، تعليق وتفعيل، وإدارة الحقوق والخطط بوصفية تامة.",
+            "إدارة المستخدمين",
+            () => {
+              alert("عرض لوحة المستخدمين والاشتراكات النشطة.");
+            }
+          ),
 
           // Card 4: Feature Flags & Remote Config
-          renderCard("4. أعلام الميزات والإعدادات", "تشغيل أو إيقاف ميزة فورًا لشريحة محددة، أو تعديل الإعدادات عن بُعد بدون نشر كود جديد.", "إدارة الميزات", () => {
-            alert("تم تحديث أعلام الميزات بنجاح وانتقلت التغييرات للعملاء فورًا.");
-          }),
+          renderCard(
+            "4. أعلام الميزات والإعدادات",
+            "تشغيل أو إيقاف ميزة فورًا لشريحة محددة، أو تعديل الإعدادات عن بُعد بدون نشر كود جديد.",
+            "إدارة الميزات",
+            () => {
+              alert("تم تحديث أعلام الميزات بنجاح وانتقلت التغييرات للعملاء فورًا.");
+            }
+          ),
 
           // Card 5: Support & Diagnostics
-          renderCard("5. الدعم والتشخيص", "صندوق التذاكر، فحص حزم التشخيص الآمنة الخالية من بيانات العملاء، والردود الجاهزة.", "فتح الدعم", () => {
-            alert("عرض صندوق تذاكر الدعم الفني وحزم التشخيص.");
-          }),
+          renderCard(
+            "5. الدعم والتشخيص",
+            "صندوق التذاكر، فحص حزم التشخيص الآمنة الخالية من بيانات العملاء، والردود الجاهزة.",
+            "فتح الدعم",
+            () => {
+              alert("عرض صندوق تذاكر الدعم الفني وحزم التشخيص.");
+            }
+          ),
 
           // Card 6: Security & Audit Log
-          renderCard("6. الأمان وسجل التدقيق", "عارض سجل التدقيق الموثق ببصمات الـ Hash، مراقبة الشذوذ، وأزرار الطوارئ المنفصلة.", "عرض سجل التدقيق", () => {
-            alert("سجل التدقيق سليم ومحمي بسلسلة بصمات غير قابلة للتعديل.");
-          })
+          renderCard(
+            "6. الأمان وسجل التدقيق",
+            "عارض سجل التدقيق الموثق ببصمات الـ Hash، مراقبة الشذوذ، وأزرار الطوارئ المنفصلة.",
+            "عرض سجل التدقيق",
+            () => {
+              alert("سجل التدقيق سليم ومحمي بسلسلة بصمات غير قابلة للتعديل.");
+            }
+          )
         ]
       )
     ]
@@ -142,8 +194,19 @@ function renderCard(title: string, desc: string, btnText: string, onClick: () =>
     },
     [
       React.createElement("div", { key: "top" }, [
-        React.createElement("h3", { key: "t", style: { fontSize: "18px", fontWeight: 700, margin: "0 0 8px 0", color: "#0F172A" } }, title),
-        React.createElement("p", { key: "d", style: { fontSize: "14px", color: "#475569", lineHeight: 1.6, margin: 0 } }, desc)
+        React.createElement(
+          "h3",
+          {
+            key: "t",
+            style: { fontSize: "18px", fontWeight: 700, margin: "0 0 8px 0", color: "#0F172A" }
+          },
+          title
+        ),
+        React.createElement(
+          "p",
+          { key: "d", style: { fontSize: "14px", color: "#475569", lineHeight: 1.6, margin: 0 } },
+          desc
+        )
       ]),
       React.createElement(
         "div",

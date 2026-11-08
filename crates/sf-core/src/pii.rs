@@ -128,6 +128,9 @@ mod tests {
         // Deterministic token consistency
         let token_1 = PiiProtector::compute_deterministic_token("29901010101234", secret);
         let token_2 = PiiProtector::compute_deterministic_token("29901010101234", secret);
-        assert_eq!(token_1, token_2, "Token must be deterministic for the same value");
+        assert_eq!(
+            token_1, token_2,
+            "Token must be deterministic for the same value"
+        );
     }
 }

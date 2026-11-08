@@ -41,15 +41,22 @@ impl SecureUpdater {
     }
 
     /// Check manifest and apply anti-downgrade and quarantine rules.
-    pub fn evaluate_manifest(&self, manifest: &ReleaseManifest) -> Result<UpdateStatus, &'static str> {
+    pub fn evaluate_manifest(
+        &self,
+        manifest: &ReleaseManifest,
+    ) -> Result<UpdateStatus, &'static str> {
         if manifest.version < self.current_version {
-            return Err("SF-UPD-001: محاولة رجوع لإصدار أقدم مرفوضة سياسياً وتقنياً (Anti-Downgrade Floor)");
+            return Err(
+                "SF-UPD-001: محاولة رجوع لإصدار أقدم مرفوضة سياسياً وتقنياً (Anti-Downgrade Floor)",
+            );
         }
         if manifest.version == self.current_version {
             return Ok(UpdateStatus::UpToDate);
         }
         if self.quarantined_builds.contains(&manifest.version) {
-            return Err("SF-UPD-002: الإصدار المستهدف موضوع في قائمة الحظر المؤقت لتكرار فشل الإقلاع (Quarantined Build)");
+            return Err(
+                "SF-UPD-002: الإصدار المستهدف موضوع في قائمة الحظر المؤقت لتكرار فشل الإقلاع (Quarantined Build)",
+            );
         }
         if manifest.version < manifest.min_required_version {
             return Ok(UpdateStatus::RequiredUpdateBlocked);

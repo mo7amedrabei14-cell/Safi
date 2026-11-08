@@ -16,9 +16,9 @@ pub fn atomic_write<P: AsRef<Path>>(path: P, content: &[u8]) -> io::Result<()> {
 
     // Create a temporary file in the same directory to ensure atomic rename on the same filesystem
     let mut tmp_path = parent.to_path_buf();
-    let file_name = path.file_name().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name")
-    })?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?;
     let mut tmp_filename = file_name.to_os_string();
     tmp_filename.push(".tmp");
     tmp_path.push(tmp_filename);
@@ -56,7 +56,10 @@ impl WatchedFolder {
 
     /// Resolve and validate an incoming file path within the watched folder.
     /// Rejects directory traversal (../) and symbolic links.
-    pub fn validate_watched_file_path<P: AsRef<Path>>(&self, incoming_path: P) -> io::Result<PathBuf> {
+    pub fn validate_watched_file_path<P: AsRef<Path>>(
+        &self,
+        incoming_path: P,
+    ) -> io::Result<PathBuf> {
         let incoming_path = incoming_path.as_ref();
 
         // If relative, join with base_dir; if absolute, canonicalize directly
@@ -85,9 +88,9 @@ impl WatchedFolder {
                 io::Error::new(io::ErrorKind::InvalidInput, "Invalid path parent")
             })?;
             let canonical_parent = fs::canonicalize(parent)?;
-            let file_name = full_path.file_name().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name")
-            })?;
+            let file_name = full_path
+                .file_name()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?;
             let mut p = canonical_parent;
             p.push(file_name);
             p

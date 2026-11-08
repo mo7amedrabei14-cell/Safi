@@ -46,8 +46,8 @@ mod tests {
         AUTO_APPLY_CONFIDENCE_THRESHOLD, CRATE_ID, CellDisplayMode, CellValue, Column,
         ColumnSchema, ColumnType, ConfidenceDecision, ConfidenceScore, DESKTOP_CLI_MAX_FILE_BYTES,
         DESKTOP_CLI_MAX_ROWS, DataQualityWeights, DiagnosticToken, ErrorCode, ErrorCodeParseError,
-        ErrorDomain, ErrorSeverity, MAX_COLUMN_SAMPLE_VALUES, MoneyValue, PlatformTarget,
-        PiiProtector, PiiType, RECOGNIZED_EMPTY_SENTINELS, SafeLogContext, SafeLogMetrics, SafiError,
+        ErrorDomain, ErrorSeverity, MAX_COLUMN_SAMPLE_VALUES, MoneyValue, PiiProtector, PiiType,
+        PlatformTarget, RECOGNIZED_EMPTY_SENTINELS, SafeLogContext, SafeLogMetrics, SafiError,
         Sheet, Table, USER_CONFIRM_CONFIDENCE_THRESHOLD, Value, WEB_PWA_MAX_FILE_BYTES,
         WEB_PWA_MAX_ROWS, ZeroPreservedText, is_recognized_empty_token,
     };

@@ -2,8 +2,8 @@
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use axum::http::{Request, StatusCode};
+    use std::sync::Arc;
     use tower::ServiceExt;
 
     use sf_server::auth::cache::InMemoryAuthCache;
@@ -43,7 +43,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/v1/owner/stats")
-                    .header("X-Safi-Zero-Trust-Token", "safi_zt_tunnel_verified_secure_2026")
+                    .header(
+                        "X-Safi-Zero-Trust-Token",
+                        "safi_zt_tunnel_verified_secure_2026",
+                    )
                     .header("X-Safi-Device-Attestation", "device_attested_ok")
                     .body(axum::body::Body::empty())
                     .unwrap(),
@@ -61,9 +64,15 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/v1/owner/stats")
-                    .header("X-Safi-Zero-Trust-Token", "safi_zt_tunnel_verified_secure_2026")
+                    .header(
+                        "X-Safi-Zero-Trust-Token",
+                        "safi_zt_tunnel_verified_secure_2026",
+                    )
                     .header("X-Safi-Device-Attestation", "device_attested_ok")
-                    .header("X-Safi-Hardware-Signature", "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123")
+                    .header(
+                        "X-Safi-Hardware-Signature",
+                        "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123",
+                    )
                     .header("X-Safi-Challenge-Nonce", "nonce_abc_12345")
                     .body(axum::body::Body::empty())
                     .unwrap(),
@@ -80,9 +89,15 @@ mod tests {
         let req_builder = || {
             Request::builder()
                 .uri("/v1/owner/stats")
-                .header("X-Safi-Zero-Trust-Token", "safi_zt_tunnel_verified_secure_2026")
+                .header(
+                    "X-Safi-Zero-Trust-Token",
+                    "safi_zt_tunnel_verified_secure_2026",
+                )
                 .header("X-Safi-Device-Attestation", "device_attested_ok")
-                .header("X-Safi-Hardware-Signature", "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123")
+                .header(
+                    "X-Safi-Hardware-Signature",
+                    "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123",
+                )
                 .header("X-Safi-Challenge-Nonce", "nonce_replay_test_999")
                 .body(axum::body::Body::empty())
                 .unwrap()

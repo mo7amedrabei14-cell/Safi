@@ -27,7 +27,9 @@ pub fn run_cli_action(args: &[String]) -> Result<i32, String> {
         }
         "clean" => {
             if args.len() < 4 || args[2] != "--out" {
-                return Err("الاستخدام الصحيح: safi clean <input> --out <output> (SF-SYS-030)".to_string());
+                return Err(
+                    "الاستخدام الصحيح: safi clean <input> --out <output> (SF-SYS-030)".to_string(),
+                );
             }
             let input = &args[1];
             let output = &args[3];
@@ -37,12 +39,15 @@ pub fn run_cli_action(args: &[String]) -> Result<i32, String> {
                 return Err("SF-SYS-001: لا يُسمح بالكتابة مباشرة فوق ملف الإدخال الأصلي. استعمل ملف إخراج منفصل".to_string());
             }
 
-            let content = fs::read_to_string(input).map_err(|e| format!("SF-IMP-002: فشل قراءة الملف: {e}"))?;
+            let content = fs::read_to_string(input)
+                .map_err(|e| format!("SF-IMP-002: فشل قراءة الملف: {e}"))?;
             let cleaned_content = format!("# تنظيف صافي\n{content}");
 
             let temp_path = format!("{output}.tmp");
-            fs::write(&temp_path, cleaned_content).map_err(|e| format!("SF-SYS-002: فشل كتابة الملف المؤقت: {e}"))?;
-            fs::rename(&temp_path, output).map_err(|e| format!("SF-SYS-003: فشل التسمية الذرية للملف: {e}"))?;
+            fs::write(&temp_path, cleaned_content)
+                .map_err(|e| format!("SF-SYS-002: فشل كتابة الملف المؤقت: {e}"))?;
+            fs::rename(&temp_path, output)
+                .map_err(|e| format!("SF-SYS-003: فشل التسمية الذرية للملف: {e}"))?;
 
             println!("تم تنضيف الملف بنجاح وحفظه ذريًا في: {output}");
             Ok(0)
@@ -104,11 +109,17 @@ mod tests {
         fs::write(&input_path, "name,phone\nahmed,01012345678").unwrap();
 
         // 1. Profile command
-        let prof_res = run_cli_action(&["profile".to_string(), input_path.to_str().unwrap().to_string()]);
+        let prof_res = run_cli_action(&[
+            "profile".to_string(),
+            input_path.to_str().unwrap().to_string(),
+        ]);
         assert_eq!(prof_res.unwrap(), 0);
 
         // 2. Report command
-        let rep_res = run_cli_action(&["report".to_string(), input_path.to_str().unwrap().to_string()]);
+        let rep_res = run_cli_action(&[
+            "report".to_string(),
+            input_path.to_str().unwrap().to_string(),
+        ]);
         assert_eq!(rep_res.unwrap(), 0);
 
         // 3. Clean command with atomic write

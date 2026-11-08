@@ -32,7 +32,8 @@ impl SignatureVerifier {
         if !info.has_rfc3161_timestamp {
             return Ok(SignatureStatus::MissingTimestamp);
         }
-        if info.sha256_hash.len() != 64 || !info.sha256_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        if info.sha256_hash.len() != 64 || !info.sha256_hash.chars().all(|c| c.is_ascii_hexdigit())
+        {
             return Err("SF-UPD-006: بصمة SHA-256 للملف غير صالحة أو متلاعب بها");
         }
 
@@ -50,9 +51,13 @@ mod tests {
             is_signed: true,
             has_rfc3161_timestamp: true,
             certificate_valid: true,
-            sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+            sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
         };
-        assert_eq!(SignatureVerifier::verify(&info).unwrap(), SignatureStatus::Valid);
+        assert_eq!(
+            SignatureVerifier::verify(&info).unwrap(),
+            SignatureStatus::Valid
+        );
     }
 
     #[test]
@@ -61,7 +66,8 @@ mod tests {
             is_signed: false,
             has_rfc3161_timestamp: false,
             certificate_valid: false,
-            sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+            sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
         };
         assert!(SignatureVerifier::verify(&info).is_err());
     }
@@ -72,7 +78,8 @@ mod tests {
             is_signed: true,
             has_rfc3161_timestamp: true,
             certificate_valid: false,
-            sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+            sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
         };
         assert!(SignatureVerifier::verify(&info).is_err());
     }
@@ -83,8 +90,12 @@ mod tests {
             is_signed: true,
             has_rfc3161_timestamp: false,
             certificate_valid: true,
-            sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+            sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
         };
-        assert_eq!(SignatureVerifier::verify(&info).unwrap(), SignatureStatus::MissingTimestamp);
+        assert_eq!(
+            SignatureVerifier::verify(&info).unwrap(),
+            SignatureStatus::MissingTimestamp
+        );
     }
 }

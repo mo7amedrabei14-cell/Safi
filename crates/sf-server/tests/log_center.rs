@@ -2,8 +2,8 @@
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use axum::http::{Request, StatusCode};
+    use std::sync::Arc;
     use tower::ServiceExt;
 
     use sf_server::auth::cache::InMemoryAuthCache;
@@ -27,9 +27,15 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/v1/owner/audit-logs")
-                    .header("X-Safi-Zero-Trust-Token", "safi_zt_tunnel_verified_secure_2026")
+                    .header(
+                        "X-Safi-Zero-Trust-Token",
+                        "safi_zt_tunnel_verified_secure_2026",
+                    )
                     .header("X-Safi-Device-Attestation", "device_attested_ok")
-                    .header("X-Safi-Hardware-Signature", "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123")
+                    .header(
+                        "X-Safi-Hardware-Signature",
+                        "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123",
+                    )
                     .header("X-Safi-Challenge-Nonce", "nonce_log_center_123")
                     .body(axum::body::Body::empty())
                     .unwrap(),
@@ -39,7 +45,9 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(json["is_chain_valid"], true);
         assert!(json["entries"].as_array().unwrap().len() >= 3);

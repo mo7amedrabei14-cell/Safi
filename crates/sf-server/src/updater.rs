@@ -41,11 +41,13 @@ impl UpdateServerRegistry {
     }
 
     pub fn publish_release(&mut self, record: ReleaseManifestRecord) {
-        self.releases.insert((record.channel.clone(), record.platform.clone()), record);
+        self.releases
+            .insert((record.channel.clone(), record.platform.clone()), record);
     }
 
     pub fn get_latest(&self, channel: &str, platform: &str) -> Option<&ReleaseManifestRecord> {
-        self.releases.get(&(channel.to_string(), platform.to_string()))
+        self.releases
+            .get(&(channel.to_string(), platform.to_string()))
     }
 }
 
@@ -65,16 +67,29 @@ impl IsolatedSigner {
     /// Isolated signing requires valid owner token (backed by physical YubiKey FIPS in production)
     pub fn sign_release(&mut self, req: &SigningRequest) -> Result<SigningResponse, &'static str> {
         if req.owner_token != self.authorized_owner_token {
-            self.audit_log.push(format!("REJECTED_SIGNING_UNAUTHORIZED_VERSION_{}", req.version));
-            return Err("SF-AUTH-004: محاولة توقيع مرفوضة؛ يتطلب مفتاح أمان المالك (Hardware YubiKey FIPS)");
+            self.audit_log.push(format!(
+                "REJECTED_SIGNING_UNAUTHORIZED_VERSION_{}",
+                req.version
+            ));
+            return Err(
+                "SF-AUTH-004: محاولة توقيع مرفوضة؛ يتطلب مفتاح أمان المالك (Hardware YubiKey FIPS)",
+            );
         }
-        if req.binary_sha256.len() != 64 || !req.binary_sha256.chars().all(|c| c.is_ascii_hexdigit()) {
-            self.audit_log.push(format!("REJECTED_SIGNING_INVALID_HASH_{}", req.version));
+        if req.binary_sha256.len() != 64
+            || !req.binary_sha256.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            self.audit_log
+                .push(format!("REJECTED_SIGNING_INVALID_HASH_{}", req.version));
             return Err("SF-UPD-006: بصمة SHA-256 للملف التنفيذي غير صالحة");
         }
 
-        let sig = format!("ed25519_sig_verified_{}_{}", req.version, &req.binary_sha256[..12]);
-        self.audit_log.push(format!("SUCCESSFUL_SIGNING_VERSION_{}", req.version));
+        let sig = format!(
+            "ed25519_sig_verified_{}_{}",
+            req.version,
+            &req.binary_sha256[..12]
+        );
+        self.audit_log
+            .push(format!("SUCCESSFUL_SIGNING_VERSION_{}", req.version));
 
         Ok(SigningResponse {
             version: req.version,
@@ -113,7 +128,8 @@ mod tests {
         let mut signer = IsolatedSigner::new("owner_yubikey_secret_token_fips");
         let req = SigningRequest {
             version: 105,
-            binary_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+            binary_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
             owner_token: "wrong_token".to_string(),
         };
 
@@ -126,7 +142,8 @@ mod tests {
         let mut signer = IsolatedSigner::new("owner_yubikey_secret_token_fips");
         let req = SigningRequest {
             version: 105,
-            binary_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+            binary_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
             owner_token: "owner_yubikey_secret_token_fips".to_string(),
         };
 

@@ -1,7 +1,7 @@
 //! Offline Desktop Licensing via Ed25519 Signatures, Grace Period, and Clock Rollback Detection (Section 9.4, AGENTS.md Rule 5).
 
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey, Verifier};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LicenseTier {
@@ -174,7 +174,9 @@ mod tests {
             "dev_abc",
         );
 
-        let status = verifier.verify(&signed, now, now - 1000, "dev_abc").unwrap();
+        let status = verifier
+            .verify(&signed, now, now - 1000, "dev_abc")
+            .unwrap();
         match status {
             LicenseStatus::GracePeriod { days_remaining } => {
                 assert!(days_remaining > 0);
@@ -204,7 +206,9 @@ mod tests {
             "dev_abc",
         );
 
-        let status = verifier.verify(&signed, now, now - 1000, "dev_abc").unwrap();
+        let status = verifier
+            .verify(&signed, now, now - 1000, "dev_abc")
+            .unwrap();
         assert_eq!(status, LicenseStatus::Expired);
     }
 
@@ -230,7 +234,9 @@ mod tests {
         );
 
         // Enterprise tier bypasses expiration offline
-        let status = verifier.verify(&signed, now, now - 1000, "dev_abc").unwrap();
+        let status = verifier
+            .verify(&signed, now, now - 1000, "dev_abc")
+            .unwrap();
         match status {
             LicenseStatus::GracePeriod { .. } => {}
             _ => panic!("Expected GracePeriod status for Enterprise"),

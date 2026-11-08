@@ -1,0 +1,844 @@
+/**
+ * SafiData — Dark Glassmorphism design system (UI-Phase-1).
+ * Gold Master tokens: obsidian base, glass surfaces, emerald/cyan/blue accents.
+ * Motion is expressed through CSS variables only; the hero animations live in
+ * `components/motion` and read the same tokens.
+ */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@property --star-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+:root {
+  /* Surfaces */
+  --bg-obsidian: #050508;
+  --bg-elevated: #0b0f19;
+  --glass-bg: rgba(15, 20, 32, 0.62);
+  --glass-bg-hover: rgba(22, 30, 48, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-specular: inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+
+  /* Accents */
+  --accent-emerald: #10b981;
+  --accent-cyan: #06b6d4;
+  --accent-blue: #3b82f6;
+
+  /* Text */
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+
+  /* Type */
+  --font-arabic: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  --font-latin: "Inter", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* Shape & motion */
+  --radius-glass: 24px;
+  --blur-glass: blur(24px) saturate(180%);
+  --motion-fast: 180ms;
+  --motion-base: 320ms;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  direction: rtl;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background-color: var(--bg-obsidian);
+  color: var(--text-primary);
+  font-family: var(--font-arabic);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  direction: rtl;
+  line-height: 1.6;
+}
+
+#root {
+  min-height: 100vh;
+  isolation: isolate;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+code,
+kbd,
+pre,
+.safi-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background-color: rgba(6, 182, 212, 0.35);
+  color: var(--text-primary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------- Glass --- */
+
+.safi-glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--blur-glass);
+  -webkit-backdrop-filter: var(--blur-glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass);
+  box-shadow:
+    var(--glass-specular),
+    0 24px 60px -32px rgba(0, 0, 0, 0.85);
+}
+
+.safi-glass--interactive {
+  transition:
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    transform var(--motion-base) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.safi-glass--interactive:hover {
+  background: var(--glass-bg-hover);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* Pointer-tracking spotlight. The component writes --mouse-x/--mouse-y through a
+   ref, so the highlight follows the cursor without a React re-render. */
+.safi-spotlight {
+  background:
+    radial-gradient(
+      550px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgba(16, 185, 129, 0.13),
+      rgba(6, 182, 212, 0.05) 40%,
+      transparent 70%
+    ),
+    var(--glass-bg);
+  backdrop-filter: var(--blur-glass);
+  -webkit-backdrop-filter: var(--blur-glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass);
+  box-shadow: var(--glass-specular);
+}
+
+/* React Bits StarBorder: a masked conic gradient that only paints the 1px edge. */
+.safi-star-border {
+  position: relative;
+  isolation: isolate;
+}
+
+.safi-star-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--star-angle),
+    var(--accent-emerald),
+    var(--accent-cyan),
+    var(--accent-blue),
+    var(--accent-emerald)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.72;
+  animation: safi-star-rotate 9s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes safi-star-rotate {
+  to {
+    --star-angle: 360deg;
+  }
+}
+
+/* React Bits ShinyText: metallic sweep clipped to the glyphs. */
+.safi-shiny-text {
+  background-image: linear-gradient(
+    100deg,
+    var(--text-muted) 20%,
+    #ffffff 42%,
+    var(--accent-cyan) 52%,
+    var(--text-muted) 78%
+  );
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: safi-shiny-sweep 6s ease-in-out infinite;
+}
+
+@keyframes safi-shiny-sweep {
+  0%,
+  100% {
+    background-position: 180% 50%;
+  }
+  50% {
+    background-position: 20% 50%;
+  }
+}
+
+/* ------------------------------------------------------------ Layout --- */
+
+/* The status capsule is wide; it only rides in the dock on desktop widths. */
+.safi-dock-status {
+  display: none;
+}
+
+@media (min-width: 1180px) {
+  .safi-dock-status {
+    display: block;
+  }
+}
+
+/* Apple-style Bento grid: 6 columns on desktop, 2 on tablets, 1 on phones. */
+.safi-bento {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.safi-bento > .safi-bento-wide {
+  grid-column: span 4;
+}
+
+.safi-bento > .safi-bento-half {
+  grid-column: span 2;
+}
+
+.safi-bento > .safi-bento-third {
+  grid-column: span 3;
+}
+
+@media (max-width: 1024px) {
+  .safi-bento {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .safi-bento > .safi-bento-wide {
+    grid-column: span 2;
+  }
+
+  .safi-bento > .safi-bento-half,
+  .safi-bento > .safi-bento-third {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 680px) {
+  .safi-bento {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .safi-bento > .safi-bento-wide {
+    grid-column: span 1;
+  }
+}
+
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .safi-shiny-text {
+    color: var(--text-primary);
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* ------------------------------------------------------- App shell --- */
+
+.safi-shell {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+.safi-stage {
+  max-width: 1280px;
+  margin-inline: auto;
+  padding: 40px 24px 132px;
+}
+
+.safi-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.safi-owner-frame {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-glass);
+  overflow: hidden;
+  box-shadow: 0 24px 60px -32px rgba(0, 0, 0, 0.85);
+}
+
+/* ---------------------------------------------------------- Studios --- */
+
+.safi-studio {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.safi-studio-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 760px;
+}
+
+.safi-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent-cyan);
+}
+
+.safi-studio-title {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.safi-studio-lead {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-muted);
+}
+
+.safi-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.safi-template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.safi-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 12px;
+  color: var(--text-primary);
+}
+
+.safi-field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}
+
+.safi-input,
+.safi-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  font-family: var(--font-arabic);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.safi-textarea {
+  min-height: 160px;
+  resize: vertical;
+}
+
+.safi-input:focus-visible,
+.safi-textarea:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 1px;
+}
+
+.safi-fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.safi-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color var(--motion-fast) ease;
+}
+
+.safi-toggle-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.safi-toggle-row input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--accent-emerald);
+}
+
+.safi-toggle-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.safi-toggle-detail {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.safi-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 8px;
+}
+
+.safi-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.safi-mini-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 12px 0 4px;
+}
+
+.safi-pre {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.safi-pre--json {
+  max-height: 200px;
+  font-size: 11px;
+}
+
+.safi-compare {
+  display: grid;
+  gap: 10px;
+}
+
+.safi-digest-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--accent-cyan);
+  word-break: break-all;
+}
+
+.safi-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.safi-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-family: var(--font-arabic);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+button.safi-chip {
+  cursor: pointer;
+}
+
+.safi-chip--accent {
+  border-color: rgba(6, 182, 212, 0.35);
+  color: var(--accent-cyan);
+}
+
+.safi-chip--active {
+  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.safi-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+}
+
+.safi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.safi-table th,
+.safi-table td {
+  padding: 10px 12px;
+  text-align: start;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  vertical-align: middle;
+}
+
+.safi-table th {
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.safi-table tr:last-child td {
+  border-bottom: none;
+}
+
+.safi-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.safi-list .safi-hint {
+  margin: 2px 0 0;
+}
+
+.safi-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.safi-status--ok {
+  color: #34d399;
+}
+
+.safi-status--bad {
+  color: #fca5a5;
+}
+
+.safi-chart-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: #ffffff;
+}
+
+/* --------------------------------------------------- Command palette --- */
+
+.safi-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12vh 16px 16px;
+  background: rgba(3, 6, 12, 0.62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.safi-palette {
+  width: min(94vw, 640px);
+  max-height: 72vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 22px;
+  padding: 8px;
+}
+
+.safi-palette-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--glass-border);
+  color: var(--text-muted);
+}
+
+.safi-palette-input {
+  flex: 1;
+  min-height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-arabic);
+  font-size: 15px;
+  outline: none;
+}
+
+.safi-kbd {
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.safi-palette-list {
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.safi-palette-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.safi-palette-option[aria-selected="true"] {
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.safi-palette-option-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.safi-palette-option-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.safi-palette-empty {
+  margin: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.safi-palette-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 4px 0 0;
+  padding: 10px 12px 4px;
+  border-top: 1px solid var(--glass-border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.safi-audit {
+  margin: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.28);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.safi-audit-summary {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* --------------------------------------------------------- Settings --- */
+
+.safi-settings {
+  width: min(94vw, 560px);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 20px 22px;
+}
+
+.safi-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.safi-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.safi-settings-list {
+  margin: 14px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.safi-settings-row dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+
+.safi-settings-row dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-muted);
+}
+
+.safi-close-button {
+  margin-top: 20px;
+  width: 100%;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  font-family: var(--font-arabic);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 960px) {
+  .safi-grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .safi-stage {
+    padding: 28px 16px 128px;
+  }
+
+  .safi-studio-title {
+    font-size: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .safi-star-border::before,
+  .safi-shiny-text {
+    animation: none;
+  }
+
+  .safi-shiny-text {
+    background-position: 50% 50%;
+  }
+}

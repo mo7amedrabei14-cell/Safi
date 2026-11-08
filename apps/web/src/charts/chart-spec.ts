@@ -57,7 +57,9 @@ export function generateDeterministicSvg(spec: ChartSpec): string {
       const barHeight = Math.min(height - 100, val * 2);
       const x = 40 + i * (barWidth + 10);
       const y = height - 50 - barHeight;
-      svg += `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" fill="#0ea5e9" rx="4"/>`;
+      // WCAG 2.2 AA non-text contrast: 4.91:1 on the white chart canvas
+      // (the previous #0ea5e9 measured 2.77:1 and failed the 3:1 graphic minimum).
+      svg += `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" fill="#0B7C8C" rx="4"/>`;
       svg += `<text x="${x + barWidth / 2}" y="${height - 30}" font-family="Cairo, sans-serif" font-size="12" text-anchor="middle" fill="#4b5563">${row[spec.xAxisKey]}</text>`;
     });
   }

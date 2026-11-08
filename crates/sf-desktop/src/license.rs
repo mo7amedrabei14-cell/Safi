@@ -119,7 +119,9 @@ pub fn generate_test_license(
         expires_at_secs,
         device_fingerprint: device_fingerprint.to_string(),
     };
-    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let payload_bytes = serde_json::to_vec(&payload).unwrap_or_else(|error| {
+        panic!("Failed to serialize license payload for signing: {error}")
+    });
     let signature = signing_key.sign(&payload_bytes);
     SignedLicense {
         payload,

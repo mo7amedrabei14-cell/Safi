@@ -17,8 +17,8 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "targets": ["msi", "msix", "appimage", "deb", "rpm"],
     "fileAssociations": [
       {
         "ext": ["xlsx", "xls"],

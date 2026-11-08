@@ -7,6 +7,7 @@ pub mod column;
 pub mod error;
 pub mod generated_errors;
 pub mod limits;
+pub mod pii;
 pub mod table;
 pub mod value;
 
@@ -25,6 +26,7 @@ pub use crate::limits::{
     DESKTOP_CLI_MAX_FILE_BYTES, DESKTOP_CLI_MAX_ROWS, ONE_GIB_BYTES, ONE_MIB_BYTES, PlatformLimits,
     PlatformTarget, WEB_PWA_MAX_FILE_BYTES, WEB_PWA_MAX_ROWS,
 };
+pub use crate::pii::{PiiMatch, PiiProtector, PiiType};
 pub use crate::table::{DataQualityWeights, Sheet, Table};
 pub use crate::value::{
     CellDisplayMode, CellValue, MoneyValue, RECOGNIZED_EMPTY_SENTINELS, Value, ZeroPreservedText,
@@ -45,14 +47,23 @@ mod tests {
         ColumnSchema, ColumnType, ConfidenceDecision, ConfidenceScore, DESKTOP_CLI_MAX_FILE_BYTES,
         DESKTOP_CLI_MAX_ROWS, DataQualityWeights, DiagnosticToken, ErrorCode, ErrorCodeParseError,
         ErrorDomain, ErrorSeverity, MAX_COLUMN_SAMPLE_VALUES, MoneyValue, PlatformTarget,
-        RECOGNIZED_EMPTY_SENTINELS, SafeLogContext, SafeLogMetrics, SafiError, Sheet, Table,
-        USER_CONFIRM_CONFIDENCE_THRESHOLD, Value, WEB_PWA_MAX_FILE_BYTES, WEB_PWA_MAX_ROWS,
-        ZeroPreservedText, is_recognized_empty_token,
+        PiiProtector, PiiType, RECOGNIZED_EMPTY_SENTINELS, SafeLogContext, SafeLogMetrics, SafiError,
+        Sheet, Table, USER_CONFIRM_CONFIDENCE_THRESHOLD, Value, WEB_PWA_MAX_FILE_BYTES,
+        WEB_PWA_MAX_ROWS, ZeroPreservedText, is_recognized_empty_token,
     };
 
     #[test]
     fn crate_id_matches_workspace_member() {
         assert_eq!(CRATE_ID, "sf-core");
+    }
+
+    #[test]
+    fn test_pii_protection_engine() {
+        let secret = b"safi_workspace_secret_key_2026";
+        let matches = PiiProtector::protect("29901010101234", secret);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].pii_type, PiiType::EgyptianNationalId);
+        assert_eq!(matches[0].redacted_text, "299******234");
     }
 
     #[test]

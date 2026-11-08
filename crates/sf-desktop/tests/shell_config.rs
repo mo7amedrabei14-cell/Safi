@@ -140,8 +140,8 @@ fn file_associations_and_deep_link_scheme_are_registered() -> Result<(), Box<dyn
 
     assert_eq!(
         config["bundle"]["active"],
-        Value::Bool(false),
-        "installers, signing and icons belong to T5.06"
+        Value::Bool(true),
+        "installers are active in T5.06"
     );
 
     Ok(())

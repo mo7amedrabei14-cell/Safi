@@ -5,8 +5,10 @@
 
 pub mod auth;
 pub mod error;
+pub mod log_center;
 pub mod routes;
 pub mod updater;
+pub mod zero_trust;
 
 use std::sync::Arc;
 
@@ -15,8 +17,10 @@ use axum::http::HeaderValue;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::Router;
+use tokio::sync::RwLock;
 
 use auth::service::AuthService;
+use log_center::AuditLogCenter;
 
 /// Request identifier attached by the middleware and echoed in the response header.
 #[derive(Debug, Clone)]
@@ -26,6 +30,8 @@ pub struct RequestId(pub String);
 #[derive(Clone)]
 pub struct AppState {
     pub auth: Arc<AuthService>,
+    pub zero_trust: zero_trust::ZeroTrustGuardState,
+    pub log_center: Arc<RwLock<AuditLogCenter>>,
 }
 
 impl AppState {
@@ -34,6 +40,8 @@ impl AppState {
     pub fn new(auth: AuthService) -> Self {
         Self {
             auth: Arc::new(auth),
+            zero_trust: zero_trust::ZeroTrustGuardState::default(),
+            log_center: Arc::new(RwLock::new(AuditLogCenter::new())),
         }
     }
 }

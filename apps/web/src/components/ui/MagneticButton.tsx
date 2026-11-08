@@ -1,12 +1,8 @@
 /**
  * `apps/web/src/components/ui/MagneticButton.tsx`
  *
- * React Bits "magnet" + "StarBorder" button. The cursor pulls the button by a few
- * pixels through `gsap.quickTo` (one reusable tween per axis), and releasing the
- * pointer returns it with `elastic.out(1, 0.4)`.
- *
- * Accessibility: a real <button>, `min-inline-size`/`min-block-size` of 44px
- * (WCAG 2.2 AA target size), and a visible focus ring from the global stylesheet.
+ * React Bits "magnet" + "StarBorder" button locked to the 4-Color Palette:
+ * `#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`
  */
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createElement, useRef } from "react";
@@ -14,7 +10,7 @@ import { clsx } from "clsx";
 import { gsap } from "gsap";
 import { canAnimate } from "./motion-preference";
 
-export type MagneticButtonVariant = "emerald" | "glass";
+export type MagneticButtonVariant = "emerald" | "glass" | "primary" | "secondary";
 
 export interface MagneticButtonProps {
   readonly children: ReactNode;
@@ -30,14 +26,24 @@ export interface MagneticButtonProps {
 
 const VARIANT_STYLES: Record<MagneticButtonVariant, Record<string, string>> = {
   emerald: {
-    backgroundImage: "linear-gradient(135deg, #10b981 0%, #06b6d4 100%)",
-    color: "#04110c",
-    borderColor: "transparent"
+    background: "#112D4E",
+    color: "#F9F7F7",
+    borderColor: "#3F72AF"
+  },
+  primary: {
+    background: "#112D4E",
+    color: "#F9F7F7",
+    borderColor: "#3F72AF"
   },
   glass: {
-    background: "var(--glass-bg)",
+    background: "var(--bg-elevated)",
     color: "var(--text-primary)",
-    borderColor: "var(--glass-border)"
+    borderColor: "var(--border-strong)"
+  },
+  secondary: {
+    background: "var(--bg-elevated)",
+    color: "var(--text-primary)",
+    borderColor: "var(--border-strong)"
   }
 };
 
@@ -59,6 +65,8 @@ export function MagneticButton({
 }: MagneticButtonProps): ReactNode {
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const settersRef = useRef<MagnetSetters | null>(null);
+
+  const isPrimary = variant === "emerald" || variant === "primary";
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     const button = buttonRef.current;
@@ -92,7 +100,7 @@ export function MagneticButton({
       x: 0,
       y: 0,
       scale: 1,
-      duration: canAnimate() ? 0.9 : 0,
+      duration: canAnimate() ? 0.85 : 0,
       ease: "elastic.out(1, 0.4)"
     });
   };
@@ -106,7 +114,12 @@ export function MagneticButton({
       onPointerMove: handlePointerMove,
       onPointerLeave: handlePointerLeave,
       onBlur: handlePointerLeave,
-      className: clsx("safi-star-border", className),
+      className: clsx(
+        "safi-btn",
+        isPrimary ? "safi-btn-primary" : "safi-btn-secondary",
+        "safi-star-border",
+        className
+      ),
       "aria-label": ariaLabel,
       disabled,
       "data-safi-magnetic": "true",
@@ -117,15 +130,14 @@ export function MagneticButton({
         gap: "8px",
         minHeight: "44px",
         minWidth: "44px",
-        paddingBlock: "12px",
-        paddingInline: "22px",
-        borderRadius: "14px",
+        padding: "10px 20px",
+        borderRadius: "999px",
         border: "1px solid",
         fontFamily: "var(--font-arabic)",
-        fontSize: "15px",
-        fontWeight: 600,
+        fontSize: "14px",
+        fontWeight: 700,
         cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.55 : 1,
+        opacity: disabled ? 0.5 : 1,
         willChange: "transform",
         ...VARIANT_STYLES[variant]
       }

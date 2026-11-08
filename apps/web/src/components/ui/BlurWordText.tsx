@@ -5,10 +5,10 @@
  * the text is split into WORDS only — never into characters — because separating
  * Arabic letters destroys the joined glyph shapes.
  *
- * Each word is animatable on its own layer (`transform` + `filter` only), so the
- * heading never triggers layout while it reveals.
+ * Uses `gsap.fromTo` + `clearProps` on cleanup so React 19 `<StrictMode>`
+ * double-invocation never leaves words stuck at `opacity: 0`.
  */
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { createElement, useEffect, useRef } from "react";
 import { gsap } from "gsap";
 import { canAnimate } from "./motion-preference";
@@ -20,6 +20,7 @@ export interface BlurWordTextProps {
   readonly text: string;
   readonly as?: BlurWordTextTag;
   readonly className?: string;
+  readonly style?: CSSProperties;
   /** Seconds between words. */
   readonly stagger?: number;
   readonly delay?: number;
@@ -44,9 +45,10 @@ export function BlurWordText({
   text,
   as = "p",
   className,
+  style,
   stagger = 0.04,
   delay = 0,
-  duration = 0.6,
+  duration = 0.55,
   ariaLabel
 }: BlurWordTextProps): ReactNode {
   const containerRef = useRef<HTMLElement | null>(null);
@@ -63,19 +65,24 @@ export function BlurWordText({
       return;
     }
 
-    const tween = gsap.from(targets, {
-      opacity: 0,
-      y: 14,
-      filter: "blur(10px)",
-      duration,
-      delay,
-      stagger,
-      ease: "power3.out",
-      clearProps: "filter"
-    });
+    const tween = gsap.fromTo(
+      targets,
+      { opacity: 0.2, y: 10, filter: "blur(6px)" },
+      {
+        opacity: 1,
+        y: 0,
+        filter: "blur(0px)",
+        duration,
+        delay,
+        stagger,
+        ease: "power3.out",
+        clearProps: "filter,transform,opacity"
+      }
+    );
 
     return () => {
       tween.kill();
+      gsap.set(targets, { clearProps: "filter,transform,opacity" });
     };
   }, [delay, duration, stagger, text]);
 
@@ -88,7 +95,13 @@ export function BlurWordText({
 
   return createElement(
     as,
-    { ref: containerRef, className, "aria-label": ariaLabel, "data-safi-blur-text": "true" },
+    {
+      ref: containerRef,
+      className,
+      style,
+      "aria-label": ariaLabel,
+      "data-safi-blur-text": "true"
+    },
     children
   );
 }

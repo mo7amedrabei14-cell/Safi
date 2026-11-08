@@ -1,14 +1,8 @@
 /**
  * `apps/web/src/components/layout/FloatingGlassDock.tsx`
  *
- * VisionOS-style floating glass dock:
- * - start (right, RTL): the Safi prism logo;
- * - centre: six navigation buttons with a sliding glass "active pill" driven by GSAP;
- * - end (left, RTL): status island, ⌘K command-palette trigger and settings.
- *
- * The pill is measured from the active button (`offsetLeft`/`offsetWidth`) and
- * animated with transform/width only, so switching tabs never triggers layout work
- * beyond one measurement.
+ * Full-Viewport Sticky Topbar (`.safi-topbar`, `max-width: 1820px`)
+ * Locked to the 4-Color Palette: `#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`
  */
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
@@ -16,11 +10,15 @@ import {
   BarChart3,
   Command,
   Home,
+  Layers,
   Library,
   ListChecks,
+  Moon,
+  Play,
   Settings,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Sun
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { gsap } from "gsap";
@@ -29,6 +27,8 @@ import { DynamicStatusIsland } from "../brand/DynamicStatusIsland";
 import { canAnimate } from "../ui/motion-preference";
 
 export type SafiDockTabId = "home" | "cleaning" | "recipes" | "charts" | "library" | "owner";
+
+export type SafiThemeId = "apple-light" | "google-gemini" | "vision-glass";
 
 export interface SafiDockTab {
   readonly id: SafiDockTabId;
@@ -45,18 +45,34 @@ export const DOCK_TABS: readonly SafiDockTab[] = [
   { id: "owner", label: "لوحة المالك", icon: ShieldCheck }
 ];
 
+export const SAFI_THEMES: ReadonlyArray<{
+  readonly id: SafiThemeId;
+  readonly labelAr: string;
+  readonly badge: string;
+}> = [
+  { id: "apple-light", labelAr: "فاتح #F9F7F7", badge: "#F9F7F7 • #DBE2EF • #3F72AF • #112D4E" },
+  { id: "vision-glass", labelAr: "هادئ #DBE2EF", badge: "#DBE2EF • #F9F7F7 • #112D4E" },
+  { id: "google-gemini", labelAr: "داكن #112D4E", badge: "#112D4E • #3F72AF • #F9F7F7" }
+];
+
 export interface FloatingGlassDockProps {
   readonly activeTab: SafiDockTabId;
   readonly onSelect: (tab: SafiDockTabId) => void;
   readonly onOpenCommandPalette?: () => void;
   readonly onOpenSettings?: () => void;
+  readonly theme?: SafiThemeId;
+  readonly onSelectTheme?: (theme: SafiThemeId) => void;
+  readonly onReplayIntro?: () => void;
 }
 
 export function FloatingGlassDock({
   activeTab,
   onSelect,
   onOpenCommandPalette,
-  onOpenSettings
+  onOpenSettings,
+  theme = "apple-light",
+  onSelectTheme,
+  onReplayIntro
 }: FloatingGlassDockProps): ReactNode {
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLSpanElement | null>(null);
@@ -76,7 +92,7 @@ export function FloatingGlassDock({
       }
       const target = { x: active.offsetLeft, width: active.offsetWidth };
       if (animate && canAnimate()) {
-        gsap.to(pill, { ...target, duration: 0.45, ease: "expo.out" });
+        gsap.to(pill, { ...target, duration: 0.35, ease: "expo.out" });
       } else {
         gsap.set(pill, target);
       }
@@ -96,138 +112,101 @@ export function FloatingGlassDock({
   }, [activeTab]);
 
   return (
-    <nav
-      aria-label="التنقل الرئيسي"
-      dir="rtl"
-      className="safi-glass"
-      style={{
-        position: "fixed",
-        bottom: "18px",
-        insetInline: "16px",
-        zIndex: 60,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "12px",
-        width: "fit-content",
-        maxWidth: "calc(100vw - 32px)",
-        marginInline: "auto",
-        padding: "10px 14px",
-        borderRadius: "999px"
-      }}
-    >
-      <div style={{ flex: "0 0 auto", paddingInlineEnd: "4px" }}>
-        <SafiPrismLogo size="sm" />
-      </div>
+    <header className="safi-topbar" dir="rtl">
+      <nav aria-label="التنقل الرئيسي" className="safi-topbar-inner">
+        <div className="safi-topbar-brand">
+          <SafiPrismLogo size="sm" showTagline={false} />
+        </div>
 
-      <div
-        ref={tabsRef}
-        style={{ position: "relative", display: "flex", alignItems: "center", gap: "2px" }}
-      >
-        <span
-          ref={pillRef}
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            top: 0,
-            bottom: 0,
-            left: 0,
-            width: 0,
-            borderRadius: "999px",
-            background: "rgba(255, 255, 255, 0.12)",
-            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.22)",
-            pointerEvents: "none"
-          }}
-        />
-        {DOCK_TABS.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = tab.id === activeTab;
-          return (
+        <div ref={tabsRef} className="safi-segmented-nav">
+          <span ref={pillRef} aria-hidden="true" className="safi-segmented-pill" />
+          {DOCK_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = tab.id === activeTab;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                data-tab-id={tab.id}
+                aria-current={isActive ? "page" : undefined}
+                onClick={() => onSelect(tab.id)}
+                className="safi-segmented-btn"
+                style={{ minHeight: "44px", height: "36px" }}
+              >
+                <Icon size={14} strokeWidth={2} aria-hidden="true" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="safi-topbar-actions">
+          <DynamicStatusIsland />
+
+          <div className="safi-theme-switcher" role="group" aria-label="تبديل مظهر المنصة">
+            {SAFI_THEMES.map((item) => {
+              const active = theme === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onSelectTheme?.(item.id)}
+                  className="safi-theme-option"
+                  title={item.badge}
+                  style={{ minHeight: "44px", height: "32px" }}
+                >
+                  {item.id === "apple-light" ? (
+                    <Sun size={12} aria-hidden="true" />
+                  ) : item.id === "google-gemini" ? (
+                    <Moon size={12} aria-hidden="true" />
+                  ) : (
+                    <Layers size={12} aria-hidden="true" />
+                  )}
+                  <span>{item.labelAr}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {onReplayIntro !== undefined ? (
             <button
-              key={tab.id}
               type="button"
-              data-tab-id={tab.id}
-              aria-current={isActive ? "page" : undefined}
-              onClick={() => onSelect(tab.id)}
-              style={{
-                position: "relative",
-                zIndex: 1,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                minHeight: "44px",
-                minWidth: "44px",
-                padding: "8px 12px",
-                borderRadius: "999px",
-                border: "none",
-                background: "transparent",
-                color: isActive ? "var(--text-primary)" : "var(--text-muted)",
-                fontFamily: "var(--font-arabic)",
-                fontSize: "13px",
-                fontWeight: isActive ? 700 : 500,
-                cursor: "pointer",
-                whiteSpace: "nowrap"
-              }}
+              onClick={onReplayIntro}
+              className="safi-topbar-btn"
+              aria-label="إعادة عرض الإنترو السينمائي"
+              title="تشغيل إنترو الموشن جرافيك (2.2s)"
+              style={{ minHeight: "44px", height: "36px" }}
             >
-              <Icon size={16} strokeWidth={2} aria-hidden="true" />
-              {tab.label}
+              <Play size={13} aria-hidden="true" />
+              <span>▶ عرض الإنترو</span>
             </button>
-          );
-        })}
-      </div>
+          ) : null}
 
-      <div className="safi-dock-status">
-        <DynamicStatusIsland />
-      </div>
+          <button
+            type="button"
+            onClick={onOpenCommandPalette}
+            className="safi-topbar-btn safi-mono"
+            aria-label="لوحة الأوامر السريعة"
+            title="لوحة الأوامر السريعة (⌘K)"
+            style={{ minHeight: "44px", height: "36px" }}
+          >
+            <Command size={13} aria-hidden="true" />
+            ⌘K
+          </button>
 
-      <button
-        type="button"
-        onClick={onOpenCommandPalette}
-        aria-label="لوحة الأوامر السريعة"
-        title="لوحة الأوامر السريعة (⌘K)"
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "6px",
-          minHeight: "44px",
-          minWidth: "44px",
-          padding: "8px 12px",
-          borderRadius: "999px",
-          border: "1px solid var(--glass-border)",
-          background: "rgba(255, 255, 255, 0.04)",
-          color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-          fontSize: "12px",
-          cursor: "pointer"
-        }}
-      >
-        <Command size={15} aria-hidden="true" />
-        ⌘K
-      </button>
-
-      <button
-        type="button"
-        onClick={onOpenSettings}
-        aria-label="الإعدادات"
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "6px",
-          minHeight: "44px",
-          minWidth: "44px",
-          padding: "8px 12px",
-          borderRadius: "999px",
-          border: "1px solid var(--glass-border)",
-          background: "rgba(255, 255, 255, 0.04)",
-          color: "var(--text-muted)",
-          fontFamily: "var(--font-arabic)",
-          fontSize: "13px",
-          cursor: "pointer"
-        }}
-      >
-        <Settings size={15} aria-hidden="true" />
-        الإعدادات
-      </button>
-    </nav>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="safi-topbar-btn"
+            aria-label="الإعدادات"
+            style={{ minHeight: "44px", height: "36px" }}
+          >
+            <Settings size={14} aria-hidden="true" />
+            الإعدادات
+          </button>
+        </div>
+      </nav>
+    </header>
   );
 }

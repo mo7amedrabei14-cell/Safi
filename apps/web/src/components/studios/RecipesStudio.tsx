@@ -1,17 +1,11 @@
 /**
  * `apps/web/src/components/studios/RecipesStudio.tsx`
  *
- * Deterministic recipe builder. The canonical JSON follows a fixed step order, so
- * the BLAKE3 digest is identical for identical recipes — the determinism proof the
- * engine relies on (`AGENTS.md` rule 12).
- *
- * The F1 watch folder is validated here (absolute path, no `..`, no NUL); the
- * actual watched-folder write and the atomic temp -> fsync -> rename happen in the
- * Rust desktop core, so this page only prepares a verifiable recipe.
+ * Deterministic Recipe Builder + Graphify DAG + WCAG 2.2 2.5.7 Click-to-Move Reordering.
  */
 import type { ChangeEvent, ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { CheckCircle2, Download, FileCode2, FolderOpen, XCircle } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, Download, FileCode2, FolderOpen, XCircle } from "lucide-react";
 import { downloadTextFile } from "../../lib/download";
 import {
   DEFAULT_RECIPE_TOGGLES,
@@ -22,9 +16,10 @@ import {
   recipeDigest,
   validateWatchFolder
 } from "../../lib/recipe";
-import type { RecipeToggles } from "../../lib/recipe";
+import type { RecipeStepId, RecipeToggles } from "../../lib/recipe";
 import { buildRecipeReportHtml } from "../../lib/report";
 import { DecryptedMonoText } from "../ui/DecryptedMonoText";
+import { GraphifyLineageCanvas } from "../ui/GraphifyLineageCanvas";
 import { MagneticButton } from "../ui/MagneticButton";
 import { SpotlightCard } from "../ui/SpotlightCard";
 
@@ -33,6 +28,9 @@ export const DEFAULT_WATCH_FOLDER = "C:\\Safi\\Output";
 export function RecipesStudio(): ReactNode {
   const [name, setName] = useState("تنقية أسماء العملاء");
   const [toggles, setToggles] = useState<RecipeToggles>(DEFAULT_RECIPE_TOGGLES);
+  const [stepOrder, setStepOrder] = useState<readonly RecipeStepId[]>(
+    RECIPE_STEPS.map((s) => s.id)
+  );
   const [folder, setFolder] = useState(DEFAULT_WATCH_FOLDER);
   const [exported, setExported] = useState<string | null>(null);
 
@@ -41,8 +39,28 @@ export function RecipesStudio(): ReactNode {
   const folderCheck = useMemo(() => validateWatchFolder(folder), [folder]);
   const enabled = enabledStepCount(toggles);
 
-  const toggleStep = (id: (typeof RECIPE_STEPS)[number]["id"]): void => {
+  const orderedSteps = useMemo(
+    () =>
+      stepOrder
+        .map((id) => RECIPE_STEPS.find((s) => s.id === id))
+        .filter((s): s is (typeof RECIPE_STEPS)[number] => s !== undefined),
+    [stepOrder]
+  );
+
+  const toggleStep = (id: RecipeStepId): void => {
     setToggles((current) => ({ ...current, [id]: !current[id] }));
+  };
+
+  const moveStep = (index: number, delta: -1 | 1): void => {
+    const target = index + delta;
+    if (target < 0 || target >= stepOrder.length) return;
+    const copy = [...stepOrder];
+    const currentItem = copy[index];
+    const targetItem = copy[target];
+    if (currentItem === undefined || targetItem === undefined) return;
+    copy[index] = targetItem;
+    copy[target] = currentItem;
+    setStepOrder(copy);
   };
 
   const handleName = (event: ChangeEvent<HTMLInputElement>): void => setName(event.target.value);
@@ -76,13 +94,13 @@ export function RecipesStudio(): ReactNode {
           الوصفات
         </h1>
         <p className="safi-studio-lead">
-          ركّب الوصفة خطوة بخطوة. نفس الاختيارات تُنتج دائمًا نفس الملف ونفس البصمة، ما يجعل كل
-          تصدير قابلًا للتدقيق.
+          ركّب الوصفة خطوة بخطوة مع بدائل التحريك بالنقر (WCAG 2.2 2.5.7). نفس الاختيارات تُنتج
+          دائمًا نفس الملف ونفس البصمة، ما يجعل كل تصدير قابلًا للتدقيق.
         </p>
       </header>
 
       <div className="safi-grid-2">
-        <SpotlightCard padding={22}>
+        <SpotlightCard padding={24}>
           <label className="safi-field-label" htmlFor="safi-recipe-name">
             اسم الوصفة
           </label>
@@ -95,25 +113,57 @@ export function RecipesStudio(): ReactNode {
           />
 
           <fieldset className="safi-fieldset">
-            <legend className="safi-field-label">خطوات التنظيف</legend>
-            {RECIPE_STEPS.map((step) => (
-              <label key={step.id} className="safi-toggle-row" htmlFor={`safi-step-${step.id}`}>
-                <input
-                  id={`safi-step-${step.id}`}
-                  type="checkbox"
-                  checked={toggles[step.id]}
-                  onChange={() => toggleStep(step.id)}
-                />
-                <span>
-                  <span className="safi-toggle-label">{step.labelAr}</span>
-                  <span className="safi-toggle-detail">{step.detailAr}</span>
-                </span>
-              </label>
+            <legend className="safi-field-label">
+              خطوات التنظيف (مع أزرار نقل لأعلى/لأسفل كبديل للسحب 2.5.7)
+            </legend>
+            {orderedSteps.map((step, idx) => (
+              <div
+                key={step.id}
+                className="safi-toggle-row"
+                style={{ justifyContent: "space-between", alignItems: "center" }}
+              >
+                <label
+                  htmlFor={`safi-step-${step.id}`}
+                  style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer", flex: 1 }}
+                >
+                  <input
+                    id={`safi-step-${step.id}`}
+                    type="checkbox"
+                    checked={toggles[step.id]}
+                    onChange={() => toggleStep(step.id)}
+                  />
+                  <span>
+                    <span className="safi-toggle-label">{step.labelAr}</span>
+                    <span className="safi-toggle-detail">{step.detailAr}</span>
+                  </span>
+                </label>
+
+                <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => moveStep(idx, -1)}
+                    disabled={idx === 0}
+                    aria-label={`انقل ${step.labelAr} لأعلى`}
+                    style={{ minHeight: "34px", minWidth: "34px", padding: "4px" }}
+                  >
+                    <ArrowUp size={13} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveStep(idx, 1)}
+                    disabled={idx === orderedSteps.length - 1}
+                    aria-label={`انقل ${step.labelAr} لأسفل`}
+                    style={{ minHeight: "34px", minWidth: "34px", padding: "4px" }}
+                  >
+                    <ArrowDown size={13} aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
             ))}
           </fieldset>
         </SpotlightCard>
 
-        <SpotlightCard padding={22}>
+        <SpotlightCard padding={24}>
           <h2 className="safi-card-title">
             <FileCode2 size={16} aria-hidden="true" /> الوصفة القانونية
           </h2>
@@ -192,6 +242,8 @@ export function RecipesStudio(): ReactNode {
           </p>
         </SpotlightCard>
       </div>
+
+      <GraphifyLineageCanvas titleAr="مخطط Graphify التفاعلي لمسار تنفيذ الوصفة الحتمية (DAG)" />
     </section>
   );
 }

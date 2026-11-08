@@ -1,12 +1,8 @@
 /**
  * `apps/web/src/components/motion/AmbientBackground.tsx`
  *
- * Two GPU-cheap layers behind the whole app:
- * 1. Aurora mesh — three blurred colour halos drifting with GSAP (transform only).
- * 2. Dot grid — a 28px dot lattice faded out with a radial mask.
- *
- * The container is `aria-hidden`, never receives pointer events, and both layers
- * are frozen when the user asks for reduced motion.
+ * Subtle Ambient Mesh locked to the 4-Color Palette:
+ * `#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`.
  */
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
@@ -28,35 +24,35 @@ interface AuroraHalo {
 
 const AURORA_HALOS: readonly AuroraHalo[] = [
   {
-    id: "emerald",
-    gradient: "radial-gradient(circle at 50% 50%, #10b981 0%, transparent 70%)",
+    id: "safi-mist",
+    gradient: "radial-gradient(circle at 50% 50%, #DBE2EF 0%, transparent 70%)",
     top: "-18%",
-    left: "-12%",
-    size: "58vw",
-    drift: { x: 90, y: 60, scale: 1.12, duration: 18 }
-  },
-  {
-    id: "cyan",
-    gradient: "radial-gradient(circle at 50% 50%, #06b6d4 0%, transparent 70%)",
-    top: "18%",
-    left: "48%",
+    left: "-10%",
     size: "52vw",
-    drift: { x: -110, y: 80, scale: 1.08, duration: 22 }
+    drift: { x: 80, y: 50, scale: 1.08, duration: 20 }
   },
   {
-    id: "blue",
-    gradient: "radial-gradient(circle at 50% 50%, #3b82f6 0%, transparent 70%)",
-    top: "52%",
-    left: "6%",
-    size: "46vw",
-    drift: { x: 70, y: -90, scale: 1.16, duration: 26 }
+    id: "safi-steel",
+    gradient: "radial-gradient(circle at 50% 50%, #3F72AF 0%, transparent 70%)",
+    top: "12%",
+    left: "48%",
+    size: "48vw",
+    drift: { x: -90, y: 65, scale: 1.06, duration: 24 }
+  },
+  {
+    id: "safi-ink",
+    gradient: "radial-gradient(circle at 50% 50%, #112D4E 0%, transparent 70%)",
+    top: "54%",
+    left: "8%",
+    size: "42vw",
+    drift: { x: 60, y: -70, scale: 1.1, duration: 28 }
   }
 ];
 
 const DOT_GRID_STYLE = {
   position: "absolute",
   inset: 0,
-  backgroundImage: "radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px)",
+  backgroundImage: "radial-gradient(rgba(17, 45, 78, 0.08) 1px, transparent 1px)",
   backgroundSize: "28px 28px",
   maskImage: "radial-gradient(ellipse at center, black 45%, transparent 85%)",
   WebkitMaskImage: "radial-gradient(ellipse at center, black 45%, transparent 85%)"
@@ -134,7 +130,7 @@ export function AmbientBackground(): ReactNode {
             background: halo.gradient,
             borderRadius: "50%",
             filter: "blur(130px)",
-            opacity: 0.16,
+            opacity: 0.1,
             willChange: "transform"
           }}
         />

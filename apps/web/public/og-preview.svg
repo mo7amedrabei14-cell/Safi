@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="صافي البيانات | SafiData — بياناتك... صافية">
+  <rect width="1200" height="630" fill="#F9F7F7" />
+
+  <rect x="48" y="48" width="1104" height="534" rx="28" fill="#DBE2EF" stroke="#3F72AF" stroke-width="2" />
+
+  <!-- Crystal Purifier + Letter "ص" + Pure Drop Emblem on the Right (RTL Start) -->
+  <g transform="translate(860, 145) scale(2.1)">
+    <rect x="6" y="2" width="116" height="124" rx="24" fill="#112D4E" />
+    <path d="M64 10 L106 33 L106 79 L64 102 L22 79 L22 33 Z" fill="#3F72AF" fill-opacity="0.32" stroke="#DBE2EF" stroke-width="3.2" stroke-linejoin="round" />
+    <path d="M32 39 L64 21 L96 39 L82 72 L46 72 Z" fill="#DBE2EF" fill-opacity="0.16" stroke="#DBE2EF" stroke-width="1.8" stroke-linejoin="round" />
+    <path d="M88 55 C88 45 73 45 66 53 C62 57 66 61 76 61 L88 61 M65 56 L58 56 C58 68 41 69 40 57 C39 49 44 45 48 45" fill="none" stroke="#F9F7F7" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M64 74 C64 74 51 90 51 99 C51 106.5 56.8 112 64 112 C71.2 112 77 106.5 77 99 C77 90 64 74 64 74 Z" fill="#3F72AF" stroke="#F9F7F7" stroke-width="2.2" />
+    <path d="M44 116 Q64 122 84 116" fill="none" stroke="#DBE2EF" stroke-width="2.2" stroke-linecap="round" />
+    <circle cx="108" cy="20" r="3.5" fill="#F9F7F7" />
+    <circle cx="98" cy="12" r="2.8" fill="#DBE2EF" />
+  </g>
+
+  <!-- Arabic Brand Typography (`#112D4E` & `#3F72AF`) -->
+  <g font-family="'IBM Plex Sans Arabic', 'Cairo', 'Segoe UI', sans-serif" text-anchor="end">
+    <rect x="520" y="125" width="295" height="42" rx="21" fill="#112D4E" />
+    <text x="795" y="152" fill="#F9F7F7" font-size="18" font-weight="700">معالجة محلية 100% • صفر شبكة</text>
+
+    <text x="815" y="250" fill="#112D4E" font-size="68" font-weight="700">صافي البيانات</text>
+    <text x="815" y="310" fill="#3F72AF" font-size="34" font-weight="700">بياناتك... صافية | SafiData v5.0</text>
+
+    <text x="815" y="380" fill="#112D4E" font-size="24" font-weight="600">منصة تنظيف وتوحيد وحماية البيانات العربية والرقم القومي</text>
+    <text x="815" y="420" fill="#3F72AF" font-size="24" font-weight="600">بوصفات حتمية ورسوم بيانية وتقارير PDF متجهية محليًا</text>
+
+    <g transform="translate(130, 465)">
+      <rect x="490" y="0" width="195" height="44" rx="10" fill="#112D4E" />
+      <text x="665" y="28" fill="#F9F7F7" font-size="17" font-weight="700" font-family="monospace">BLAKE3 Verified</text>
+
+      <rect x="265" y="0" width="210" height="44" rx="10" fill="#3F72AF" />
+      <text x="455" y="28" fill="#F9F7F7" font-size="17" font-weight="700" font-family="monospace">SQLCipher Vault</text>
+
+      <rect x="40" y="0" width="210" height="44" rx="10" fill="#F9F7F7" stroke="#112D4E" stroke-width="2" />
+      <text x="230" y="28" fill="#112D4E" font-size="17" font-weight="700" font-family="monospace">Rust + WASM 60fps</text>
+    </g>
+  </g>
+</svg>

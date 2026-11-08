@@ -1,12 +1,7 @@
 /**
  * `apps/web/src/components/ui/CountUpMetric.tsx`
  *
- * React Bits "count up" for KPI numbers. GSAP tweens a plain object and writes the
- * formatted value into the element (`textContent`), so the count never re-renders
- * React and stays on `tabular-nums` without glyph jitter.
- *
- * The server renders the final value, which keeps the metric readable with JS
- * disabled and correct for assistive technology.
+ * KPI numbers with Apple Blue suffix and tabular-nums alignment.
  */
 import type { ReactNode } from "react";
 import { createElement, useEffect, useRef } from "react";
@@ -14,17 +9,12 @@ import { gsap } from "gsap";
 import { canAnimate } from "./motion-preference";
 
 export interface CountUpMetricProps {
-  /** Target value. */
   readonly value: number;
-  /** Unit that follows the number, e.g. `%`, `صف/ث`, `ms`. */
   readonly suffix?: string;
   readonly prefix?: string;
-  /** Fraction digits to render. */
   readonly decimals?: number;
-  /** Animation duration in seconds. */
   readonly duration?: number;
   readonly className?: string;
-  /** Optional caption rendered under the number. */
   readonly label?: string;
 }
 
@@ -97,9 +87,9 @@ export function CountUpMetric({
             display: "inline-flex",
             alignItems: "baseline",
             gap: "6px",
-            fontSize: "32px",
+            fontSize: "28px",
             fontWeight: 700,
-            lineHeight: 1.1,
+            lineHeight: 1.15,
             fontVariantNumeric: "tabular-nums",
             color: "var(--text-primary)"
           }
@@ -109,7 +99,7 @@ export function CountUpMetric({
             ? null
             : createElement(
                 "span",
-                { key: "prefix", style: { fontSize: "18px", opacity: 0.8 } },
+                { key: "prefix", style: { fontSize: "16px", color: "var(--text-secondary)" } },
                 prefix
               ),
           createElement(
@@ -123,7 +113,7 @@ export function CountUpMetric({
                 "span",
                 {
                   key: "suffix",
-                  style: { fontSize: "14px", fontWeight: 500, color: "var(--accent-cyan)" }
+                  style: { fontSize: "13px", fontWeight: 600, color: "var(--accent-primary)" }
                 },
                 suffix
               )
@@ -133,7 +123,7 @@ export function CountUpMetric({
         ? null
         : createElement(
             "span",
-            { key: "label", style: { fontSize: "12px", color: "var(--text-muted)" } },
+            { key: "label", style: { fontSize: "12px", color: "var(--text-secondary)" } },
             label
           )
     ]

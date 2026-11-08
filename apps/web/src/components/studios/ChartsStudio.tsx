@@ -1,15 +1,15 @@
 /**
  * `apps/web/src/components/studios/ChartsStudio.tsx`
  *
- * Chart Studio: deterministic SVG preview, credibility guard and a real WCAG 2.2 AA
- * contrast audit of the colours actually used by the rendered chart.
- *
- * The contrast table is computed from the generated SVG markup itself, so a colour
- * change in the renderer can never silently escape the audit.
+ * Interactive Chart Studio (Spec Section 17):
+ * - Live editable chart title & data values
+ * - Deterministic SVG preview + one-click SVG download
+ * - Credibility Guard (`SF-CHT-006`) + Smart Chart Recommender
+ * - Real WCAG 2.2 AA contrast audit of the rendered SVG colours
  */
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { AlertTriangle, BarChart3, CheckCircle2, Eye, XCircle } from "lucide-react";
+import { AlertTriangle, BarChart3, CheckCircle2, Download, Eye, Plus, XCircle } from "lucide-react";
 import {
   DARK_COLORS,
   WCAG_AA_TEXT_MIN_RATIO,
@@ -20,6 +20,7 @@ import { generateDeterministicSvg, validateChartSpec } from "../../charts/chart-
 import type { ChartSpec, ChartType } from "../../charts/chart-spec";
 import { checkChartCredibility } from "../../charts/credibility-guard";
 import { recommendCharts } from "../../charts/smart-chart-recommender";
+import { downloadTextFile } from "../../lib/download";
 import { SpotlightCard } from "../ui/SpotlightCard";
 
 export const SAMPLE_CHART_DATA: ReadonlyArray<{
@@ -68,7 +69,6 @@ const CHART_TYPE_LABELS: Readonly<Record<ChartType, string>> = {
 
 const WHITE_CANVAS = "#ffffff";
 
-/** Unique fill and stroke colours used by the generated SVG, excluding the canvas itself. */
 export function extractSvgColors(svg: string): string[] {
   const colors = new Set<string>();
   for (const match of svg.matchAll(/(?:fill|stroke)="(#[0-9a-fA-F]{6})"/g)) {
@@ -82,8 +82,28 @@ export function extractSvgColors(svg: string): string[] {
 
 export function ChartsStudio(): ReactNode {
   const [chartType, setChartType] = useState<ChartType>("bar");
+  const [titleAr, setTitleAr] = useState<string>(SAMPLE_CHART_SPEC.titleAr);
+  const [rows, setRows] = useState<Array<{ region: string; completion: number }>>(
+    SAMPLE_CHART_DATA.map((r) => ({ ...r }))
+  );
 
-  const spec = useMemo<ChartSpec>(() => ({ ...SAMPLE_CHART_SPEC, type: chartType }), [chartType]);
+  const effectiveRenderType: ChartType =
+    chartType === "area" || chartType === "scatter"
+      ? "line"
+      : chartType === "histogram" || chartType === "kpi"
+        ? "bar"
+        : chartType;
+
+  const spec = useMemo<ChartSpec>(
+    () => ({
+      ...SAMPLE_CHART_SPEC,
+      type: effectiveRenderType,
+      titleAr,
+      data: rows
+    }),
+    [effectiveRenderType, titleAr, rows]
+  );
+
   const validation = useMemo(() => validateChartSpec(spec), [spec]);
   const svg = useMemo(
     () => (validation.valid ? generateDeterministicSvg(spec) : ""),
@@ -95,8 +115,8 @@ export function ChartsStudio(): ReactNode {
   );
 
   const credibility = useMemo(
-    () => checkChartCredibility({ type: spec.type, yAxisKey: spec.yAxisKey, data: spec.data }),
-    [spec]
+    () => checkChartCredibility({ type: chartType, yAxisKey: spec.yAxisKey, data: spec.data }),
+    [chartType, spec]
   );
   const recommendations = useMemo(
     () =>
@@ -137,6 +157,12 @@ export function ChartsStudio(): ReactNode {
 
   const allPass = [...svgAudit, ...paletteAudit].every((row) => row.ratio >= row.minimum);
 
+  const handleDownloadSvg = (): void => {
+    if (svg.length > 0) {
+      downloadTextFile(`safi-chart-${chartType}.svg`, svg, "image/svg+xml");
+    }
+  };
+
   return (
     <section className="safi-studio" aria-labelledby="safi-charts-title" dir="rtl">
       <header className="safi-studio-header">
@@ -145,13 +171,34 @@ export function ChartsStudio(): ReactNode {
           الرسوم البيانية
         </h1>
         <p className="safi-studio-lead">
-          مخططات حتمية من نفس المواصفة، مع حارس المصداقية وفحص تباين WCAG 2.2 AA لكل لون يرسمه
-          المخطط فعلًا.
+          مخططات حتمية من نفس المواصفة، مع تحرير حي للبيانات، وحارس المصداقية، وفحص تباين WCAG 2.2
+          AA لكل لون يرسمه المخطط فعلًا.
         </p>
       </header>
 
       <div className="safi-grid-2">
-        <SpotlightCard padding={22}>
+        <SpotlightCard padding={24}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
+            <label className="safi-field-label" htmlFor="safi-chart-title-input" style={{ margin: 0 }}>
+              عنوان المخطط
+            </label>
+            <button
+              type="button"
+              className="safi-btn safi-btn-primary"
+              onClick={handleDownloadSvg}
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <Download size={13} aria-hidden="true" />
+              تنزيل SVG
+            </button>
+          </div>
+          <input
+            id="safi-chart-title-input"
+            className="safi-input"
+            value={titleAr}
+            onChange={(e) => setTitleAr(e.target.value)}
+          />
+
           <div className="safi-chip-row" role="group" aria-label="نوع المخطط">
             {CHART_TYPES.map((type) => (
               <button
@@ -166,23 +213,12 @@ export function ChartsStudio(): ReactNode {
             ))}
           </div>
 
-          {chartType === "bar" ||
-          chartType === "line" ||
-          chartType === "pie" ||
-          chartType === "donut" ? (
-            <img
-              src={imageUri}
-              alt={SAMPLE_CHART_SPEC.titleAr}
-              className="safi-chart-canvas"
-              data-testid="safi-chart-image"
-            />
-          ) : (
-            <p className="safi-hint" role="status">
-              المعاينة الحتمية SVG لهذه النسخة تدعم الأعمدة والخطي والدائري والحلقي. أما{" "}
-              {CHART_TYPE_LABELS[chartType]} فتُصدَّر عبر مواصفة Vega-Lite في نواة التقارير بنفس
-              البيانات والمواصفة.
-            </p>
-          )}
+          <img
+            src={imageUri}
+            alt={titleAr}
+            className="safi-chart-canvas"
+            data-testid="safi-chart-image"
+          />
 
           <p className="safi-hint">
             <BarChart3 size={13} aria-hidden="true" /> المواصفة صالحة:{" "}
@@ -190,7 +226,50 @@ export function ChartsStudio(): ReactNode {
           </p>
         </SpotlightCard>
 
-        <SpotlightCard padding={22}>
+        <SpotlightCard padding={24}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+            <h2 className="safi-card-title" style={{ margin: 0 }}>
+              تحرير بيانات المخطط مباشرةً
+            </h2>
+            <button
+              type="button"
+              onClick={() => setRows([...rows, { region: `محافظة ${rows.length + 1}`, completion: 80 }])}
+              style={{ minHeight: "32px", padding: "4px 10px", fontSize: "11px" }}
+            >
+              <Plus size={12} aria-hidden="true" /> إضافة صف
+            </button>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "18px" }}>
+            {rows.map((r, idx) => (
+              <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: "8px", alignItems: "center" }}>
+                <input
+                  value={r.region}
+                  onChange={(e) => {
+                    const next = [...rows];
+                    next[idx] = { ...r, region: e.target.value };
+                    setRows(next);
+                  }}
+                  style={{ minHeight: "34px", padding: "4px 8px", fontSize: "12px" }}
+                  aria-label={`اسم المحافظة ${idx + 1}`}
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={r.completion}
+                  onChange={(e) => {
+                    const next = [...rows];
+                    next[idx] = { ...r, completion: Number(e.target.value) };
+                    setRows(next);
+                  }}
+                  style={{ minHeight: "34px", padding: "4px 8px", fontSize: "12px" }}
+                  aria-label={`نسبة الاكتمال ${idx + 1}`}
+                />
+              </div>
+            ))}
+          </div>
+
           <h2 className="safi-card-title">
             <AlertTriangle size={16} aria-hidden="true" /> حارس المصداقية
           </h2>
@@ -223,7 +302,7 @@ export function ChartsStudio(): ReactNode {
         </SpotlightCard>
       </div>
 
-      <SpotlightCard padding={22}>
+      <SpotlightCard padding={24}>
         <h2 className="safi-card-title">
           {allPass ? (
             <CheckCircle2 size={16} aria-hidden="true" />
@@ -248,6 +327,16 @@ export function ChartsStudio(): ReactNode {
               {[...svgAudit, ...paletteAudit].map((row) => (
                 <tr key={`${row.colour}-${row.background}`}>
                   <td className="safi-mono" dir="ltr">
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: "10px",
+                        height: "10px",
+                        borderRadius: "2px",
+                        backgroundColor: row.colour,
+                        marginInlineEnd: "6px"
+                      }}
+                    />
                     {row.colour}
                   </td>
                   <td className="safi-mono" dir="ltr">

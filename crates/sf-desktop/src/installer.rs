@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_portable_mode_detection() {
-        let dir = tempdir().unwrap();
+        let dir = crate::test_result(tempdir());
         let manager = PortableManager::new(dir.path());
 
         // Initially not portable
@@ -102,7 +102,7 @@ mod tests {
 
         // Create .portable marker
         let marker = dir.path().join(".portable");
-        std::fs::write(&marker, b"portable=true").unwrap();
+        crate::test_result(std::fs::write(&marker, b"portable=true"));
 
         assert!(manager.is_portable_mode());
         assert_eq!(manager.resolve_local_data_dir(), dir.path().join("data"));

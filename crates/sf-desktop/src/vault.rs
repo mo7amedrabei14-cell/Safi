@@ -68,22 +68,22 @@ mod tests {
     #[test]
     fn test_vault_key_derivation_and_encryption() {
         let salt = [1u8; 16];
-        let key = VaultKey::derive_from_passphrase("secure-master-pass", &salt).unwrap();
+        let key = crate::test_result(VaultKey::derive_from_passphrase("secure-master-pass", &salt));
         let plain = b"SafiData Secret Local Storage Data";
 
-        let cipher = encrypt_vault_payload(&key, plain).unwrap();
-        let decrypted = decrypt_vault_payload(&key, &cipher).unwrap();
+        let cipher = crate::test_result(encrypt_vault_payload(&key, plain));
+        let decrypted = crate::test_result(decrypt_vault_payload(&key, &cipher));
         assert_eq!(decrypted, plain);
     }
 
     #[test]
     fn test_vault_wrong_key_rejection() {
         let salt = [1u8; 16];
-        let key1 = VaultKey::derive_from_passphrase("secure-master-pass-1", &salt).unwrap();
-        let key2 = VaultKey::derive_from_passphrase("secure-master-pass-2", &salt).unwrap();
+        let key1 = crate::test_result(VaultKey::derive_from_passphrase("secure-master-pass-1", &salt));
+        let key2 = crate::test_result(VaultKey::derive_from_passphrase("secure-master-pass-2", &salt));
         let plain = b"Confidential Data";
 
-        let cipher = encrypt_vault_payload(&key1, plain).unwrap();
+        let cipher = crate::test_result(encrypt_vault_payload(&key1, plain));
         let res = decrypt_vault_payload(&key2, &cipher);
         assert!(res.is_err());
     }

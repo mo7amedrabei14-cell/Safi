@@ -138,13 +138,13 @@ mod tests {
         };
 
         // Stage update
-        updater.stage_update(&manifest).unwrap();
+        crate::test_result(updater.stage_update(&manifest));
         assert_eq!(updater.current_version, 101);
         assert_eq!(updater.rollback_version, 100);
         assert_eq!(updater.boot_state, UpdateStatus::PendingVerification);
 
         // Simulate boot failure -> triggers auto-rollback to 100 and quarantines 101
-        updater.handle_boot_failure().unwrap();
+        crate::test_result(updater.handle_boot_failure());
         assert_eq!(updater.current_version, 100);
         assert_eq!(updater.boot_state, UpdateStatus::RolledBackDueToFailure);
         assert!(updater.quarantined_builds.contains(&101));
@@ -165,8 +165,8 @@ mod tests {
             is_mandatory: false,
         };
 
-        updater.stage_update(&manifest).unwrap();
-        updater.confirm_boot_health().unwrap();
+        crate::test_result(updater.stage_update(&manifest));
+        crate::test_result(updater.confirm_boot_health());
         assert_eq!(updater.boot_state, UpdateStatus::Committed);
         assert_eq!(updater.current_version, 201);
     }

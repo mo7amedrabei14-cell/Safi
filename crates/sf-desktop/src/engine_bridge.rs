@@ -54,7 +54,7 @@ mod tests {
             operation: "clean_csv".to_string(),
             payload_size: 2048,
         };
-        let res = spawn_isolated_parser(&req).unwrap();
+        let res = crate::test_result(spawn_isolated_parser(&req));
         assert!(res.success);
         assert!(res.message.contains("بدون نافذة طرفية"));
     }

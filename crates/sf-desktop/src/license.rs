@@ -150,7 +150,7 @@ mod tests {
             "dev_abc",
         );
 
-        let status = verifier.verify(&signed, now, now - 500, "dev_abc").unwrap();
+        let status = crate::test_result(verifier.verify(&signed, now, now - 500, "dev_abc"));
         assert_eq!(status, LicenseStatus::Active);
     }
 
@@ -175,9 +175,7 @@ mod tests {
             "dev_abc",
         );
 
-        let status = verifier
-            .verify(&signed, now, now - 1000, "dev_abc")
-            .unwrap();
+        let status = crate::test_result(verifier.verify(&signed, now, now - 1000, "dev_abc"));
         match status {
             LicenseStatus::GracePeriod { days_remaining } => {
                 assert!(days_remaining > 0);
@@ -207,9 +205,7 @@ mod tests {
             "dev_abc",
         );
 
-        let status = verifier
-            .verify(&signed, now, now - 1000, "dev_abc")
-            .unwrap();
+        let status = crate::test_result(verifier.verify(&signed, now, now - 1000, "dev_abc"));
         assert_eq!(status, LicenseStatus::Expired);
     }
 
@@ -235,9 +231,7 @@ mod tests {
         );
 
         // Enterprise tier bypasses expiration offline
-        let status = verifier
-            .verify(&signed, now, now - 1000, "dev_abc")
-            .unwrap();
+        let status = crate::test_result(verifier.verify(&signed, now, now - 1000, "dev_abc"));
         match status {
             LicenseStatus::GracePeriod { .. } => {}
             _ => panic!("Expected GracePeriod status for Enterprise"),

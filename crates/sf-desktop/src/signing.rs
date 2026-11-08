@@ -55,7 +55,7 @@ mod tests {
                 .to_string(),
         };
         assert_eq!(
-            SignatureVerifier::verify(&info).unwrap(),
+            crate::test_result(SignatureVerifier::verify(&info)),
             SignatureStatus::Valid
         );
     }
@@ -94,7 +94,7 @@ mod tests {
                 .to_string(),
         };
         assert_eq!(
-            SignatureVerifier::verify(&info).unwrap(),
+            crate::test_result(SignatureVerifier::verify(&info)),
             SignatureStatus::MissingTimestamp
         );
     }

@@ -115,24 +115,24 @@ mod tests {
 
     #[test]
     fn test_atomic_write_success() {
-        let dir = tempdir().unwrap();
+        let dir = crate::test_result(tempdir());
         let file_path = dir.path().join("test_export.csv");
         let data = b"id,name,amount\n1,Ahmed,100.50\n";
 
-        atomic_write(&file_path, data).unwrap();
-        let read_back = fs::read(&file_path).unwrap();
+        crate::test_result(atomic_write(&file_path, data));
+        let read_back = crate::test_result(fs::read(&file_path));
         assert_eq!(read_back, data);
     }
 
     #[test]
     fn test_watched_folder_validation() {
-        let dir = tempdir().unwrap();
-        let watched = WatchedFolder::new(dir.path()).unwrap();
+        let dir = crate::test_result(tempdir());
+        let watched = crate::test_result(WatchedFolder::new(dir.path()));
 
         // Valid file inside watched folder
         let valid_sub = dir.path().join("incoming_file.csv");
         let base = watched.base_dir.clone();
-        let checked = watched.validate_watched_file_path(&valid_sub).unwrap();
+        let checked = crate::test_result(watched.validate_watched_file_path(&valid_sub));
         assert!(checked.starts_with(base));
 
         // Attempt traversal outside watched folder

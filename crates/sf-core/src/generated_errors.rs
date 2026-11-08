@@ -297,7 +297,6 @@ impl ErrorCode {
         domain: ErrorDomain::Unk,
         number: 1,
     };
-
     /// Registered error code `SF-UPD-001`.
     pub const SF_UPD_001: Self = Self {
         domain: ErrorDomain::Upd,
@@ -338,6 +337,7 @@ impl ErrorCode {
         domain: ErrorDomain::Upd,
         number: 8,
     };
+
     /// Complete array of all officially registered error codes.
     pub const ALL_REGISTERED: &[Self] = &[
         Self::SF_AUTH_001,

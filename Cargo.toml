@@ -11,6 +11,7 @@ members = [
     "crates/sf-wasm",
     "crates/sf-server",
     "crates/sf-desktop",
+    "crates/sf-cli",
 ]
 
 [workspace.package]

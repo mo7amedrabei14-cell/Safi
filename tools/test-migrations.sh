@@ -319,7 +319,7 @@ COMMIT;
 SQL
 
 echo "[test-migrations] exercising SQLx account registration, verification, and login under the restricted app role"
-SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test account_postgres -- --test-threads=1
+SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test account_postgres -- --ignored --test-threads=1
 
 echo "[test-migrations] rolling back 0004, 0003, 0002, and 0001 in reverse order"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \

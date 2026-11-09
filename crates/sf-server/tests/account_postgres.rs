@@ -65,6 +65,7 @@ async fn scalar_count(pool: &PgPool, query: &str, value: &str) -> i64 {
 }
 
 #[tokio::test]
+#[ignore = "requires SF_TEST_DATABASE_URL and the migrated PostgreSQL 18 NOBYPASSRLS app role"]
 async fn postgres_account_registration_verification_and_login_are_atomic_and_rls_safe() {
     let database_url =
         std::env::var("SF_TEST_DATABASE_URL").expect("SF_TEST_DATABASE_URL is required");

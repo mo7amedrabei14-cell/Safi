@@ -398,12 +398,7 @@ async fn a_new_device_session_revokes_the_previous_session_on_its_next_request()
 
     let first_after_replacement = send(
         &fixture.router,
-        request(
-            "GET",
-            "/v1/auth/sessions/current",
-            Some(&first_token),
-            None,
-        ),
+        request("GET", "/v1/auth/sessions/current", Some(&first_token), None),
     )
     .await;
     assert_eq!(first_after_replacement.status(), StatusCode::UNAUTHORIZED);

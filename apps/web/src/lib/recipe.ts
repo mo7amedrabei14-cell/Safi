@@ -13,24 +13,28 @@ export type RecipeStepId = keyof NormOptions;
 export interface RecipeStepDefinition {
   readonly id: RecipeStepId;
   readonly labelAr: string;
+  readonly labelEn: string;
   readonly detailAr: string;
+  readonly detailEn: string;
 }
 
 /** Canonical order: the digest depends on it, so it is never sorted at runtime. */
 export const RECIPE_STEPS: readonly RecipeStepDefinition[] = [
-  { id: "unifyAlif", labelAr: "توحيد الألف", detailAr: "أ إ آ ٱ ← ا" },
-  { id: "unifyYa", labelAr: "توحيد الياء", detailAr: "ى ← ي" },
-  { id: "unifyHa", labelAr: "توحيد التاء المربوطة", detailAr: "ة ← ه" },
-  { id: "removeTatweel", labelAr: "إزالة التطويل", detailAr: "حذف ـ الكاشيدة" },
-  { id: "removeDiacritics", labelAr: "إزالة التشكيل", detailAr: "حذف الفتحات والضمات والتنوين" },
-  { id: "normalizeDigits", labelAr: "توحيد الأرقام", detailAr: "٠-٩ و۰-۹ ← 0-9" },
-  { id: "joinCompoundNames", labelAr: "وصل الأسماء المركبة", detailAr: "عبد الله ← عبدالله" },
+  { id: "unifyAlif", labelAr: "توحيد الألف", labelEn: "Normalize Alif", detailAr: "أ إ آ ٱ ← ا", detailEn: "أ / إ / آ / ٱ → ا" },
+  { id: "unifyYa", labelAr: "توحيد الياء", labelEn: "Normalize Ya", detailAr: "ى ← ي", detailEn: "ى → ي" },
+  { id: "unifyHa", labelAr: "توحيد التاء المربوطة", labelEn: "Normalize Taa Marbuta", detailAr: "ة ← ه", detailEn: "ة → ه" },
+  { id: "removeTatweel", labelAr: "إزالة التطويل", labelEn: "Remove Tatweel", detailAr: "حذف ـ الكاشيدة", detailEn: "Remove the kashida elongation mark" },
+  { id: "removeDiacritics", labelAr: "إزالة التشكيل", labelEn: "Remove Diacritics", detailAr: "حذف الفتحات والضمات والتنوين", detailEn: "Remove Arabic vowel marks and tanween" },
+  { id: "normalizeDigits", labelAr: "توحيد الأرقام", labelEn: "Normalize Digits", detailAr: "٠-٩ و۰-۹ ← 0-9", detailEn: "٠-٩ and ۰-۹ → 0-9" },
+  { id: "joinCompoundNames", labelAr: "وصل الأسماء المركبة", labelEn: "Join Compound Names", detailAr: "عبد الله ← عبدالله", detailEn: "عبد الله → عبدالله" },
   {
     id: "cleanWhitespace",
     labelAr: "تنظيف المسافات",
-    detailAr: "حذف المحارف غير المرئية والمسافات المكررة"
+    labelEn: "Clean Whitespace",
+    detailAr: "حذف المحارف غير المرئية والمسافات المكررة",
+    detailEn: "Remove invisible characters and repeated whitespace"
   },
-  { id: "removeTitles", labelAr: "إزالة الألقاب", detailAr: "د. م. أ. الأستاذ دكتور" }
+  { id: "removeTitles", labelAr: "إزالة الألقاب", labelEn: "Remove Titles", detailAr: "د. م. أ. الأستاذ دكتور", detailEn: "Remove common professional and academic titles" }
 ];
 
 export type RecipeToggles = Readonly<Record<RecipeStepId, boolean>>;
@@ -134,7 +138,9 @@ export function validateWatchFolder(raw: string): WatchFolderValidation {
 export interface RecipeTemplate {
   readonly id: string;
   readonly nameAr: string;
+  readonly nameEn: string;
   readonly descriptionAr: string;
+  readonly descriptionEn: string;
   readonly toggles: RecipeToggles;
 }
 
@@ -142,7 +148,9 @@ export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
   {
     id: "clients",
     nameAr: "تنقية أسماء العملاء",
+    nameEn: "Clean Customer Names",
     descriptionAr: "توحيد الألف والتاء المربوطة، إزالة اللقب، ووصل الأسماء المركبة قبل المطابقة.",
+    descriptionEn: "Normalize Arabic letter variants, remove titles, and join compound names before matching.",
     toggles: {
       ...DEFAULT_RECIPE_TOGGLES,
       unifyHa: true,
@@ -153,7 +161,9 @@ export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
   {
     id: "phones",
     nameAr: "توحيد أرقام الهواتف",
+    nameEn: "Normalize Phone Numbers",
     descriptionAr: "أرقام لاتينية موحدة ومسافات نظيفة مع إبقاء بادئة الدولة كما هي.",
+    descriptionEn: "Standardize digits and whitespace while preserving each country calling code.",
     toggles: {
       ...DEFAULT_RECIPE_TOGGLES,
       unifyAlif: false,
@@ -165,7 +175,9 @@ export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
   {
     id: "schools",
     nameAr: "تقارير المدارس",
+    nameEn: "School Reports",
     descriptionAr: "تنظيف أسماء الطلاب مع إبقاء التشكيل عند الحاجة لإظهار الاسم كما ورد.",
+    descriptionEn: "Clean student names while preserving diacritics when the original spelling matters.",
     toggles: {
       ...DEFAULT_RECIPE_TOGGLES,
       removeDiacritics: false,
@@ -175,7 +187,9 @@ export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
   {
     id: "payroll",
     nameAr: "كشوف الرواتب",
+    nameEn: "Payroll Sheets",
     descriptionAr: "توحيد الأرقام والمسافات فقط، دون أي تغيير في الحروف أو الأسماء.",
+    descriptionEn: "Normalize digits and whitespace only, without changing letters or names.",
     toggles: {
       unifyAlif: false,
       unifyYa: false,

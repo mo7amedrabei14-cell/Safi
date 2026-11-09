@@ -7,8 +7,15 @@ describe("S1 End-to-End Vertical Slice Integration Verification (Section 19.7)",
     const manifestPath = path.resolve(process.cwd(), "apps/web/public/manifest.webmanifest");
     expect(fs.existsSync(manifestPath)).toBe(true);
     const content = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-    expect(content.name).toBe("صافي البيانات | SafiData");
+    expect(content.name).toBe("SafiData");
+    expect(content.short_name).toBe("SafiData");
     expect(content.display).toBe("standalone");
+
+    const arabicManifestPath = path.resolve(process.cwd(), "apps/web/public/manifest.ar.webmanifest");
+    expect(fs.existsSync(arabicManifestPath)).toBe(true);
+    const arabicContent = JSON.parse(fs.readFileSync(arabicManifestPath, "utf-8"));
+    expect(arabicContent.name).toBe("صافي البيانات");
+    expect(arabicContent.dir).toBe("rtl");
   });
 
   it("verifies all 10 S1 Owner Checklist items are satisfied and tested", () => {

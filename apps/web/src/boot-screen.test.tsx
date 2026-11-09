@@ -17,7 +17,8 @@ describe("SafiData first-paint introduction", () => {
     const html = renderToString(createElement(App, null));
 
     expect(html).toContain('class="safi-intro-splash"');
-    expect(html).toContain("عرض إقلاع صافي البيانات السينمائي");
+    expect(html).toContain("SafiData cinematic startup");
+    expect(html).not.toContain("صافي البيانات");
   });
 
   it("keeps one shared intro stylesheet with the required layout rules", () => {

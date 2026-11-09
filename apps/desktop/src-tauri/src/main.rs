@@ -91,7 +91,7 @@ fn main() {
                 "main",
                 tauri::WebviewUrl::App("index.html".into()),
             )
-            .title("صافي البيانات | SafiData")
+            .title("SafiData")
             .inner_size(1200.0, 800.0)
             .min_inner_size(960.0, 600.0)
             .resizable(true)

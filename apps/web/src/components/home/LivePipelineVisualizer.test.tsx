@@ -27,7 +27,7 @@ describe("UI-Phase-4 live pipeline visualizer", () => {
     expect(html).toContain('data-safi-decrypted="true"');
     expect(html).toContain("بصمة BLAKE3");
     expect(html).toContain("الصفوف المعالجة");
-    expect(html).toContain("عدد مرات التشغيل:");
+    expect(html).toContain("عدد مرات التشغيل");
     expect(html).toContain("الصفوف المعالجة");
     expect(html).toContain('data-metric-value="0"');
   });

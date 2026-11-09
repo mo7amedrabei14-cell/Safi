@@ -61,7 +61,11 @@ describe("SafiData startup and application shell", () => {
     expect(html).toContain('id="safi-manifest"');
     expect(bootLocale).toContain("/manifest.ar.webmanifest");
     expect(shareCard).toContain("SafiData");
-    expect(shareCard).not.toMatch(/[\\u0600-\\u06FF]/);
+    const hasArabicShareCopy = [...shareCard].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint >= 0x0600 && codePoint <= 0x06ff;
+    });
+    expect(hasArabicShareCopy).toBe(false);
   });
 
   it("uses English as the first-run locale for the default studio", () => {

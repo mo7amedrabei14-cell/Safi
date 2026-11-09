@@ -453,10 +453,8 @@ function localizeCleaningNode(node: ReactNode): ReactNode {
       const value = next[key];
       if (typeof value === "string") next[key] = translateCleaningText(value);
     }
-    if ("children" in next) {
-      next.children = localizeCleaningNode(next.children as ReactNode);
-    }
-    return cloneElement(node, next);
+    const children = localizeCleaningNode(node.props.children as ReactNode);
+    return cloneElement(node, next, children);
   }
   return node;
 }

@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(clean_res.unwrap(), 0);
         assert!(output_path.exists());
         let cleaned_output = fs::read_to_string(&output_path).unwrap();
-        assert!(cleaned_output.starts_with("# تنظيف صافي\\n"));
+        assert!(cleaned_output.starts_with("# تنظيف صافي\n"));
 
         // 4. Refuse overwriting input directly
         let same_file_res = run_cli_action(&[

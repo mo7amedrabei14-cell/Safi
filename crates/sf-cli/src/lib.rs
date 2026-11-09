@@ -102,10 +102,7 @@ pub fn run_cli_action(args: &[String]) -> Result<i32, String> {
                     &error.to_string(),
                 )
             })?;
-            let cleaned_content = format!(
-                "{}\n{content}",
-                localized("# تنظيف صافي", "# Cleaned by SafiData")
-            );
+            let cleaned_content = format!("# تنظيف صافي\n{content}");
 
             let temp_path = format!("{output}.tmp");
             fs::write(&temp_path, cleaned_content).map_err(|error| {
@@ -266,6 +263,8 @@ mod tests {
         ]);
         assert_eq!(clean_res.unwrap(), 0);
         assert!(output_path.exists());
+        let cleaned_output = fs::read_to_string(&output_path).unwrap();
+        assert!(cleaned_output.starts_with("# تنظيف صافي\\n"));
 
         // 4. Refuse overwriting input directly
         let same_file_res = run_cli_action(&[

@@ -78,3 +78,12 @@ python3 tools/verify-security.py
 # التحقق من المعاينة الجافة لتوليد عينات المجموعة الذهبية (No-Cost AI)
 python3 tools/seed-data/no-cost-gen.py --verify
 ```
+
+## لغة واجهة سطر الأوامر
+
+تظهر رسائل وأوامر Safi CLI بالإنجليزية افتراضيًا. لتشغيل الواجهة العربية، اضبط المتغير `SAFI_LANG` قبل تنفيذ الأمر:
+
+- PowerShell: `$env:SAFI_LANG = "ar"`
+- Bash: `export SAFI_LANG=ar`
+
+تقبل الواجهة أيضًا القيمة `ar-EG`. هذا الإعداد يغيّر رسائل CLI فقط؛ ولا يغيّر لغة بيانات الملف أو محتوى المخرجات والتقارير.

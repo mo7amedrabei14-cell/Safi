@@ -7,6 +7,10 @@ import { App } from "./App";
 const entryHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const bootCss = readFileSync(new URL("../public/boot.css", import.meta.url), "utf8");
 const appCss = readFileSync(new URL("./index.css", import.meta.url), "utf8");
+const introSource = readFileSync(
+  new URL("./components/brand/SafiIntroSplash.tsx", import.meta.url),
+  "utf8"
+);
 
 describe("SafiData first-paint introduction", () => {
   it("renders the cinematic intro on the first React commit", () => {
@@ -24,6 +28,22 @@ describe("SafiData first-paint introduction", () => {
     expect(appCss).toContain('data-fonts-ready="false"');
     expect(appCss.trimStart().startsWith("import ")).toBe(false);
     expect(appCss).not.toContain('describe("UI-Phase-5');
+  });
+
+  it("holds the opening frame still and guarantees a complete progress handoff", () => {
+    expect(introSource).toContain("INTRO_START_PAUSE_MS = 1_000");
+    expect(introSource).toContain("INTRO_PROGRESS_DURATION_SECONDS = 2.25");
+    expect(introSource).toContain("INTRO_PROGRESS_COMPLETION_HOLD_SECONDS = 0.22");
+    expect(introSource.indexOf("INTRO_START_PAUSE_MS")).toBeLessThan(
+      introSource.indexOf("gsap.timeline({")
+    );
+    expect(introSource).toContain('gsap.set(progress, { scaleX: 1, transformOrigin: "right center" })');
+    expect(appCss).toContain(
+      '.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-progress-fill'
+    );
+    expect(appCss).toContain(
+      '.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-orb-ring'
+    );
   });
 
   it("provides a boot curtain before the React root with local styles", () => {

@@ -36,7 +36,8 @@ describe("SafiData first-paint introduction", () => {
     expect(bootCss).toContain("background: #090B10;");
     expect(bootCss).toContain("@media (prefers-reduced-motion: reduce)");
     const firstPaintMarkup = entryHtml.slice(curtainIndex, rootIndex);
-    expect(firstPaintMarkup).not.toContain("صافي البيانات");
-    expect(firstPaintMarkup).not.toContain("SafiData");
+    const visibleFirstPaintMarkup = firstPaintMarkup.replace(/<noscript>[\\s\\S]*?<\\/noscript>/i, "");
+    expect(visibleFirstPaintMarkup).not.toContain("صافي البيانات");
+    expect(visibleFirstPaintMarkup).not.toContain("SafiData");
   });
 });

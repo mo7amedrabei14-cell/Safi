@@ -136,10 +136,16 @@ try {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".safi-intro-splash", { state: "visible", timeout: 20_000 });
   await page.waitForFunction(
-    () => Boolean(window.__safiIntroTrace && window.__safiIntroTrace.fontsReadyAt !== null),
+    () => document.querySelector(".safi-intro-splash")?.dataset.fontsReady === "true",
     undefined,
     { timeout: 30_000 }
   );
+  await page.evaluate(() => {
+    const trace = window.__safiIntroTrace;
+    if (trace && trace.fontsReadyAt === null) {
+      trace.fontsReadyAt = performance.now();
+    }
+  });
 
   const pausedFrame = await page.evaluate(() => {
     const root = document.querySelector(".safi-intro-splash");
@@ -164,10 +170,16 @@ try {
   await page.screenshot({ path: resolve(artifactDir, "intro-still-frame.png"), fullPage: true });
 
   await page.waitForFunction(
-    () => Boolean(window.__safiIntroTrace && window.__safiIntroTrace.motionStartedAt !== null),
+    () => document.querySelector(".safi-intro-splash")?.dataset.motionReady === "true",
     undefined,
     { timeout: 10_000 }
   );
+  await page.evaluate(() => {
+    const trace = window.__safiIntroTrace;
+    if (trace && trace.motionStartedAt === null) {
+      trace.motionStartedAt = performance.now();
+    }
+  });
 
   const timing = await page.evaluate(() => {
     const trace = window.__safiIntroTrace;

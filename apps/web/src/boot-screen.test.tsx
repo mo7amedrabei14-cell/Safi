@@ -34,9 +34,7 @@ describe("SafiData first-paint introduction", () => {
     expect(introSource).toContain("INTRO_START_PAUSE_MS = 1_000");
     expect(introSource).toContain("INTRO_PROGRESS_DURATION_SECONDS = 2.25");
     expect(introSource).toContain("INTRO_PROGRESS_COMPLETION_HOLD_SECONDS = 0.22");
-    const pauseWaitIndex = introSource.indexOf(
-      "window.setTimeout(resolve, INTRO_START_PAUSE_MS)"
-    );
+    const pauseWaitIndex = introSource.indexOf("window.setTimeout(resolve, INTRO_START_PAUSE_MS)");
     expect(pauseWaitIndex).toBeGreaterThan(-1);
     expect(pauseWaitIndex).toBeLessThan(introSource.indexOf("gsap.timeline({"));
     expect(introSource).toContain(

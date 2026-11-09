@@ -6,6 +6,7 @@ on:
     paths:
       - "crates/sf-server/src/auth/**"
       - "crates/sf-server/src/routes.rs"
+      - ".github/workflows/p0-02-rustfmt.yml"
 
 permissions:
   contents: write

@@ -7,6 +7,7 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { SafiIntroSplash } from "./components/brand/SafiIntroSplash";
+import { getInitialSafiLang } from "./lib/locale";
 
 const loadApplicationShell = async () => {
   const module = await import("./ApplicationShell");
@@ -19,6 +20,7 @@ export function App(): ReactNode {
   const [applicationRequested, setApplicationRequested] = useState(false);
   const [applicationReady, setApplicationReady] = useState(false);
   const [introMounted, setIntroMounted] = useState(true);
+  const [initialLang] = useState(getInitialSafiLang);
 
   useEffect(() => {
     const preloadTimer = window.setTimeout(() => {
@@ -42,6 +44,7 @@ export function App(): ReactNode {
   return (
     <>
       <SafiIntroSplash
+        lang={initialLang}
         open={introMounted}
         exiting={applicationReady}
         onAnimationComplete={requestApplication}

@@ -7,6 +7,8 @@ export interface ChartRecommendation {
   type: "bar" | "line" | "pie" | "scatter" | "kpi";
   titleAr: string;
   reasonAr: string;
+  titleEn: string;
+  reasonEn: string;
 }
 
 export function recommendCharts(
@@ -23,7 +25,9 @@ export function recommendCharts(
       type: "bar",
       titleAr: "مخطط الأعمدة المقارن",
       reasonAr:
-        "مناسب جدًا لمقارنة القيم العددية عبر الفئات النصية المختلفة مثل الأقسام أو الأسماء."
+        "مناسب جدًا لمقارنة القيم العددية عبر الفئات النصية المختلفة مثل الأقسام أو الأسماء.",
+      titleEn: "Comparative bar chart",
+      reasonEn: "Compare numeric values across categories such as departments, regions, or names."
     });
   }
 
@@ -31,7 +35,9 @@ export function recommendCharts(
     recommendations.push({
       type: "line",
       titleAr: "مخطط الخط الزمني",
-      reasonAr: "أفضل طريقة لعرض تطور القيم العددية بمرور الوقت وتحديد الاتجاهات."
+      reasonAr: "أفضل طريقة لعرض تطور القيم العددية بمرور الوقت وتحديد الاتجاهات.",
+      titleEn: "Time-series line chart",
+      reasonEn: "Show how numeric values change over time and identify trends."
     });
   }
 
@@ -39,7 +45,9 @@ export function recommendCharts(
     recommendations.push({
       type: "kpi",
       titleAr: "بطاقة المؤشر الرئيسي (KPI)",
-      reasonAr: "تعرض الإجمالي أو المتوسط العام بشكل بارز ومباشر لمتخذ القرار."
+      reasonAr: "تعرض الإجمالي أو المتوسط العام بشكل بارز ومباشر لمتخذ القرار.",
+      titleEn: "Key performance indicator (KPI)",
+      reasonEn: "Highlight the total or overall average for a quick decision."
     });
   }
 

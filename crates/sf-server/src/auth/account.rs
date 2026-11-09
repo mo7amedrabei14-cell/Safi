@@ -658,7 +658,7 @@ impl AccountRepository for SqlxAccountRepository {
     ) -> Result<bool, AuthError> {
         let mut transaction = self.pool.begin().await.map_err(|_| AuthError::BackendUnavailable)?;
         let user_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM users WHERE lower(email) = $1 AND email_verified_at IS NULL AND deleted_at IS NULL",
+            "SELECT id FROM users WHERE lower(email) = $1 AND email_verified_at IS NULL AND deleted_at IS NULL FOR UPDATE",
         )
         .bind(email)
         .fetch_optional(&mut *transaction)
@@ -990,5 +990,115 @@ mod tests {
             AuthError::InvalidRequest
         );
         assert!(fixture.mailer.messages().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn axum_register_verify_and_login_routes_issue_existing_session() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use serde_json::Value;
+        use tower::ServiceExt;
+        use crate::{app, AppState};
+
+        let sessions = Arc::new(in_memory_service().0);
+        let repository = Arc::new(MemoryAccountRepository::default());
+        let mailer = MemoryEmailSender::default();
+        let state = AppState::new(in_memory_service().0);
+        let account_service = AccountAuthService::new(
+            repository,
+            Arc::new(mailer.clone()),
+            state.auth.clone(),
+            "https://safidata.example",
+        );
+        let router = app(state.with_account_auth(account_service));
+
+        async fn send(router: &axum::Router, method: &str, uri: &str, body: Value) -> axum::response::Response {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            router.clone().oneshot(request).await.unwrap()
+        }
+
+        async fn read_json(response: axum::response::Response) -> Value {
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        }
+
+        let registered = send(
+            &router,
+            "POST",
+            "/v1/auth/register",
+            serde_json::json!({
+                "email": "route@example.test",
+                "display_name": "Route Test",
+                "password": "A secure phrase 2026!"
+            }),
+        ).await;
+        assert_eq!(registered.status(), StatusCode::ACCEPTED);
+        assert!(registered.headers().contains_key("x-request-id"));
+        assert!(read_json(registered).await["message"].as_str().is_some());
+
+        let before_verification = send(
+            &router,
+            "POST",
+            "/v1/auth/login",
+            serde_json::json!({
+                "email": "route@example.test",
+                "password": "A secure phrase 2026!",
+                "device_name": "Browser"
+            }),
+        ).await;
+        assert_eq!(before_verification.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(read_json(before_verification).await["code"], "SF-AUTH-001");
+
+        let messages = mailer.messages().await;
+        assert_eq!(messages.len(), 1);
+        let token = token_from_message(&messages[0]);
+        let verified = send(
+            &router,
+            "POST",
+            "/v1/auth/email/verify",
+            serde_json::json!({ "token": token }),
+        ).await;
+        assert_eq!(verified.status(), StatusCode::OK);
+
+        let signed_in = send(
+            &router,
+            "POST",
+            "/v1/auth/login",
+            serde_json::json!({
+                "email": "route@example.test",
+                "password": "A secure phrase 2026!",
+                "device_name": "Browser"
+            }),
+        ).await;
+        assert_eq!(signed_in.status(), StatusCode::CREATED);
+        let login_body = read_json(signed_in).await;
+        let token = login_body["token"].as_str().unwrap();
+        assert!(token.starts_with("sfs_"));
+
+        let current = {
+            let request = Request::builder()
+                .method("GET")
+                .uri("/v1/auth/sessions/current")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap();
+            router.clone().oneshot(request).await.unwrap()
+        };
+        assert_eq!(current.status(), StatusCode::OK);
+        assert_eq!(read_json(current).await["device_name"], "Browser");
+
+        let replay = send(
+            &router,
+            "POST",
+            "/v1/auth/email/verify",
+            serde_json::json!({ "token": token_from_message(&messages[0]) }),
+        ).await;
+        assert_eq!(replay.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let _ = sessions;
     }
 }

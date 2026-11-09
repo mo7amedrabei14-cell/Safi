@@ -36,7 +36,8 @@ echo "[test-migrations] seeding synthetic legacy workspaces before P0.01"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO users (id, email, display_name) VALUES
     ('10000000-0000-7000-8000-000000000001', 'p001-one@example.test', 'P0.01 One'),
-    ('10000000-0000-7000-8000-000000000002', 'p001-two@example.test', 'P0.01 Two');
+    ('10000000-0000-7000-8000-000000000002', 'p001-two@example.test', 'P0.01 Two'),
+    ('10000000-0000-7000-8000-000000000003', 'p001-three@example.test', 'P0.01 Three');
 
 INSERT INTO workspaces (id, name, plan_code) VALUES
     ('20000000-0000-7000-8000-000000000001', 'P0.01 Free Workspace', 'free'),
@@ -46,7 +47,8 @@ INSERT INTO workspaces (id, name, plan_code) VALUES
 INSERT INTO memberships (workspace_id, user_id, role) VALUES
     ('20000000-0000-7000-8000-000000000001', '10000000-0000-7000-8000-000000000001', 'owner'),
     ('20000000-0000-7000-8000-000000000002', '10000000-0000-7000-8000-000000000002', 'owner'),
-    ('20000000-0000-7000-8000-000000000003', '10000000-0000-7000-8000-000000000001', 'owner');
+    ('20000000-0000-7000-8000-000000000003', '10000000-0000-7000-8000-000000000001', 'owner'),
+    ('20000000-0000-7000-8000-000000000003', '10000000-0000-7000-8000-000000000003', 'member');
 SQL
 
 echo "[test-migrations] applying 0002 and P0.01 migration 0003"
@@ -189,7 +191,7 @@ BEGIN
             workspace_id, user_id, device_name, platform, installation_key_hash
         ) VALUES (
             '20000000-0000-7000-8000-000000000002',
-            '10000000-0000-7000-8000-000000000001',
+            '10000000-0000-7000-8000-000000000003',
             'Wrong Workspace Device', 'linux', decode(repeat('3', 64), 'hex')
         );
         RAISE EXCEPTION 'A device was attached to a workspace without user membership';

@@ -1,12 +1,6 @@
 /**
- * `apps/web/src/components/layout/CommandPalette.tsx`
- *
- * ⌘K / Ctrl+K glass palette. Search is Arabic-normalised, so `التنظيف` and
- * `تنظيف` (different alif forms) both find the cleaning studio.
- *
- * Keyboard: ↑/↓ move the active option with wrap-around, Enter runs it, Escape
- * closes. Screen readers get a combobox + listbox pair with
- * `aria-activedescendant`.
+ * ⌘K / Ctrl+K command palette with locale-aware labels and Arabic-normalized search.
+ * Keyboard: ↑/↓ move, Enter runs, Escape closes.
  */
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -15,12 +9,14 @@ import { normalizeText } from "../../lib/arabic-normalize";
 import { readClientAuditEnv, runClientSecurityAudit, summarizeAudit } from "../../lib/client-audit";
 import type { ClientAuditCheck } from "../../lib/client-audit";
 import { DOCK_TABS } from "./FloatingGlassDock";
-import type { SafiDockTabId } from "./FloatingGlassDock";
+import type { SafiDockTabId, SafiLang } from "./FloatingGlassDock";
 
 export interface PaletteItem {
   readonly id: string;
   readonly label: string;
   readonly hint: string;
+  readonly labelEn: string;
+  readonly hintEn: string;
   readonly tab?: SafiDockTabId;
   readonly action?: "security-audit";
 }
@@ -34,39 +30,47 @@ const TAB_HINTS: Readonly<Record<SafiDockTabId, string>> = {
   owner: "البطاقات الست وحارس Zero Trust"
 };
 
+const TAB_HINTS_EN: Readonly<Record<SafiDockTabId, string>> = {
+  home: "Product overview and command center",
+  cleaning: "Clean, normalize, and protect sensitive data",
+  recipes: "Deterministic cleaning recipes and watch folders",
+  charts: "Chart studio and WCAG 2.2 AA contrast checks",
+  library: "Reusable templates and quality reports",
+  owner: "Owner controls, security, and audit trail"
+};
+
 export const PALETTE_ITEMS: readonly PaletteItem[] = [
   ...DOCK_TABS.map((tab) => ({
     id: `nav-${tab.id}`,
     label: tab.label,
     hint: TAB_HINTS[tab.id],
+    labelEn: tab.labelEn,
+    hintEn: TAB_HINTS_EN[tab.id],
     tab: tab.id
   })),
   {
     id: "security-audit",
     label: "فحص أمني سريع",
     hint: "يفحص سياق التشغيل وWebCrypto وOPFS وحماية الإطار",
+    labelEn: "Quick security audit",
+    hintEn: "Check runtime context, WebCrypto, OPFS, and frame protections",
     action: "security-audit"
   }
 ];
 
-export function filterCommands(
-  items: readonly PaletteItem[],
-  query: string
-): readonly PaletteItem[] {
+export function filterCommands(items: readonly PaletteItem[], query: string): readonly PaletteItem[] {
   const needle = normalizeText(query.trim()).toLowerCase();
-  if (needle.length === 0) {
-    return items;
-  }
+  if (needle.length === 0) return items;
   return items.filter((item) =>
-    normalizeText(`${item.label} ${item.hint}`).toLowerCase().includes(needle)
+    normalizeText(`${item.label} ${item.hint} ${item.labelEn} ${item.hintEn}`)
+      .toLowerCase()
+      .includes(needle)
   );
 }
 
 /** Wrap-around index arithmetic, exported for tests. */
 export function nextIndex(current: number, delta: number, length: number): number {
-  if (length <= 0) {
-    return 0;
-  }
+  if (length <= 0) return 0;
   return (current + delta + length) % length;
 }
 
@@ -74,22 +78,30 @@ export interface CommandPaletteProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onSelectTab: (tab: SafiDockTabId) => void;
+  readonly lang?: SafiLang;
 }
 
-export function CommandPalette({ open, onClose, onSelectTab }: CommandPaletteProps): ReactNode {
+export function CommandPalette({ open, onClose, onSelectTab, lang = "en" }: CommandPaletteProps): ReactNode {
+  const isAr = lang === "ar";
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [audit, setAudit] = useState<readonly ClientAuditCheck[] | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const restoreFocusRef = useRef<Element | null>(null);
 
-  const items = useMemo(() => filterCommands(PALETTE_ITEMS, query), [query]);
+  const sourceItems = useMemo(
+    () => PALETTE_ITEMS.map((item) => ({
+      ...item,
+      label: isAr ? item.label : item.labelEn,
+      hint: isAr ? item.hint : item.hintEn
+    })),
+    [isAr]
+  );
+  const items = useMemo(() => filterCommands(sourceItems, query), [sourceItems, query]);
   const activeItem = items[Math.min(activeIndex, Math.max(0, items.length - 1))];
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
+    if (!open) return;
     setQuery("");
     setActiveIndex(0);
     setAudit(null);
@@ -103,31 +115,22 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
       }
     };
     window.addEventListener("keydown", onKeyDown);
-
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       const previous = restoreFocusRef.current;
-      if (previous instanceof HTMLElement) {
-        previous.focus();
-      }
+      if (previous instanceof HTMLElement) previous.focus();
     };
   }, [open, onClose]);
 
   useEffect(() => {
-    if (activeItem === undefined || typeof document === "undefined") {
-      return;
-    }
+    if (activeItem === undefined || typeof document === "undefined") return;
     document.getElementById(`safi-cmd-${activeItem.id}`)?.scrollIntoView({ block: "nearest" });
   }, [activeItem]);
 
-  if (!open) {
-    return null;
-  }
+  if (!open) return null;
 
   const runItem = (item: PaletteItem | undefined): void => {
-    if (item === undefined) {
-      return;
-    }
+    if (item === undefined) return;
     if (item.tab !== undefined) {
       onSelectTab(item.tab);
       onClose();
@@ -142,14 +145,10 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((current) => nextIndex(current, 1, items.length));
-      return;
-    }
-    if (event.key === "ArrowUp") {
+    } else if (event.key === "ArrowUp") {
       event.preventDefault();
       setActiveIndex((current) => nextIndex(current, -1, items.length));
-      return;
-    }
-    if (event.key === "Enter") {
+    } else if (event.key === "Enter") {
       event.preventDefault();
       runItem(activeItem);
     }
@@ -162,9 +161,7 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
     <div
       className="safi-palette-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
+        if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
@@ -172,10 +169,10 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
         role="dialog"
         aria-modal="true"
         aria-labelledby="safi-palette-title"
-        dir="rtl"
+        dir={isAr ? "rtl" : "ltr"}
       >
         <h2 id="safi-palette-title" className="safi-visually-hidden">
-          لوحة الأوامر السريعة
+          {isAr ? "لوحة الأوامر السريعة" : "Quick command palette"}
         </h2>
 
         <div className="safi-palette-search">
@@ -189,8 +186,8 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
             aria-controls="safi-palette-list"
             aria-autocomplete="list"
             aria-activedescendant={activeId}
-            aria-label="ابحث عن أداة أو أمر"
-            placeholder="ابحث عن أداة أو أمر…"
+            aria-label={isAr ? "ابحث عن أداة أو أمر" : "Search tools and commands"}
+            placeholder={isAr ? "ابحث عن أداة أو أمر…" : "Search tools and commands…"}
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
@@ -203,14 +200,14 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
 
         {items.length === 0 ? (
           <p className="safi-palette-empty" role="status">
-            لا توجد نتائج مطابقة لـ «{query}».
+            {isAr ? `لا توجد نتائج مطابقة لـ «${query}».` : `No matching results for “${query}”.`}
           </p>
         ) : (
           <ul
             id="safi-palette-list"
             className="safi-palette-list"
             role="listbox"
-            aria-label="الأوامر المتاحة"
+            aria-label={isAr ? "الأوامر المتاحة" : "Available commands"}
           >
             {items.map((item, index) => (
               <li
@@ -226,9 +223,7 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
                 }}
               >
                 <span className="safi-palette-option-label">
-                  {item.action === "security-audit" ? (
-                    <ShieldCheck size={15} aria-hidden="true" />
-                  ) : null}
+                  {item.action === "security-audit" ? <ShieldCheck size={15} aria-hidden="true" /> : null}
                   {item.label}
                 </span>
                 <span className="safi-palette-option-hint">{item.hint}</span>
@@ -240,7 +235,9 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
         {audit !== null && summary !== null && (
           <div className="safi-audit" role="status" aria-live="polite">
             <p className="safi-audit-summary">
-              نتيجة الفحص: {summary.passed} من {summary.total} فحوصات ناجحة
+              {isAr
+                ? `نتيجة الفحص: ${summary.passed} من ${summary.total} فحوصات ناجحة`
+                : `Audit result: ${summary.passed} of ${summary.total} checks passed`}
             </p>
             <ul className="safi-list">
               {audit.map((check) => (
@@ -249,9 +246,11 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
                   className={check.passed ? "safi-status--ok" : "safi-status--bad"}
                 >
                   <strong>
-                    {check.passed ? "✓" : "✗"} {check.labelAr}
+                    {check.passed ? "✓" : "✗"} {isAr ? check.labelAr : check.id}
                   </strong>
-                  <span className="safi-hint">{check.detailAr}</span>
+                  <span className="safi-hint">
+                    {isAr ? check.detailAr : (check.passed ? "Passed." : "Review this security check.")}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -259,9 +258,9 @@ export function CommandPalette({ open, onClose, onSelectTab }: CommandPalettePro
         )}
 
         <p className="safi-palette-footer">
-          <span>↑ ↓ للتنقل</span>
-          <span>Enter للتنفيذ</span>
-          <span>Esc للإغلاق</span>
+          <span>{isAr ? "↑ ↓ للتنقل" : "↑ ↓ Navigate"}</span>
+          <span>{isAr ? "Enter للتنفيذ" : "Enter Run"}</span>
+          <span>{isAr ? "Esc للإغلاق" : "Esc Close"}</span>
         </p>
       </div>
     </div>

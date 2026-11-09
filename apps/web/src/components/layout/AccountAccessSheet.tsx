@@ -22,6 +22,12 @@ export interface AccountAccessSheetProps {
 
 function getRequestError(error: unknown, isAr: boolean, isVerification = false): string {
   if (error instanceof SafiAuthApiError) {
+    if (error.code === "SF-AUTH-007") {
+      return isAr
+        ? "رابط التحقق غير صالح أو انتهت صلاحيته. اطلب رابطًا جديدًا."
+        : "This verification link is invalid or has expired. Request a new link.";
+    }
+
     if (error.status === 0 || error.status >= 500) {
       return isAr
         ? "خدمة الحسابات غير متاحة حاليًا. حاول مرة أخرى لاحقًا."

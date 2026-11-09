@@ -209,7 +209,8 @@ impl AccountAuthService {
     /// A verification token is a one-time capability and is never reflected in
     /// the response. Invalid, expired, and replayed values share one response.
     pub async fn verify_email(&self, token: &str) -> Result<(), AuthError> {
-        let token_hash = hash_presented_verification_token(token)?;
+        let token_hash = hash_presented_verification_token(token)
+            .map_err(|_| AuthError::InvalidVerificationToken)?;
         let accepted = self
             .repository
             .verify_email(&token_hash, unix_now())
@@ -217,7 +218,7 @@ impl AccountAuthService {
         if accepted {
             Ok(())
         } else {
-            Err(AuthError::InvalidRequest)
+            Err(AuthError::InvalidVerificationToken)
         }
     }
 
@@ -1020,13 +1021,22 @@ mod tests {
                 .verify_email(&token_from_message(&first[0]))
                 .await
                 .unwrap_err(),
-            AuthError::InvalidRequest
+            AuthError::InvalidVerificationToken
         );
         fixture
             .service
             .verify_email(&token_from_message(&second[1]))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn malformed_verification_tokens_use_the_dedicated_error_code() {
+        let fixture = fixture();
+        assert_eq!(
+            fixture.service.verify_email("not-a-64-character-hex-token").await.unwrap_err(),
+            AuthError::InvalidVerificationToken
+        );
     }
 
     #[tokio::test]
@@ -1041,11 +1051,11 @@ mod tests {
         let token = token_from_message(&messages[0]);
         assert_eq!(
             service.verify_email(&token).await.unwrap_err(),
-            AuthError::InvalidRequest
+            AuthError::InvalidVerificationToken
         );
         assert_eq!(
             service.verify_email(&token).await.unwrap_err(),
-            AuthError::InvalidRequest
+            AuthError::InvalidVerificationToken
         );
     }
 
@@ -1234,5 +1244,6 @@ mod tests {
         )
         .await;
         assert_eq!(replay.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(read_json(replay).await["code"], "SF-AUTH-007");
     }
 }

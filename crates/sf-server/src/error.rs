@@ -22,8 +22,10 @@ pub enum AuthError {
     InsufficientScope,
     /// PostgreSQL or Valkey is unreachable.
     BackendUnavailable,
-    /// Request body is not acceptable (e.g. blank device name).
+    /// Request body or account field is malformed.
     InvalidRequest,
+    /// Email-verification token is malformed, unknown, expired, or already consumed.
+    InvalidVerificationToken,
 }
 
 impl AuthError {
@@ -37,6 +39,7 @@ impl AuthError {
             Self::InsufficientScope => "SF-AUTH-004",
             Self::BackendUnavailable => "SF-AUTH-005",
             Self::InvalidRequest => "SF-AUTH-006",
+            Self::InvalidVerificationToken => "SF-AUTH-007",
         }
     }
 
@@ -47,7 +50,7 @@ impl AuthError {
             Self::InvalidCredentials | Self::Expired | Self::Revoked => StatusCode::UNAUTHORIZED,
             Self::InsufficientScope => StatusCode::FORBIDDEN,
             Self::BackendUnavailable => StatusCode::SERVICE_UNAVAILABLE,
-            Self::InvalidRequest => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::InvalidRequest | Self::InvalidVerificationToken => StatusCode::UNPROCESSABLE_ENTITY,
         }
     }
 
@@ -61,6 +64,7 @@ impl AuthError {
             Self::InsufficientScope => "ليس لديك صلاحية لهذا الإجراء",
             Self::BackendUnavailable => "خدمة الدخول غير متاحة مؤقتًا",
             Self::InvalidRequest => "طلب الدخول غير صالح",
+            Self::InvalidVerificationToken => "رابط التحقق غير صالح أو انتهت صلاحيته",
         }
     }
 }

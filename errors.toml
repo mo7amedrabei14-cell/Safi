@@ -236,11 +236,19 @@ owner_note = "Database or Valkey failure inside the auth layer; return 503, neve
 
 [SF-AUTH-006]
 severity = "error"
-title_ar = "طلب الدخول غير صالح"
-action_ar = "تحقق من اسم الجهاز المطلوب ثم أعد المحاولة."
-title_en = "Invalid authentication request"
-action_en = "Check the requested device name, then try again."
-owner_note = "Malformed auth request body (e.g. blank device_name or over 120 chars)."
+title_ar = "الطلب غير صالح"
+action_ar = "راجع صيغة الطلب والحقول المطلوبة وأطوالها ثم أعد المحاولة."
+title_en = "Invalid request"
+action_en = "Check the request format, required fields, and input lengths, then retry."
+owner_note = "Malformed or invalid account/authentication request fields; never echo submitted credentials."
+
+[SF-AUTH-007]
+severity = "error"
+title_ar = "رابط التحقق غير صالح أو انتهت صلاحيته"
+action_ar = "اطلب رابط تحقق جديدًا من صفحة تسجيل الدخول ثم افتح أحدث رسالة وصلتك."
+title_en = "Email verification link is invalid or expired"
+action_en = "Request a new verification link from sign-in, then open the latest email."
+owner_note = "Verification token was malformed, unknown, expired, or already consumed; do not log the submitted token."
 
 [SF-UNK-001]
 severity = "fatal"

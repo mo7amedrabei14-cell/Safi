@@ -186,11 +186,11 @@ export function FloatingGlassDock({
             type="button"
             onClick={onToggleLang}
             className="safi-topbar-btn"
-            aria-label={lang === "ar" ? "Switch to English" : "التبديل إلى العربية"}
+            aria-label={lang === "ar" ? "التبديل إلى الإنجليزية" : "Switch to Arabic"}
             style={{ minHeight: "44px", height: "38px" }}
           >
             <Globe size={15} aria-hidden="true" />
-            <span>{lang === "ar" ? "English" : "العربية"}</span>
+            <span>{lang === "ar" ? "English" : "Arabic"}</span>
           </button>
 
           {/* 2. Day / Night Theme Switcher ONLY (نهاري / ليلي) */}

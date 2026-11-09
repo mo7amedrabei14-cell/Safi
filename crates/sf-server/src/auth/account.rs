@@ -1000,7 +1000,6 @@ mod tests {
         use tower::ServiceExt;
         use crate::{app, AppState};
 
-        let sessions = Arc::new(in_memory_service().0);
         let repository = Arc::new(MemoryAccountRepository::default());
         let mailer = MemoryEmailSender::default();
         let state = AppState::new(in_memory_service().0);
@@ -1099,6 +1098,5 @@ mod tests {
             serde_json::json!({ "token": token_from_message(&messages[0]) }),
         ).await;
         assert_eq!(replay.status(), StatusCode::UNPROCESSABLE_ENTITY);
-        let _ = sessions;
     }
 }

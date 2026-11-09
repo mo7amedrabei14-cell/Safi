@@ -6,7 +6,6 @@ on:
     paths:
       - "crates/sf-server/src/auth/**"
       - "crates/sf-server/src/routes.rs"
-      - ".github/workflows/p0-02-rustfmt.yml"
 
 permissions:
   contents: write
@@ -26,12 +25,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
           cargo fmt --all
           git add crates/sf-server/src/auth/account.rs
           git add crates/sf-server/src/auth/mod.rs
           git add crates/sf-server/src/auth/repository.rs
           git add crates/sf-server/src/auth/service.rs
           git add crates/sf-server/src/routes.rs
+          git add crates/sf-server/src/lib.rs
           git rm .github/workflows/p0-02-rustfmt.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -389,7 +389,9 @@ function translateCleaningText(value: string): string {
       /^تم تحميل مجموعة بيانات «(.+)» بنجاح في الذاكرة المحلية\.$/,
       (m) => {
         const label = m[1] ?? "";
-        return 'Loaded dataset "' + (CLEANING_EN[label] ?? label) + '" successfully into local memory.';
+        return (
+          'Loaded dataset "' + (CLEANING_EN[label] ?? label) + '" successfully into local memory.'
+        );
       }
     ],
     [

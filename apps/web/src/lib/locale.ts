@@ -9,11 +9,6 @@ export function parseSafiLang(value: string | null | undefined): SafiLang | null
 }
 
 export function getInitialSafiLang(): SafiLang {
-  if (typeof document !== "undefined") {
-    const fromDocument = parseSafiLang(document.documentElement.dataset.safiLocale);
-    if (fromDocument !== null) return fromDocument;
-  }
-
   if (typeof window !== "undefined") {
     try {
       const fromStorage = parseSafiLang(window.localStorage.getItem(SAFI_LOCALE_STORAGE_KEY));
@@ -21,6 +16,11 @@ export function getInitialSafiLang(): SafiLang {
     } catch {
       // Storage may be unavailable in private or restricted browser contexts.
     }
+  }
+
+  if (typeof document !== "undefined") {
+    const fromDocument = parseSafiLang(document.documentElement.dataset.safiLocale);
+    if (fromDocument !== null) return fromDocument;
   }
 
   return "en";

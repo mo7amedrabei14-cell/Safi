@@ -47,9 +47,9 @@ export interface RecipesStudioProps {
   readonly onSelectTab?: (tab: SafiDockTabId) => void;
 }
 
-export function RecipesStudio({ lang = "ar", onSelectTab }: RecipesStudioProps = {}): ReactNode {
+export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps = {}): ReactNode {
   const isAr = lang === "ar";
-  const [name, setName] = useState("تنقية أسماء العملاء");
+  const [name, setName] = useState(lang === "ar" ? "تنقية أسماء العملاء" : "Clean customer names");
   const [toggles, setToggles] = useState<RecipeToggles>(DEFAULT_RECIPE_TOGGLES);
   const [stepOrder, setStepOrder] = useState<readonly RecipeStepId[]>(
     RECIPE_STEPS.map((s) => s.id)

@@ -403,45 +403,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn expired_session_is_rejected() {
-        let (service, _api_keys, _sessions, plaintext, _workspace, _user) = fixture().await;
-        let principal = service.authenticate_api_key(&plaintext).await.unwrap();
-        let issued = service.create_session(&principal, "جهاز").await.unwrap();
-
-        let hash = token_hash(&issued.token);
+    async fn expired_session_is_rejected_even_when_a_stale_cache_entry_exists() {
+        let issued = generate_session_token();
+        let now = unix_now();
         let expired = SessionRecord {
-            id: issued.session.id,
-            workspace_id: principal.workspace_id,
-            user_id: principal.user_id,
+            id: Uuid::now_v7(),
+            workspace_id: Uuid::now_v7(),
+            user_id: Uuid::now_v7(),
             api_key_id: None,
-            token_hash: hash.clone(),
+            token_hash: issued.token_hash().to_owned(),
             device_name: "جهاز".to_owned(),
-            scopes: principal.scopes.clone(),
-            created_at: unix_now() - 100,
-            last_seen_at: unix_now() - 100,
-            expires_at: unix_now() - 1,
+            scopes: vec![Scope::Read],
+            created_at: now - 100,
+            last_seen_at: now - 100,
+            expires_at: now - 1,
             revoked: false,
         };
+
+        let sessions = Arc::new(
+            super::super::repository::InMemorySessionRepository::new(),
+        );
+        sessions.replace_active(&expired).await.unwrap();
+
         let cache = Arc::new(super::super::cache::InMemoryAuthCache::new());
         cache
             .set(
-                &session_cache_key(&hash),
+                &session_cache_key(&expired.token_hash),
                 serde_json::to_string(&expired).unwrap(),
                 Duration::from_secs(60),
             )
             .await
             .unwrap();
+
         let service = AuthService::new(
             Arc::new(InMemoryApiKeyRepository::new(vec![]).await),
-            Arc::new(super::super::repository::InMemorySessionRepository::new()),
+            sessions,
             cache,
         );
+
         assert_eq!(
             service
-                .authenticate_session(&issued.token)
+                .authenticate_session(issued.plaintext())
                 .await
                 .unwrap_err(),
             AuthError::Expired
         );
-    }
-}
+    }}

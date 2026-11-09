@@ -153,6 +153,10 @@ async fn missing_or_malformed_credentials_are_rejected_with_problem_json() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response.headers()["content-type"],
+        "application/problem+json"
+    );
     let body = json_body(response).await;
     assert_eq!(body["code"], "SF-AUTH-001");
     assert_eq!(body["status"], 401);

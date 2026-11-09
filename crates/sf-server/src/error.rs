@@ -3,7 +3,7 @@
 //! the response body or the logs (AGENTS.md Rule 4).
 
 use axum::{
-    http::StatusCode,
+    http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -88,6 +88,11 @@ impl IntoResponse for AuthError {
             status: self.status().as_u16(),
             code: self.code(),
         };
-        (self.status(), Json(body)).into_response()
+        let mut response = (self.status(), Json(body)).into_response();
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/problem+json"),
+        );
+        response
     }
 }

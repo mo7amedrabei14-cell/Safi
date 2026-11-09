@@ -11,20 +11,20 @@ describe("UI-Phase-4 floating glass dock", () => {
 
     expect(DOCK_TABS).toHaveLength(6);
     for (const label of [
-      "الرئيسية",
-      "التنظيف وPII",
-      "الوصفات",
-      "الرسوم البيانية",
-      "المكتبة",
-      "لوحة المالك"
+      "Website",
+      "Cleaning App",
+      "Recipes App",
+      "Charts App",
+      "Library App",
+      "Owner App"
     ]) {
       expect(html).toContain(label);
     }
 
     // Legacy semantic strings must survive so earlier suites keep passing.
-    expect(html).toContain("المكتبة");
-    expect(html).toContain("الإعدادات");
-    expect(html).toContain("التنقل الرئيسي");
+    expect(html).toContain("Library");
+    expect(html).toContain("Settings");
+    expect(html).toContain("Main navigation");
   });
 
   it("marks exactly the active tab and keeps the brand, island and palette triggers", () => {
@@ -34,11 +34,20 @@ describe("UI-Phase-4 floating glass dock", () => {
 
     expect(html.split('aria-current="page"').length - 1).toBe(1);
     expect(html).toContain('data-tab-id="charts"');
-    expect(html).toContain('aria-label="شعار صافي البيانات"');
-    expect(html).toContain('aria-label="لوحة الأوامر السريعة"');
+    expect(html).toContain('aria-label="SafiData logo"');
+    expect(html).toContain('aria-label="Command palette"');
     expect(html).toContain("⌘K");
-    expect(html).toContain("نواة Rust نشطة");
-    expect(html).toContain('aria-label="الإعدادات"');
+    expect(html).toContain("Rust engine active");
+    expect(html).toContain('aria-label="Settings"');
+  });
+
+  it("renders the Arabic brand only when Arabic is selected", () => {
+    const html = renderToString(
+      createElement(FloatingGlassDock, { activeTab: "home", onSelect: () => undefined, lang: "ar" })
+    );
+    expect(html).toContain('aria-label="شعار صافي البيانات"');
+    expect(html).toContain("صافي البيانات");
+    expect(html).not.toContain('aria-label="SafiData logo"');
   });
 
   it("keeps every dock control at the 44px touch target", () => {

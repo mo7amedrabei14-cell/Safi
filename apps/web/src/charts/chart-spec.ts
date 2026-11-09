@@ -8,6 +8,7 @@ export interface ChartSpec {
   version: string;
   type: ChartType;
   titleAr: string;
+  titleEn?: string;
   data: Array<Record<string, string | number>>;
   xAxisKey: string;
   yAxisKey: string;
@@ -37,7 +38,7 @@ export function validateChartSpec(spec: ChartSpec): ValidationResult {
   };
 }
 
-export function generateDeterministicSvg(spec: ChartSpec): string {
+export function generateDeterministicSvg(spec: ChartSpec, lang: "ar" | "en" = "ar"): string {
   const validation = validateChartSpec(spec);
   if (!validation.valid) {
     throw new Error(`Invalid ChartSpec: ${validation.errors.join(", ")}`);
@@ -49,7 +50,8 @@ export function generateDeterministicSvg(spec: ChartSpec): string {
   // Deterministic SVG rendering
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
   svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
-  svg += `<text x="20" y="30" font-family="Cairo, sans-serif" font-size="18" font-weight="bold" fill="#111827">${spec.titleAr}</text>`;
+  const chartTitle = lang === "ar" ? spec.titleAr : (spec.titleEn ?? spec.titleAr);
+  svg += `<text x="20" y="30" font-family="Inter, sans-serif" font-size="18" font-weight="bold" fill="#111827">${chartTitle}</text>`;
 
   const count = spec.data.length;
   if (count > 0) {

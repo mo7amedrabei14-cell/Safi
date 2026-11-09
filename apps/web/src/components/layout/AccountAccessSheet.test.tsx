@@ -37,7 +37,7 @@ describe("account access sheet", () => {
 
     expect(html).toContain("تسجيل الدخول");
     expect(html).toContain("البريد الإلكتروني");
-    expect(html).toContain("إنشاء الحساب وإرسال التحقق");
+    expect(html).toContain("حساب جديد");
     expect(html).toContain('dir="rtl"');
   });
 

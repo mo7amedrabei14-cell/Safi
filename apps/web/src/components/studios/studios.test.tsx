@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { WCAG_AA_UI_GRAPHIC_MIN_RATIO, contrastRatio } from "@safi/design-tokens";
 import { CleaningStudio, SAMPLE_CLEANING_TEXT } from "./CleaningStudio";
@@ -13,7 +12,7 @@ import { RECIPE_TEMPLATES, recipeDigest } from "../../lib/recipe";
 
 describe("UI-Phase-5 Cleaning & PII studio", () => {
   it("renders the normalization, masking and token tables", () => {
-    const html = renderToString(createElement(CleaningStudio, { lang: "ar" }));
+    const html = renderToString(<CleaningStudio lang="ar" />);
 
     expect(html).toContain("التنظيف وPII");
     expect(html).toContain("نتيجة التطبيع العربي");
@@ -26,7 +25,7 @@ describe("UI-Phase-5 Cleaning & PII studio", () => {
   });
 
   it("defaults to English UI while retaining Arabic sample data", () => {
-    const html = renderToString(createElement(CleaningStudio, null));
+    const html = renderToString(<CleaningStudio />);
 
     expect(html).toContain("Cleaning & PII");
     expect(html).toContain("Normalization result");
@@ -44,7 +43,7 @@ describe("UI-Phase-5 Cleaning & PII studio", () => {
 
 describe("UI-Phase-5 Recipes studio", () => {
   it("renders a deterministic canonical recipe pointing at a valid F1 folder", () => {
-    const html = renderToString(createElement(RecipesStudio, { lang: "ar" }));
+    const html = renderToString(<RecipesStudio lang="ar" />);
 
     expect(html).toContain("الوصفات");
     expect(html).toContain("الوصفة القانونية");
@@ -56,7 +55,7 @@ describe("UI-Phase-5 Recipes studio", () => {
   });
 
   it("defaults to English and keeps the recipe output copy localized", () => {
-    const html = renderToString(createElement(RecipesStudio, null));
+    const html = renderToString(<RecipesStudio />);
 
     expect(html).toContain("Recipes");
     expect(html).toContain("Canonical recipe");
@@ -83,7 +82,7 @@ describe("UI-Phase-5 Chart studio", () => {
   );
 
   it("renders the preview, credibility guard and contrast table", () => {
-    const html = renderToString(createElement(ChartsStudio, { lang: "ar" }));
+    const html = renderToString(<ChartsStudio lang="ar" />);
 
     expect(html).toContain("الرسوم البيانية");
     expect(html).toContain("التحقق من تباين WCAG 2.2 AA");
@@ -94,7 +93,7 @@ describe("UI-Phase-5 Chart studio", () => {
   });
 
   it("defaults to English labels and validation guidance", () => {
-    const html = renderToString(createElement(ChartsStudio, null));
+    const html = renderToString(<ChartsStudio />);
 
     expect(html).toContain("Charts");
     expect(html).toContain("WCAG 2.2 AA contrast audit");
@@ -106,7 +105,7 @@ describe("UI-Phase-5 Chart studio", () => {
 
 describe("UI-Phase-5 Library studio", () => {
   it("lists the four templates with stable digests and honest signing copy", () => {
-    const html = renderToString(createElement(LibraryStudio, { lang: "ar" }));
+    const html = renderToString(<LibraryStudio lang="ar" />);
 
     expect(html.split("data-template-id=").length - 1).toBe(RECIPE_TEMPLATES.length);
     for (const template of RECIPE_TEMPLATES) {
@@ -118,7 +117,7 @@ describe("UI-Phase-5 Library studio", () => {
   });
 
   it("defaults to English template and signature guidance", () => {
-    const html = renderToString(createElement(LibraryStudio, null));
+    const html = renderToString(<LibraryStudio />);
 
     expect(html).toContain("Template library & quality reports");
     expect(html).toContain("Recipe digest (BLAKE3)");

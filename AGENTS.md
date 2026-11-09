@@ -1,7 +1,7 @@
 # AGENTS.md (SafiData / صافي — v5.0 Full Gold Master)
 
 ## What this is
-Arabic-first, local-first data cleaning, charting, and reporting platform (Web PWA, Windows, Linux, CLI; Mobile 1.1/1.2).
+English-default, bilingual (English/Arabic), local-first data cleaning, charting, and reporting platform (Web PWA, Windows, Linux, CLI; Mobile 1.1/1.2).
 The full specification is in `docs/spec/`. Precedence: `docs/spec/20-v5-architecture-upgrades.md` & `docs/spec/18-review.md` > all earlier sections.
 The owner receives all reports in simple, structured Arabic following `.agents/skills/i-have-adhd/SKILL.md`.
 
@@ -13,9 +13,9 @@ The owner receives all reports in simple, structured Arabic following `.agents/s
 5. Never write your own cryptography. Use audited RustCrypto / libsodium (`XChaCha20-Poly1305`, `Argon2id`, `Ed25519`, `X25519`, `BLAKE3`, `PASETO v4`).
 6. Pin every dependency to an exact version with a lockfile. Disable `postinstall` scripts.
 7. The engine crates (`crates/sf-*`) have ZERO network access. CI fails if a network crate appears in them (`tools/check-no-network.sh`).
-8. All user-visible strings come from i18n ICU files (Arabic first, English second). No hard-coded strings.
+8. All user-visible strings come from i18n ICU files (English is the first-run default; Arabic is fully supported and selectable). Never hard-code interface text. CI must catch missing translations instead of silently leaking another language. Localized brand names must use BRAND_CONFIG.
 9. Every error has a code from `errors.toml` (`SF-<DOMAIN>-<NNN>`). No silent failures.
-10. UI: RTL first, Tailwind CSS v4 design tokens only, light and dark both, WCAG 2.2 AA, every drag has a click alternative, respect `prefers-reduced-motion`. Supervised by **UI/UX Pro Max Skill** and **I-Have-ADHD Skill**.
+10. UI: LTR by default for English and RTL for Arabic, with both directions fully supported; Tailwind CSS v4 design tokens only, light and dark both, WCAG 2.2 AA, every drag has a click alternative, respect `prefers-reduced-motion`. Supervised by **UI/UX Pro Max Skill** and **I-Have-ADHD Skill**.
 11. Security: strict CSP (no `unsafe-inline`, no `unsafe-eval`); sandbox file parsers with memory and time limits; neutralize CSV/Excel formula injection on export; never execute formulas or macros. Audited in every slice by **Cloudflare Security Audit Skill** and **Strix AI Pentesting**.
 12. Determinism: same file + same recipe = byte-identical output.
 13. Never modify the user's original file. Exports are always new files, written atomically (temp file -> `fsync` -> rename).
@@ -31,7 +31,7 @@ The owner receives all reports in simple, structured Arabic following `.agents/s
 ## Workflow per task (Claudex Loop)
 1. Read `docs/tasks/<id>.md` and referenced spec files.
 2. Write `docs/plans/<id>.md` BEFORE coding.
-3. Implement on a task branch with small conventional commits.
+3. Implement directly on `main` with small conventional commits; do not create task branches.
 4. Run full local gate (`make check` including **Codeburn**, **Cloudflare Security Skill**, and **Strix**).
 5. Write `docs/reports/<id>.md` in simple Arabic using the owner report template.
 6. STOP and wait for owner acceptance.

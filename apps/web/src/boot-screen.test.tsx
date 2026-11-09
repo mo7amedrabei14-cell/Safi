@@ -22,7 +22,7 @@ describe("SafiData first-paint introduction", () => {
     expect(appCss).toContain(".safi-intro-copy");
     expect(appCss).toContain(".safi-intro-progress-fill");
     expect(appCss).toContain('data-fonts-ready="false"');
-    expect(appCss).not.toMatch(/^\\s*import\\s/m);
+    expect(appCss.trimStart()).not.toMatch(/^import\\s/m);
     expect(appCss).not.toContain('describe("UI-Phase-5');
   });
 
@@ -36,7 +36,7 @@ describe("SafiData first-paint introduction", () => {
     expect(bootCss).toContain("background: #090B10;");
     expect(bootCss).toContain("@media (prefers-reduced-motion: reduce)");
     const firstPaintMarkup = entryHtml.slice(curtainIndex, rootIndex);
-    const visibleFirstPaintMarkup = firstPaintMarkup.replace(/<noscript>[\\s\\S]*?<\\/noscript>/i, "");
+    const visibleFirstPaintMarkup = firstPaintMarkup.split("<noscript>")[0] ?? firstPaintMarkup;
     expect(visibleFirstPaintMarkup).not.toContain("صافي البيانات");
     expect(visibleFirstPaintMarkup).not.toContain("SafiData");
   });

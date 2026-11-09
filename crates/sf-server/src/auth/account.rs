@@ -13,8 +13,8 @@ use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 use async_trait::async_trait;
 use lettre::message::header::ContentType;
-use lettre::message::Mailbox;
 use lettre::transport::smtp::authentication::Credentials;
+use lettre::message::Mailbox;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -275,7 +275,7 @@ impl AccountAuthService {
     }
 
     async fn dispatch_verification(&self, email: &str, token: &str) {
-        let url = format!("{}/verify-email?token={token}", self.public_base_url);
+        let url = format!("{}/?verify_email={token}", self.public_base_url);
         if self
             .email_sender
             .send_verification(email, &url)
@@ -306,7 +306,10 @@ fn validate_display_name(raw: &str) -> Result<String, AuthError> {
 }
 
 fn validate_new_password(password: &str) -> Result<(), AuthError> {
-    if password.len() < 12 || password.len() > 128 || password.chars().all(char::is_whitespace) {
+    if password.chars().count() < 12
+        || password.len() > 128
+        || password.chars().all(char::is_whitespace)
+    {
         return Err(AuthError::InvalidRequest);
     }
     Ok(())
@@ -910,7 +913,7 @@ mod tests {
         assert_eq!(messages[0].0, "user@example.test");
         assert!(messages[0]
             .1
-            .starts_with("https://safidata.example/verify-email?token="));
+            .starts_with("https://safidata.example/?verify_email="));
 
         let failed = fixture
             .service

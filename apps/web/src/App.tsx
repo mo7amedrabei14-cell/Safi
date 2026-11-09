@@ -1,8 +1,7 @@
 /**
  * SafiData boot coordinator.
  *
- * The product application is code-split and preloaded during the intro, but it
- * is not mounted until the entrance animation has completed.
+ * The product application is requested immediately and loads under the short intro.
  */
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -25,8 +24,8 @@ function readVerificationToken(): string | null {
 }
 
 export function App(): ReactNode {
-  const [applicationRequested, setApplicationRequested] = useState(false);
   const [applicationReady, setApplicationReady] = useState(false);
+  const [introAnimationComplete, setIntroAnimationComplete] = useState(false);
   const [introMounted, setIntroMounted] = useState(true);
   const [initialLang] = useState(getInitialSafiLang);
   const [verificationToken] = useState(readVerificationToken);
@@ -48,15 +47,8 @@ export function App(): ReactNode {
     }
   }, [verificationToken]);
 
-  useEffect(() => {
-    const preloadTimer = window.setTimeout(() => {
-      void loadApplicationShell();
-    }, 1_200);
-    return () => window.clearTimeout(preloadTimer);
-  }, []);
-
-  const requestApplication = useCallback((): void => {
-    setApplicationRequested(true);
+  const markIntroAnimationComplete = useCallback((): void => {
+    setIntroAnimationComplete(true);
   }, []);
 
   const markApplicationReady = useCallback((): void => {
@@ -72,18 +64,16 @@ export function App(): ReactNode {
       <SafiIntroSplash
         lang={initialLang}
         open={introMounted}
-        exiting={applicationReady}
-        onAnimationComplete={requestApplication}
+        exiting={applicationReady && introAnimationComplete}
+        onAnimationComplete={markIntroAnimationComplete}
         onExitComplete={unmountIntro}
       />
-      {applicationRequested ? (
-        <Suspense fallback={null}>
-          <ApplicationShell
-            onReady={markApplicationReady}
-            initialVerificationToken={verificationToken}
-          />
-        </Suspense>
-      ) : null}
+      <Suspense fallback={null}>
+        <ApplicationShell
+          onReady={markApplicationReady}
+          initialVerificationToken={verificationToken}
+        />
+      </Suspense>
     </>
   );
 }

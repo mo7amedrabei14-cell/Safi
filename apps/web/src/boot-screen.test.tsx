@@ -11,6 +11,7 @@ const introSource = readFileSync(
   new URL("./components/brand/SafiIntroSplash.tsx", import.meta.url),
   "utf8"
 );
+const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
 describe("SafiData first-paint introduction", () => {
   it("renders the cinematic intro on the first React commit", () => {
@@ -25,37 +26,37 @@ describe("SafiData first-paint introduction", () => {
     expect(bootCss).toContain(".safi-intro-splash");
     expect(bootCss.toLowerCase()).toContain("color: #f5f5f7;");
     expect(bootCss).toContain(".safi-intro-copy");
-    expect(bootCss).toContain(".safi-intro-progress-fill");
+    expect(bootCss).not.toContain("safi-intro-progress");
+    expect(bootCss).toContain(".safi-intro-transition-path");
+    expect(bootCss).toContain('[dir="rtl"] .safi-intro-arrow');
+    expect(bootCss).toContain(".safi-intro-skip:focus-visible");
+    expect(bootCss).toContain("safiIntroBootHalo 1.2s ease-in-out infinite alternate");
     expect(bootCss).toContain('data-fonts-ready="false"');
-    expect(bootCss).toContain(
-      '#safi-boot-screen[data-fonts-ready="false"] .safi-intro-progress-fill'
-    );
-    expect(bootCss).not.toContain(
-      '.safi-intro-splash[data-fonts-ready="false"] .safi-intro-progress-fill'
-    );
     expect(appCss).not.toContain(".safi-intro-splash {");
     expect(appCss.trimStart().startsWith("import ")).toBe(false);
     expect(appCss).not.toContain('describe("UI-Phase-5');
   });
 
-  it("starts motion immediately and exits only after a complete progress handoff", () => {
+  it("starts the intro and requests the application without a timed wait", () => {
     expect(introSource).not.toContain("INTRO_START_PAUSE_MS");
-    expect(introSource).toContain("INTRO_PROGRESS_DURATION_SECONDS = 2.25");
-    expect(introSource).toContain("INTRO_PROGRESS_COMPLETION_HOLD_SECONDS = 0.22");
-    expect(introSource).toContain("INTRO_EXIT_DURATION_SECONDS = 0.65");
+    expect(introSource).toContain("INTRO_MOTION_DURATION_SECONDS = 0.58");
+    expect(introSource).toContain("INTRO_EXIT_DURATION_SECONDS = 0.48");
+    expect(introSource).not.toContain("INTRO_PROGRESS");
     expect(introSource.indexOf('root.dataset.motionReady = "true"')).toBeLessThan(
       introSource.indexOf("gsap.timeline({")
     );
     expect(introSource).toContain("onExitComplete?.()");
-    expect(introSource).toContain(
-      'gsap.set(progress, { scaleX: 1, transformOrigin: "right center" })'
-    );
-    expect(bootCss).toContain(
-      '.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-progress-fill'
-    );
-    expect(bootCss).toContain(
-      '.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-orb-ring'
-    );
+    expect(introSource).toContain('rootRef.current.dataset.motionComplete = "true"');
+    expect(introSource).toContain("strokeDashoffset: 0");
+    expect(introSource).toContain("clipPath: `circle(0px at ${endX}px ${centerY}px)`");
+    expect(introSource).toContain('className="safi-intro-transition-path"');
+    expect(appSource).toContain("<ApplicationShell");
+    expect(appSource).not.toContain("preloadTimer");
+    expect(appSource).not.toContain("applicationRequested");
+    expect(bootCss).not.toContain("safi-intro-progress");
+    expect(bootCss).toContain(".safi-intro-splash .safi-pm-logo-orbit");
+    expect(bootCss).toContain("animation: safiIntroOrbit 1.4s linear infinite");
+    expect(introSource).toContain("useLayoutEffect(() =>");
   });
 
   it("uses the exact React opening composition before JavaScript loads", () => {
@@ -71,7 +72,8 @@ describe("SafiData first-paint introduction", () => {
     expect(firstPaintMarkup).toContain('class="safi-intro-splash"');
     expect(firstPaintMarkup).toContain('class="safi-intro-stage"');
     expect(firstPaintMarkup).toContain('class="safi-intro-copy"');
-    expect(firstPaintMarkup).toContain('class="safi-intro-progress-fill"');
+    expect(firstPaintMarkup).not.toContain("safi-intro-progress");
+    expect(firstPaintMarkup).toContain('class="safi-intro-arrow"');
     expect(firstPaintMarkup.split("data-intro-dot=").length - 1).toBe(9);
     expect(firstPaintMarkup.split("data-intro-bar=").length - 1).toBe(3);
     expect(firstPaintMarkup).not.toContain("safi-boot-progress");

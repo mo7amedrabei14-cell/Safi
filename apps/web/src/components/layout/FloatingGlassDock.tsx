@@ -217,7 +217,7 @@ export function FloatingGlassDock({
             style={{ minHeight: "44px", height: "38px" }}
           >
             <Globe size={15} aria-hidden="true" />
-            <span>{lang === "ar" ? "English" : "Arabic"}</span>
+            <span>{lang === "ar" ? "English" : "العربية"}</span>
           </button>
 
           {/* 2. Day / Night Theme Switcher ONLY (نهاري / ليلي) */}

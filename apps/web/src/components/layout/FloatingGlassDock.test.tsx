@@ -51,6 +51,19 @@ describe("UI-Phase-4 floating glass dock", () => {
     expect(html).not.toContain('aria-label="SafiData logo"');
   });
 
+  it("labels the language switch with the destination language", () => {
+    const english = renderToString(
+      createElement(FloatingGlassDock, { activeTab: "home", onSelect: () => undefined, lang: "en" })
+    );
+    const arabic = renderToString(
+      createElement(FloatingGlassDock, { activeTab: "home", onSelect: () => undefined, lang: "ar" })
+    );
+
+    expect(english).toContain(">العربية</span>");
+    expect(english).not.toContain(">Arabic</span>");
+    expect(arabic).toContain(">English</span>");
+  });
+
   it("keeps every dock control at the 44px touch target", () => {
     const html = renderToString(
       createElement(FloatingGlassDock, { activeTab: "home", onSelect: () => undefined })

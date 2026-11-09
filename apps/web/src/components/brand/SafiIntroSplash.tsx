@@ -5,7 +5,7 @@
  * local fonts load in parallel, and the intro exits over the committed application.
  */
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { MOTION_DOTS } from "./SafiPrismLogo";
 import type { SafiLang } from "../layout/FloatingGlassDock";
@@ -18,9 +18,8 @@ export interface SafiIntroSplashProps {
   readonly onExitComplete?: (() => void) | undefined;
 }
 
-export const INTRO_PROGRESS_DURATION_SECONDS = 2.25;
-export const INTRO_PROGRESS_COMPLETION_HOLD_SECONDS = 0.22;
-export const INTRO_EXIT_DURATION_SECONDS = 0.65;
+export const INTRO_MOTION_DURATION_SECONDS = 0.58;
+export const INTRO_EXIT_DURATION_SECONDS = 0.48;
 
 function canRunIntroTimeline(): boolean {
   if (
@@ -59,7 +58,7 @@ export function SafiIntroSplash({
 }: SafiIntroSplashProps): ReactNode {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const progressRef = useRef<HTMLDivElement | null>(null);
+  const transitionPathRef = useRef<SVGPathElement | null>(null);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
   const finishedRef = useRef(false);
   const [fontsReady, setFontsReady] = useState(false);
@@ -69,6 +68,9 @@ export function SafiIntroSplash({
       return;
     }
     finishedRef.current = true;
+    if (rootRef.current !== null) {
+      rootRef.current.dataset.motionComplete = "true";
+    }
     onAnimationComplete?.();
   }, [onAnimationComplete]);
 
@@ -107,7 +109,7 @@ export function SafiIntroSplash({
     };
   }, [open]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) {
       timelineRef.current?.kill();
       timelineRef.current = null;
@@ -125,8 +127,6 @@ export function SafiIntroSplash({
     const dots = Array.from(svg.querySelectorAll<SVGCircleElement>("[data-intro-dot]"));
     const bars = Array.from(svg.querySelectorAll<SVGRectElement>("[data-intro-bar]"));
     const trendPath = svg.querySelector<SVGPathElement>("[data-intro-trend]");
-    const progress = progressRef.current;
-
     if (trendPath !== null && typeof trendPath.getTotalLength === "function") {
       const length = trendPath.getTotalLength();
       trendPath.style.strokeDasharray = String(length);
@@ -136,9 +136,8 @@ export function SafiIntroSplash({
     root.dataset.motionReady = "true";
 
     if (!canRunIntroTimeline()) {
-      if (progress !== null) {
-        gsap.set(progress, { scaleX: 1 });
-      }
+      gsap.set(dots, { opacity: 0 });
+      gsap.set(bars, { opacity: 1, scaleY: 1, transformOrigin: "center bottom" });
       if (trendPath !== null) {
         trendPath.style.strokeDasharray = "none";
         trendPath.style.strokeDashoffset = "0";
@@ -147,12 +146,10 @@ export function SafiIntroSplash({
       return;
     }
 
+    gsap.set(bars, { opacity: 0, scaleY: 0, transformOrigin: "center bottom" });
     const timeline = gsap.timeline({
       defaults: { ease: "power3.out" },
       onComplete: () => {
-        if (progress !== null) {
-          gsap.set(progress, { scaleX: 1, transformOrigin: "right center" });
-        }
         if (fallbackTimer !== undefined) {
           window.clearTimeout(fallbackTimer);
           fallbackTimer = undefined;
@@ -163,15 +160,6 @@ export function SafiIntroSplash({
     });
     timelineRef.current = timeline;
 
-    if (progress !== null) {
-      timeline.fromTo(
-        progress,
-        { scaleX: 0, transformOrigin: "right center" },
-        { scaleX: 1, duration: INTRO_PROGRESS_DURATION_SECONDS, ease: "power2.inOut" },
-        0
-      );
-    }
-
     dots.forEach((dot, index) => {
       const spec = MOTION_DOTS[index];
       if (spec !== undefined) {
@@ -179,10 +167,10 @@ export function SafiIntroSplash({
           dot,
           {
             attr: { cx: spec.gridX, cy: spec.gridY },
-            duration: 0.44,
-            ease: "elastic.out(1, 0.75)"
+            duration: 0.27,
+            ease: "back.out(1.35)"
           },
-          0.28
+          0.04 + index * 0.012
         );
       }
     });
@@ -191,25 +179,24 @@ export function SafiIntroSplash({
       dots,
       {
         opacity: 0,
-        scale: 0.4,
-        duration: 0.24,
+        scale: 0.5,
+        duration: 0.15,
         ease: "power2.in"
       },
-      0.78
+      0.25
     );
 
     if (bars.length > 0) {
-      timeline.fromTo(
+      timeline.to(
         bars,
-        { scaleY: 0, opacity: 0, transformOrigin: "center bottom" },
         {
           scaleY: 1,
           opacity: 1,
-          duration: 0.44,
-          stagger: 0.07,
-          ease: "back.out(1.6)"
+          duration: 0.2,
+          stagger: 0.035,
+          ease: "back.out(1.45)"
         },
-        0.9
+        0.27
       );
     }
 
@@ -218,24 +205,23 @@ export function SafiIntroSplash({
         trendPath,
         {
           strokeDashoffset: 0,
-          duration: 0.4,
+          duration: 0.2,
           ease: "power2.out"
         },
-        1.22
+        0.36
       );
     }
 
-    timeline.call(
-      () => undefined,
-      [],
-      INTRO_PROGRESS_DURATION_SECONDS + INTRO_PROGRESS_COMPLETION_HOLD_SECONDS
-    );
+    timeline.call(() => undefined, [], INTRO_MOTION_DURATION_SECONDS);
 
     fallbackTimer = window.setTimeout(() => {
       timeline.kill();
       timelineRef.current = null;
-      if (progress !== null) {
-        gsap.set(progress, { scaleX: 1, transformOrigin: "right center" });
+      gsap.set(dots, { opacity: 0 });
+      gsap.set(bars, { opacity: 1, scaleY: 1, transformOrigin: "center bottom" });
+      if (trendPath !== null) {
+        trendPath.style.strokeDasharray = "none";
+        trendPath.style.strokeDashoffset = "0";
       }
       finishOnce();
     }, 6000);
@@ -267,24 +253,56 @@ export function SafiIntroSplash({
     }
 
     const stage = root.querySelector<HTMLElement>(".safi-intro-stage");
-    const exitTimeline = gsap.timeline({ onComplete: () => onExitComplete?.() });
-    if (stage !== null) {
-      exitTimeline.to(
-        stage,
-        { autoAlpha: 0, y: -20, scale: 0.96, duration: 0.4, ease: "power2.in" },
-        0
-      );
+    const arrow = root.querySelector<SVGSVGElement>(".safi-intro-arrow");
+    const transitionPath = transitionPathRef.current;
+    if (stage === null || arrow === null || transitionPath === null) {
+      onExitComplete?.();
+      return;
     }
+
+    const arrowBounds = arrow.getBoundingClientRect();
+    const isRtl = lang === "ar";
+    const startX = isRtl ? arrowBounds.left : arrowBounds.right;
+    const endX = isRtl ? 24 : window.innerWidth - 24;
+    const centerY = arrowBounds.top + arrowBounds.height / 2;
+    transitionPath.setAttribute("d", `M ${startX} ${centerY} H ${endX}`);
+    const pathLength = transitionPath.getTotalLength();
+    transitionPath.style.strokeDasharray = `${pathLength}`;
+    transitionPath.style.strokeDashoffset = `${pathLength}`;
+
+    const radius = Math.hypot(window.innerWidth, window.innerHeight) + 24;
+    gsap.set(root, { clipPath: `circle(${radius}px at ${endX}px ${centerY}px)` });
+    gsap.set(transitionPath, { opacity: 1 });
+
+    const exitTimeline = gsap.timeline({ onComplete: () => onExitComplete?.() });
+    exitTimeline.to(
+      transitionPath,
+      {
+        strokeDashoffset: 0,
+        duration: INTRO_EXIT_DURATION_SECONDS * 0.46,
+        ease: "power2.out"
+      },
+      0
+    );
+    exitTimeline.to(
+      stage,
+      { autoAlpha: 0, y: -20, scale: 0.96, duration: 0.32, ease: "power2.in" },
+      0.12
+    );
     exitTimeline.to(
       root,
-      { autoAlpha: 0, duration: INTRO_EXIT_DURATION_SECONDS, ease: "power2.inOut" },
-      0
+      {
+        clipPath: `circle(0px at ${endX}px ${centerY}px)`,
+        duration: INTRO_EXIT_DURATION_SECONDS * 0.57,
+        ease: "power2.inOut"
+      },
+      0.28
     );
 
     return () => {
       exitTimeline.kill();
     };
-  }, [exiting, onExitComplete, open]);
+  }, [exiting, lang, onExitComplete, open]);
 
   if (!open) {
     return null;
@@ -301,6 +319,32 @@ export function SafiIntroSplash({
       }
       dir={lang === "ar" ? "rtl" : "ltr"}
     >
+      <svg className="safi-intro-transition" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="safi-intro-transition-gradient">
+            <stop offset="0%" stopColor="var(--sf-color-primary-soft)" stopOpacity="0.35" />
+            <stop offset="55%" stopColor="var(--sf-color-info)" />
+            <stop offset="100%" stopColor="var(--sf-color-text-primary)" />
+          </linearGradient>
+          <marker
+            id="safi-intro-transition-arrowhead"
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="8"
+            markerHeight="8"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--sf-color-text-primary)" />
+          </marker>
+        </defs>
+        <path
+          ref={transitionPathRef}
+          className="safi-intro-transition-path"
+          markerEnd="url(#safi-intro-transition-arrowhead)"
+          d=""
+        />
+      </svg>
       <div className="safi-intro-stage">
         <div className="safi-intro-orb">
           <div className="safi-intro-orb-ring" aria-hidden="true" />
@@ -388,17 +432,29 @@ export function SafiIntroSplash({
           </p>
         </div>
 
-        <div className="safi-intro-progress-track" aria-hidden="true">
-          <div ref={progressRef} className="safi-intro-progress-fill" />
-        </div>
-
         <button
           type="button"
           className="safi-intro-skip"
           onClick={skipIntro}
           aria-label={lang === "ar" ? "الدخول إلى الموقع" : "Enter SafiData"}
         >
-          {lang === "ar" ? "الدخول إلى الموقع ←" : "Enter SafiData →"}
+          <span>{lang === "ar" ? "الدخول إلى الموقع" : "Enter SafiData"}</span>
+          <svg
+            className="safi-intro-arrow"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            aria-hidden="true"
+          >
+            <path
+              d="M4 12h15m-6-6 6 6-6 6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
       </div>
     </div>

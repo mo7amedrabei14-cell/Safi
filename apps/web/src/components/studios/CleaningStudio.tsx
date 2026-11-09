@@ -1517,4 +1517,4 @@ export function CleaningStudio({ lang = "en", onSelectTab }: CleaningStudioProps
     </section>
   );
   return isAr ? content : localizeCleaningNode(content);
-}}
+}

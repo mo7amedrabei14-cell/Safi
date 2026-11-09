@@ -285,13 +285,12 @@ impl ApiKeyRepository for SqlxApiKeyRepository {
             .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;
-        let workspace_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT workspace_id FROM api_keys WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(|_| backend_error())?;
+        let workspace_id =
+            sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM api_keys WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(|_| backend_error())?;
         let Some(workspace_id) = workspace_id else {
             transaction.commit().await.map_err(|_| backend_error())?;
             return Ok(());
@@ -442,13 +441,12 @@ impl SessionRepository for SqlxSessionRepository {
             .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;
-        let workspace_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT workspace_id FROM sessions WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(|_| backend_error())?;
+        let workspace_id =
+            sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM sessions WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(|_| backend_error())?;
         let Some(workspace_id) = workspace_id else {
             transaction.commit().await.map_err(|_| backend_error())?;
             return Ok(());
@@ -474,13 +472,12 @@ impl SessionRepository for SqlxSessionRepository {
             .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;
-        let workspace_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT workspace_id FROM sessions WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(|_| backend_error())?;
+        let workspace_id =
+            sqlx::query_scalar::<_, Uuid>("SELECT workspace_id FROM sessions WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(|_| backend_error())?;
         let Some(workspace_id) = workspace_id else {
             transaction.commit().await.map_err(|_| backend_error())?;
             return Ok(());

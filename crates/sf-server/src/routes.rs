@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::auth::account::{
-    AccountAuthService, AccountMessage, LoginAccountRequest, LoginResponse,
-    RegisterAccountRequest, ResendVerificationRequest, VerifyEmailRequest,
+    AccountAuthService, AccountMessage, LoginAccountRequest, LoginResponse, RegisterAccountRequest,
+    ResendVerificationRequest, VerifyEmailRequest,
 };
 use crate::auth::middleware::{
     require_any_credential, require_api_key, require_session, AnyCredentialGuard, ApiKeyGuard,
@@ -112,7 +112,6 @@ pub struct UpdateQuery {
     pub channel: Option<String>,
     pub platform: Option<String>,
 }
-
 
 /// Public email/password registration. The same response is returned for new
 /// and pre-existing email addresses to prevent account enumeration.

@@ -894,7 +894,7 @@ mod tests {
     fn token_from_message(message: &(String, String)) -> String {
         message
             .1
-            .split("token=")
+            .split("verify_email=")
             .nth(1)
             .unwrap_or_default()
             .to_owned()

@@ -117,7 +117,9 @@ jobs:
 
       - name: Install pinned Playwright Chromium
         run: |
-          npm install --prefix /tmp/safi-playwright --no-save --no-package-lock playwright@1.56.1
+          mkdir -p /tmp/safi-playwright
+          npm init -y --prefix /tmp/safi-playwright
+          npm install --prefix /tmp/safi-playwright --save-exact playwright@1.56.1
           /tmp/safi-playwright/node_modules/.bin/playwright install --with-deps chromium
 
       - name: Verify cold-load intro in Chromium

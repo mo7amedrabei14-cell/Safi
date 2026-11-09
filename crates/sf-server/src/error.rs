@@ -26,6 +26,8 @@ pub enum AuthError {
     InvalidRequest,
     /// Email-verification token is malformed, unknown, expired, or already consumed.
     InvalidVerificationToken,
+    /// The normalized email or verified phone already belongs to an account.
+    DuplicateAccount,
 }
 
 impl AuthError {
@@ -40,6 +42,7 @@ impl AuthError {
             Self::BackendUnavailable => "SF-AUTH-005",
             Self::InvalidRequest => "SF-AUTH-006",
             Self::InvalidVerificationToken => "SF-AUTH-007",
+            Self::DuplicateAccount => "SF-AUTH-008",
         }
     }
 
@@ -53,6 +56,7 @@ impl AuthError {
             Self::InvalidRequest | Self::InvalidVerificationToken => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
+            Self::DuplicateAccount => StatusCode::CONFLICT,
         }
     }
 
@@ -67,6 +71,7 @@ impl AuthError {
             Self::BackendUnavailable => "خدمة الدخول غير متاحة مؤقتًا",
             Self::InvalidRequest => "طلب الدخول غير صالح",
             Self::InvalidVerificationToken => "رابط التحقق غير صالح أو انتهت صلاحيته",
+            Self::DuplicateAccount => "هذا الحساب مسجل بالفعل",
         }
     }
 }

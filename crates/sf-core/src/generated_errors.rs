@@ -52,6 +52,11 @@ impl ErrorCode {
         domain: ErrorDomain::Auth,
         number: 7,
     };
+    /// Registered error code `SF-AUTH-008`.
+    pub const SF_AUTH_008: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 8,
+    };
     /// Registered error code `SF-CHT-001`.
     pub const SF_CHT_001: Self = Self {
         domain: ErrorDomain::Cht,
@@ -352,6 +357,7 @@ impl ErrorCode {
         Self::SF_AUTH_005,
         Self::SF_AUTH_006,
         Self::SF_AUTH_007,
+        Self::SF_AUTH_008,
         Self::SF_CHT_001,
         Self::SF_CHT_002,
         Self::SF_CHT_003,
@@ -504,6 +510,16 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Email verification link is invalid or expired",
         action_en: "Request a new verification link from sign-in, then open the latest email.",
         owner_note: "Verification token was malformed, unknown, expired, or already consumed; do not log the submitted token.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_008,
+        code_str: "SF-AUTH-008",
+        severity: ErrorSeverity::Error,
+        title_ar: "هذا الحساب مسجل بالفعل",
+        action_ar: "سجّل الدخول إلى الحساب الحالي بدلًا من إنشاء حساب مكرر.",
+        title_en: "Account already registered",
+        action_en: "Sign in to the existing account instead of creating a duplicate.",
+        owner_note: "Normalized email or verified phone already exists; never log the submitted identity values.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_CHT_001,

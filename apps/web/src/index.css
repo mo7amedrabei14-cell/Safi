@@ -10,13 +10,31 @@
  */
 
 /* ============================================================================
- * 1. Calm Apple Daylight & Midnight Palettes (2 Modes Only)
+ * 0. The browser's default scrollbar never appears — SafiData owns the indicator
+ * ========================================================================== */
+
+html,
+body,
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge / IE */
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* ============================================================================
+ * 1. Calm Apple Daylight & Midnight Palettes (3 Global Themes)
  * ========================================================================== */
 
 :root,
 :root[data-theme="light"],
-:root[data-theme="apple-light"],
-:root[data-theme="vision-glass"] {
+:root[data-theme="apple-light"] {
   --bg-canvas: #f5f5f7;
   --bg-surface: rgba(255, 255, 255, 0.65);
   --bg-surface-soft: rgba(255, 255, 255, 0.56);
@@ -91,6 +109,44 @@
   --spotlight-glow: rgba(96, 165, 250, 0.1);
 
   color-scheme: dark;
+}
+
+/* Apple VisionOS Glass — frosted, luminous, still readable at WCAG 2.2 AA */
+:root[data-theme="vision-glass"] {
+  --bg-canvas: #eaf0fb;
+  --bg-surface: rgba(255, 255, 255, 0.34);
+  --bg-surface-soft: rgba(255, 255, 255, 0.28);
+  --bg-elevated: rgba(255, 255, 255, 0.56);
+  --bg-glass: rgba(255, 255, 255, 0.46);
+  --border-subtle: rgba(15, 23, 42, 0.1);
+  --border-strong: rgba(15, 23, 42, 0.18);
+
+  --text-primary: #0b1220;
+  --text-secondary: #3f4a5f;
+  --text-muted: #66738a;
+
+  --accent-primary: #0057d9;
+  --accent-soft: #2f6bff;
+  --accent-calm-gradient: linear-gradient(135deg, #0057d9 0%, #2f6bff 55%, #3cc8f0 100%);
+  --accent-hero-glow: radial-gradient(
+    circle at 50% 0%,
+    rgba(47, 107, 255, 0.16) 0%,
+    rgba(60, 200, 240, 0.08) 45%,
+    transparent 75%
+  );
+  --accent-tint: rgba(47, 107, 255, 0.12);
+
+  --status-ok: #0f9d63;
+  --status-warn: #b47400;
+  --status-danger: #d64545;
+
+  --shadow-card:
+    0 20px 60px -18px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+  --shadow-elevated:
+    0 32px 80px -20px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.7) inset;
+  --spotlight-glow: rgba(47, 107, 255, 0.12);
+
+  color-scheme: light;
 }
 
 /* ============================================================================
@@ -380,11 +436,19 @@ pre,
 
 .safi-container {
   width: 100%;
-  max-width: 100%;
+  max-width: 1840px;
   margin-inline: auto;
-  padding-inline: clamp(20px, 2.6vw, 48px);
+  padding-inline: clamp(16px, 2.2vw, 36px);
   padding-top: 16px;
   padding-bottom: 96px;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: clamp(12px, 1.2vw, 20px);
+}
+
+.safi-container > * {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
 .safi-topbar {
@@ -1203,4 +1267,752 @@ select {
     padding: 20px;
     border-radius: 24px;
   }
+}
+
+/* ============================================================================
+ * 20. SafiData Custom Scrollbar (the browser default never appears)
+ * ========================================================================== */
+
+.safi-scrollbar {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: 240;
+  width: 16px;
+  padding-block: 8px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  animation: safiScrollbarReveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.05s forwards;
+}
+
+@keyframes safiScrollbarReveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.safi-scrollbar-track {
+  position: relative;
+  width: 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  pointer-events: auto;
+  transition:
+    width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.3s ease;
+}
+
+.safi-scrollbar.is-engaged .safi-scrollbar-track,
+.safi-scrollbar.is-dragging .safi-scrollbar-track {
+  width: 9px;
+  background: rgba(15, 23, 42, 0.13);
+}
+
+.safi-scrollbar-thumb {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.95) 0%, rgba(37, 99, 235, 0.62) 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.35) inset,
+    0 6px 18px -6px rgba(37, 99, 235, 0.6);
+  cursor: grab;
+  outline: none;
+  will-change: transform, height;
+  transition:
+    background 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.safi-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+}
+
+.safi-scrollbar.is-dragging .safi-scrollbar-thumb {
+  cursor: grabbing;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset,
+    0 10px 26px -6px rgba(37, 99, 235, 0.75);
+}
+
+.safi-scrollbar-thumb:focus-visible {
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.38),
+    0 0 0 1px rgba(255, 255, 255, 0.65) inset;
+}
+
+:root[data-theme="dark"] .safi-scrollbar-track,
+:root[data-theme="google-gemini"] .safi-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="dark"] .safi-scrollbar.is-engaged .safi-scrollbar-track,
+:root[data-theme="dark"] .safi-scrollbar.is-dragging .safi-scrollbar-track,
+:root[data-theme="google-gemini"] .safi-scrollbar.is-engaged .safi-scrollbar-track,
+:root[data-theme="google-gemini"] .safi-scrollbar.is-dragging .safi-scrollbar-track {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+:root[data-theme="dark"] .safi-scrollbar-thumb,
+:root[data-theme="google-gemini"] .safi-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.95) 0%, rgba(37, 99, 235, 0.7) 100%);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.5) inset,
+    0 6px 20px -4px rgba(37, 99, 235, 0.7);
+}
+
+@media (pointer: coarse) {
+  .safi-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .safi-scrollbar {
+    animation: none;
+    opacity: 1;
+  }
+
+  .safi-scrollbar-track,
+  .safi-scrollbar-thumb {
+    transition: none;
+  }
+}
+
+/* ============================================================================
+ * 21. Motion Auth Portal (Apple ID / Google Sign-In)
+ * ========================================================================== */
+
+.safi-auth-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(8, 12, 20, 0.48);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+.safi-auth-modal {
+  position: relative;
+  width: min(480px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 28px;
+  border-radius: 28px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-elevated);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  color: var(--text-primary);
+}
+
+.safi-auth-close {
+  position: absolute;
+  inset-inline-end: 16px;
+  top: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-soft);
+  color: var(--text-secondary);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.safi-auth-close:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.safi-auth-header h2 {
+  margin: 6px 0 6px;
+  font-size: clamp(24px, 3vw, 30px);
+  letter-spacing: -0.02em;
+}
+
+.safi-auth-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--accent-soft);
+}
+
+.safi-auth-subtitle {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.safi-auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 20px 0 16px;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.safi-auth-tabs [role="tab"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.safi-auth-tabs [role="tab"][aria-selected="true"] {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 6px 18px -8px rgba(15, 23, 42, 0.25);
+}
+
+.safi-auth-providers {
+  display: grid;
+  gap: 8px;
+}
+
+.safi-auth-provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.safi-auth-provider:hover {
+  border-color: var(--accent-soft);
+  box-shadow: 0 10px 28px -14px rgba(37, 99, 235, 0.45);
+}
+
+.safi-auth-provider--apple {
+  background: #111318;
+  color: #f8fafc;
+  border-color: #111318;
+}
+
+.safi-auth-provider--github {
+  background: #1f2328;
+  color: #f8fafc;
+  border-color: #1f2328;
+}
+
+.safi-auth-divider {
+  position: relative;
+  margin: 18px 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.safi-auth-divider::before,
+.safi-auth-divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 36%;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.safi-auth-divider::before {
+  inset-inline-start: 0;
+}
+
+.safi-auth-divider::after {
+  inset-inline-end: 0;
+}
+
+.safi-auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.safi-auth-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.safi-auth-field input {
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 14px;
+  border-radius: 13px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.safi-auth-field input:focus-visible {
+  outline: none;
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.safi-auth-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.safi-auth-input-wrap > svg {
+  position: absolute;
+  inset-inline-start: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.safi-auth-input-wrap input {
+  padding-inline-start: 36px;
+  padding-inline-end: 42px;
+}
+
+.safi-auth-eye {
+  position: absolute;
+  inset-inline-end: 6px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.safi-auth-eye:hover {
+  background: var(--accent-tint);
+  color: var(--accent-primary);
+}
+
+.safi-auth-owner-hint {
+  position: absolute;
+  inset-inline-end: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #b47400;
+}
+
+.safi-auth-password-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--border-strong);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.safi-auth-password-meter.is-ready {
+  border-style: solid;
+  border-color: rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.1);
+  color: #0f9d63;
+}
+
+.safi-auth-meter-dot {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+
+.safi-auth-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.safi-auth-feedback--error,
+.safi-auth-feedback--duplicate {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.safi-auth-feedback--success {
+  background: rgba(16, 185, 129, 0.1);
+  color: #0f7a52;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.safi-auth-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.safi-auth-submit {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.safi-auth-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.safi-auth-spinner {
+  animation: safiOrbitSpin 0.9s linear infinite;
+}
+
+.safi-auth-legal {
+  margin: 14px 0 0;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.safi-auth-owner-email {
+  margin: 6px 0 0;
+  font-family: var(--safi-font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.safi-auth-session {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.safi-auth-session p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.safi-owner-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.18), rgba(245, 158, 11, 0.08));
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.safi-owner-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.08));
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  color: #8a4b00;
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+:root[data-theme="dark"] .safi-owner-badge,
+:root[data-theme="google-gemini"] .safi-owner-badge {
+  color: #fbbf24;
+}
+
+@media (max-width: 560px) {
+  .safi-auth-backdrop {
+    align-items: end;
+    padding: 8px;
+  }
+
+  .safi-auth-modal {
+    padding: 22px 18px;
+    border-radius: 24px;
+  }
+
+  .safi-auth-tabs {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================================
+ * 22. Executive Owner Dashboard (full-width 12-column command center)
+ * ========================================================================== */
+
+.safi-exec-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 18px;
+  padding: 24px;
+  margin-bottom: 22px;
+  border-radius: 26px;
+  border: 1px solid var(--border-strong);
+  background:
+    radial-gradient(circle at 12% 0%, var(--accent-tint), transparent 55%), var(--bg-surface);
+  box-shadow: var(--shadow-card);
+}
+
+@media (max-width: 900px) {
+  .safi-exec-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.safi-exec-owner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.safi-exec-owner-email {
+  font-family: var(--safi-font-mono);
+  font-size: 12px;
+  color: var(--accent-primary);
+  word-break: break-all;
+}
+
+.safi-horizon-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.safi-horizon-btn {
+  min-height: 44px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.safi-horizon-btn[aria-pressed="true"] {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 8px 20px -10px rgba(15, 23, 42, 0.35);
+}
+
+.safi-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.safi-kpi-card {
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.safi-kpi-card h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.safi-kpi-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.safi-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.safi-chart-card {
+  padding: 20px;
+  border-radius: 22px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.safi-chart-card h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.safi-chart-card p {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.safi-friend-manager {
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: linear-gradient(150deg, var(--bg-surface) 0%, var(--accent-tint) 100%);
+  margin-bottom: 22px;
+}
+
+.safi-friend-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+
+@media (max-width: 760px) {
+  .safi-friend-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+.safi-friend-form input {
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.safi-exec-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.safi-exec-table th,
+.safi-exec-table td {
+  padding: 10px 12px;
+  text-align: start;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.safi-exec-table th {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.safi-exec-search {
+  width: min(360px, 100%);
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.safi-exec-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.safi-exec-actions button {
+  min-height: 34px;
+  padding: 4px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.safi-exec-actions button:hover {
+  border-color: var(--accent-soft);
+}
+
+.safi-exec-actions button[data-danger="true"] {
+  border-color: rgba(239, 68, 68, 0.4);
+  color: var(--status-danger);
+}
+
+.safi-exec-denied {
+  max-width: 640px;
+  margin: 48px auto;
+  padding: 28px;
+  border-radius: 24px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: var(--bg-surface);
+  text-align: center;
 }

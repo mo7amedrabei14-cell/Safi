@@ -23,6 +23,7 @@ use sqlx::postgres::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::auth::identity::{MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT_MESSAGE_AR};
 use crate::auth::service::{AuthService, IssuedSession};
 use crate::auth::unix_now;
 use crate::auth::{AuthMethod, Principal, Scope};
@@ -199,10 +200,14 @@ impl AccountAuthService {
             )
             .await?;
 
-        if created {
-            self.dispatch_verification(&email, &token).await;
+        if !created {
+            // The constitution forbids duplicate accounts: the normalized email
+            // or verified phone already owns an account, so direct the visitor
+            // to sign in instead of silently accepting a second registration.
+            return Err(AuthError::DuplicateAccount);
         }
 
+        self.dispatch_verification(&email, &token).await;
         Ok(())
     }
 
@@ -307,10 +312,16 @@ fn validate_display_name(raw: &str) -> Result<String, AuthError> {
 }
 
 fn validate_new_password(password: &str) -> Result<(), AuthError> {
-    if password.chars().count() < 12
+    if password.chars().count() < MIN_PASSWORD_LENGTH
         || password.len() > 128
         || password.chars().all(char::is_whitespace)
     {
+        // `PASSWORD_TOO_SHORT_MESSAGE_AR` is the exact owner-approved copy used
+        // by the interface; the API still answers with the canonical code.
+        tracing::debug!(
+            message_ar = PASSWORD_TOO_SHORT_MESSAGE_AR,
+            "password rejected"
+        );
         return Err(AuthError::InvalidRequest);
     }
     Ok(())
@@ -955,19 +966,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicate_registration_is_non_enumerating_and_does_not_send_twice() {
+    async fn duplicate_registration_is_rejected_and_does_not_send_twice() {
         let fixture = fixture();
         fixture
             .service
             .register(request("user@example.test"))
             .await
             .unwrap();
-        fixture
-            .service
-            .register(request("USER@example.test"))
-            .await
-            .unwrap();
+        assert_eq!(
+            fixture
+                .service
+                .register(request("USER@example.test"))
+                .await
+                .unwrap_err(),
+            AuthError::DuplicateAccount
+        );
         assert_eq!(fixture.mailer.messages().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn password_floor_accepts_eight_characters_and_rejects_seven() {
+        let fixture = fixture();
+        let mut eight = request("eight@example.test");
+        eight.password = "Abc12345".to_owned();
+        fixture.service.register(eight).await.unwrap();
+
+        let mut seven = request("seven@example.test");
+        seven.password = "Abc1234".to_owned();
+        assert_eq!(
+            fixture.service.register(seven).await.unwrap_err(),
+            AuthError::InvalidRequest
+        );
     }
 
     #[tokio::test]

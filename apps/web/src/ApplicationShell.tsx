@@ -16,6 +16,7 @@ import type { SafiDockTabId, SafiLang, SafiThemeId } from "./components/layout/F
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { SettingsSheet } from "./components/layout/SettingsSheet";
 import { AccountAccessSheet } from "./components/layout/AccountAccessSheet";
+import { AuthModal } from "./components/auth/AuthModal";
 import { useAnimatedFavicon } from "./components/brand/useAnimatedFavicon";
 import { BentoCommandCenter } from "./components/home/BentoCommandCenter";
 import { CleaningStudio } from "./components/studios/CleaningStudio";
@@ -79,6 +80,8 @@ export function ApplicationShell({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(initialVerificationToken !== null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+  const [ownerAccount, setOwnerAccount] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   useAnimatedFavicon();
@@ -171,6 +174,7 @@ export function ApplicationShell({
             onToggleLang={toggleLang}
             onOpenAccount={() => setAccountOpen(true)}
             authenticated={sessionToken !== null}
+            ownerAccount={ownerAccount}
           />
 
           <main id="safi-main" className="safi-container safi-stage">
@@ -190,15 +194,41 @@ export function ApplicationShell({
           />
 
           <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} lang={lang} />
-          <AccountAccessSheet
-            open={accountOpen}
-            onClose={() => setAccountOpen(false)}
-            lang={lang}
-            verificationToken={initialVerificationToken}
-            sessionToken={sessionToken}
-            onAuthenticated={setSessionToken}
-            onLoggedOut={() => setSessionToken(null)}
-          />
+          {initialVerificationToken !== null ? (
+            <AccountAccessSheet
+              open={accountOpen}
+              onClose={() => setAccountOpen(false)}
+              lang={lang}
+              verificationToken={initialVerificationToken}
+              sessionToken={sessionToken}
+              onAuthenticated={(token) => setSessionToken(token)}
+              onLoggedOut={() => {
+                setSessionToken(null);
+                setSessionEmail(null);
+                setOwnerAccount(false);
+              }}
+            />
+          ) : (
+            <AuthModal
+              open={accountOpen}
+              onClose={() => setAccountOpen(false)}
+              lang={lang}
+              theme={theme}
+              sessionToken={sessionToken}
+              sessionEmail={sessionEmail}
+              onAuthenticated={(session) => {
+                setSessionToken(session.token);
+                setSessionEmail(session.email);
+                setOwnerAccount(session.isOwner);
+              }}
+              onOwnerDetected={() => setOwnerAccount(true)}
+              onSignedOut={() => {
+                setSessionToken(null);
+                setSessionEmail(null);
+                setOwnerAccount(false);
+              }}
+            />
+          )}
         </div>
       </SmoothScrollProvider>
     </>

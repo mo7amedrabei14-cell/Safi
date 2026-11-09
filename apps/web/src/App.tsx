@@ -6,6 +6,7 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { SafiIntroSplash } from "./components/brand/SafiIntroSplash";
+import { SafiCustomScrollbar } from "./components/layout/SafiCustomScrollbar";
 import { getInitialSafiLang } from "./lib/locale";
 
 const loadApplicationShell = async () => {
@@ -74,6 +75,8 @@ export function App(): ReactNode {
           initialVerificationToken={verificationToken}
         />
       </Suspense>
+      {/* The custom scrollbar only mounts after the intro hands over to the website. */}
+      <SafiCustomScrollbar active={!introMounted} lang={initialLang} />
     </>
   );
 }

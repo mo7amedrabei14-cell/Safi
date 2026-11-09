@@ -1,0 +1,236 @@
+{
+  "_readme": "SINGLE SOURCE OF TRUTH for business, auth, roles, and billing decisions. Code must read values from here. Never hard-code prices, limits, emails, or texts.",
+  "brand": {
+    "name_en": "SafiData",
+    "name_ar": "صافي البيانات",
+    "status": "CONFIRMED_V1",
+    "note": "Centralized in config/business.json and packages/brand."
+  },
+  "owner": {
+    "email": "mo7amed.rabei14@gmail.com",
+    "strict_single_owner_lock": true,
+    "exclusive_permissions": [
+      "access_owner_dashboard",
+      "grant_or_revoke_friend_role",
+      "cancel_subscription",
+      "issue_refund",
+      "extend_trial",
+      "suspend_user",
+      "toggle_maintenance_mode"
+    ]
+  },
+  "support": {
+    "email": "mo7amed.rabei14@gmail.com",
+    "show_publicly": true
+  },
+  "auth": {
+    "min_password_length": 8,
+    "password_visibility_toggle": true,
+    "prevent_duplicate_accounts": true,
+    "unique_account_keys": ["normalized_email", "verified_phone"],
+    "oauth_providers": ["google", "apple", "github"],
+    "motion_animations_enabled": true
+  },
+  "roles": {
+    "owner": {
+      "email_match": "mo7amed.rabei14@gmail.com",
+      "full_platform_access": true,
+      "owner_console_access": true
+    },
+    "friend": {
+      "label_ar": "صديق المالك (VIP Friend)",
+      "label_en": "Owner's Friend (VIP)",
+      "granted_ exclusively_by": "mo7amed.rabei14@gmail.com",
+      "price": { "USD": 0, "EGP": 0 },
+      "all_paid_features_open": true,
+      "removes_watermark": true,
+      "saved_recipes": true,
+      "includes_premium_recipe_packs": true,
+      "ai_calls_per_month": 400,
+      "expires": "never_unless_revoked_by_owner"
+    }
+  },
+  "currency": {
+    "egypt": "EGP",
+    "rest_of_world": "USD",
+    "choose_by": "billing country (fallback: IP country)"
+  },
+  "trial": {
+    "days": 7,
+    "all_features_open": true,
+    "requires_card": false,
+    "requires_verified_email": true,
+    "requires_verified_phone": true,
+    "phone_verification": {
+      "primary": "sms",
+      "fallback": "whatsapp"
+    },
+    "one_trial_per": [
+      "verified_email",
+      "verified_phone",
+      "device_fingerprint"
+    ],
+    "ai_calls_cap": 25,
+    "after_trial": "downgrade_to_free_plan"
+  },
+  "free_plan": {
+    "operations_per_month": 5,
+    "max_rows": 5000,
+    "max_columns": 20,
+    "cleaning_types": [
+      "normalize_text",
+      "dedupe_exact",
+      "blanks",
+      "dates",
+      "numbers"
+    ],
+    "watermark": "on_everything",
+    "watermark_text": "Processed by SafiData (Free Plan) — صافي البيانات",
+    "saved_recipes": false,
+    "recipes_after_downgrade": "read_only_locked",
+    "premium_recipe_packs": false,
+    "ai": false,
+    "teams": false
+  },
+  "plans": [
+    {
+      "id": "individual_monthly",
+      "audience": "individual",
+      "billing": "monthly",
+      "price": { "USD": 20, "EGP": 1000 },
+      "ai_calls_per_month": 400,
+      "includes_premium_recipe_packs": true,
+      "recipe_packs_duration": "active_subscription_only"
+    },
+    {
+      "id": "individual_annual",
+      "audience": "individual",
+      "billing": "annual",
+      "price": { "USD": 168, "EGP": 8400 },
+      "ai_calls_per_month": 400,
+      "includes_premium_recipe_packs": true,
+      "recipe_packs_duration": "active_subscription_only",
+      "note": "= monthly x 12 minus 30%"
+    },
+    {
+      "id": "organization_seat",
+      "audience": "organization",
+      "billing": "annual_per_seat",
+      "min_seats": 3,
+      "price_per_seat_per_month": { "USD": 17, "EGP": 850 },
+      "price_per_seat_per_year": { "USD": 204, "EGP": 10200 },
+      "ai_calls_per_seat_per_month": 400,
+      "includes_premium_recipe_packs": true,
+      "recipe_packs_duration": "active_subscription_only",
+      "note": "= individual monthly minus 15%"
+    }
+  ],
+  "micro_purchases": {
+    "pay_per_file": {
+      "enabled": true,
+      "price": { "USD": 2, "EGP": 50 },
+      "removes_watermark": true,
+      "max_rows": 100000,
+      "includes_premium_recipe_packs": false,
+      "includes_ai": false
+    },
+    "credit_pack_25": {
+      "enabled": true,
+      "operations": 25,
+      "price": { "USD": 5, "EGP": 250 },
+      "expires": false,
+      "removes_watermark": true,
+      "includes_premium_recipe_packs": false,
+      "includes_ai": false
+    }
+  },
+  "OneTimeDesktopLicense": {
+    "enabled": false,
+    "note": "Rejected by owner. Desktop app requires an active subscription, friend role, or trial."
+  },
+  "premium_recipe_packs_policy": {
+    "sold_separately": false,
+    "access_rule": "ACTIVE_SUBSCRIBERS_AND_FRIENDS_ONLY",
+    "eligible_plans": [
+      "individual_monthly",
+      "individual_annual",
+      "organization_seat",
+      "friend"
+    ],
+    "available_to_credit_pack_users": false,
+    "available_to_pay_per_file_users": false,
+    "access_duration": "valid_only_while_subscription_or_friend_role_is_active"
+  },
+  "owner_dashboard_analytics": {
+    "layout": "full_width_executive_command_center",
+    "time_horizons": ["monthly", "quarterly", "annual"],
+    "quarters": ["Q1", "Q2", "Q3", "Q4"],
+    "tracked_metrics": [
+      "total_users",
+      "active_trials",
+      "free_users",
+      "monthly_subscribers",
+      "annual_subscribers",
+      "organization_seats",
+      "friend_vip_users",
+      "credit_pack_buyers",
+      "pay_per_file_buyers",
+      "mrr_usd_egp",
+      "arr_usd_egp",
+      "quarterly_revenue_growth",
+      "churn_rate",
+      "conversion_rate",
+      "rows_cleaned_total",
+      "pii_masked_total",
+      "ai_calls_used"
+    ]
+  },
+  "billing_grace_period": {
+    "past_due_days": 3,
+    "show_warning_banner": true
+  },
+  "discounts": "none_at_launch",
+  "price_policy": {
+    "status": "HYPOTHESIS_UNTIL_P0",
+    "egp_review": "every 3 months"
+  },
+  "refunds": {
+    "how": "only by emailing the owner; the owner activates the refund manually",
+    "window_days": 3,
+    "inside_window": "negotiable",
+    "after_window": "no refund, even if the customer contacts the owner",
+    "show_on_pricing_page": true,
+    "owner_console_actions": ["cancel_subscription", "issue_refund"],
+    "eu_consumer_law_and_paddle_policy_check": "enforce_3_day_owner_policy_by_default_allow_paddle_mandatory_legal_webhook_only"
+  },
+  "payments": {
+    "international": "paddle",
+    "egypt": "paymob",
+    "accounts_created": false
+  },
+  "hosting": {
+    "region_now": "europe",
+    "egypt_option": "later"
+  },
+  "languages": {
+    "launch": ["ar", "en", "fr", "es", "tr", "fa", "ur"],
+    "default": "ar",
+    "rtl": ["ar", "fa", "ur"]
+  },
+  "ai": {
+    "in_1_0": true,
+    "requires_user_consent": true,
+    "local_pii_masking_before_send": true,
+    "usage_limit": {
+      "trial_total_calls": 25,
+      "paid_monthly_calls": 400,
+      "friend_monthly_calls": 400
+    },
+    "egypt_cross_border_legal_check": "mask_pii_locally_on_device_and_require_explicit_user_consent_checkbox"
+  },
+  "data_retention": {
+    "user_data_days_after_account_deletion": 0,
+    "keep_statutory_tax_invoices_only": true
+  },
+  "open_items": []
+}

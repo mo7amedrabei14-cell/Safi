@@ -250,6 +250,14 @@ title_en = "Email verification link is invalid or expired"
 action_en = "Request a new verification link from sign-in, then open the latest email."
 owner_note = "Verification token was malformed, unknown, expired, or already consumed; do not log the submitted token."
 
+[SF-AUTH-008]
+severity = "error"
+title_ar = "هذا الحساب مسجل بالفعل"
+action_ar = "سجّل الدخول إلى الحساب الحالي بدلًا من إنشاء حساب مكرر."
+title_en = "Account already registered"
+action_en = "Sign in to the existing account instead of creating a duplicate."
+owner_note = "Normalized email or verified phone already exists; never log the submitted identity values."
+
 [SF-UNK-001]
 severity = "fatal"
 title_ar = "حدث خطأ غير متوقع"

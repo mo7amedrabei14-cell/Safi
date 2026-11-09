@@ -17,6 +17,7 @@ import {
   Home,
   Library,
   ListChecks,
+  Monitor,
   Moon,
   ShieldCheck,
   Sparkles,
@@ -60,7 +61,16 @@ export interface FloatingGlassDockProps {
   readonly onToggleLang?: () => void;
   readonly onOpenAccount?: () => void;
   readonly authenticated?: boolean;
+  readonly ownerAccount?: boolean;
 }
+
+const THEME_ORDER: readonly SafiThemeId[] = ["apple-light", "google-gemini", "vision-glass"];
+
+const THEME_LABELS: Record<SafiThemeId, { ar: string; en: string }> = {
+  "apple-light": { ar: "Apple الفاتح", en: "Apple Light" },
+  "google-gemini": { ar: "Gemini الداكن", en: "Gemini Dark" },
+  "vision-glass": { ar: "Vision الزجاجي", en: "Vision Glass" }
+};
 
 const WEBSITE_SECTIONS: ReadonlyArray<{
   readonly href: string;
@@ -84,16 +94,21 @@ export function FloatingGlassDock({
   lang = "en",
   onToggleLang,
   onOpenAccount,
-  authenticated = false
+  authenticated = false,
+  ownerAccount = false
 }: FloatingGlassDockProps): ReactNode {
   const isDark = theme === "google-gemini";
+  const isVision = theme === "vision-glass";
+  const currentThemeLabel = lang === "ar" ? THEME_LABELS[theme].ar : THEME_LABELS[theme].en;
   const [activeNavIdx, setActiveNavIdx] = useState<number>(0);
   const [hoveredNavIdx, setHoveredNavIdx] = useState<number | null>(null);
   const [stripExpanded, setStripExpanded] = useState<boolean>(false);
   const leaveTimerRef = useRef<number | null>(null);
 
-  const handleToggleDayNight = (): void => {
-    onSelectTheme?.(isDark ? "apple-light" : "google-gemini");
+  const handleCycleTheme = (): void => {
+    const currentIndex = THEME_ORDER.indexOf(theme);
+    const nextTheme = THEME_ORDER[(currentIndex + 1) % THEME_ORDER.length] ?? "apple-light";
+    onSelectTheme?.(nextTheme);
   };
 
   const handleEnterStrip = (): void => {
@@ -220,26 +235,27 @@ export function FloatingGlassDock({
             <span>{lang === "ar" ? "English" : "العربية"}</span>
           </button>
 
-          {/* 2. Day / Night Theme Switcher ONLY (نهاري / ليلي) */}
+          {/* 2. Three Global Themes Switcher (Apple Light / Gemini Dark / Vision Glass) */}
           <button
             type="button"
-            onClick={handleToggleDayNight}
+            onClick={handleCycleTheme}
             className="safi-topbar-btn"
             aria-label={
               lang === "ar"
-                ? isDark
-                  ? "الوضع النهاري"
-                  : "الوضع الليلي"
-                : isDark
-                  ? "Switch to daylight theme"
-                  : "Switch to midnight theme"
+                ? `تبديل المظهر — الحالي: ${currentThemeLabel}`
+                : `Switch appearance — current: ${currentThemeLabel}`
             }
+            data-theme-current={theme}
             style={{ minHeight: "44px", height: "38px" }}
           >
-            {isDark ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
-            <span>
-              {lang === "ar" ? (isDark ? "نهاري" : "ليلي") : isDark ? "Daylight" : "Midnight"}
-            </span>
+            {isDark ? (
+              <Moon size={15} aria-hidden="true" />
+            ) : isVision ? (
+              <Monitor size={15} aria-hidden="true" />
+            ) : (
+              <Sun size={15} aria-hidden="true" />
+            )}
+            <span>{currentThemeLabel}</span>
           </button>
 
           {/* 3. Direct Jump to Download App */}
@@ -252,6 +268,17 @@ export function FloatingGlassDock({
             <span>{lang === "ar" ? "حمّل التطبيق" : "Download App"}</span>
           </a>
         </div>
+
+        {ownerAccount ? (
+          <div className="safi-owner-badge" role="status">
+            <span aria-hidden="true">👑</span>
+            <span>
+              {lang === "ar"
+                ? "حساب المالك الموثق (Owner — Mohamed Rabea)"
+                : "Verified Owner — Mohamed Rabea"}
+            </span>
+          </div>
+        ) : null}
 
         {/* Visually-Hidden Semantic Contract Layer for Automated Test Suite */}
         <div className="safi-visually-hidden" aria-hidden="false">

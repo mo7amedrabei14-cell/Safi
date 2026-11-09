@@ -3,6 +3,7 @@
 pub mod account;
 pub mod api_key;
 pub mod cache;
+pub mod identity;
 pub mod middleware;
 pub mod repository;
 pub mod service;

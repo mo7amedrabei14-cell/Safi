@@ -9,6 +9,7 @@ export type SafiErrorCode =
   | "SF-AUTH-005"
   | "SF-AUTH-006"
   | "SF-AUTH-007"
+  | "SF-AUTH-008"
   | "SF-CHT-001"
   | "SF-CHT-002"
   | "SF-CHT-003"
@@ -83,6 +84,8 @@ export type SafiErrorTranslationKey =
   | "error.SF-AUTH-006.action"
   | "error.SF-AUTH-007.title"
   | "error.SF-AUTH-007.action"
+  | "error.SF-AUTH-008.title"
+  | "error.SF-AUTH-008.action"
   | "error.SF-CHT-001.title"
   | "error.SF-CHT-001.action"
   | "error.SF-CHT-002.title"
@@ -218,6 +221,7 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-AUTH-005",
   "SF-AUTH-006",
   "SF-AUTH-007",
+  "SF-AUTH-008",
   "SF-CHT-001",
   "SF-CHT-002",
   "SF-CHT-003",
@@ -344,6 +348,16 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Request a new verification link from sign-in, then open the latest email.",
     ownerNote:
       "Verification token was malformed, unknown, expired, or already consumed; do not log the submitted token."
+  },
+  "SF-AUTH-008": {
+    code: "SF-AUTH-008",
+    severity: "error",
+    titleAr: "هذا الحساب مسجل بالفعل",
+    actionAr: "سجّل الدخول إلى الحساب الحالي بدلًا من إنشاء حساب مكرر.",
+    titleEn: "Account already registered",
+    actionEn: "Sign in to the existing account instead of creating a duplicate.",
+    ownerNote:
+      "Normalized email or verified phone already exists; never log the submitted identity values."
   },
   "SF-CHT-001": {
     code: "SF-CHT-001",
@@ -896,6 +910,8 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-AUTH-007.title": "رابط التحقق غير صالح أو انتهت صلاحيته",
   "error.SF-AUTH-007.action":
     "اطلب رابط تحقق جديدًا من صفحة تسجيل الدخول ثم افتح أحدث رسالة وصلتك.",
+  "error.SF-AUTH-008.title": "هذا الحساب مسجل بالفعل",
+  "error.SF-AUTH-008.action": "سجّل الدخول إلى الحساب الحالي بدلًا من إنشاء حساب مكرر.",
   "error.SF-CHT-001.title": "إصدار مواصفة المخطط مفقود",
   "error.SF-CHT-001.action": "أضف إصدارًا صحيحًا لمواصفة المخطط ثم أعد المحاولة.",
   "error.SF-CHT-002.title": "نوع المخطط مفقود",
@@ -1036,6 +1052,8 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-AUTH-007.title": "Email verification link is invalid or expired",
   "error.SF-AUTH-007.action":
     "Request a new verification link from sign-in, then open the latest email.",
+  "error.SF-AUTH-008.title": "Account already registered",
+  "error.SF-AUTH-008.action": "Sign in to the existing account instead of creating a duplicate.",
   "error.SF-CHT-001.title": "Chart specification version is missing",
   "error.SF-CHT-001.action": "Add a valid chart specification version, then try again.",
   "error.SF-CHT-002.title": "Chart type is missing",

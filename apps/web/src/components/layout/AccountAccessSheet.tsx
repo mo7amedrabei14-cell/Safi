@@ -42,8 +42,8 @@ function getRequestError(error: unknown, isAr: boolean): string {
 
     if (error.code === "SF-AUTH-006" || error.status === 400 || error.status === 422) {
       return isAr
-        ? "راجع البريد الإلكتروني والاسم الظاهر وكلمة المرور. يجب ألا تقل كلمة المرور عن 12 حرفًا."
-        : "Check the email address, display name, and password. Passwords must contain at least 12 characters.";
+        ? "راجع البريد الإلكتروني والاسم الظاهر وكلمة المرور. يجب ألا تقل كلمة المرور عن 8 خانات."
+        : "Check the email address, display name, and password. Passwords must contain at least 8 characters.";
     }
   }
 
@@ -362,7 +362,7 @@ export function AccountAccessSheet({
                     type="password"
                     name="password"
                     autoComplete={mode === "register" ? "new-password" : "current-password"}
-                    minLength={mode === "register" ? 12 : undefined}
+                    minLength={mode === "register" ? 8 : undefined}
                     maxLength={128}
                     required
                     value={password}
@@ -370,7 +370,7 @@ export function AccountAccessSheet({
                     disabled={busy}
                   />
                   {mode === "register" ? (
-                    <small>{isAr ? "12 حرفًا على الأقل." : "At least 12 characters."}</small>
+                    <small>{isAr ? "8 خانات على الأقل." : "At least 8 characters."}</small>
                   ) : null}
                 </label>
               ) : null}

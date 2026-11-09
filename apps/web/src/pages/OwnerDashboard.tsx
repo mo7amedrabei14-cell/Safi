@@ -1,5 +1,13 @@
 import React, { useState } from "react";
 import type { SafiDockTabId, SafiLang } from "../components/layout/FloatingGlassDock";
+import { CountUpMetric } from "../components/ui/CountUpMetric";
+import { OWNER_EMAIL, FRIEND_ROLE } from "../lib/business-config";
+import { isOwnerEmail } from "../lib/auth-rules";
+import {
+  grantFriendRole,
+  revokeFriendRole,
+  type FriendMember
+} from "../lib/owner-access";
 
 interface AuditLogEntry {
   readonly id: string;
@@ -166,13 +174,164 @@ function localizeOwnerNode(node: React.ReactNode): React.ReactNode {
   return node;
 }
 
+export type OwnerTimeHorizon = "monthly" | "quarterly" | "annual";
+
+export interface OwnerSubscriberRow {
+  readonly id: string;
+  readonly email: string;
+  readonly plan: string;
+  readonly verifiedEmail: boolean;
+  readonly verifiedPhone: boolean;
+  readonly verifiedDevice: boolean;
+  readonly expiresAt: string;
+  readonly status: "active" | "suspended";
+  readonly aiCallsUsed: number;
+}
+
+export interface OwnerAnalyticsSnapshot {
+  readonly totalUsers: number;
+  readonly activeTrials: number;
+  readonly freeUsers: number;
+  readonly monthlySubscribers: number;
+  readonly annualSubscribers: number;
+  readonly organizationSeats: number;
+  readonly friendVipUsers: number;
+  readonly creditPackBuyers: number;
+  readonly payPerFileBuyers: number;
+  readonly mrrUsd: number;
+  readonly mrrEgp: number;
+  readonly arrUsd: number;
+  readonly arrEgp: number;
+  readonly churnRate: number;
+  readonly conversionRate: number;
+  readonly rowsCleaned: number;
+  readonly piiMasked: number;
+  readonly aiCallsUsed: number;
+  readonly monthly: ReadonlyArray<{
+    readonly month: string;
+    readonly users: number;
+    readonly revenueUsd: number;
+  }>;
+  readonly quarterly: ReadonlyArray<{ readonly quarter: string; readonly revenueUsd: number }>;
+  readonly subscribers: readonly OwnerSubscriberRow[];
+}
+
+const MONTH_LABELS = [
+  "01",
+  "02",
+  "03",
+  "04",
+  "05",
+  "06",
+  "07",
+  "08",
+  "09",
+  "10",
+  "11",
+  "12"
+] as const;
+
+export const EMPTY_OWNER_ANALYTICS: OwnerAnalyticsSnapshot = {
+  totalUsers: 0,
+  activeTrials: 0,
+  freeUsers: 0,
+  monthlySubscribers: 0,
+  annualSubscribers: 0,
+  organizationSeats: 0,
+  friendVipUsers: 0,
+  creditPackBuyers: 0,
+  payPerFileBuyers: 0,
+  mrrUsd: 0,
+  mrrEgp: 0,
+  arrUsd: 0,
+  arrEgp: 0,
+  churnRate: 0,
+  conversionRate: 0,
+  rowsCleaned: 0,
+  piiMasked: 0,
+  aiCallsUsed: 0,
+  monthly: MONTH_LABELS.map((month) => ({ month, users: 0, revenueUsd: 0 })),
+  quarterly: ["Q1", "Q2", "Q3", "Q4"].map((quarter) => ({ quarter, revenueUsd: 0 })),
+  subscribers: []
+};
+
+function ExecutiveBarChart({
+  title,
+  subtitle,
+  values,
+  labels,
+  accent
+}: {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly values: readonly number[];
+  readonly labels: readonly string[];
+  readonly accent: string;
+}): React.ReactNode {
+  const width = 520;
+  const height = 132;
+  const gap = 7;
+  const barWidth = values.length === 0 ? 0 : (width - gap * (values.length - 1)) / values.length;
+  const max = Math.max(...values, 1);
+
+  return (
+    <div className="safi-chart-card">
+      <h3>{title}</h3>
+      <p>{subtitle}</p>
+      <svg viewBox={`0 0 ${width} ${height + 26}`} width="100%" height="180" role="img" aria-label={title}>
+        {values.map((value, index) => {
+          const barHeight = Math.max(Math.round((value / max) * (height - 12)), 3);
+          return (
+            <g key={`${labels[index] ?? index}-${index}`}>
+              <rect
+                x={index * (barWidth + gap)}
+                y={height - barHeight}
+                width={barWidth}
+                height={barHeight}
+                rx="6"
+                fill={accent}
+                opacity="0.88"
+              />
+              <text
+                x={index * (barWidth + gap) + barWidth / 2}
+                y={height + 18}
+                textAnchor="middle"
+                fontSize="9.5"
+                fill="currentColor"
+                opacity="0.55"
+              >
+                {labels[index] ?? ""}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 export interface OwnerDashboardProps {
   readonly lang?: SafiLang;
   readonly onSelectTab?: (tab: SafiDockTabId) => void;
+  readonly viewerEmail?: string;
+  readonly analytics?: OwnerAnalyticsSnapshot;
 }
 
-export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "en", onSelectTab }) => {
+export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
+  lang = "en",
+  onSelectTab,
+  viewerEmail = OWNER_EMAIL,
+  analytics = EMPTY_OWNER_ANALYTICS
+}) => {
   const isAr = lang === "ar";
+  const [horizon, setHorizon] = useState<OwnerTimeHorizon>("monthly");
+  const [friendMembers, setFriendMembers] = useState<readonly FriendMember[]>([]);
+  const [friendEmail, setFriendEmail] = useState<string>("");
+  const [friendNote, setFriendNote] = useState<string>("");
+  const [friendError, setFriendError] = useState<string | null>(null);
+  const [subscriberQuery, setSubscriberQuery] = useState<string>("");
+  const [suspendedEmails, setSuspendedEmails] = useState<ReadonlySet<string>>(new Set());
+  const [extendedTrials, setExtendedTrials] = useState<Readonly<Record<string, string>>>({});
   const [statusMessage, setStatusMessage] = useState<string>(
     "كل شيء سليم — النظام يعمل بكفاءة تامة"
   );
@@ -202,6 +361,504 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "en", onS
     };
     setAuditLogs((prev) => [newEntry, ...prev]);
   };
+
+  if (!isOwnerEmail(viewerEmail)) {
+    return (
+      <div className="safi-exec-denied" role="alert">
+        <p style={{ fontSize: "34px", margin: 0 }} aria-hidden="true">
+          🔒
+        </p>
+        <h1 style={{ fontSize: "22px", margin: "10px 0 6px" }}>
+          {isAr ? "هذه اللوحة للمالك الحصري فقط" : "This console is reserved for the exclusive owner"}
+        </h1>
+        <p style={{ color: "var(--text-secondary)", fontSize: "13.5px" }}>
+          {isAr
+            ? `المالك المعتمد: ${OWNER_EMAIL}. كل محاولة من بريد آخر تُرفض فوراً.`
+            : `Certified owner: ${OWNER_EMAIL}. Every other account is rejected immediately.`}
+        </p>
+      </div>
+    );
+  }
+
+  const describe = (ar: string, en: string): string => (isAr ? ar : en);
+
+  const announce = (ar: string, en: string): void => {
+    const message = describe(ar, en);
+    setActiveActionLog(message);
+    appendAuditEvent(message);
+  };
+
+  const handleGrantFriend = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const result = grantFriendRole(
+      viewerEmail,
+      friendEmail,
+      friendNote,
+      `${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC`
+    );
+    if (!result.ok) {
+      setFriendError(
+        result.reason === "not_owner"
+          ? describe("هذا الإجراء متاح للمالك فقط.", "Only the owner can grant this role.")
+          : result.reason === "owner_address"
+            ? describe(
+                "لا يمكن منح رتبة Friend لبريد المالك.",
+                "The owner address cannot receive the Friend role."
+              )
+            : describe("أدخل بريدًا إلكترونيًا صالحًا.", "Enter a valid email address.")
+      );
+      return;
+    }
+    setFriendError(null);
+    setFriendMembers((prev) =>
+      prev.some((member) => member.email === result.member.email) ? prev : [...prev, result.member]
+    );
+    setFriendEmail("");
+    setFriendNote("");
+    announce(
+      `تم منح ${result.member.email} رتبة Friend VIP شاملة مجاناً.`,
+      `Granted ${result.member.email} full Friend VIP access for free.`
+    );
+  };
+
+  const handleRevokeFriend = (email: string): void => {
+    const result = revokeFriendRole(viewerEmail, email);
+    if (!result.ok) {
+      setFriendError(describe("تعذّر سحب الصلاحية.", "Could not revoke this role."));
+      return;
+    }
+    setFriendMembers((prev) => prev.filter((member) => member.email !== result.email));
+    announce(
+      `تم سحب صلاحية Friend VIP من ${email}.`,
+      `Revoked Friend VIP access from ${email}.`
+    );
+  };
+
+  const handlePromote = (email: string): void => {
+    const result = grantFriendRole(viewerEmail, email, "", new Date().toISOString().slice(0, 10));
+    if (!result.ok) return;
+    setFriendMembers((prev) =>
+      prev.some((member) => member.email === result.member.email) ? prev : [...prev, result.member]
+    );
+    announce(`تمت ترقية ${email} إلى Friend VIP.`, `Promoted ${email} to Friend VIP.`);
+  };
+
+  const handleExtendTrial = (email: string): void => {
+    const extended = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    setExtendedTrials((prev) => ({ ...prev, [email]: extended }));
+    announce(
+      `تم تمديد تجربة ${email} سبعة أيام.`,
+      `Extended the ${email} trial by seven days.`
+    );
+  };
+
+  const handleSuspend = (email: string): void => {
+    const wasSuspended = suspendedEmails.has(email);
+    setSuspendedEmails((prev) => {
+      const next = new Set(prev);
+      if (next.has(email)) {
+        next.delete(email);
+      } else {
+        next.add(email);
+      }
+      return next;
+    });
+    announce(
+      wasSuspended ? `تم تفعيل حساب ${email}.` : `تم إيقاف حساب ${email}.`,
+      wasSuspended ? `Reactivated ${email}.` : `Suspended ${email}.`
+    );
+  };
+
+  const handleCancelSubscription = (email: string): void => {
+    announce(`تم إلغاء اشتراك ${email}.`, `Cancelled the ${email} subscription.`);
+  };
+
+  const handleRefund = (email: string): void => {
+    announce(
+      `تم تسجيل استرداد ${email} ضمن مهلة 3 أيام.`,
+      `Recorded a refund for ${email} inside the 3-day window.`
+    );
+  };
+
+  const friendCount = friendMembers.length + analytics.friendVipUsers;
+  const totalUsers = 1 + friendMembers.length + analytics.totalUsers;
+
+  const horizonOptions: ReadonlyArray<{ readonly id: OwnerTimeHorizon; readonly ar: string; readonly en: string }> = [
+    { id: "monthly", ar: "شهرياً (Monthly)", en: "Monthly" },
+    { id: "quarterly", ar: "ربع سنوي (Q1–Q4)", en: "Quarterly (Q1–Q4)" },
+    { id: "annual", ar: "سنوياً (Annual)", en: "Annual" }
+  ];
+
+  const kpiCards: ReadonlyArray<{
+    readonly id: string;
+    readonly ar: string;
+    readonly en: string;
+    readonly value: number;
+    readonly suffix: string;
+    readonly decimals: number;
+    readonly noteAr: string;
+    readonly noteEn: string;
+  }> = [
+    { id: "total_users", ar: "إجمالي المستخدمين", en: "Total users", value: totalUsers, suffix: "", decimals: 0, noteAr: "+ نمو كلي", noteEn: "+ total growth" },
+    { id: "active_trials", ar: "تجارب مجانية نشطة (7 أيام)", en: "Active 7-day trials", value: analytics.activeTrials, suffix: "", decimals: 0, noteAr: "", noteEn: "" },
+    { id: "free_users", ar: "مستخدمو الباقة المجانية", en: "Free plan users", value: analytics.freeUsers, suffix: "", decimals: 0, noteAr: "", noteEn: "" },
+    { id: "monthly_subscribers", ar: "اشتراكات الأفراد الشهرية", en: "Individual monthly subscribers", value: analytics.monthlySubscribers, suffix: "", decimals: 0, noteAr: "1,000 EGP / $20", noteEn: "1,000 EGP / $20" },
+    { id: "annual_subscribers", ar: "اشتراكات الأفراد السنوية", en: "Individual annual subscribers", value: analytics.annualSubscribers, suffix: "", decimals: 0, noteAr: "8,400 EGP / $168", noteEn: "8,400 EGP / $168" },
+    { id: "organization_seats", ar: "الشركات والمقاعد النشطة", en: "Organization seats", value: analytics.organizationSeats, suffix: "", decimals: 0, noteAr: "850 EGP / $17", noteEn: "850 EGP / $17" },
+    { id: "friend_vip", ar: "أصحاب رتبة صديق المالك", en: "Friend VIP members", value: friendCount, suffix: "", decimals: 0, noteAr: "0 EGP / $0", noteEn: "0 EGP / $0" },
+    { id: "credit_pack_buyers", ar: "مشترو باقات الرصيد (25 عملية)", en: "Credit pack buyers (25 ops)", value: analytics.creditPackBuyers, suffix: "", decimals: 0, noteAr: "250 EGP / $5", noteEn: "250 EGP / $5" },
+    { id: "pay_per_file_buyers", ar: "مشترو فتح الملف الواحد", en: "Pay-per-file buyers", value: analytics.payPerFileBuyers, suffix: "", decimals: 0, noteAr: "50 EGP / $2", noteEn: "50 EGP / $2" },
+    { id: "mrr_usd", ar: "الإيراد الشهري المتكرر (دولار)", en: "Monthly recurring revenue (USD)", value: analytics.mrrUsd, suffix: " USD", decimals: 0, noteAr: "Paddle", noteEn: "Paddle" },
+    { id: "mrr_egp", ar: "الإيراد الشهري المتكرر (جنيه)", en: "Monthly recurring revenue (EGP)", value: analytics.mrrEgp, suffix: " EGP", decimals: 0, noteAr: "Paymob", noteEn: "Paymob" },
+    { id: "arr_usd", ar: "الإيراد السنوي المتكرر (دولار)", en: "Annual recurring revenue (USD)", value: analytics.arrUsd, suffix: " USD", decimals: 0, noteAr: "Paddle", noteEn: "Paddle" },
+    { id: "arr_egp", ar: "الإيراد السنوي المتكرر (جنيه)", en: "Annual recurring revenue (EGP)", value: analytics.arrEgp, suffix: " EGP", decimals: 0, noteAr: "Paymob", noteEn: "Paymob" },
+    { id: "conversion", ar: "التحويل من التجربة إلى الدفع", en: "Trial-to-paid conversion", value: analytics.conversionRate, suffix: "%", decimals: 1, noteAr: "", noteEn: "" },
+    { id: "churn", ar: "معدل إلغاء الاشتراك", en: "Churn rate", value: analytics.churnRate, suffix: "%", decimals: 1, noteAr: "", noteEn: "" },
+    { id: "rows_cleaned", ar: "الصفوف المنظفة", en: "Rows cleaned", value: analytics.rowsCleaned, suffix: "", decimals: 0, noteAr: "", noteEn: "" },
+    { id: "pii_masked", ar: "حقول PII المخفية", en: "PII fields masked", value: analytics.piiMasked, suffix: "", decimals: 0, noteAr: "", noteEn: "" },
+    { id: "ai_calls", ar: "نداءات الذكاء الاصطناعي", en: "AI calls used", value: analytics.aiCallsUsed, suffix: ` / ${FRIEND_ROLE.ai_calls_per_month}`, decimals: 0, noteAr: "الحد الشهري", noteEn: "Monthly cap" }
+  ];
+
+  const baseSubscriberRows: readonly OwnerSubscriberRow[] = [
+    {
+      id: "owner",
+      email: OWNER_EMAIL,
+      plan: describe("المالك", "Owner"),
+      verifiedEmail: true,
+      verifiedPhone: true,
+      verifiedDevice: true,
+      expiresAt: describe("دائم", "Lifetime"),
+      status: "active",
+      aiCallsUsed: analytics.aiCallsUsed
+    },
+    ...friendMembers.map((member) => ({
+      id: `friend-${member.email}`,
+      email: member.email,
+      plan: "Friend VIP",
+      verifiedEmail: true,
+      verifiedPhone: false,
+      verifiedDevice: false,
+      expiresAt: describe("لا ينتهي إلا بسحب المالك", "Never unless revoked by the owner"),
+      status: "active" as const,
+      aiCallsUsed: member.aiCallsUsed
+    })),
+    ...analytics.subscribers
+  ];
+
+  const normalizedQuery = subscriberQuery.trim().toLowerCase();
+  const filteredSubscribers = baseSubscriberRows
+    .filter((row) => {
+      if (normalizedQuery.length === 0) return true;
+      return (
+        row.email.toLowerCase().includes(normalizedQuery) ||
+        row.plan.toLowerCase().includes(normalizedQuery)
+      );
+    })
+    .map((row) => {
+      const suspended = suspendedEmails.has(row.email);
+      const extended = extendedTrials[row.email];
+      return {
+        ...row,
+        status: suspended ? ("suspended" as const) : row.status,
+        expiresAt: extended ?? row.expiresAt
+      };
+    });
+
+  const executiveCommandCenter = (
+    <React.Fragment key="executive-command-center">
+      <section
+        className="safi-exec-hero"
+        aria-label={describe("هوية المالك والفترات الزمنية", "Owner identity and time horizons")}
+      >
+        <div>
+          <span className="safi-badge safi-badge--accent">
+            {describe("المركز التنفيذي للمالك", "Executive owner command center")}
+          </span>
+          <h2 style={{ margin: "10px 0 6px", fontSize: "clamp(22px, 2.4vw, 30px)" }}>
+            {describe("المالك الحصري المعتمد", "Certified exclusive owner")}
+          </h2>
+          <div className="safi-exec-owner">
+            <span aria-hidden="true">👑</span>
+            <span className="safi-exec-owner-email" dir="ltr">
+              {OWNER_EMAIL}
+            </span>
+            <span className="safi-badge safi-badge--ok">
+              {describe("قفل مالك صارم • تحقق 100%", "Strict owner lock • 100% verified")}
+            </span>
+          </div>
+          <p style={{ margin: "10px 0 0", color: "var(--text-secondary)", fontSize: "13.5px" }}>
+            {describe(
+              "كل رقم في المشروع أمامك: المستخدمون، التجارب، الاشتراكات، المقاعد، رتبة Friend، الرصيد، النداءات، والإيرادات بالجنيه والدولار.",
+              "Every number in one place: users, trials, subscriptions, seats, Friend VIP, credits, AI calls, and revenue in EGP and USD."
+            )}
+          </p>
+          <p className="safi-kpi-note">
+            {describe(
+              "تُحدَّث الأرقام من خادم المنصة عند الاتصال؛ بيانات ملفاتك لا تترك جهازك أبداً.",
+              "Figures refresh from the platform server when connected; your file data never leaves this device."
+            )}
+          </p>
+        </div>
+        <div>
+          <p className="safi-kpi-note" style={{ marginBottom: "8px", fontWeight: 800 }}>
+            {describe("الفترة الزمنية", "Time horizon")}
+          </p>
+          <div
+            className="safi-horizon-switch"
+            role="group"
+            aria-label={describe("فلتر الفترات الزمنية", "Time horizon filter")}
+            data-horizon={horizon}
+          >
+            {horizonOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className="safi-horizon-btn"
+                aria-pressed={horizon === option.id}
+                onClick={() => setHorizon(option.id)}
+              >
+                {describe(option.ar, option.en)}
+              </button>
+            ))}
+          </div>
+          {horizon === "quarterly" ? (
+            <ul
+              style={{
+                margin: "12px 0 0",
+                paddingInlineStart: "18px",
+                fontSize: "12.5px",
+                color: "var(--text-secondary)"
+              }}
+            >
+              {analytics.quarterly.map((entry) => (
+                <li key={entry.quarter}>
+                  {entry.quarter}: {entry.revenueUsd.toLocaleString("en-US")} USD
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {horizon === "monthly" ? (
+            <p className="safi-kpi-note">
+              {describe(
+                "مقارنة بالشهر السابق (MoM%)",
+                "Month-over-month comparison (MoM%)"
+              )}
+            </p>
+          ) : null}
+          {horizon === "annual" ? (
+            <p className="safi-kpi-note">
+              {describe("الإجمالي السنوي ومعدل النمو (YoY%)", "Annual totals and growth (YoY%)")}
+            </p>
+          ) : null}
+        </div>
+      </section>
+
+      <section
+        className="safi-kpi-grid"
+        aria-label={describe("شبكة مؤشرات الأداء التنفيذية", "Executive KPI matrix")}
+      >
+        {kpiCards.map((card) => (
+          <article className="safi-kpi-card" key={`${horizon}-${card.id}`}>
+            <h3>{describe(card.ar, card.en)}</h3>
+            <CountUpMetric value={card.value} suffix={card.suffix} decimals={card.decimals} />
+            {card.noteAr === "" ? null : (
+              <p className="safi-kpi-note">{describe(card.noteAr, card.noteEn)}</p>
+            )}
+          </article>
+        ))}
+      </section>
+
+      <div className="safi-chart-grid">
+        <ExecutiveBarChart
+          title={describe("نمو المستخدمين خلال الأشهر الاثني عشر", "User growth across twelve months")}
+          subtitle={describe(
+            "شهرياً — يتحدث فوراً مع الفترة المختارة",
+            "Monthly — refreshes with the selected horizon"
+          )}
+          values={analytics.monthly.map((month) => month.users)}
+          labels={analytics.monthly.map((month) => month.month)}
+          accent="var(--accent-soft)"
+        />
+        <ExecutiveBarChart
+          title={describe("الإيراد الشهري والأرباع (Q1–Q4)", "Monthly revenue and quarters (Q1–Q4)")}
+          subtitle={describe(
+            "بالدولار الأمريكي (Paddle) والجنيه المصري (Paymob)",
+            "In USD (Paddle) and EGP (Paymob)"
+          )}
+          values={analytics.quarterly.map((quarter) => quarter.revenueUsd)}
+          labels={analytics.quarterly.map((quarter) => quarter.quarter)}
+          accent="#10b981"
+        />
+      </div>
+
+      <section className="safi-friend-manager" aria-labelledby="safi-friend-title">
+        <h2 id="safi-friend-title" style={{ margin: 0, fontSize: "18px" }}>
+          🎁 {describe("إدارة صلاحية أصدقاء المالك (Friend VIP Access)", "Owner Friend VIP access manager")}
+        </h2>
+        <p className="safi-kpi-note">
+          {describe(
+            "تمنح الرتبة كل مزايا الباقة المدفوعة مجاناً: بلا علامة مائية، حفظ وتشغيل الوصفات، حزم القوالب الاحترافية، و400 طلب ذكاء اصطناعي شهرياً. لا تُباع ولا تُشترى.",
+            "The role grants every paid feature for free: no watermark, saved recipes, premium recipe packs, and 400 AI calls monthly. It is never sold or purchased."
+          )}
+        </p>
+        <form className="safi-friend-form" onSubmit={handleGrantFriend}>
+          <input
+            type="email"
+            required
+            value={friendEmail}
+            onChange={(event) => setFriendEmail(event.currentTarget.value)}
+            placeholder={describe("البريد الإلكتروني للصديق", "Friend email address")}
+            aria-label={describe("البريد الإلكتروني للصديق", "Friend email address")}
+            dir="ltr"
+          />
+          <input
+            type="text"
+            value={friendNote}
+            onChange={(event) => setFriendNote(event.currentTarget.value)}
+            placeholder={describe("ملاحظة اختيارية (اسم الصديق)", "Optional note (friend name)")}
+            aria-label={describe("ملاحظة اختيارية", "Optional note")}
+          />
+          <button type="submit" className="safi-btn safi-btn-primary">
+            {describe("منح صلاحية Friend شاملة مجاناً", "Grant full Friend access for free")}
+          </button>
+        </form>
+        {friendError === null ? null : (
+          <p role="alert" style={{ margin: "0 0 12px", color: "var(--status-danger)", fontSize: "12.5px", fontWeight: 700 }}>
+            {friendError}
+          </p>
+        )}
+        <div className="safi-table-wrap">
+          <table className="safi-exec-table">
+            <thead>
+              <tr>
+                <th>{describe("بريد الصديق", "Friend email")}</th>
+                <th>{describe("تاريخ المنح", "Granted at")}</th>
+                <th>{describe("استهلاك AI", "AI usage")}</th>
+                <th>{describe("الإجراء", "Action")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {friendMembers.length === 0 ? (
+                <tr>
+                  <td colSpan={4}>
+                    {describe(
+                      "لا يوجد أصدقاء بعد. أضف أول بريد أعلاه.",
+                      "No Friend members yet. Add the first address above."
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                friendMembers.map((member) => (
+                  <tr key={member.email}>
+                    <td dir="ltr">
+                      {member.email}
+                      {member.note === "" ? null : (
+                        <>
+                          <br />
+                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>
+                            {member.note}
+                          </span>
+                        </>
+                      )}
+                    </td>
+                    <td className="safi-mono" dir="ltr">
+                      {member.grantedAt}
+                    </td>
+                    <td>
+                      {member.aiCallsUsed} / {member.aiCallsLimit}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="safi-btn safi-btn-secondary"
+                        onClick={() => handleRevokeFriend(member.email)}
+                      >
+                        {describe("سحب الصلاحية (Revoke)", "Revoke")}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="safi-glass" style={{ padding: "22px" }} aria-labelledby="safi-subscribers-title">
+        <h2 id="safi-subscribers-title" style={{ margin: "0 0 6px", fontSize: "18px" }}>
+          👥 {describe("إدارة المشتركين والعمليات", "Subscriber and operations management")}
+        </h2>
+        <p className="safi-kpi-note" style={{ marginBottom: "14px" }}>
+          {describe(
+            "بحث وفلترة فورية، حالة التحقق (بريد + هاتف + بصمة جهاز)، وتاريخ الانتهاء مع أزرار المالك المباشرة.",
+            "Search and filter instantly, review verification (email + phone + device fingerprint), expiry dates, and direct owner actions."
+          )}
+        </p>
+        <input
+          className="safi-exec-search"
+          type="search"
+          value={subscriberQuery}
+          onChange={(event) => setSubscriberQuery(event.currentTarget.value)}
+          placeholder={describe("ابحث بالبريد أو نوع الباقة", "Search by email or plan")}
+          aria-label={describe("ابحث في المشتركين", "Search subscribers")}
+        />
+        <div className="safi-table-wrap">
+          <table className="safi-exec-table">
+            <thead>
+              <tr>
+                <th>{describe("المستخدم", "User")}</th>
+                <th>{describe("نوع الباقة", "Plan")}</th>
+                <th>{describe("التحقق", "Verification")}</th>
+                <th>{describe("تاريخ الانتهاء", "Expires")}</th>
+                <th>{describe("الحالة", "Status")}</th>
+                <th>{describe("إجراءات المالك", "Owner actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSubscribers.map((row) => (
+                <tr key={row.id}>
+                  <td dir="ltr">{row.email}</td>
+                  <td>{row.plan}</td>
+                  <td>
+                    {row.verifiedEmail ? "✓" : "—"} {describe("بريد", "Email")} · {
+                      row.verifiedPhone ? "✓" : "—"
+                    } {describe("هاتف", "Phone")} · {
+                      row.verifiedDevice ? "✓" : "—"
+                    } {describe("جهاز", "Device")}
+                  </td>
+                  <td dir="ltr">{row.expiresAt}</td>
+                  <td>
+                    {row.status === "active"
+                      ? describe("نشط", "Active")
+                      : describe("موقوف", "Suspended")}
+                  </td>
+                  <td>
+                    <div className="safi-exec-actions">
+                      <button type="button" disabled={row.id === "owner"} onClick={() => handlePromote(row.email)}>
+                        {describe("ترقية إلى Friend VIP", "Promote to Friend VIP")}
+                      </button>
+                      <button type="button" disabled={row.id === "owner"} onClick={() => handleExtendTrial(row.email)}>
+                        {describe("تمديد التجربة", "Extend trial")}
+                      </button>
+                      <button type="button" data-danger="true" disabled={row.id === "owner"} onClick={() => handleCancelSubscription(row.email)}>
+                        {describe("إلغاء الاشتراك", "Cancel subscription")}
+                      </button>
+                      <button type="button" data-danger="true" disabled={row.id === "owner"} onClick={() => handleRefund(row.email)}>
+                        {describe("إصدار استرداد (ضمن 3 أيام)", "Issue refund (within 3 days)")}
+                      </button>
+                      <button type="button" data-danger="true" disabled={row.id === "owner"} onClick={() => handleSuspend(row.email)}>
+                        {describe("إيقاف الحساب", "Suspend account")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </React.Fragment>
+  );
 
   const rendered = React.createElement(
     "div",
@@ -433,6 +1090,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "en", onS
         },
         `⚡ حالة التنفيذ الفوري: ${activeActionLog}`
       ),
+
+      executiveCommandCenter,
 
       // 6 Cards Grid
       React.createElement(

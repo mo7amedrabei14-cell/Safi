@@ -20,21 +20,21 @@ describe("UI-Phase-5 command palette", () => {
 
     expect(html).toContain('role="dialog"');
     expect(html).toContain('aria-modal="true"');
-    expect(html).toContain("لوحة الأوامر السريعة");
+    expect(html).toContain("Quick command palette");
     expect(html).toContain('role="combobox"');
     expect(html).toContain('aria-controls="safi-palette-list"');
-    expect(html).toContain("ابحث عن أداة أو أمر…");
+    expect(html).toContain("Search tools and commands…");
     expect(html.split('role="option"').length - 1).toBe(PALETTE_ITEMS.length);
     expect(PALETTE_ITEMS).toHaveLength(7);
 
     for (const label of [
-      "الرئيسية",
-      "التنظيف وPII",
-      "الوصفات",
-      "الرسوم البيانية",
-      "المكتبة",
-      "لوحة المالك",
-      "فحص أمني سريع"
+      "Website",
+      "Cleaning App",
+      "Recipes App",
+      "Charts App",
+      "Library App",
+      "Owner App",
+      "Quick security audit"
     ]) {
       expect(html).toContain(label);
     }

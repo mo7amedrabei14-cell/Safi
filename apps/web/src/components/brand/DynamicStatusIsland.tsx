@@ -7,28 +7,31 @@
  */
 import type { ReactNode } from "react";
 import { useState } from "react";
+import type { SafiLang } from "../layout/FloatingGlassDock";
 
 interface Metric {
   readonly id: string;
   readonly label: string;
+  readonly labelAr: string;
   readonly value: string;
 }
 
 export const STATUS_METRICS: readonly Metric[] = [
-  { id: "license", label: "الترخيص", value: "Ed25519 Offline Verified" },
-  { id: "kernel", label: "بصمة النواة", value: "BLAKE3 Chain Intact" },
-  { id: "throughput", label: "سرعة المعالجة", value: "125,000 صف/ث" }
+  { id: "license", label: "License", labelAr: "الترخيص", value: "Ed25519 Offline Verified" },
+  { id: "kernel", label: "Kernel integrity", labelAr: "بصمة النواة", value: "BLAKE3 Chain Intact" },
+  { id: "throughput", label: "Throughput", labelAr: "سرعة المعالجة", value: "125,000 rows/s" }
 ];
 
-const STATUS_SUMMARY = "نواة Rust نشطة • صفر شبكة • خزنة SQLCipher مؤمّنة";
-const STATUS_GROUP_LABEL = "مقاييس الأمان الفورية";
+const STATUS_SUMMARY_EN = "Rust engine active • Zero network • SQLCipher vault secured";
+const STATUS_SUMMARY_AR = "نواة Rust نشطة • صفر شبكة • خزنة SQLCipher مؤمّنة";
 
-export function DynamicStatusIsland(): ReactNode {
+export function DynamicStatusIsland({ lang = "en" }: { readonly lang?: SafiLang }): ReactNode {
+  const isAr = lang === "ar";
   const [pinned, setPinned] = useState(false);
 
   return (
     <div
-      dir="rtl"
+      dir={isAr ? "rtl" : "ltr"}
       style={{
         position: "relative",
         display: "inline-flex",
@@ -68,13 +71,13 @@ export function DynamicStatusIsland(): ReactNode {
             flex: "0 0 auto"
           }}
         />
-        <span>{STATUS_SUMMARY}</span>
+        <span>{isAr ? STATUS_SUMMARY_AR : STATUS_SUMMARY_EN}</span>
       </button>
 
       <div
         id="safi-status-panel"
         role="group"
-        aria-label={STATUS_GROUP_LABEL}
+        aria-label={isAr ? "مقاييس الأمان الفورية" : "Live security metrics"}
         aria-hidden={!pinned}
         className={pinned ? "safi-card" : "safi-visually-hidden"}
         style={
@@ -104,7 +107,7 @@ export function DynamicStatusIsland(): ReactNode {
               fontSize: "12px"
             }}
           >
-            <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{metric.label}</span>
+            <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{isAr ? metric.labelAr : metric.label}</span>
             <span className="safi-mono" style={{ color: "var(--accent-primary)", fontWeight: 600 }}>
               {metric.value}
             </span>

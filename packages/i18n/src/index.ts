@@ -34,15 +34,39 @@ export interface I18nProviderProps {
 
 export const I18nProvider: React.FC<I18nProviderProps> = ({
   children,
-  defaultLocale = "ar-EG"
+  defaultLocale = "en-US"
 }) => {
-  const [locale, setLocaleState] = useState<Locale>(defaultLocale);
+  const [locale, setLocaleState] = useState<Locale>(() => {
+    if (typeof document !== "undefined") {
+      const selected = document.documentElement.dataset.safiLocale;
+      if (selected === "ar") return "ar-EG";
+      if (selected === "en") return "en-US";
+    }
+    if (typeof window !== "undefined") {
+      try {
+        const selected = window.localStorage.getItem("safi.locale");
+        if (selected === "ar" || selected === "ar-EG") return "ar-EG";
+        if (selected === "en" || selected === "en-US") return "en-US";
+      } catch {
+        // The configured default locale remains available without storage.
+      }
+    }
+    return defaultLocale;
+  });
 
   const setLocale = (newLocale: Locale) => {
     setLocaleState(newLocale);
     if (typeof document !== "undefined") {
       document.documentElement.lang = newLocale;
       document.documentElement.dir = newLocale === "ar-EG" ? "rtl" : "ltr";
+      document.documentElement.dataset.safiLocale = newLocale === "ar-EG" ? "ar" : "en";
+    }
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem("safi.locale", newLocale === "ar-EG" ? "ar" : "en");
+      } catch {
+        // The locale still changes for the current session.
+      }
     }
   };
 
@@ -50,12 +74,13 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
     if (typeof document !== "undefined") {
       document.documentElement.lang = locale;
       document.documentElement.dir = locale === "ar-EG" ? "rtl" : "ltr";
+      document.documentElement.dataset.safiLocale = locale === "ar-EG" ? "ar" : "en";
     }
   }, [locale]);
 
   const t = (key: string, params?: Record<string, string | number>): string => {
-    const dict = dictionaries[locale] || dictionaries["ar-EG"];
-    let template = dict[key] || dictionaries["ar-EG"][key] || key;
+    const dict = dictionaries[locale];
+    let template = dict[key] ?? key;
 
     if (params) {
       for (const [paramKey, paramVal] of Object.entries(params)) {
@@ -67,7 +92,7 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
 
   const expandText40Pct = (text: string): string => {
     // Specification Section 6.7: UI layout resilience testing by expanding text length by ~40%
-    return `${text} [ممتد 40%]`.repeat(1);
+    return locale === "ar-EG" ? text + " [ممتد 40%]" : text + " [expanded 40%]";
   };
 
   const dir = locale === "ar-EG" ? "rtl" : "ltr";

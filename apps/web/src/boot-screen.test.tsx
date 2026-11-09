@@ -34,9 +34,9 @@ describe("SafiData first-paint introduction", () => {
     expect(introSource).toContain("INTRO_START_PAUSE_MS = 1_000");
     expect(introSource).toContain("INTRO_PROGRESS_DURATION_SECONDS = 2.25");
     expect(introSource).toContain("INTRO_PROGRESS_COMPLETION_HOLD_SECONDS = 0.22");
-    expect(introSource.indexOf("INTRO_START_PAUSE_MS")).toBeLessThan(
-      introSource.indexOf("gsap.timeline({")
-    );
+    const pauseWaitIndex = introSource.indexOf("window.setTimeout(resolve, INTRO_START_PAUSE_MS)");
+    expect(pauseWaitIndex).toBeGreaterThan(-1);
+    expect(pauseWaitIndex).toBeLessThan(introSource.indexOf("gsap.timeline({"));
     expect(introSource).toContain('gsap.set(progress, { scaleX: 1, transformOrigin: "right center" })');
     expect(appCss).toContain(
       '.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-progress-fill'

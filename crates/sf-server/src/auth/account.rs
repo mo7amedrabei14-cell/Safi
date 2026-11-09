@@ -1034,7 +1034,11 @@ mod tests {
     async fn malformed_verification_tokens_use_the_dedicated_error_code() {
         let fixture = fixture();
         assert_eq!(
-            fixture.service.verify_email("not-a-64-character-hex-token").await.unwrap_err(),
+            fixture
+                .service
+                .verify_email("not-a-64-character-hex-token")
+                .await
+                .unwrap_err(),
             AuthError::InvalidVerificationToken
         );
     }

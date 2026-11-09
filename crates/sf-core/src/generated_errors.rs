@@ -47,6 +47,11 @@ impl ErrorCode {
         domain: ErrorDomain::Auth,
         number: 6,
     };
+    /// Registered error code `SF-AUTH-007`.
+    pub const SF_AUTH_007: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 7,
+    };
     /// Registered error code `SF-CHT-001`.
     pub const SF_CHT_001: Self = Self {
         domain: ErrorDomain::Cht,
@@ -346,6 +351,7 @@ impl ErrorCode {
         Self::SF_AUTH_004,
         Self::SF_AUTH_005,
         Self::SF_AUTH_006,
+        Self::SF_AUTH_007,
         Self::SF_CHT_001,
         Self::SF_CHT_002,
         Self::SF_CHT_003,
@@ -483,11 +489,21 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         code: ErrorCode::SF_AUTH_006,
         code_str: "SF-AUTH-006",
         severity: ErrorSeverity::Error,
-        title_ar: "طلب الدخول غير صالح",
-        action_ar: "تحقق من اسم الجهاز المطلوب ثم أعد المحاولة.",
-        title_en: "Invalid authentication request",
-        action_en: "Check the requested device name, then try again.",
-        owner_note: "Malformed auth request body (e.g. blank device_name or over 120 chars).",
+        title_ar: "الطلب غير صالح",
+        action_ar: "راجع صيغة الطلب والحقول المطلوبة وأطوالها ثم أعد المحاولة.",
+        title_en: "Invalid request",
+        action_en: "Check the request format, required fields, and input lengths, then retry.",
+        owner_note: "Malformed or invalid account/authentication request fields; never echo submitted credentials.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_007,
+        code_str: "SF-AUTH-007",
+        severity: ErrorSeverity::Error,
+        title_ar: "رابط التحقق غير صالح أو انتهت صلاحيته",
+        action_ar: "اطلب رابط تحقق جديدًا من صفحة تسجيل الدخول ثم افتح أحدث رسالة وصلتك.",
+        title_en: "Email verification link is invalid or expired",
+        action_en: "Request a new verification link from sign-in, then open the latest email.",
+        owner_note: "Verification token was malformed, unknown, expired, or already consumed; do not log the submitted token.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_CHT_001,

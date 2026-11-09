@@ -8,6 +8,7 @@ export type SafiErrorCode =
   | "SF-AUTH-004"
   | "SF-AUTH-005"
   | "SF-AUTH-006"
+  | "SF-AUTH-007"
   | "SF-CHT-001"
   | "SF-CHT-002"
   | "SF-CHT-003"
@@ -80,6 +81,8 @@ export type SafiErrorTranslationKey =
   | "error.SF-AUTH-005.action"
   | "error.SF-AUTH-006.title"
   | "error.SF-AUTH-006.action"
+  | "error.SF-AUTH-007.title"
+  | "error.SF-AUTH-007.action"
   | "error.SF-CHT-001.title"
   | "error.SF-CHT-001.action"
   | "error.SF-CHT-002.title"
@@ -214,6 +217,7 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-AUTH-004",
   "SF-AUTH-005",
   "SF-AUTH-006",
+  "SF-AUTH-007",
   "SF-CHT-001",
   "SF-CHT-002",
   "SF-CHT-003",
@@ -324,11 +328,22 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
   "SF-AUTH-006": {
     code: "SF-AUTH-006",
     severity: "error",
-    titleAr: "طلب الدخول غير صالح",
-    actionAr: "تحقق من اسم الجهاز المطلوب ثم أعد المحاولة.",
-    titleEn: "Invalid authentication request",
-    actionEn: "Check the requested device name, then try again.",
-    ownerNote: "Malformed auth request body (e.g. blank device_name or over 120 chars)."
+    titleAr: "الطلب غير صالح",
+    actionAr: "راجع صيغة الطلب والحقول المطلوبة وأطوالها ثم أعد المحاولة.",
+    titleEn: "Invalid request",
+    actionEn: "Check the request format, required fields, and input lengths, then retry.",
+    ownerNote:
+      "Malformed or invalid account/authentication request fields; never echo submitted credentials."
+  },
+  "SF-AUTH-007": {
+    code: "SF-AUTH-007",
+    severity: "error",
+    titleAr: "رابط التحقق غير صالح أو انتهت صلاحيته",
+    actionAr: "اطلب رابط تحقق جديدًا من صفحة تسجيل الدخول ثم افتح أحدث رسالة وصلتك.",
+    titleEn: "Email verification link is invalid or expired",
+    actionEn: "Request a new verification link from sign-in, then open the latest email.",
+    ownerNote:
+      "Verification token was malformed, unknown, expired, or already consumed; do not log the submitted token."
   },
   "SF-CHT-001": {
     code: "SF-CHT-001",
@@ -876,8 +891,11 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-AUTH-004.action": "اطلب من مالك المساحة منح مفتاحك النطاق المطلوب.",
   "error.SF-AUTH-005.title": "خدمة الدخول غير متاحة مؤقتًا",
   "error.SF-AUTH-005.action": "أعد المحاولة بعد لحظات. بياناتك لم تتأثر.",
-  "error.SF-AUTH-006.title": "طلب الدخول غير صالح",
-  "error.SF-AUTH-006.action": "تحقق من اسم الجهاز المطلوب ثم أعد المحاولة.",
+  "error.SF-AUTH-006.title": "الطلب غير صالح",
+  "error.SF-AUTH-006.action": "راجع صيغة الطلب والحقول المطلوبة وأطوالها ثم أعد المحاولة.",
+  "error.SF-AUTH-007.title": "رابط التحقق غير صالح أو انتهت صلاحيته",
+  "error.SF-AUTH-007.action":
+    "اطلب رابط تحقق جديدًا من صفحة تسجيل الدخول ثم افتح أحدث رسالة وصلتك.",
   "error.SF-CHT-001.title": "إصدار مواصفة المخطط مفقود",
   "error.SF-CHT-001.action": "أضف إصدارًا صحيحًا لمواصفة المخطط ثم أعد المحاولة.",
   "error.SF-CHT-002.title": "نوع المخطط مفقود",
@@ -1012,8 +1030,12 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-AUTH-004.action": "Ask the workspace owner to grant your key the required scope.",
   "error.SF-AUTH-005.title": "Authentication backend unavailable",
   "error.SF-AUTH-005.action": "Retry in a moment. Your data was not affected.",
-  "error.SF-AUTH-006.title": "Invalid authentication request",
-  "error.SF-AUTH-006.action": "Check the requested device name, then try again.",
+  "error.SF-AUTH-006.title": "Invalid request",
+  "error.SF-AUTH-006.action":
+    "Check the request format, required fields, and input lengths, then retry.",
+  "error.SF-AUTH-007.title": "Email verification link is invalid or expired",
+  "error.SF-AUTH-007.action":
+    "Request a new verification link from sign-in, then open the latest email.",
   "error.SF-CHT-001.title": "Chart specification version is missing",
   "error.SF-CHT-001.action": "Add a valid chart specification version, then try again.",
   "error.SF-CHT-002.title": "Chart type is missing",

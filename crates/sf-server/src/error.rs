@@ -50,7 +50,9 @@ impl AuthError {
             Self::InvalidCredentials | Self::Expired | Self::Revoked => StatusCode::UNAUTHORIZED,
             Self::InsufficientScope => StatusCode::FORBIDDEN,
             Self::BackendUnavailable => StatusCode::SERVICE_UNAVAILABLE,
-            Self::InvalidRequest | Self::InvalidVerificationToken => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::InvalidRequest | Self::InvalidVerificationToken => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
         }
     }
 

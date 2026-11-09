@@ -17,7 +17,7 @@
 :root[data-theme="light"],
 :root[data-theme="apple-light"],
 :root[data-theme="vision-glass"] {
-  --bg-canvas: #F5F5F7;
+  --bg-canvas: #f5f5f7;
   --bg-surface: rgba(255, 255, 255, 0.65);
   --bg-surface-soft: rgba(255, 255, 255, 0.56);
   --bg-elevated: rgba(238, 242, 246, 0.72);
@@ -25,30 +25,33 @@
   --border-subtle: rgba(15, 23, 42, 0.08);
   --border-strong: rgba(15, 23, 42, 0.15);
 
-  --text-primary: #1D1D1F;
+  --text-primary: #1d1d1f;
   --text-secondary: #515154;
-  --text-muted: #86868B;
+  --text-muted: #86868b;
 
-  --accent-primary: #1E293B;
-  --accent-soft: #3B82F6;
-  --accent-calm-gradient: linear-gradient(135deg, #1E293B 0%, #334155 50%, #475569 100%);
-  --accent-hero-glow: radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.10) 0%, rgba(148, 163, 184, 0.06) 45%, transparent 75%);
+  --accent-primary: #1e293b;
+  --accent-soft: #3b82f6;
+  --accent-calm-gradient: linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%);
+  --accent-hero-glow: radial-gradient(
+    circle at 50% 0%,
+    rgba(59, 130, 246, 0.1) 0%,
+    rgba(148, 163, 184, 0.06) 45%,
+    transparent 75%
+  );
   --accent-tint: rgba(59, 130, 246, 0.08);
 
-  --status-ok: #10B981;
-  --status-warn: #F59E0B;
-  --status-danger: #EF4444;
+  --status-ok: #10b981;
+  --status-warn: #f59e0b;
+  --status-danger: #ef4444;
 
   --shadow-card:
-    0 2px 6px rgba(15, 23, 42, 0.03),
-    0 18px 42px -12px rgba(15, 23, 42, 0.07),
+    0 2px 6px rgba(15, 23, 42, 0.03), 0 18px 42px -12px rgba(15, 23, 42, 0.07),
     0 0 0 1px rgba(15, 23, 42, 0.06);
-  --shadow-elevated:
-    0 28px 64px -16px rgba(15, 23, 42, 0.12),
-    0 0 0 1px rgba(15, 23, 42, 0.10);
+  --shadow-elevated: 0 28px 64px -16px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.1);
   --spotlight-glow: rgba(59, 130, 246, 0.07);
 
-  --safi-font-sans: "IBM Plex Sans Arabic", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --safi-font-sans:
+    "IBM Plex Sans Arabic", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --safi-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   color-scheme: light;
@@ -56,7 +59,7 @@
 
 :root[data-theme="dark"],
 :root[data-theme="google-gemini"] {
-  --bg-canvas: #090B10;
+  --bg-canvas: #090b10;
   --bg-surface: rgba(18, 22, 32, 0.65);
   --bg-surface-soft: rgba(18, 22, 32, 0.56);
   --bg-elevated: rgba(27, 33, 48, 0.72);
@@ -64,27 +67,28 @@
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
 
-  --text-primary: #F5F5F7;
-  --text-secondary: #A1A1AA;
-  --text-muted: #71717A;
+  --text-primary: #f5f5f7;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
 
-  --accent-primary: #F5F5F7;
-  --accent-soft: #60A5FA;
-  --accent-calm-gradient: linear-gradient(135deg, #F8FAFC 0%, #CBD5E1 55%, #94A3B8 100%);
-  --accent-hero-glow: radial-gradient(circle at 50% 0%, rgba(96, 165, 250, 0.14) 0%, rgba(148, 163, 184, 0.05) 45%, transparent 75%);
+  --accent-primary: #f5f5f7;
+  --accent-soft: #60a5fa;
+  --accent-calm-gradient: linear-gradient(135deg, #f8fafc 0%, #cbd5e1 55%, #94a3b8 100%);
+  --accent-hero-glow: radial-gradient(
+    circle at 50% 0%,
+    rgba(96, 165, 250, 0.14) 0%,
+    rgba(148, 163, 184, 0.05) 45%,
+    transparent 75%
+  );
   --accent-tint: rgba(96, 165, 250, 0.12);
 
-  --status-ok: #34D399;
-  --status-warn: #FBBF24;
-  --status-danger: #F87171;
+  --status-ok: #34d399;
+  --status-warn: #fbbf24;
+  --status-danger: #f87171;
 
-  --shadow-card:
-    0 20px 50px -12px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(255, 255, 255, 0.08);
-  --shadow-elevated:
-    0 32px 72px -14px rgba(0, 0, 0, 0.75),
-    0 0 0 1px rgba(255, 255, 255, 0.16);
-  --spotlight-glow: rgba(96, 165, 250, 0.10);
+  --shadow-card: 0 20px 50px -12px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-elevated: 0 32px 72px -14px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.16);
+  --spotlight-glow: rgba(96, 165, 250, 0.1);
 
   color-scheme: dark;
 }
@@ -94,7 +98,8 @@
  * ========================================================================== */
 
 @keyframes safiFloatSlow {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px) rotateX(0deg);
   }
   50% {
@@ -120,7 +125,8 @@
 }
 
 @keyframes safiPulseRing {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 0.55;
   }
@@ -131,18 +137,33 @@
 }
 
 @keyframes safiBarWave1 {
-  0%, 100% { transform: scaleY(0.72); }
-  50% { transform: scaleY(1.05); }
+  0%,
+  100% {
+    transform: scaleY(0.72);
+  }
+  50% {
+    transform: scaleY(1.05);
+  }
 }
 
 @keyframes safiBarWave2 {
-  0%, 100% { transform: scaleY(1.02); }
-  50% { transform: scaleY(0.68); }
+  0%,
+  100% {
+    transform: scaleY(1.02);
+  }
+  50% {
+    transform: scaleY(0.68);
+  }
 }
 
 @keyframes safiBarWave3 {
-  0%, 100% { transform: scaleY(0.84); }
-  50% { transform: scaleY(1.12); }
+  0%,
+  100% {
+    transform: scaleY(0.84);
+  }
+  50% {
+    transform: scaleY(1.12);
+  }
 }
 
 @keyframes safiMarqueeScroll {
@@ -173,7 +194,7 @@
   left: 16px;
   right: 16px;
   height: 2px;
-  background: linear-gradient(90deg, transparent 0%, #60A5FA 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, #60a5fa 50%, transparent 100%);
   box-shadow: 0 0 18px 2px rgba(96, 165, 250, 0.55);
   pointer-events: none;
   animation: safiScanBeam 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
@@ -224,7 +245,9 @@ html {
   scroll-padding-top: 88px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  transition: background-color 0.35s ease, color 0.25s ease;
+  transition:
+    background-color 0.35s ease,
+    color 0.25s ease;
 }
 
 body {
@@ -291,11 +314,16 @@ pre,
 }
 
 @keyframes safiStarGlow {
-  0%, 100% {
-    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 10px 30px -8px rgba(59, 130, 246, 0.28);
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(59, 130, 246, 0.25),
+      0 10px 30px -8px rgba(59, 130, 246, 0.28);
   }
   50% {
-    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.55), 0 14px 38px -6px rgba(59, 130, 246, 0.45);
+    box-shadow:
+      0 0 0 2px rgba(96, 165, 250, 0.55),
+      0 14px 38px -6px rgba(59, 130, 246, 0.45);
   }
 }
 
@@ -303,8 +331,8 @@ pre,
   background: linear-gradient(
     110deg,
     var(--text-primary) 25%,
-    #3B82F6 48%,
-    #10B981 54%,
+    #3b82f6 48%,
+    #10b981 54%,
     var(--text-primary) 75%
   );
   background-size: 220% auto;
@@ -321,13 +349,13 @@ pre,
   border-radius: 16px;
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.14) 0%, rgba(16, 185, 129, 0.14) 100%);
   border: 1px solid rgba(59, 130, 246, 0.32);
-  color: #2563EB;
+  color: #2563eb;
   animation: safiWordFlipIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 :root[data-theme="dark"] .safi-rb-rotating-word,
 :root[data-theme="google-gemini"] .safi-rb-rotating-word {
-  color: #60A5FA;
+  color: #60a5fa;
   border-color: rgba(96, 165, 250, 0.4);
 }
 
@@ -388,14 +416,24 @@ pre,
 }
 
 @keyframes safiOrbitSpin {
-  0% { transform: rotate(0deg); }
-  50% { transform: rotate(180deg) scale(1.03); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.03);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes safiStripShimmer {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
 }
 
 .safi-pm-logo-orbit {
@@ -422,7 +460,7 @@ pre,
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow:
-    0 12px 32px -8px rgba(15, 23, 42, 0.10),
+    0 12px 32px -8px rgba(15, 23, 42, 0.1),
     0 2px 6px rgba(15, 23, 42, 0.04),
     0 0 0 1px rgba(255, 255, 255, 0.7) inset;
   overflow: hidden;
@@ -595,8 +633,8 @@ pre,
 
 .safi-segmented-btn[data-active="true"],
 .safi-segmented-btn[aria-current="page"] {
-  background: #FFFFFF;
-  color: #0F172A;
+  background: #ffffff;
+  color: #0f172a;
   font-weight: 700;
   box-shadow:
     0 2px 8px rgba(15, 23, 42, 0.08),
@@ -608,7 +646,7 @@ pre,
 :root[data-theme="google-gemini"] .safi-segmented-btn[data-active="true"],
 :root[data-theme="google-gemini"] .safi-segmented-btn[aria-current="page"] {
   background: rgba(255, 255, 255, 0.14);
-  color: #F8FAFC;
+  color: #f8fafc;
   box-shadow:
     0 2px 10px rgba(0, 0, 0, 0.35),
     0 0 0 1px rgba(255, 255, 255, 0.12);
@@ -717,10 +755,18 @@ pre,
   gap: 22px;
 }
 
-.safi-bento-wide { grid-column: span 7; }
-.safi-bento-half { grid-column: span 5; }
-.safi-bento-third { grid-column: span 6; }
-.safi-bento-full { grid-column: span 12; }
+.safi-bento-wide {
+  grid-column: span 7;
+}
+.safi-bento-half {
+  grid-column: span 5;
+}
+.safi-bento-third {
+  grid-column: span 6;
+}
+.safi-bento-full {
+  grid-column: span 12;
+}
 
 @media (max-width: 1080px) {
   .safi-bento-wide,
@@ -730,189 +776,7 @@ pre,
   }
 }
 
-/* ============================================================================
- * 6. Cinematic Intro Splash (Calm Apple Keynote Curtain)
- * ========================================================================== */
-
-.safi-intro-splash {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background:
-    radial-gradient(800px 480px at 50% 35%, rgba(59, 130, 246, 0.14), transparent 70%),
-    #090B10;
-  color: #F5F5F7;
-  overflow: hidden;
-}
-
-.safi-intro-stage {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  max-width: 640px;
-  width: 100%;
-}
-
-.safi-intro-orb {
-  position: relative;
-  width: 196px;
-  height: 196px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 24px;
-}
-
-.safi-intro-orb-ring {
-  position: absolute;
-  inset: -6px;
-  border-radius: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  animation: safiPulseRing 2.4s ease-in-out infinite;
-  pointer-events: none;
-}
-
-.safi-intro-title {
-  display: flex;
-  min-height: 1.3em;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 0.24em;
-  margin: 0 0 10px;
-  direction: rtl;
-  text-align: center;
-  font-size: clamp(28px, 4vw, 44px);
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  color: #F5F5F7;
-}
-
-.safi-intro-title bdi {
-  display: inline-block;
-  white-space: nowrap;
-  unicode-bidi: isolate;
-}
-
-.safi-intro-title bdi[dir="ltr"] {
-  direction: ltr;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  letter-spacing: -0.02em;
-}
-
-.safi-intro-copy {
-  display: flex;
-  width: 100%;
-  max-width: 540px;
-  flex-direction: column;
-  align-items: center;
-}
-
-.safi-intro-splash[data-fonts-ready="false"] .safi-intro-copy {
-  visibility: hidden;
-}
-
-.safi-intro-tagline {
-  display: flex;
-  min-height: 3.3em;
-  align-items: flex-start;
-  justify-content: center;
-  margin: 0 0 24px;
-  max-width: 500px;
-  font-size: 16px;
-  line-height: 1.65;
-  color: #94A3B8;
-  text-wrap: balance;
-}
-
-.safi-intro-progress-track {
-  width: 240px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-  margin-bottom: 20px;
-}
-
-@keyframes safiIntroFontWait {
-  from {
-    transform: translateX(140%) scaleX(0.35);
-  }
-
-  to {
-    transform: translateX(-140%) scaleX(1);
-  }
-}
-
-.safi-intro-progress-fill {
-  width: 100%;
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #60A5FA 0%, #CBD5E1 50%, #F8FAFC 100%);
-  transform: scaleX(0);
-  transform-origin: right center;
-}
-
-.safi-intro-splash[data-fonts-ready="false"] .safi-intro-progress-fill {
-  width: 36%;
-  animation: safiIntroFontWait 1.15s ease-in-out infinite alternate;
-}
-
-/* The first second is a deliberate, completely still composition. */
-.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-orb-ring,
-.safi-intro-splash:not([data-motion-ready="true"]) .safi-pm-logo-orbit {
-  animation: none !important;
-}
-
-.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-progress-fill {
-  width: 100%;
-  animation: none !important;
-  transform: scaleX(0);
-}
-
-.safi-intro-splash:not([data-motion-ready="true"]) [data-intro-dot] {
-  opacity: 1;
-}
-
-.safi-intro-splash:not([data-motion-ready="true"]) [data-intro-bar] {
-  opacity: 0;
-}
-
-.safi-intro-splash[data-motion-ready="true"] [data-intro-dot],
-.safi-intro-splash[data-motion-ready="true"] [data-intro-bar] {
-  opacity: 1;
-}
-
-.safi-intro-splash:not([data-motion-ready="true"]) [data-intro-trend] {
-  stroke-dasharray: 120;
-  stroke-dashoffset: 120;
-}
-
-.safi-intro-skip {
-  appearance: none;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #F5F5F7;
-  font-family: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-  padding: 10px 24px;
-  min-height: 44px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.safi-intro-skip:hover {
-  background: #F5F5F7;
-  color: #090B10;
-}
+/* Intro styles live in public/boot.css so the static and React frames cannot diverge. */
 
 /* ============================================================================
  * 7. Tables, Inputs, Modals & Legacy Compatibility
@@ -986,8 +850,13 @@ select {
  * ========================================================================== */
 
 @keyframes safiCursorBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 @keyframes safiStepReveal {
@@ -1029,7 +898,7 @@ select {
   display: inline-block;
   width: 2px;
   height: 1.1em;
-  background: #60A5FA;
+  background: #60a5fa;
   vertical-align: middle;
   margin-inline-start: 4px;
   animation: safiCursorBlink 0.9s infinite;

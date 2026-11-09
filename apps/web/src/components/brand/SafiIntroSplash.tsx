@@ -1,9 +1,8 @@
 /**
  * Cinematic SafiData intro.
  *
- * The title is kept as intact Arabic/English runs. The animation waits for the
- * actual local fonts and hands off to the application without unmounting the
- * intro until the application has committed.
+ * The title is kept as intact Arabic/English runs. Logo motion starts immediately,
+ * local fonts load in parallel, and the intro exits over the committed application.
  */
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -12,12 +11,14 @@ import { MOTION_DOTS } from "./SafiPrismLogo";
 
 export interface SafiIntroSplashProps {
   readonly open: boolean;
+  readonly exiting?: boolean | undefined;
   readonly onAnimationComplete?: (() => void) | undefined;
+  readonly onExitComplete?: (() => void) | undefined;
 }
 
-export const INTRO_START_PAUSE_MS = 1_000;
 export const INTRO_PROGRESS_DURATION_SECONDS = 2.25;
 export const INTRO_PROGRESS_COMPLETION_HOLD_SECONDS = 0.22;
+export const INTRO_EXIT_DURATION_SECONDS = 0.65;
 
 function canRunIntroTimeline(): boolean {
   if (
@@ -47,10 +48,14 @@ async function waitForIntroFonts(): Promise<void> {
   await document.fonts.ready;
 }
 
-export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashProps): ReactNode {
+export function SafiIntroSplash({
+  open,
+  exiting = false,
+  onAnimationComplete,
+  onExitComplete
+}: SafiIntroSplashProps): ReactNode {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const titleRef = useRef<HTMLHeadingElement | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
   const finishedRef = useRef(false);
@@ -74,204 +79,209 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
 
   useEffect(() => {
     if (!open) {
+      return;
+    }
+
+    let cancelled = false;
+    const revealCopy = async (): Promise<void> => {
+      try {
+        await waitForIntroFonts();
+      } catch {
+        // A local font failure falls back to the system font without blocking motion.
+      }
+      if (!cancelled) {
+        setFontsReady(true);
+        const root = rootRef.current;
+        if (root !== null) {
+          root.dataset.fontsReady = "true";
+        }
+      }
+    };
+
+    void revealCopy();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
       timelineRef.current?.kill();
       timelineRef.current = null;
       return;
     }
 
-    let cancelled = false;
     let fallbackTimer: number | undefined;
-    let startDelayTimer: number | undefined;
-    let startDelayResolve: (() => void) | null = null;
+    const root = rootRef.current;
+    const svg = svgRef.current;
+    if (root === null || svg === null) {
+      finishOnce();
+      return;
+    }
 
-    const startTimeline = async (): Promise<void> => {
-      try {
-        await waitForIntroFonts();
-      } catch {
-        // A local font failure falls back to the system font; it must not trap startup.
-      }
+    const dots = Array.from(svg.querySelectorAll<SVGCircleElement>("[data-intro-dot]"));
+    const bars = Array.from(svg.querySelectorAll<SVGRectElement>("[data-intro-bar]"));
+    const trendPath = svg.querySelector<SVGPathElement>("[data-intro-trend]");
+    const progress = progressRef.current;
 
-      if (cancelled || finishedRef.current) {
-        return;
-      }
+    if (trendPath !== null && typeof trendPath.getTotalLength === "function") {
+      const length = trendPath.getTotalLength();
+      trendPath.style.strokeDasharray = String(length);
+      trendPath.style.strokeDashoffset = String(length);
+    }
 
-      setFontsReady(true);
+    root.dataset.motionReady = "true";
 
-      const root = rootRef.current;
-      const svg = svgRef.current;
-      if (root === null || svg === null) {
-        finishOnce();
-        return;
-      }
-
-      // Make the font-ready frame visible before starting the one-second pause.
-      root.dataset.fontsReady = "true";
-
-      const dots = Array.from(svg.querySelectorAll<SVGCircleElement>("[data-intro-dot]"));
-      const bars = Array.from(svg.querySelectorAll<SVGRectElement>("[data-intro-bar]"));
-      const trendPath = svg.querySelector<SVGPathElement>("[data-intro-trend]");
-      const title = titleRef.current;
-      const progress = progressRef.current;
-
-      if (trendPath !== null && typeof trendPath.getTotalLength === "function") {
-        const length = trendPath.getTotalLength();
-        trendPath.style.strokeDasharray = String(length);
-        trendPath.style.strokeDashoffset = String(length);
-      }
-
-      // Keep every part of the intro still for one full second after fonts are ready.
-      await new Promise<void>((resolve) => {
-        startDelayResolve = resolve;
-        startDelayTimer = window.setTimeout(resolve, INTRO_START_PAUSE_MS);
-      });
-      startDelayTimer = undefined;
-      startDelayResolve = null;
-
-      if (cancelled || finishedRef.current) {
-        return;
-      }
-
-      root.dataset.motionReady = "true";
-
-      if (!canRunIntroTimeline()) {
-        if (progress !== null) {
-          gsap.set(progress, { scaleX: 1 });
-        }
-        if (trendPath !== null) {
-          trendPath.style.strokeDasharray = "none";
-          trendPath.style.strokeDashoffset = "0";
-        }
-        finishOnce();
-        return;
-      }
-
-      const timeline = gsap.timeline({
-        defaults: { ease: "power3.out" },
-        onComplete: () => {
-          // Never hand off with a partially filled progress indicator.
-          if (progress !== null) {
-            gsap.set(progress, { scaleX: 1, transformOrigin: "right center" });
-          }
-          if (fallbackTimer !== undefined) {
-            window.clearTimeout(fallbackTimer);
-            fallbackTimer = undefined;
-          }
-          timelineRef.current = null;
-          finishOnce();
-        }
-      });
-      timelineRef.current = timeline;
-
-      if (title !== null) {
-        timeline.fromTo(
-          title,
-          { autoAlpha: 0, y: 8, filter: "blur(4px)" },
-          {
-            autoAlpha: 1,
-            y: 0,
-            filter: "blur(0px)",
-            duration: 0.42,
-            ease: "power3.out",
-            clearProps: "filter,transform,opacity,visibility"
-          },
-          0
-        );
-      }
-
+    if (!canRunIntroTimeline()) {
       if (progress !== null) {
-        timeline.fromTo(
-          progress,
-          { scaleX: 0, transformOrigin: "right center" },
-          { scaleX: 1, duration: INTRO_PROGRESS_DURATION_SECONDS, ease: "power2.inOut" },
-          0
-        );
+        gsap.set(progress, { scaleX: 1 });
       }
-
-      dots.forEach((dot, index) => {
-        const spec = MOTION_DOTS[index];
-        if (spec !== undefined) {
-          timeline.to(
-            dot,
-            {
-              attr: { cx: spec.gridX, cy: spec.gridY },
-              duration: 0.44,
-              ease: "elastic.out(1, 0.75)"
-            },
-            0.28
-          );
-        }
-      });
-
-      timeline.to(
-        dots,
-        {
-          opacity: 0,
-          scale: 0.4,
-          duration: 0.24,
-          ease: "power2.in"
-        },
-        0.78
-      );
-
-      if (bars.length > 0) {
-        timeline.fromTo(
-          bars,
-          { scaleY: 0, opacity: 0, transformOrigin: "center bottom" },
-          {
-            scaleY: 1,
-            opacity: 1,
-            duration: 0.44,
-            stagger: 0.07,
-            ease: "back.out(1.6)"
-          },
-          0.9
-        );
-      }
-
       if (trendPath !== null) {
-        timeline.to(
-          trendPath,
-          {
-            strokeDashoffset: 0,
-            duration: 0.4,
-            ease: "power2.out"
-          },
-          1.22
-        );
+        trendPath.style.strokeDasharray = "none";
+        trendPath.style.strokeDashoffset = "0";
       }
+      finishOnce();
+      return;
+    }
 
-      // Mark the progress completion, then delay the handoff without changing the composition.
-      timeline.call(
-        () => undefined,
-        [],
-        INTRO_PROGRESS_DURATION_SECONDS + INTRO_PROGRESS_COMPLETION_HOLD_SECONDS
-      );
-
-      fallbackTimer = window.setTimeout(() => {
-        timeline.kill();
-        timelineRef.current = null;
+    const timeline = gsap.timeline({
+      defaults: { ease: "power3.out" },
+      onComplete: () => {
         if (progress !== null) {
           gsap.set(progress, { scaleX: 1, transformOrigin: "right center" });
         }
+        if (fallbackTimer !== undefined) {
+          window.clearTimeout(fallbackTimer);
+          fallbackTimer = undefined;
+        }
+        timelineRef.current = null;
         finishOnce();
-      }, 6000);
-    };
+      }
+    });
+    timelineRef.current = timeline;
 
-    void startTimeline();
+    if (progress !== null) {
+      timeline.fromTo(
+        progress,
+        { scaleX: 0, transformOrigin: "right center" },
+        { scaleX: 1, duration: INTRO_PROGRESS_DURATION_SECONDS, ease: "power2.inOut" },
+        0
+      );
+    }
+
+    dots.forEach((dot, index) => {
+      const spec = MOTION_DOTS[index];
+      if (spec !== undefined) {
+        timeline.to(
+          dot,
+          {
+            attr: { cx: spec.gridX, cy: spec.gridY },
+            duration: 0.44,
+            ease: "elastic.out(1, 0.75)"
+          },
+          0.28
+        );
+      }
+    });
+
+    timeline.to(
+      dots,
+      {
+        opacity: 0,
+        scale: 0.4,
+        duration: 0.24,
+        ease: "power2.in"
+      },
+      0.78
+    );
+
+    if (bars.length > 0) {
+      timeline.fromTo(
+        bars,
+        { scaleY: 0, opacity: 0, transformOrigin: "center bottom" },
+        {
+          scaleY: 1,
+          opacity: 1,
+          duration: 0.44,
+          stagger: 0.07,
+          ease: "back.out(1.6)"
+        },
+        0.9
+      );
+    }
+
+    if (trendPath !== null) {
+      timeline.to(
+        trendPath,
+        {
+          strokeDashoffset: 0,
+          duration: 0.4,
+          ease: "power2.out"
+        },
+        1.22
+      );
+    }
+
+    timeline.call(
+      () => undefined,
+      [],
+      INTRO_PROGRESS_DURATION_SECONDS + INTRO_PROGRESS_COMPLETION_HOLD_SECONDS
+    );
+
+    fallbackTimer = window.setTimeout(() => {
+      timeline.kill();
+      timelineRef.current = null;
+      if (progress !== null) {
+        gsap.set(progress, { scaleX: 1, transformOrigin: "right center" });
+      }
+      finishOnce();
+    }, 6000);
 
     return () => {
-      cancelled = true;
       if (fallbackTimer !== undefined) {
         window.clearTimeout(fallbackTimer);
-      }
-      if (startDelayTimer !== undefined) {
-        window.clearTimeout(startDelayTimer);
-        startDelayResolve?.();
       }
       timelineRef.current?.kill();
       timelineRef.current = null;
     };
   }, [finishOnce, open]);
+
+  useEffect(() => {
+    if (!open || !exiting) {
+      return;
+    }
+
+    const root = rootRef.current;
+    if (root === null) {
+      onExitComplete?.();
+      return;
+    }
+
+    root.dataset.exiting = "true";
+    if (!canRunIntroTimeline()) {
+      onExitComplete?.();
+      return;
+    }
+
+    const stage = root.querySelector<HTMLElement>(".safi-intro-stage");
+    const exitTimeline = gsap.timeline({ onComplete: () => onExitComplete?.() });
+    if (stage !== null) {
+      exitTimeline.to(
+        stage,
+        { autoAlpha: 0, y: -20, scale: 0.96, duration: 0.4, ease: "power2.in" },
+        0
+      );
+    }
+    exitTimeline.to(
+      root,
+      { autoAlpha: 0, duration: INTRO_EXIT_DURATION_SECONDS, ease: "power2.inOut" },
+      0
+    );
+
+    return () => {
+      exitTimeline.kill();
+    };
+  }, [exiting, onExitComplete, open]);
 
   if (!open) {
     return null;
@@ -354,7 +364,7 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
         </div>
 
         <div className="safi-intro-copy">
-          <h2 ref={titleRef} className="safi-intro-title" aria-label="صافي البيانات • SafiData">
+          <h2 className="safi-intro-title" aria-label="صافي البيانات • SafiData">
             <bdi dir="rtl">صافي البيانات</bdi>
             <span aria-hidden="true">•</span>
             <bdi dir="ltr">SafiData</bdi>

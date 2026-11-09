@@ -42,27 +42,35 @@
     <meta name="twitter:image" content="/og-preview.svg" />
   </head>
   <body>
-    <!--
-      This tiny static curtain is deliberately outside #root.
-      It is painted before React and handed off only after the real intro mounts.
-    -->
-    <div id="safi-boot-screen" role="status" aria-live="polite" aria-label="جارٍ تجهيز التطبيق">
-      <div class="safi-boot-content">
-        <div class="safi-boot-orb" aria-hidden="true">
-          <svg viewBox="0 0 128 128" fill="none">
-            <circle
-              cx="64"
-              cy="64"
-              r="60"
-              stroke="#60A5FA"
-              stroke-opacity="0.38"
-              stroke-width="1.4"
-              stroke-dasharray="6 6"
-            />
-            <rect x="60" y="1" width="8" height="8" rx="2.5" fill="#2F6BFF" />
-            <rect x="119" y="60" width="8" height="8" rx="2.5" fill="#3CC8F0" />
-            <rect x="60" y="119" width="8" height="8" rx="2.5" fill="#4ED6A0" />
-            <rect x="1" y="60" width="8" height="8" rx="2.5" fill="#F8FAFC" />
+    <!-- This static frame matches the first React frame and shares its stylesheet. -->
+    <div
+      id="safi-boot-screen"
+      class="safi-intro-splash"
+      data-fonts-ready="false"
+      role="status"
+      aria-live="polite"
+      aria-label="جارٍ تجهيز التطبيق"
+      dir="rtl"
+    >
+      <div class="safi-intro-stage">
+        <div class="safi-intro-orb">
+          <div class="safi-intro-orb-ring" aria-hidden="true"></div>
+          <svg width="168" height="168" viewBox="0 0 128 128" fill="none" aria-hidden="true">
+            <g class="safi-pm-logo-orbit">
+              <circle
+                cx="64"
+                cy="64"
+                r="60"
+                stroke="#60A5FA"
+                stroke-opacity="0.38"
+                stroke-width="1.4"
+                stroke-dasharray="6 6"
+              />
+              <rect x="60" y="1" width="8" height="8" rx="2.5" fill="#2F6BFF" />
+              <rect x="119" y="60" width="8" height="8" rx="2.5" fill="#3CC8F0" />
+              <rect x="60" y="119" width="8" height="8" rx="2.5" fill="#4ED6A0" />
+              <rect x="1" y="60" width="8" height="8" rx="2.5" fill="#F8FAFC" />
+            </g>
             <rect
               x="10"
               y="10"
@@ -73,19 +81,55 @@
               stroke="rgba(255,255,255,0.22)"
               stroke-width="2"
             />
-            <rect x="26" y="68" width="18" height="30" rx="4" fill="#64748B" />
-            <rect x="55" y="50" width="18" height="48" rx="4" fill="#94A3B8" />
-            <rect x="84" y="34" width="18" height="64" rx="4" fill="#F8FAFC" />
-            <path
-              d="M32 56L62 38L93 22"
-              stroke="#60A5FA"
-              stroke-width="4.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
+            <g>
+              <circle data-intro-dot="1" cx="20" cy="30" r="5.5" fill="#F8FAFC" />
+              <circle data-intro-dot="2" cx="96" cy="22" r="5.5" fill="#94A3B8" />
+              <circle data-intro-dot="3" cx="112" cy="70" r="5.5" fill="#60A5FA" />
+              <circle data-intro-dot="4" cx="30" cy="104" r="5.5" fill="#F8FAFC" />
+              <circle data-intro-dot="5" cx="70" cy="118" r="5.5" fill="#94A3B8" />
+              <circle data-intro-dot="6" cx="8" cy="64" r="5.5" fill="#60A5FA" />
+              <circle data-intro-dot="7" cx="108" cy="108" r="5.5" fill="#F8FAFC" />
+              <circle data-intro-dot="8" cx="52" cy="12" r="5.5" fill="#94A3B8" />
+              <circle data-intro-dot="9" cx="84" cy="60" r="5.5" fill="#60A5FA" />
+            </g>
+            <g>
+              <rect data-intro-bar="1" x="26" y="68" width="18" height="30" rx="4" fill="#64748B" />
+              <rect data-intro-bar="2" x="55" y="50" width="18" height="48" rx="4" fill="#94A3B8" />
+              <rect data-intro-bar="3" x="84" y="34" width="18" height="64" rx="4" fill="#F8FAFC" />
+              <path
+                data-intro-trend="true"
+                d="M32 56L62 38L93 22"
+                stroke="#60A5FA"
+                stroke-width="4.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </g>
           </svg>
         </div>
-        <div class="safi-boot-progress" aria-hidden="true"><span></span></div>
+        <div class="safi-intro-copy">
+          <h2 class="safi-intro-title" aria-label="صافي البيانات • SafiData">
+            <bdi dir="rtl">صافي البيانات</bdi>
+            <span aria-hidden="true">•</span>
+            <bdi dir="ltr">SafiData</bdi>
+          </h2>
+          <p class="safi-intro-tagline">
+            بياناتك الفوضوية تصبح واضحة في ثوانٍ • خصوصية مطلقة على جهازك
+          </p>
+        </div>
+        <div class="safi-intro-progress-track" aria-hidden="true">
+          <div class="safi-intro-progress-fill"></div>
+        </div>
+        <button
+          type="button"
+          class="safi-intro-skip"
+          disabled
+          tabindex="-1"
+          aria-hidden="true"
+          aria-label="الدخول إلى الموقع"
+        >
+          الدخول إلى الموقع ←
+        </button>
       </div>
       <noscript>يلزم تفعيل JavaScript لتشغيل منصة صافي البيانات.</noscript>
     </div>

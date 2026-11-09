@@ -12,14 +12,14 @@ import "@fontsource/jetbrains-mono/600.css";
 import "@fontsource/jetbrains-mono/700.css";
 import "./index.css";
 
-import { StrictMode, useEffect } from "react";
+import { StrictMode, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 
 function BootScreenHandoff(): null {
-  useEffect(() => {
-    // App has committed its real SafiIntroSplash before the static curtain is removed.
+  useLayoutEffect(() => {
+    // Remove the identical static frame before the browser paints the React handoff.
     document.getElementById("safi-boot-screen")?.remove();
   }, []);
 

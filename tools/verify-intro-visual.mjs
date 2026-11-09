@@ -15,8 +15,19 @@ const artifactDir = resolve("artifacts/intro-visual");
 await mkdir(artifactDir, { recursive: true });
 
 const server = spawn(
-  "pnpm",
-  ["--filter", "@safi/web", "exec", "vite", "preview", "--host", "127.0.0.1", "--port", "4173", "--strictPort"],
+  process.platform === "win32" ? "pnpm.cmd" : "pnpm",
+  [
+    "--filter",
+    "@safi/web",
+    "exec",
+    "vite",
+    "preview",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "4173",
+    "--strictPort"
+  ],
   { stdio: "inherit" }
 );
 
@@ -63,145 +74,220 @@ try {
 
   await page.addInitScript(() => {
     window.__safiIntroTrace = {
-      fontsReadyAt: null,
+      reactMountedAt: null,
       motionStartedAt: null,
+      fontsReadyAt: null,
       progressFullAt: null,
       progressWidthRatio: null,
-      introRemovedAt: null
+      applicationMountedAtProgressFull: null,
+      exitStartedAt: null,
+      introRemovedAt: null,
+      bootFrame: null,
+      reactFrame: null
     };
+
+    const readFrame = (root) => {
+      const orb = root.querySelector(".safi-intro-orb")?.getBoundingClientRect();
+      const fill = root.querySelector(".safi-intro-progress-fill");
+      const ring = root.querySelector(".safi-intro-orb-ring");
+      const dots = Array.from(root.querySelectorAll("[data-intro-dot]"));
+      const bars = Array.from(root.querySelectorAll("[data-intro-bar]"));
+      return {
+        orb: orb ? { x: orb.x, y: orb.y, width: orb.width, height: orb.height } : null,
+        progressScale: fill ? new DOMMatrixReadOnly(getComputedStyle(fill).transform).a : null,
+        ringAnimation: ring ? getComputedStyle(ring).animationName : null,
+        visibleDataDots: dots.filter((dot) => Number(getComputedStyle(dot).opacity) > 0.9).length,
+        visibleBars: bars.filter((bar) => Number(getComputedStyle(bar).opacity) > 0.9).length
+      };
+    };
+
+    const samplingStartedAt = performance.now();
+    const sampleIntro = () => {
+      const trace = window.__safiIntroTrace;
+      const boot = document.querySelector("#safi-boot-screen");
+      const react = document.querySelector("#root .safi-intro-splash");
+      if (trace && boot) trace.bootFrame = readFrame(boot);
+      if (trace && react) {
+        if (trace.reactFrame === null) {
+          trace.reactFrame = readFrame(react);
+          trace.reactMountedAt = performance.now();
+        }
+        if (trace.motionStartedAt === null && react.dataset.motionReady === "true") {
+          trace.motionStartedAt = performance.now();
+        }
+        if (trace.fontsReadyAt === null && react.dataset.fontsReady === "true") {
+          trace.fontsReadyAt = performance.now();
+        }
+        if (trace.exitStartedAt === null && react.dataset.exiting === "true") {
+          trace.exitStartedAt = performance.now();
+        }
+      }
+      if (
+        (trace?.exitStartedAt !== null && !react) ||
+        performance.now() - samplingStartedAt > 30_000
+      ) {
+        return;
+      }
+      requestAnimationFrame(sampleIntro);
+    };
+    requestAnimationFrame(sampleIntro);
   });
 
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".safi-intro-splash", { state: "visible", timeout: 20_000 });
+  await page.waitForSelector("#root .safi-intro-splash", { state: "visible", timeout: 20_000 });
+  await page.waitForFunction(() => window.__safiIntroTrace?.motionStartedAt !== null, undefined, {
+    timeout: 10_000
+  });
+
+  const handoff = await page.evaluate(() => {
+    const trace = window.__safiIntroTrace;
+    return {
+      bootFrame: trace?.bootFrame ?? null,
+      reactFrame: trace?.reactFrame ?? null,
+      reactMountedAt: trace?.reactMountedAt ?? null,
+      motionStartedAt: trace?.motionStartedAt ?? null
+    };
+  });
+  assert.ok(handoff.bootFrame, "The static opening frame was not captured.");
+  assert.ok(handoff.reactFrame, "The first React opening frame was not captured.");
+  assert.ok(handoff.bootFrame.orb && handoff.reactFrame.orb, "Both frames must contain the logo.");
+  assert.ok(
+    Math.abs(handoff.bootFrame.orb.x - handoff.reactFrame.orb.x) <= 0.1 &&
+      Math.abs(handoff.bootFrame.orb.y - handoff.reactFrame.orb.y) <= 0.1,
+    `The logo jumped during handoff: ${JSON.stringify(handoff)}`
+  );
+  for (const [name, frame] of [
+    ["static", handoff.bootFrame],
+    ["React", handoff.reactFrame]
+  ]) {
+    assert.equal(frame.visibleDataDots, 9, `The ${name} frame must show all nine data points.`);
+    assert.equal(frame.visibleBars, 0, `The ${name} frame must keep the bars hidden initially.`);
+    assert.equal(frame.ringAnimation, "none", `The ${name} frame must keep the ring still.`);
+  }
+  assert.equal(handoff.bootFrame.progressScale, 0, "The static frame must start at zero progress.");
+  assert.ok(
+    handoff.motionStartedAt - handoff.reactMountedAt < 950,
+    `Motion must start without the old one-second pause; measured ${handoff.motionStartedAt - handoff.reactMountedAt}ms.`
+  );
+
   await page.waitForFunction(
-    () => document.querySelector(".safi-intro-splash")?.dataset.fontsReady === "true",
+    () => document.querySelector("#root .safi-intro-splash")?.dataset.fontsReady === "true",
     undefined,
     { timeout: 30_000 }
   );
-  await page.evaluate(() => {
-    const trace = window.__safiIntroTrace;
-    if (trace && trace.fontsReadyAt === null) {
-      trace.fontsReadyAt = performance.now();
-    }
-  });
-
-  const pausedFrame = await page.evaluate(() => {
-    const root = document.querySelector(".safi-intro-splash");
-    const fill = root?.querySelector(".safi-intro-progress-fill");
-    const ring = root?.querySelector(".safi-intro-orb-ring");
-    const dots = root ? Array.from(root.querySelectorAll("[data-intro-dot]")) : [];
+  const openingFrame = await page.evaluate(() => {
+    const root = document.querySelector("#root .safi-intro-splash");
     const title = root?.querySelector(".safi-intro-title");
+    const copy = root?.querySelector(".safi-intro-copy");
     return {
-      motionStartedAt: window.__safiIntroTrace?.motionStartedAt ?? null,
-      progressTransform: fill ? getComputedStyle(fill).transform : null,
-      progressScale: fill ? new DOMMatrixReadOnly(getComputedStyle(fill).transform).a : null,
-      visibleDataDots: dots.filter((dot) => Number(getComputedStyle(dot).opacity) > 0.9).length,
-      ringAnimation: ring ? getComputedStyle(ring).animationName : null,
       arabicTitle: title?.querySelector('bdi[dir="rtl"]')?.textContent ?? "",
-      englishTitle: title?.querySelector('bdi[dir="ltr"]')?.textContent ?? ""
+      englishTitle: title?.querySelector('bdi[dir="ltr"]')?.textContent ?? "",
+      copyVisibility: copy ? getComputedStyle(copy).visibility : null
     };
   });
-
-  assert.equal(pausedFrame.motionStartedAt, null, "Motion started before the one-second still frame.");
-  assert.equal(pausedFrame.ringAnimation, "none", "The decorative ring must be still during the opening pause.");
-  assert.equal(pausedFrame.progressScale, 0, "The progress bar must remain at zero during the opening pause.");
-  assert.equal(pausedFrame.visibleDataDots, 9, "All nine data points must form a visible, still logo before motion begins.");
-  assert.equal(pausedFrame.arabicTitle, "صافي البيانات", "The Arabic title must remain a single RTL run.");
-  assert.equal(pausedFrame.englishTitle, "SafiData", "The product name must remain an isolated LTR run.");
-  await page.screenshot({ path: resolve(artifactDir, "intro-still-frame.png"), fullPage: true });
-
-  await page.waitForFunction(
-    () => document.querySelector(".safi-intro-splash")?.dataset.motionReady === "true",
-    undefined,
-    { timeout: 10_000 }
-  );
-  await page.evaluate(() => {
-    const trace = window.__safiIntroTrace;
-    if (trace && trace.motionStartedAt === null) {
-      trace.motionStartedAt = performance.now();
-    }
-  });
-
-  const timing = await page.evaluate(() => {
-    const trace = window.__safiIntroTrace;
-    return {
-      fontsReadyToMotionMs: trace.motionStartedAt - trace.fontsReadyAt
-    };
-  });
-  assert.ok(
-    timing.fontsReadyToMotionMs >= 950,
-    `Expected a one-second pause after fonts became ready; measured ${timing.fontsReadyToMotionMs}ms.`
-  );
+  assert.equal(openingFrame.arabicTitle, "صافي البيانات");
+  assert.equal(openingFrame.englishTitle, "SafiData");
+  assert.equal(openingFrame.copyVisibility, "visible");
+  await page.screenshot({ path: resolve(artifactDir, "intro-opening-motion.png"), fullPage: true });
 
   try {
-    await page.waitForFunction(() => {
-      const root = document.querySelector(".safi-intro-splash");
-      const fill = root?.querySelector(".safi-intro-progress-fill");
-      const track = root?.querySelector(".safi-intro-progress-track");
-      if (!fill || !track) return false;
+    await page.waitForFunction(
+      () => {
+        const root = document.querySelector("#root .safi-intro-splash");
+        const fill = root?.querySelector(".safi-intro-progress-fill");
+        const track = root?.querySelector(".safi-intro-progress-track");
+        if (!fill || !track) return false;
 
-      const trackRect = track.getBoundingClientRect();
-      const fillRect = fill.getBoundingClientRect();
-      const ratio = trackRect.width > 0 ? fillRect.width / trackRect.width : 0;
-      const scaleX = new DOMMatrixReadOnly(getComputedStyle(fill).transform).a;
-      const rightEdgeGapPx = Math.max(0, trackRect.right - fillRect.right);
-      if (scaleX < 0.99999 || rightEdgeGapPx > 0.1) return false;
+        const trackRect = track.getBoundingClientRect();
+        const fillRect = fill.getBoundingClientRect();
+        const ratio = trackRect.width > 0 ? fillRect.width / trackRect.width : 0;
+        const scaleX = new DOMMatrixReadOnly(getComputedStyle(fill).transform).a;
+        const rightEdgeGapPx = Math.max(0, trackRect.right - fillRect.right);
+        if (scaleX < 0.99999 || rightEdgeGapPx > 0.1) return false;
 
-      const trace = window.__safiIntroTrace;
-      if (trace && trace.progressFullAt === null) {
-        trace.progressFullAt = performance.now();
-        trace.progressWidthRatio = ratio;
-        trace.progressScaleX = scaleX;
-        trace.progressRightEdgeGapPx = rightEdgeGapPx;
-      }
-      return true;
-    }, undefined, { timeout: 10_000 });
+        const trace = window.__safiIntroTrace;
+        if (trace && trace.progressFullAt === null) {
+          trace.progressFullAt = performance.now();
+          trace.progressWidthRatio = ratio;
+          trace.progressScaleX = scaleX;
+          trace.progressRightEdgeGapPx = rightEdgeGapPx;
+          trace.applicationMountedAtProgressFull = Boolean(document.querySelector(".safi-shell"));
+        }
+        return true;
+      },
+      undefined,
+      { timeout: 10_000 }
+    );
   } catch (error) {
-    const state = await page.evaluate(() => {
-      const root = document.querySelector(".safi-intro-splash");
-      const fill = root?.querySelector(".safi-intro-progress-fill");
-      const track = root?.querySelector(".safi-intro-progress-track");
-      const trackWidth = track?.getBoundingClientRect().width ?? 0;
-      const fillWidth = fill?.getBoundingClientRect().width ?? 0;
-      return {
-        introPresent: Boolean(root),
-        motionReady: root?.dataset.motionReady ?? null,
-        progressTransform: fill ? getComputedStyle(fill).transform : null,
-        progressWidth: fillWidth,
-        trackWidth,
-        progressWidthRatio: trackWidth > 0 ? fillWidth / trackWidth : null,
-        progressScaleX: fill ? new DOMMatrixReadOnly(getComputedStyle(fill).transform).a : null,
-        progressRightEdgeGapPx: fill && track
-          ? Math.max(0, track.getBoundingClientRect().right - fill.getBoundingClientRect().right)
-          : null,
-        trace: window.__safiIntroTrace
-      };
+    const state = await page.evaluate(() => ({
+      trace: window.__safiIntroTrace,
+      introPresent: Boolean(document.querySelector("#root .safi-intro-splash"))
+    }));
+    await page.screenshot({
+      path: resolve(artifactDir, "intro-progress-timeout.png"),
+      fullPage: true
     });
-    await page.screenshot({ path: resolve(artifactDir, "intro-progress-timeout.png"), fullPage: true });
-    await writeFile(resolve(artifactDir, "visual-debug.json"), JSON.stringify(state, null, 2) + "\\n");
-    throw new Error(`The intro progress bar did not reach 100% in Chromium: ${JSON.stringify(state)}; ${String(error)}`);
+    await writeFile(
+      resolve(artifactDir, "visual-debug.json"),
+      JSON.stringify(state, null, 2) + "\n"
+    );
+    throw new Error(
+      `The intro progress bar did not reach 100%: ${JSON.stringify(state)}; ${String(error)}`
+    );
   }
 
   const completedFrame = await page.evaluate(() => ({
     progressWidthRatio: window.__safiIntroTrace?.progressWidthRatio ?? 0,
     progressScaleX: window.__safiIntroTrace?.progressScaleX ?? 0,
-    progressRightEdgeGapPx: window.__safiIntroTrace?.progressRightEdgeGapPx ?? Number.POSITIVE_INFINITY
+    progressRightEdgeGapPx:
+      window.__safiIntroTrace?.progressRightEdgeGapPx ?? Number.POSITIVE_INFINITY,
+    applicationMountedAtProgressFull:
+      window.__safiIntroTrace?.applicationMountedAtProgressFull ?? null
   }));
-  assert.ok(
-    completedFrame.progressScaleX >= 0.99999,
-    `Expected a 100% transform scale; measured ${completedFrame.progressScaleX}.`
+  assert.ok(completedFrame.progressScaleX >= 0.99999);
+  assert.ok(completedFrame.progressRightEdgeGapPx <= 0.1);
+  assert.ok(completedFrame.progressWidthRatio >= 0.9999);
+  assert.equal(
+    completedFrame.applicationMountedAtProgressFull,
+    false,
+    "The application must not mount before the entrance timeline completes."
   );
-  assert.ok(
-    completedFrame.progressRightEdgeGapPx <= 0.1,
-    `Expected the fill to reach the track's right edge; gap was ${completedFrame.progressRightEdgeGapPx}px.`
-  );
-  assert.ok(
-    completedFrame.progressWidthRatio >= 0.9999,
-    `Expected the progress fill to cover 100% of the track; ratio was ${completedFrame.progressWidthRatio}.`
-  );
-  await page.screenshot({ path: resolve(artifactDir, "intro-progress-100-percent.png"), fullPage: true });
+  await page.screenshot({
+    path: resolve(artifactDir, "intro-progress-100-percent.png"),
+    fullPage: true
+  });
 
-  await page.waitForSelector(".safi-intro-splash", { state: "detached", timeout: 30_000 });
+  await page.waitForFunction(
+    () => document.querySelector("#root .safi-intro-splash")?.dataset.exiting === "true",
+    undefined,
+    { timeout: 30_000 }
+  );
+  await page.waitForFunction(
+    () => {
+      const root = document.querySelector("#root .safi-intro-splash");
+      return root !== null && Number(getComputedStyle(root).opacity) < 0.95;
+    },
+    undefined,
+    { timeout: 5_000 }
+  );
+
+  const siteHandoff = await page.evaluate(() => {
+    const root = document.querySelector("#root .safi-intro-splash");
+    return {
+      applicationMounted: Boolean(document.querySelector(".safi-shell")),
+      introOpacity: root ? Number(getComputedStyle(root).opacity) : null,
+      exitStartedAt: window.__safiIntroTrace?.exitStartedAt ?? null
+    };
+  });
+  assert.equal(
+    siteHandoff.applicationMounted,
+    true,
+    "The site must be mounted under the exiting intro."
+  );
+  assert.ok(siteHandoff.introOpacity > 0 && siteHandoff.introOpacity < 0.95);
+  await page.screenshot({ path: resolve(artifactDir, "intro-site-handoff.png"), fullPage: true });
+
+  await page.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 30_000 });
   await page.evaluate(() => {
     const trace = window.__safiIntroTrace;
     if (trace) trace.introRemovedAt = performance.now();
@@ -209,27 +295,47 @@ try {
 
   const finalTrace = await page.evaluate(() => ({ ...window.__safiIntroTrace }));
   const fullProgressHoldMs = finalTrace.introRemovedAt - finalTrace.progressFullAt;
-  assert.ok(
-    fullProgressHoldMs >= 180,
-    `The full progress bar was not held before handoff; measured ${fullProgressHoldMs}ms.`
-  );
+  const exitDurationMs = finalTrace.introRemovedAt - finalTrace.exitStartedAt;
+  assert.ok(fullProgressHoldMs >= 180, `Full progress was not held: ${fullProgressHoldMs}ms.`);
+  assert.ok(exitDurationMs >= 500, `The animated site handoff was too short: ${exitDurationMs}ms.`);
   assert.deepEqual(pageErrors, [], `Unexpected browser runtime errors: ${pageErrors.join("; ")}`);
+  await context.close();
+
+  const reducedContext = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    reducedMotion: "reduce"
+  });
+  const reducedPage = await reducedContext.newPage();
+  await reducedPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await reducedPage.waitForSelector(".safi-shell", { state: "visible", timeout: 30_000 });
+  await reducedPage.waitForSelector("#root .safi-intro-splash", {
+    state: "detached",
+    timeout: 5_000
+  });
+  await reducedContext.close();
 
   const report = {
     viewport: "1440x900",
     cacheDisabled: true,
     networkProfile: "3G throttled (150ms latency, 200KB/s download)",
     cpuThrottleRate: 4,
-    fontsReadyToMotionMs: timing.fontsReadyToMotionMs,
+    handoff,
+    motionStartDelayMs: handoff.motionStartedAt - handoff.reactMountedAt,
     progressWidthRatio: completedFrame.progressWidthRatio,
     progressScaleX: completedFrame.progressScaleX,
     progressRightEdgeGapPx: completedFrame.progressRightEdgeGapPx,
+    applicationMountedAtProgressFull: completedFrame.applicationMountedAtProgressFull,
+    siteHandoff,
     fullProgressHoldMs,
+    exitDurationMs,
+    reducedMotionPassed: true,
     pageErrors
   };
-  await writeFile(resolve(artifactDir, "visual-check.json"), JSON.stringify(report, null, 2) + "\n");
+  await writeFile(
+    resolve(artifactDir, "visual-check.json"),
+    JSON.stringify(report, null, 2) + "\n"
+  );
   console.log("Intro visual verification passed:", JSON.stringify(report));
-  await context.close();
 } finally {
   if (browser) await browser.close();
   server.kill("SIGTERM");

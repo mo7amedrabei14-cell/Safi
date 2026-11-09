@@ -6,7 +6,13 @@ export default defineConfig({
   server: {
     host: true,
     port: 1420,
-    strictPort: false
+    strictPort: false,
+    proxy: {
+      "/v1": {
+        target: "http://127.0.0.1:8080",
+        changeOrigin: false
+      }
+    }
   },
   build: {
     target: "es2023",

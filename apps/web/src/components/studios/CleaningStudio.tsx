@@ -221,7 +221,7 @@ export interface CleaningStudioProps {
   readonly onSelectTab?: (tab: SafiDockTabId) => void;
 }
 
-export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps = {}): ReactNode {
+export function CleaningStudio({ lang = "en", onSelectTab }: CleaningStudioProps = {}): ReactNode {
   const isAr = lang === "ar";
   // 1. Arabic Normalization + PII + National ID state
   const [draft, setDraft] = useState(SAMPLE_CLEANING_TEXT);

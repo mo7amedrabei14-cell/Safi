@@ -6,6 +6,7 @@ import { App } from "./App";
 
 const entryHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const bootCss = readFileSync(new URL("../public/boot.css", import.meta.url), "utf8");
+const appCss = readFileSync(new URL("./index.css", import.meta.url), "utf8");
 
 describe("SafiData first-paint introduction", () => {
   it("renders the cinematic intro on the first React commit", () => {
@@ -13,6 +14,16 @@ describe("SafiData first-paint introduction", () => {
 
     expect(html).toContain('class="safi-intro-splash"');
     expect(html).toContain("عرض إقلاع صافي البيانات السينمائي");
+  });
+
+  it("keeps the intro stylesheet valid and restores its required layout rules", () => {
+    expect(appCss).toContain(".safi-intro-splash");
+    expect(appCss).toContain("color: #F5F5F7;");
+    expect(appCss).toContain(".safi-intro-copy");
+    expect(appCss).toContain(".safi-intro-progress-fill");
+    expect(appCss).toContain('data-fonts-ready="false"');
+    expect(appCss).not.toMatch(/^\\s*import\\s/m);
+    expect(appCss).not.toContain('describe("UI-Phase-5');
   });
 
   it("provides a boot curtain before the React root with local styles", () => {

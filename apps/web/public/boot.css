@@ -183,7 +183,7 @@ body {
   transform-origin: right center;
 }
 
-.safi-intro-splash[data-fonts-ready="false"] .safi-intro-progress-fill {
+#safi-boot-screen[data-fonts-ready="false"] .safi-intro-progress-fill {
   width: 36%;
   animation: safiIntroFontWait 1.15s ease-in-out infinite alternate;
 }

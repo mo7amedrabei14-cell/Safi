@@ -474,9 +474,10 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
           )}
 
           <p className="safi-hint">
-            <FolderOpen size={13} aria-hidden="true" /> الكتابة الذرية (ملف مؤقت ← fsync ← إعادة
-            تسمية) والمراقبة الفعلية للمجلد تُنفَّذ في نواة سطح المكتب، وترفض الروابط الرمزية
-            والمسارات الخارجية عن المجلد الهدف.
+            <FolderOpen size={13} aria-hidden="true" />{" "}
+            {isAr
+              ? "الكتابة الذرية (ملف مؤقت ← fsync ← إعادة تسمية) والمراقبة الفعلية للمجلد تُنفَّذ في نواة سطح المكتب، وترفض الروابط الرمزية والمسارات الخارجية عن المجلد الهدف."
+              : "Atomic file writing (temporary file → fsync → rename) and actual folder monitoring are handled by the desktop engine, which rejects symbolic links and paths outside the target folder."}
           </p>
         </SpotlightCard>
       </div>

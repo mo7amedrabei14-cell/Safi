@@ -86,6 +86,14 @@ const CHART_TYPE_LABELS: Readonly<Record<ChartType, { ar: string; en: string }>>
 
 const WHITE_CANVAS = "#ffffff";
 
+const CHART_VALIDATION_EN: Readonly<Record<string, string>> = {
+  "SF-CHT-001": "Chart specification version is missing.",
+  "SF-CHT-002": "Chart type is missing.",
+  "SF-CHT-003": "Chart data is missing or invalid.",
+  "SF-CHT-004": "The x-axis key is missing.",
+  "SF-CHT-005": "The y-axis key is missing."
+};
+
 export function extractSvgColors(svg: string): string[] {
   const colors = new Set<string>();
   for (const match of svg.matchAll(/(?:fill|stroke)="(#[0-9a-fA-F]{6})"/g)) {
@@ -494,7 +502,16 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
 
           <p className="safi-hint">
             <BarChart3 size={13} aria-hidden="true" /> {isAr ? "المواصفة صالحة:" : "Valid specification:"}{" "}
-            {validation.valid ? (isAr ? "نعم" : "Yes") : validation.errors.join(" · ")}
+            {validation.valid
+              ? (isAr ? "نعم" : "Yes")
+              : validation.errors
+                  .map((error) => {
+                    if (isAr) return error;
+                    const code = error.slice(0, 11);
+                    const message = CHART_VALIDATION_EN[code];
+                    return message ? `${code}: ${message}` : error;
+                  })
+                  .join(" · ")}
           </p>
         </SpotlightCard>
 

@@ -201,7 +201,7 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                   ))}
                 </div>
 
-                <p className="safi-mini-label">بصمة الوصفة (BLAKE3)</p>
+                <p className="safi-mini-label">{isAr ? "بصمة الوصفة (BLAKE3)" : "Recipe digest (BLAKE3)"}</p>
                 <p className="safi-mono safi-digest-line" dir="ltr">
                   {template.digest.slice(0, 24)}…
                 </p>

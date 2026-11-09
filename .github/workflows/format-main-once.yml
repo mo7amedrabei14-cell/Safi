@@ -1,0 +1,79 @@
+name: Temporary one-time main formatting repair
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+jobs:
+  format-once:
+    if: github.event.head_commit.message == 'style: run one-time Prettier formatting'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
+        with:
+          version: 10.8.1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Install locked workspace dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Format only files rejected by the existing Prettier gate
+        run: |
+          pnpm exec prettier --write \
+            apps/web/src/App.tsx \
+            apps/web/src/ApplicationShell.tsx \
+            apps/web/src/components/brand/SafiIntroSplash.tsx \
+            apps/web/src/components/brand/SafiMotionShowcase.tsx \
+            apps/web/src/components/brand/SafiPrismLogo.tsx \
+            apps/web/src/components/home/BentoCommandCenter.tsx \
+            apps/web/src/components/home/LivePipelineVisualizer.tsx \
+            apps/web/src/components/home/SmartDropzone.tsx \
+            apps/web/src/components/layout/FloatingGlassDock.tsx \
+            apps/web/src/components/motion/AmbientBackground.tsx \
+            apps/web/src/components/studios/ChartsStudio.tsx \
+            apps/web/src/components/studios/CleaningStudio.tsx \
+            apps/web/src/components/studios/LibraryStudio.tsx \
+            apps/web/src/components/studios/RecipesStudio.tsx \
+            apps/web/src/components/ui/GraphifyLineageCanvas.tsx \
+            apps/web/src/pages/OwnerDashboard.tsx
+
+      - name: Commit formatting changes directly to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/web/src/App.tsx \
+            apps/web/src/ApplicationShell.tsx \
+            apps/web/src/components/brand/SafiIntroSplash.tsx \
+            apps/web/src/components/brand/SafiMotionShowcase.tsx \
+            apps/web/src/components/brand/SafiPrismLogo.tsx \
+            apps/web/src/components/home/BentoCommandCenter.tsx \
+            apps/web/src/components/home/LivePipelineVisualizer.tsx \
+            apps/web/src/components/home/SmartDropzone.tsx \
+            apps/web/src/components/layout/FloatingGlassDock.tsx \
+            apps/web/src/components/motion/AmbientBackground.tsx \
+            apps/web/src/components/studios/ChartsStudio.tsx \
+            apps/web/src/components/studios/CleaningStudio.tsx \
+            apps/web/src/components/studios/LibraryStudio.tsx \
+            apps/web/src/components/studios/RecipesStudio.tsx \
+            apps/web/src/components/ui/GraphifyLineageCanvas.tsx \
+            apps/web/src/pages/OwnerDashboard.tsx
+          if git diff --cached --quiet; then
+            echo "No formatting changes were required."
+            exit 0
+          fi
+          git commit -m "style: format TypeScript sources for CI"
+          git push origin HEAD:main

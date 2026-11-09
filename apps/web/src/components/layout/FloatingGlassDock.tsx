@@ -220,7 +220,7 @@ export function FloatingGlassDock({
 
         {/* Visually-Hidden Semantic Contract Layer for Automated Test Suite */}
         <div className="safi-visually-hidden" aria-hidden="false">
-          <DynamicStatusIsland />
+          <DynamicStatusIsland lang={lang} />
           {DOCK_TABS.map((tab) => {
             const isActive = tab.id === activeTab;
             return (

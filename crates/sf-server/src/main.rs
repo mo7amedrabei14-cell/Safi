@@ -21,25 +21,23 @@ use sf_server::{app, AppState};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let database_url = std::env::var("DATABASE_URL").map_err(|_| {
-        io::Error::new(io::ErrorKind::NotFound, "DATABASE_URL is required")
-    })?;
-    let bind_address = std::env::var("SAFI_BIND_ADDRESS")
-        .unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
+    let database_url = std::env::var("DATABASE_URL")
+        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "DATABASE_URL is required"))?;
+    let bind_address =
+        std::env::var("SAFI_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
 
     let pool = PgPoolOptions::new()
         .max_connections(20)
         .connect(&database_url)
         .await?;
 
-    let cache: Arc<dyn AuthCache> = match std::env::var("SAFI_VALKEY_URL") {
-        Ok(url) => Arc::new(
-            ValkeyAuthCache::connect(&url)
-                .await
-                .map_err(|_| io::Error::other("Unable to connect to the configured Valkey service"))?,
-        ),
-        Err(_) => Arc::new(InMemoryAuthCache::new()),
-    };
+    let cache: Arc<dyn AuthCache> =
+        match std::env::var("SAFI_VALKEY_URL") {
+            Ok(url) => Arc::new(ValkeyAuthCache::connect(&url).await.map_err(|_| {
+                io::Error::other("Unable to connect to the configured Valkey service")
+            })?),
+            Err(_) => Arc::new(InMemoryAuthCache::new()),
+        };
 
     let auth = AuthService::new(
         Arc::new(SqlxApiKeyRepository::new(pool.clone())),

@@ -26,6 +26,8 @@ export interface GraphifyEdge {
 
 export interface GraphifyLineageCanvasProps {
   readonly titleAr?: string;
+  readonly titleEn?: string;
+  readonly lang?: "ar" | "en";
   readonly nodes?: readonly GraphifyNode[];
   readonly edges?: readonly GraphifyEdge[];
 }
@@ -106,9 +108,26 @@ const KIND_COLORS: Readonly<
 
 export function GraphifyLineageCanvas({
   titleAr = "مخطط Graphify التفاعلي لنسب الأرقام (Lineage N11) ومراحل الوصفة",
+  titleEn = "Interactive Graphify data lineage and recipe pipeline",
+  lang = "en",
   nodes = DEFAULT_LINEAGE_NODES,
   edges = DEFAULT_LINEAGE_EDGES
 }: GraphifyLineageCanvasProps): ReactNode {
+  const isAr = lang === "ar";
+  const title = isAr ? titleAr : titleEn;
+  const englishNodes: Readonly<Record<string, { title: string; subtitle: string; detail: string }>> = {
+    "src-raw": { title: "Raw customer file (CSV)", subtitle: "4 columns • unnormalized text", detail: "The original source is never modified (Rule 13). It is read in isolated memory." },
+    "src-nid": { title: "National ID and phone columns", subtitle: "14 digits + Arabic-Indic numerals", detail: "Contains sensitive personal information (PII) and Arabic-Indic digits." },
+    "tr-arabic": { title: "Arabic normalization (sf-arabic)", subtitle: "Normalize Alif and Ya; remove Tatweel", detail: "Deterministically normalizes Alif variants, Taa Marbuta, and Arabic-Indic digits." },
+    "tr-pii": { title: "BLAKE3 masking and governorate validation", subtitle: "Extract governorate and date of birth", detail: "Validates the Egyptian national ID checksum and generates a salted BLAKE3 token." },
+    "out-clean": { title: "Clean table + atomic fsync write", subtitle: "A11 formula-injection protection", detail: "Written as a new file with a change log and CSV/Excel formula-injection protection." },
+    "out-chart": { title: "Governorate chart and Typst PDF report", subtitle: "WCAG 2.2 AA contrast ≥ 3.0:1", detail: "Data lineage maps every chart column directly to cleaned source cells." }
+  };
+  const englishKinds: Readonly<Record<GraphifyNode["kind"], string>> = {
+    source: "Source",
+    transform: "Transform",
+    output: "Output"
+  };
   const [selectedId, setSelectedId] = useState<string>(nodes[0]?.id ?? "src-raw");
   const selectedNode = nodes.find((n) => n.id === selectedId) ?? nodes[0];
 
@@ -116,7 +135,7 @@ export function GraphifyLineageCanvas({
 
   return (
     <div
-      dir="rtl"
+      dir={isAr ? "rtl" : "ltr"}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -141,11 +160,13 @@ export function GraphifyLineageCanvas({
           <h3
             style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}
           >
-            {titleAr}
+            {title}
           </h3>
         </div>
         <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>
-          انقر على أي عقدة لاستعراض نسب البيانات والعملية الحتمية
+          {isAr
+            ? "انقر على أي عقدة لاستعراض نسب البيانات والعملية الحتمية"
+            : "Select a node to inspect its data lineage and deterministic operation"}
         </span>
       </div>
 
@@ -154,7 +175,7 @@ export function GraphifyLineageCanvas({
           viewBox="0 0 880 235"
           style={{ width: "100%", minWidth: "660px", height: "auto", display: "block" }}
           role="img"
-          aria-label={titleAr}
+          aria-label={title}
         >
           <defs>
             <linearGradient id="graphify-edge-grad" x1="1" y1="0" x2="0" y2="0">
@@ -219,7 +240,7 @@ export function GraphifyLineageCanvas({
                   fontSize="9"
                   fontWeight="700"
                 >
-                  {palette.label}
+                  {isAr ? palette.label : englishKinds[node.kind]}
                 </text>
                 <text
                   x="118"
@@ -229,10 +250,10 @@ export function GraphifyLineageCanvas({
                   fontSize="11"
                   fontWeight="700"
                 >
-                  {node.titleAr}
+                  {isAr ? node.titleAr : (englishNodes[node.id]?.title ?? node.id)}
                 </text>
                 <text x="158" y="42" textAnchor="end" fill="var(--text-secondary)" fontSize="10">
-                  {node.subtitleAr}
+                  {isAr ? node.subtitleAr : (englishNodes[node.id]?.subtitle ?? "")}
                 </text>
               </g>
             );
@@ -257,8 +278,8 @@ export function GraphifyLineageCanvas({
           }}
         >
           <div>
-            <strong style={{ color: "var(--text-primary)" }}>{selectedNode.titleAr}: </strong>
-            <span style={{ color: "var(--text-secondary)" }}>{selectedNode.detailAr}</span>
+            <strong style={{ color: "var(--text-primary)" }}>{isAr ? selectedNode.titleAr : (englishNodes[selectedNode.id]?.title ?? selectedNode.id)}: </strong>
+            <span style={{ color: "var(--text-secondary)" }}>{isAr ? selectedNode.detailAr : (englishNodes[selectedNode.id]?.detail ?? "")}</span>
           </div>
           <span
             className="safi-mono"

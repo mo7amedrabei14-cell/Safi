@@ -34,6 +34,13 @@ describe("UI-Phase-5 Cleaning & PII studio", () => {
     expect(html).not.toContain("نتيجة التطبيع العربي");
     expect(html).not.toContain("الاستبدال الرمزي الحتمي (BLAKE3)");
     expect(html).toContain("أَحْمَدُ محمد عبد الله");
+    expect(html).toContain("الاسم الكامل");
+    expect(html).toContain("الرقم القومي");
+    expect(html).toContain("تاريخ الصرف");
+    expect(html).toContain("المبلغ (ج.م)");
+    expect(html).toContain("رقم الهاتف");
+    expect(html).not.toContain("Full name");
+    expect(html).not.toContain("Payment date");
   });
 
   it("finds the four personal fields in the sample text", () => {

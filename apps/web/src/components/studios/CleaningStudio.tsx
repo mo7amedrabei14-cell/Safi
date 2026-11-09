@@ -218,19 +218,14 @@ const DATASET_PRESETS: ReadonlyArray<{
 ];
 
 const CLEANING_EN: Readonly<Record<string, string>> = {
-  "الاسم الكامل": "Full name",
   "نص عربي (Text)": "Arabic text",
   "اسم مركب": "Compound name",
-  "الرقم القومي": "National ID",
   "رقم قومي مصري (14 رقمًا)": "Egyptian national ID (14 digits)",
   "معرّف نصي": "Text identifier",
-  "تاريخ الصرف": "Payment date",
   "تاريخ (ISO Date)": "Date (ISO)",
   "تاريخ هجري": "Hijri date",
-  "المبلغ (ج.م)": "Amount (EGP)",
   "مبلغ مالي (Decimal)": "Monetary amount (decimal)",
   "رقم صحيح": "Integer",
-  "رقم الهاتف": "Phone number",
   "هاتف محمول (Phone)": "Mobile phone",
   نص: "Text",
   "القيمة (0) في عمود «المبلغ (ج.م)» بالصف 3: هل تعني صفرًا فعليًا أم «لم يستلم / فارغ»؟":
@@ -240,7 +235,6 @@ const CLEANING_EN: Readonly<Record<string, string>> = {
   "الخلية الأولى في الصف 5 تبدأ بعلامة صيغة (=HYPERLINK): سيتم تحييدها تلقائيًا لحمايتك (A11).":
     "The first cell in row 5 starts with a formula (=HYPERLINK). It will be neutralized automatically for your protection (A11).",
   "سجل العملاء والمرتبات": "Payroll & Clients Ledger",
-  "سجل العملاء والمرتبات المنقّى": "Cleaned Payroll & Clients Ledger",
   "المدفوعات والتجارة العالمية": "Global E-Commerce Payments",
   "السجل الطبي المشفّر": "Encrypted Clinical Registry",
   "0 معناها لم يستلم": "0 means not received",
@@ -317,12 +311,6 @@ const CLEANING_EN: Readonly<Record<string, string>> = {
   الإسكندرية: "Alexandria",
   الجيزة: "Giza",
   أسوان: "Aswan",
-  "الاسم:": "Name:",
-  "الهاتف:": "Phone:",
-  "البريد:": "Email:",
-  "الرقم القومي:": "National ID:",
-  "العنوان:": "Address:",
-  "المبلغ:": "Amount:",
   "تم تحديث خطوات التنضيف وإعادة حساب الجدول فورًا.":
     "Cleaning steps updated and the table recalculated.",
   "تمت إضافة صف جديد وتطبيق قواعد التنقية والحماية عليه فورًا.":

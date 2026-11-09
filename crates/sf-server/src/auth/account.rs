@@ -5,23 +5,22 @@
 //! hashes alone are persisted, and delivery happens only after the database
 //! transaction commits.
 
-use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 use async_trait::async_trait;
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
-use lettre::{AsyncSmtpTransport, AsyncTransport, Mailbox, Message, Tokio1Executor};
+use lettre::message::Mailbox;
+use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::Deserialize;
 use sqlx::postgres::PgPool;
 use sqlx::Row;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::auth::service::{AuthService, IssuedSession};
@@ -291,7 +290,7 @@ impl AccountAuthService {
 
 fn normalize_email(raw: &str) -> Result<String, AuthError> {
     let email = raw.trim().to_ascii_lowercase();
-    if email.is_empty() || email.len() > 254 || Mailbox::from_str(&email).is_err() {
+    if email.is_empty() || email.len() > 254 || email.parse::<Mailbox>().is_err() {
         return Err(AuthError::InvalidRequest);
     }
     Ok(email)
@@ -414,7 +413,7 @@ impl SmtpVerificationEmailSender {
             .map(|value| value.parse::<u16>().map_err(|_| AuthError::InvalidRequest))
             .transpose()?
             .unwrap_or(587);
-        let from = Mailbox::from_str(&from_raw).map_err(|_| AuthError::InvalidRequest)?;
+        let from = from_raw.parse::<Mailbox>().map_err(|_| AuthError::InvalidRequest)?;
         let credentials = Credentials::new(username, password);
         let transport = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)
             .map_err(|_| AuthError::BackendUnavailable)?
@@ -437,7 +436,7 @@ impl VerificationEmailSender for SmtpVerificationEmailSender {
         recipient: &str,
         verification_url: &str,
     ) -> Result<(), AuthError> {
-        let to = Mailbox::from_str(recipient).map_err(|_| AuthError::InvalidRequest)?;
+        let to = recipient.parse::<Mailbox>().map_err(|_| AuthError::InvalidRequest)?;
         let message = Message::builder()
             .from(self.from.clone())
             .to(to)
@@ -730,6 +729,8 @@ impl AccountRepository for SqlxAccountRepository {
 mod tests {
     use super::*;
     use crate::auth::service::in_memory_service;
+    use std::collections::HashMap;
+    use tokio::sync::RwLock;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[derive(Default)]

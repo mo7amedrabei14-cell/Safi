@@ -31,6 +31,16 @@ pub struct IssuedSession {
     pub session: SessionView,
 }
 
+impl std::fmt::Debug for IssuedSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("IssuedSession")
+            .field("token", &"[REDACTED]")
+            .field("session", &self.session)
+            .finish()
+    }
+}
+
 /// API-key authentication and session lifecycle.
 pub struct AuthService {
     api_keys: SharedApiKeyRepository,

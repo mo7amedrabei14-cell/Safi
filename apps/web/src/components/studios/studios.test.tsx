@@ -27,6 +27,7 @@ describe("UI-Phase-5 Cleaning & PII studio", () => {
   it("defaults to English UI while retaining Arabic sample data", () => {
     const html = renderToString(<CleaningStudio />);
 
+    expect(html).toContain("Cleaning, Privacy & Workspace Lab");
     expect(html).toContain("Cleaning & PII");
     expect(html).toContain("Normalization result");
     expect(html).toContain("Deterministic tokenization (BLAKE3)");
@@ -119,7 +120,7 @@ describe("UI-Phase-5 Library studio", () => {
   it("defaults to English template and signature guidance", () => {
     const html = renderToString(<LibraryStudio />);
 
-    expect(html).toContain("Template library & quality reports");
+    expect(html).toContain("Template library &amp; quality reports");
     expect(html).toContain("Recipe digest (BLAKE3)");
     expect(html).toContain("About digital signatures");
     expect(html).not.toContain("بصمة الوصفة (BLAKE3)");

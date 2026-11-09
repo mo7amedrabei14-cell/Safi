@@ -46,6 +46,8 @@ const OWNER_ENGLISH: Readonly<Record<string, string>> = {
     "Ready — Zero Trust guard and YubiKey FIPS are active. Select a card to run an action.",
   "مركز قيادة المالك • Zero Trust + YubiKey FIPS":
     "Owner Command Console • Zero Trust + YubiKey FIPS",
+  "مركز السجلات الموثّق بسلسلة بصمات BLAKE3 (Immutable Audit Chain)":
+    "Verified audit log center with BLAKE3 hash chain (Immutable Audit Chain)",
   "🛡️ حارس Zero Trust + YubiKey FIPS موثّق": "🛡️ Zero Trust + YubiKey FIPS verified",
   "⚠️ بانتظار لمس مفتاح YubiKey": "⚠️ Waiting for YubiKey touch",
   "تم تجديد جلسة مصادقة الأجهزة (WebAuthn FIDO2 / YubiKey FIPS + PASETO v4).":

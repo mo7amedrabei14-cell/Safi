@@ -448,18 +448,13 @@ function localizeCleaningNode(node: ReactNode): ReactNode {
   if (typeof node === "string") return translateCleaningText(node);
   if (Array.isArray(node)) return node.map(localizeCleaningNode);
   if (isValidElement<Record<string, unknown>>(node)) {
-    const next: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(node.props)) {
-      if (
-        typeof value === "string" &&
-        ["aria-label", "title", "placeholder", "alt"].includes(key)
-      ) {
-        next[key] = translateCleaningText(value);
-      } else if (key === "children") {
-        next[key] = localizeCleaningNode(value as ReactNode);
-      } else {
-        next[key] = value;
-      }
+    const next: Record<string, unknown> = { ...node.props };
+    for (const key of ["aria-label", "title", "placeholder", "alt"]) {
+      const value = next[key];
+      if (typeof value === "string") next[key] = translateCleaningText(value);
+    }
+    if ("children" in next) {
+      next.children = localizeCleaningNode(next.children as ReactNode);
     }
     return cloneElement(node, next);
   }

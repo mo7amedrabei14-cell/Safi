@@ -240,6 +240,7 @@ const CLEANING_EN: Readonly<Record<string, string>> = {
   "الخلية الأولى في الصف 5 تبدأ بعلامة صيغة (=HYPERLINK): سيتم تحييدها تلقائيًا لحمايتك (A11).":
     "The first cell in row 5 starts with a formula (=HYPERLINK). It will be neutralized automatically for your protection (A11).",
   "سجل العملاء والمرتبات": "Payroll & Clients Ledger",
+  "سجل العملاء والمرتبات المنقّى": "Cleaned Payroll & Clients Ledger",
   "المدفوعات والتجارة العالمية": "Global E-Commerce Payments",
   "السجل الطبي المشفّر": "Encrypted Clinical Registry",
   "0 معناها لم يستلم": "0 means not received",
@@ -329,7 +330,9 @@ const CLEANING_EN: Readonly<Record<string, string>> = {
   "تم تطبيق قاعدة الفهم الطبيعية على الجدول.":
     "The natural-language understanding rule was applied to the table.",
   "تم التراجع عن الخطوة الأخيرة.": "The last step was undone.",
+  "↶ تم التراجع عن الخطوة الأخيرة.": "↶ Undid the last step.",
   "تمت إعادة الخطوة.": "The step was redone.",
+  "↷ تمت إعادة الخطوة.": "↷ Redid the step.",
   "تم اعتماد توصيات بطاقة الأسئلة المجمّعة (U6) دفعة واحدة.":
     "All recommendations in the aggregated questions card (U6) were applied.",
   "تم تأجيل الأسئلة — يمكنك متابعة العمل بلا مقاطعة.":

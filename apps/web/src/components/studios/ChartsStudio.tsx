@@ -142,7 +142,7 @@ export interface ChartsStudioProps {
   readonly onSelectTab?: (tab: SafiDockTabId) => void;
 }
 
-export function ChartsStudio({ lang = "ar", onSelectTab }: ChartsStudioProps = {}): ReactNode {
+export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {}): ReactNode {
   const isAr = lang === "ar";
   const [activePresetId, setActivePresetId] = useState<string>("governorates");
   const [chartType, setChartType] = useState<ChartType>("bar");

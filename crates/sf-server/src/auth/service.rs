@@ -107,7 +107,7 @@ impl AuthService {
         let now = unix_now();
         let api_key_id = match principal.auth_method {
             AuthMethod::ApiKey { key_id } => Some(key_id),
-            AuthMethod::Session { .. } => None,
+            AuthMethod::Session { .. } | AuthMethod::Password => None,
         };
         let record = SessionRecord {
             id: Uuid::now_v7(),

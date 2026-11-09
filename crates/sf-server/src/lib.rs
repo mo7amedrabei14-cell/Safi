@@ -19,6 +19,7 @@ use axum::response::Response;
 use axum::Router;
 use tokio::sync::RwLock;
 
+use auth::account::AccountAuthService;
 use auth::service::AuthService;
 use log_center::AuditLogCenter;
 
@@ -30,6 +31,7 @@ pub struct RequestId(pub String);
 #[derive(Clone)]
 pub struct AppState {
     pub auth: Arc<AuthService>,
+    pub account_auth: Option<Arc<AccountAuthService>>,
     pub zero_trust: zero_trust::ZeroTrustGuardState,
     pub log_center: Arc<RwLock<AuditLogCenter>>,
 }
@@ -40,9 +42,17 @@ impl AppState {
     pub fn new(auth: AuthService) -> Self {
         Self {
             auth: Arc::new(auth),
+            account_auth: None,
             zero_trust: zero_trust::ZeroTrustGuardState::default(),
             log_center: Arc::new(RwLock::new(AuditLogCenter::new())),
         }
+    }
+
+    /// Attach the public account lifecycle without changing API-key/session routes.
+    #[must_use]
+    pub fn with_account_auth(mut self, account_auth: AccountAuthService) -> Self {
+        self.account_auth = Some(Arc::new(account_auth));
+        self
     }
 }
 

@@ -34,13 +34,26 @@ const ARGON2_MEMORY_KIB: u32 = 65_536;
 const ARGON2_ITERATIONS: u32 = 3;
 const ARGON2_LANES: u32 = 1;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LoginAccount {
     pub user_id: Uuid,
     pub workspace_id: Option<Uuid>,
     pub password_hash: String,
     pub email_verified: bool,
     pub deleted: bool,
+}
+
+impl std::fmt::Debug for LoginAccount {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LoginAccount")
+            .field("user_id", &self.user_id)
+            .field("workspace_id", &self.workspace_id)
+            .field("password_hash", &"[REDACTED]")
+            .field("email_verified", &self.email_verified)
+            .field("deleted", &self.deleted)
+            .finish()
+    }
 }
 
 #[async_trait]

@@ -1,5 +1,6 @@
 //! API-key authentication and high-performance session management (Section 9.1, 9.3).
 
+pub mod account;
 pub mod api_key;
 pub mod cache;
 pub mod middleware;
@@ -88,6 +89,8 @@ pub enum AuthMethod {
     ApiKey { key_id: Uuid },
     /// Short-lived session issued from an API key.
     Session { session_id: Uuid },
+    /// Email/password sign-in before a new session is issued.
+    Password,
 }
 
 /// Authenticated caller, always bound to exactly one workspace.

@@ -8,6 +8,10 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::auth::account::{
+    AccountAuthService, AccountMessage, LoginAccountRequest, LoginResponse,
+    RegisterAccountRequest, ResendVerificationRequest, VerifyEmailRequest,
+};
 use crate::auth::middleware::{
     require_any_credential, require_api_key, require_session, AnyCredentialGuard, ApiKeyGuard,
     SessionGuard,
@@ -109,6 +113,78 @@ pub struct UpdateQuery {
     pub platform: Option<String>,
 }
 
+
+/// Public email/password registration. The same response is returned for new
+/// and pre-existing email addresses to prevent account enumeration.
+pub async fn register_account(
+    State(state): State<AppState>,
+    Json(body): Json<RegisterAccountRequest>,
+) -> Result<(StatusCode, Json<AccountMessage>), AuthError> {
+    let service: &AccountAuthService = state
+        .account_auth
+        .as_deref()
+        .ok_or(AuthError::BackendUnavailable)?;
+    service.register(body).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(AccountMessage {
+            message: "If this address can be registered, a verification email will be sent.",
+        }),
+    ))
+}
+
+/// Consume a one-time email verification token.
+pub async fn verify_email(
+    State(state): State<AppState>,
+    Json(body): Json<VerifyEmailRequest>,
+) -> Result<Json<AccountMessage>, AuthError> {
+    let service: &AccountAuthService = state
+        .account_auth
+        .as_deref()
+        .ok_or(AuthError::BackendUnavailable)?;
+    service.verify_email(&body.token).await?;
+    Ok(Json(AccountMessage {
+        message: "Your email address has been verified.",
+    }))
+}
+
+/// Reissue an email verification token without revealing account existence.
+pub async fn resend_verification(
+    State(state): State<AppState>,
+    Json(body): Json<ResendVerificationRequest>,
+) -> Result<(StatusCode, Json<AccountMessage>), AuthError> {
+    let service: &AccountAuthService = state
+        .account_auth
+        .as_deref()
+        .ok_or(AuthError::BackendUnavailable)?;
+    service.resend_verification(&body.email).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(AccountMessage {
+            message: "If this account needs verification, a new email will be sent.",
+        }),
+    ))
+}
+
+/// Verify credentials and issue the existing sfs_* session token.
+pub async fn login_account(
+    State(state): State<AppState>,
+    Json(body): Json<LoginAccountRequest>,
+) -> Result<(StatusCode, Json<LoginResponse>), AuthError> {
+    let service: &AccountAuthService = state
+        .account_auth
+        .as_deref()
+        .ok_or(AuthError::BackendUnavailable)?;
+    let issued = service.login(body).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(LoginResponse {
+            token: issued.token,
+            session: issued.session,
+        }),
+    ))
+}
+
 /// `GET /v1/updates/latest` — fetch latest release manifest for client desktop app.
 pub async fn get_latest_update(Query(query): Query<UpdateQuery>) -> Json<ReleaseManifestRecord> {
     let channel = query.channel.unwrap_or_else(|| "stable".to_string());
@@ -205,6 +281,15 @@ pub fn build_router(state: AppState) -> Router {
             require_session,
         ));
 
+    let public_account_routes = Router::new()
+        .route("/v1/auth/register", post(register_account))
+        .route("/v1/auth/email/verify", post(verify_email))
+        .route(
+            "/v1/auth/email/verification/resend",
+            post(resend_verification),
+        )
+        .route("/v1/auth/login", post(login_account));
+
     let updates_route = Router::new().route("/v1/updates/latest", get(get_latest_update));
 
     let owner_route = Router::new()
@@ -226,6 +311,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(any_credential)
         .merge(api_key_only)
         .merge(session_only)
+        .merge(public_account_routes)
         .merge(updates_route)
         .merge(owner_route)
         .merge(log_route)

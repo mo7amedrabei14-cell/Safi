@@ -38,7 +38,7 @@ export interface OwnerDashboardProps {
   readonly onSelectTab?: (tab: SafiDockTabId) => void;
 }
 
-export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "ar", onSelectTab }) => {
+export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "en", onSelectTab }) => {
   const isAr = lang === "ar";
   const [statusMessage, setStatusMessage] = useState<string>(
     "كل شيء سليم — النظام يعمل بكفاءة تامة"

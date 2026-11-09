@@ -54,6 +54,7 @@ describe("UI-Phase-5 Recipes studio", () => {
     expect(html).toMatch(/[0-9a-f]{64}/);
     expect(html).toContain("الكتابة الذرية");
   });
+
   it("defaults to English and keeps the recipe output copy localized", () => {
     const html = renderToString(createElement(RecipesStudio, null));
 

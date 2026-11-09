@@ -89,11 +89,13 @@ try {
     const root = document.querySelector(".safi-intro-splash");
     const fill = root?.querySelector(".safi-intro-progress-fill");
     const ring = root?.querySelector(".safi-intro-orb-ring");
+    const dots = root ? Array.from(root.querySelectorAll("[data-intro-dot]")) : [];
     const title = root?.querySelector(".safi-intro-title");
     return {
       motionStartedAt: window.__safiIntroTrace?.motionStartedAt ?? null,
       progressTransform: fill ? getComputedStyle(fill).transform : null,
       progressScale: fill ? new DOMMatrixReadOnly(getComputedStyle(fill).transform).a : null,
+      visibleDataDots: dots.filter((dot) => Number(getComputedStyle(dot).opacity) > 0.9).length,
       ringAnimation: ring ? getComputedStyle(ring).animationName : null,
       arabicTitle: title?.querySelector('bdi[dir="rtl"]')?.textContent ?? "",
       englishTitle: title?.querySelector('bdi[dir="ltr"]')?.textContent ?? ""
@@ -103,6 +105,7 @@ try {
   assert.equal(pausedFrame.motionStartedAt, null, "Motion started before the one-second still frame.");
   assert.equal(pausedFrame.ringAnimation, "none", "The decorative ring must be still during the opening pause.");
   assert.equal(pausedFrame.progressScale, 0, "The progress bar must remain at zero during the opening pause.");
+  assert.equal(pausedFrame.visibleDataDots, 9, "All nine data points must form a visible, still logo before motion begins.");
   assert.equal(pausedFrame.arabicTitle, "صافي البيانات", "The Arabic title must remain a single RTL run.");
   assert.equal(pausedFrame.englishTitle, "SafiData", "The product name must remain an isolated LTR run.");
   await page.screenshot({ path: resolve(artifactDir, "intro-still-frame.png"), fullPage: true });

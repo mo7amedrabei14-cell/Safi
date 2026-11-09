@@ -184,11 +184,29 @@ export function SafiMotionShowcase(): ReactNode {
   return (
     <div className="safi-grid-2" dir="rtl" style={{ marginTop: "8px" }}>
       {/* Card 1: 2.6s Motion Logo Stage & Droplet Loader */}
-      <div className="safi-spotlight" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+      <div
+        className="safi-spotlight"
+        style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            flexWrap: "wrap"
+          }}
+        >
           <div>
             <span className="safi-eyebrow">القسم 7.1 و 7.2 • الموشن جرافيك الرسمي (2.6 ثانية)</span>
-            <h3 style={{ fontSize: "18px", fontWeight: 700, marginTop: "2px", color: "var(--text-primary)" }}>
+            <h3
+              style={{
+                fontSize: "18px",
+                fontWeight: 700,
+                marginTop: "2px",
+                color: "var(--text-primary)"
+              }}
+            >
               مبعثر ← شبكة 3×3 ← قطرة صافي النقية
             </h3>
           </div>
@@ -226,7 +244,9 @@ export function SafiMotionShowcase(): ReactNode {
             border: "1px solid var(--border-subtle)"
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+          <div
+            style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}
+          >
             <svg
               ref={stageSvgRef}
               viewBox="0 0 128 156"
@@ -237,7 +257,14 @@ export function SafiMotionShowcase(): ReactNode {
               style={{ overflow: "visible" }}
             >
               <defs>
-                <linearGradient id="stage-drop-grad" x1="64" y1="10" x2="64" y2="120" gradientUnits="userSpaceOnUse">
+                <linearGradient
+                  id="stage-drop-grad"
+                  x1="64"
+                  y1="10"
+                  x2="64"
+                  y2="120"
+                  gradientUnits="userSpaceOnUse"
+                >
                   <stop offset="0%" stopColor="#AD97B0" />
                   <stop offset="100%" stopColor="#7A5B7E" />
                 </linearGradient>
@@ -253,7 +280,13 @@ export function SafiMotionShowcase(): ReactNode {
                 </filter>
               </defs>
 
-              <g data-stage-grid="true" opacity="0" stroke="#7A5B7E" strokeWidth="0.75" strokeDasharray="2 3">
+              <g
+                data-stage-grid="true"
+                opacity="0"
+                stroke="#7A5B7E"
+                strokeWidth="0.75"
+                strokeDasharray="2 3"
+              >
                 <line x1="44" y1="48" x2="44" y2="108" />
                 <line x1="64" y1="48" x2="64" y2="108" />
                 <line x1="84" y1="48" x2="84" y2="108" />
@@ -327,15 +360,29 @@ export function SafiMotionShowcase(): ReactNode {
                     background: "var(--bg-surface)"
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center"
+                    }}
+                  >
+                    <span
+                      style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}
+                    >
                       {phase.title}
                     </span>
-                    <span className="safi-mono" style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }} dir="ltr">
+                    <span
+                      className="safi-mono"
+                      style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}
+                      dir="ltr"
+                    >
                       {phase.time}
                     </span>
                   </div>
-                  <p style={{ margin: "2px 0 0", fontSize: "11px", color: "var(--text-secondary)" }}>
+                  <p
+                    style={{ margin: "2px 0 0", fontSize: "11px", color: "var(--text-secondary)" }}
+                  >
                     {phase.desc}
                   </p>
                 </div>
@@ -392,7 +439,14 @@ export function SafiMotionShowcase(): ReactNode {
               ) : null}
             </svg>
             <div>
-              <span style={{ fontSize: "13px", fontWeight: 700, display: "block", color: "var(--text-primary)" }}>
+              <span
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  display: "block",
+                  color: "var(--text-primary)"
+                }}
+              >
                 حركة التحميل بالقطرة الحية (القسم 7.3): {fillPct}%
               </span>
               <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
@@ -414,11 +468,31 @@ export function SafiMotionShowcase(): ReactNode {
       </div>
 
       {/* Card 2: Browser Tab Favicon & Messaging Social Preview Card */}
-      <div className="safi-spotlight" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+      <div
+        className="safi-spotlight"
+        style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            flexWrap: "wrap"
+          }}
+        >
           <div>
-            <span className="safi-eyebrow">القسم 7.4 • أيقونة المتصفح ومعاينة الروابط في الرسائل</span>
-            <h3 style={{ fontSize: "18px", fontWeight: 700, marginTop: "2px", color: "var(--text-primary)" }}>
+            <span className="safi-eyebrow">
+              القسم 7.4 • أيقونة المتصفح ومعاينة الروابط في الرسائل
+            </span>
+            <h3
+              style={{
+                fontSize: "18px",
+                fontWeight: 700,
+                marginTop: "2px",
+                color: "var(--text-primary)"
+              }}
+            >
               مظهر التبويب (Favicon) وبطاقة المشاركة (OpenGraph)
             </h3>
           </div>
@@ -428,7 +502,11 @@ export function SafiMotionShowcase(): ReactNode {
             onClick={handleCopyShareLink}
             style={{ minHeight: "38px", padding: "6px 14px", fontSize: "13px" }}
           >
-            {copiedLink ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+            {copiedLink ? (
+              <Check size={14} aria-hidden="true" />
+            ) : (
+              <Copy size={14} aria-hidden="true" />
+            )}
             {copiedLink ? "تم نسخ الرابط!" : "نسخ رابط المنصة"}
           </button>
         </div>
@@ -495,7 +573,9 @@ export function SafiMotionShowcase(): ReactNode {
               color: "var(--text-primary)"
             }}
           >
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 700 }}>
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 700 }}
+            >
               <Share2 size={13} aria-hidden="true" />
               معاينة عند إرسال الرابط في أي رسالة (WhatsApp • Telegram • Slack • X)
             </span>
@@ -514,15 +594,22 @@ export function SafiMotionShowcase(): ReactNode {
             style={{ width: "100%", height: "auto", display: "block" }}
           />
 
-          <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "4px" }}>
-            <span className="safi-mono" style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }} dir="ltr">
+          <div
+            style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "4px" }}
+          >
+            <span
+              className="safi-mono"
+              style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}
+              dir="ltr"
+            >
               safidata.app • OpenGraph & Twitter Summary Large Image
             </span>
             <strong style={{ fontSize: "14px", color: "var(--text-primary)" }}>
               صافي البيانات | SafiData — بياناتك... صافية
             </strong>
             <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-              نظّف ووحّد وأخفِ بياناتك العربية بالكامل على جهازك بدون سحابة — مع محرك الرقم القومي المصري، وصفات BLAKE3 الحتمية، ورسوم WCAG 2.2 AA.
+              نظّف ووحّد وأخفِ بياناتك العربية بالكامل على جهازك بدون سحابة — مع محرك الرقم القومي
+              المصري، وصفات BLAKE3 الحتمية، ورسوم WCAG 2.2 AA.
             </span>
           </div>
         </div>

@@ -1,995 +1,122 @@
-/**
- * `apps/web/src/index.css`
- *
- * SafiData — Apple.com Flagship Product Website Design System
- * - Calm, simple colors & soft gradients
- * - Two modes only: Daylight (`light` / `apple-light`) & Midnight (`dark` / `google-gemini`)
- * - Rich, continuous 60/120fps motion keyframes + GSAP choreography
- * - Full RTL (Arabic) & LTR (English) support
- * - Zero external network URLs
- */
+import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
+import { App, SHELL_TABS, renderStudio } from "./App";
+import { DOCK_TABS } from "./components/layout/FloatingGlassDock";
 
-/* ============================================================================
- * 1. Calm Apple Daylight & Midnight Palettes (2 Modes Only)
- * ========================================================================== */
+const noop = (): void => undefined;
 
-:root,
-:root[data-theme="light"],
-:root[data-theme="apple-light"],
-:root[data-theme="vision-glass"] {
-  --bg-canvas: #F5F5F7;
-  --bg-surface: rgba(255, 255, 255, 0.65);
-  --bg-surface-soft: rgba(255, 255, 255, 0.56);
-  --bg-elevated: rgba(238, 242, 246, 0.72);
-  --bg-glass: rgba(255, 255, 255, 0.78);
-  --border-subtle: rgba(15, 23, 42, 0.08);
-  --border-strong: rgba(15, 23, 42, 0.15);
+describe("UI-Phase-5 application shell", () => {
+  it("renders the home stage, the six-tab dock and the preserved semantic strings", () => {
+    const html = renderToString(createElement(App, null));
 
-  --text-primary: #1D1D1F;
-  --text-secondary: #515154;
-  --text-muted: #86868B;
+    expect(SHELL_TABS).toEqual(["home", "cleaning", "recipes", "charts", "library", "owner"]);
+    expect(html).toContain('data-active-tab="home"');
+    expect(html).toContain("مرحبًا بك في منصة صافي البيانات");
+    expect(html).toContain("الإصدار الذهبي المعتمد v1.0.0-s5-gold");
 
-  --accent-primary: #1E293B;
-  --accent-soft: #3B82F6;
-  --accent-calm-gradient: linear-gradient(135deg, #1E293B 0%, #334155 50%, #475569 100%);
-  --accent-hero-glow: radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.10) 0%, rgba(148, 163, 184, 0.06) 45%, transparent 75%);
-  --accent-tint: rgba(59, 130, 246, 0.08);
+    for (const label of ["الرئيسية", "المكتبة", "الإعدادات"]) {
+      expect(html).toContain(label);
+    }
+    expect(html.split("data-tab-id=").length - 1).toBe(DOCK_TABS.length);
+    expect(html).toContain("⌘K");
 
-  --status-ok: #10B981;
-  --status-warn: #F59E0B;
-  --status-danger: #EF4444;
+    // Both overlays start closed, so no dialog is in the tree.
+    expect(html).not.toContain('role="dialog"');
+    expect(html).toContain('role="status"');
+  });
 
-  --shadow-card:
-    0 2px 6px rgba(15, 23, 42, 0.03),
-    0 18px 42px -12px rgba(15, 23, 42, 0.07),
-    0 0 0 1px rgba(15, 23, 42, 0.06);
-  --shadow-elevated:
-    0 28px 64px -16px rgba(15, 23, 42, 0.12),
-    0 0 0 1px rgba(15, 23, 42, 0.10);
-  --spotlight-glow: rgba(59, 130, 246, 0.07);
+  it("renders a distinct studio for every tab", () => {
+    const expectations: Array<[string, string]> = [
+      ["home", "الإصدار الذهبي المعتمد"],
+      ["cleaning", "مختبر التنقية والخصوصية"],
+      ["recipes", "محرك الوصفات الحتمية"],
+      ["charts", "التحقق من تباين WCAG 2.2 AA"],
+      ["library", "مكتبة القوالب وتقارير الجودة"],
+      ["owner", "لوحة تحكم المالك"]
+    ];
 
-  --safi-font-sans: "IBM Plex Sans Arabic", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --safi-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    for (const tab of SHELL_TABS) {
+      const html = renderToString(renderStudio(tab, noop));
+      const match = expectations.find(([id]) => id === tab);
+      expect(match).toBeDefined();
+      expect(html).toContain(match?.[1] ?? "");
+    }
 
-  color-scheme: light;
-}
+    const owner = renderToString(renderStudio("owner", noop));
+    expect(owner.split("انشر تحديثًا").length - 1).toBe(1);
+    expect(owner).toContain("6. الأمان وسجل التدقيق");
+    expect(owner).toContain("safi-owner-frame");
+  });
+});
 
-:root[data-theme="dark"],
-:root[data-theme="google-gemini"] {
-  --bg-canvas: #090B10;
-  --bg-surface: rgba(18, 22, 32, 0.65);
-  --bg-surface-soft: rgba(18, 22, 32, 0.56);
-  --bg-elevated: rgba(27, 33, 48, 0.72);
-  --bg-glass: rgba(18, 22, 32, 0.78);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
-
-  --text-primary: #F5F5F7;
-  --text-secondary: #A1A1AA;
-  --text-muted: #71717A;
-
-  --accent-primary: #F5F5F7;
-  --accent-soft: #60A5FA;
-  --accent-calm-gradient: linear-gradient(135deg, #F8FAFC 0%, #CBD5E1 55%, #94A3B8 100%);
-  --accent-hero-glow: radial-gradient(circle at 50% 0%, rgba(96, 165, 250, 0.14) 0%, rgba(148, 163, 184, 0.05) 45%, transparent 75%);
-  --accent-tint: rgba(96, 165, 250, 0.12);
-
-  --status-ok: #34D399;
-  --status-warn: #FBBF24;
-  --status-danger: #F87171;
-
-  --shadow-card:
-    0 20px 50px -12px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(255, 255, 255, 0.08);
-  --shadow-elevated:
-    0 32px 72px -14px rgba(0, 0, 0, 0.75),
-    0 0 0 1px rgba(255, 255, 255, 0.16);
-  --spotlight-glow: rgba(96, 165, 250, 0.10);
-
-  color-scheme: dark;
-}
-
-/* ============================================================================
- * 2. Continuous Visible Motion Keyframes (Apple Showcase Motion)
- * ========================================================================== */
-
-@keyframes safiFloatSlow {
-  0%, 100% {
-    transform: translateY(0px) rotateX(0deg);
-  }
-  50% {
-    transform: translateY(-10px) rotateX(1.5deg);
-  }
-}
-
-@keyframes safiScanBeam {
-  0% {
-    top: 8%;
-    opacity: 0;
-  }
-  15% {
-    opacity: 1;
-  }
-  85% {
-    opacity: 1;
-  }
-  100% {
-    top: 88%;
-    opacity: 0;
-  }
-}
-
-@keyframes safiPulseRing {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.55;
-  }
-  50% {
-    transform: scale(1.06);
-    opacity: 0.9;
-  }
-}
-
-@keyframes safiBarWave1 {
-  0%, 100% { transform: scaleY(0.72); }
-  50% { transform: scaleY(1.05); }
-}
-
-@keyframes safiBarWave2 {
-  0%, 100% { transform: scaleY(1.02); }
-  50% { transform: scaleY(0.68); }
-}
-
-@keyframes safiBarWave3 {
-  0%, 100% { transform: scaleY(0.84); }
-  50% { transform: scaleY(1.12); }
-}
-
-@keyframes safiMarqueeScroll {
-  0% {
-    transform: translateX(0%);
-  }
-  100% {
-    transform: translateX(50%);
-  }
-}
-
-@keyframes safiOrbitGlow {
-  0% {
-    transform: rotate(0deg) translateX(18px) rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg) translateX(18px) rotate(-360deg);
-  }
-}
-
-.safi-float-hardware {
-  animation: safiFloatSlow 5.5s ease-in-out infinite;
-  will-change: transform;
-}
-
-.safi-scan-line {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  height: 2px;
-  background: linear-gradient(90deg, transparent 0%, #60A5FA 50%, transparent 100%);
-  box-shadow: 0 0 18px 2px rgba(96, 165, 250, 0.55);
-  pointer-events: none;
-  animation: safiScanBeam 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-.safi-bar-anim-1 {
-  transform-origin: center bottom;
-  animation: safiBarWave1 2.4s ease-in-out infinite;
-}
-
-.safi-bar-anim-2 {
-  transform-origin: center bottom;
-  animation: safiBarWave2 2.8s ease-in-out infinite;
-}
-
-.safi-bar-anim-3 {
-  transform-origin: center bottom;
-  animation: safiBarWave3 2.2s ease-in-out infinite;
-}
-
-.safi-marquee-track {
+/* Intro startup stability: reveal the copy only after its local fonts load. */
+.safi-intro-copy {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  width: max-content;
-  animation: safiMarqueeScroll 28s linear infinite;
-}
-
-.safi-marquee-track:hover {
-  animation-play-state: paused;
-}
-
-/* ============================================================================
- * 3. Base Reset & Typography
- * ========================================================================== */
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-html {
-  font-family: var(--safi-font-sans);
-  background-color: var(--bg-canvas);
-  color: var(--text-primary);
-  scroll-behavior: smooth;
-  scroll-padding-top: 88px;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  transition: background-color 0.35s ease, color 0.25s ease;
-}
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  background-color: var(--bg-canvas);
-  color: var(--text-primary);
-  overflow-x: hidden;
-  line-height: 1.65;
-}
-
-.safi-mono,
-code,
-pre,
-[dir="ltr"] {
-  font-family: var(--safi-font-mono);
-  unicode-bidi: isolate;
-}
-
-.safi-visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* ============================================================================
- * 4. Apple Website Layout & Floating Glass Navbar
- * ========================================================================== */
-
-.safi-shell {
-  position: relative;
-  z-index: 1;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-@keyframes safiShinySweep {
-  0% {
-    background-position: 200% center;
-  }
-  100% {
-    background-position: -200% center;
-  }
-}
-
-@keyframes safiWordFlipIn {
-  0% {
-    opacity: 0;
-    transform: translateY(14px) rotateX(-40deg) scale(0.95);
-    filter: blur(4px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) rotateX(0deg) scale(1);
-    filter: blur(0px);
-  }
-}
-
-@keyframes safiStarGlow {
-  0%, 100% {
-    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 10px 30px -8px rgba(59, 130, 246, 0.28);
-  }
-  50% {
-    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.55), 0 14px 38px -6px rgba(59, 130, 246, 0.45);
-  }
-}
-
-.safi-rb-shiny-text {
-  background: linear-gradient(
-    110deg,
-    var(--text-primary) 25%,
-    #3B82F6 48%,
-    #10B981 54%,
-    var(--text-primary) 75%
-  );
-  background-size: 220% auto;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: safiShinySweep 4.5s linear infinite;
-}
-
-.safi-rb-rotating-word {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 16px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.14) 0%, rgba(16, 185, 129, 0.14) 100%);
-  border: 1px solid rgba(59, 130, 246, 0.32);
-  color: #2563EB;
-  animation: safiWordFlipIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-:root[data-theme="dark"] .safi-rb-rotating-word,
-:root[data-theme="google-gemini"] .safi-rb-rotating-word {
-  color: #60A5FA;
-  border-color: rgba(96, 165, 250, 0.4);
-}
-
-.safi-rb-star-cta {
-  animation: safiStarGlow 3s ease-in-out infinite;
-}
-
-.safi-rb-hero-grid {
-  display: grid;
-  grid-template-columns: 1.04fr 0.96fr;
-  gap: clamp(24px, 3vw, 48px);
-  align-items: center;
-  min-height: calc(100vh - 118px);
-}
-
-@media (max-width: 1100px) {
-  .safi-rb-hero-grid {
-    grid-template-columns: 1fr;
-    min-height: auto;
-  }
-}
-
-.safi-container {
   width: 100%;
-  max-width: 100%;
-  margin-inline: auto;
-  padding-inline: clamp(20px, 2.6vw, 48px);
-  padding-top: 16px;
-  padding-bottom: 96px;
-}
-
-.safi-topbar {
-  position: relative;
-  z-index: 60;
-  width: 100%;
-  background: transparent;
-  border-bottom: none;
-}
-
-.safi-topbar-inner {
-  width: 100%;
-  max-width: 100%;
-  margin-inline: auto;
-  padding-inline: clamp(20px, 2.6vw, 48px);
-  min-height: 74px;
-  padding-block: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.safi-topbar-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-@keyframes safiOrbitSpin {
-  0% { transform: rotate(0deg); }
-  50% { transform: rotate(180deg) scale(1.03); }
-  100% { transform: rotate(360deg); }
-}
-
-@keyframes safiStripShimmer {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
-}
-
-.safi-pm-logo-orbit {
-  animation: safiOrbitSpin 18s linear infinite;
-}
-
-/* THE ONLY PINNED ELEMENT: Pure Apple Minimalist Glass Pill (Single-Row 44px height) */
-.safi-morph-strip {
-  position: fixed;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 130;
-  height: 44px;
-  max-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: nowrap;
-  padding: 4px 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow:
-    0 12px 32px -8px rgba(15, 23, 42, 0.10),
-    0 2px 6px rgba(15, 23, 42, 0.04),
-    0 0 0 1px rgba(255, 255, 255, 0.7) inset;
-  overflow: hidden;
-  cursor: pointer;
-  white-space: nowrap;
-  transition:
-    padding 0.72s cubic-bezier(0.16, 1, 0.3, 1),
-    background-color 0.55s ease,
-    border-color 0.55s ease,
-    box-shadow 0.72s cubic-bezier(0.16, 1, 0.3, 1),
-    transform 0.72s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-:root[data-theme="dark"] .safi-morph-strip,
-:root[data-theme="google-gemini"] .safi-morph-strip {
-  background: rgba(15, 23, 42, 0.86);
-  border-color: rgba(148, 163, 184, 0.22);
-  box-shadow:
-    0 16px 40px -10px rgba(0, 0, 0, 0.48),
-    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-}
-
-.safi-morph-strip:hover,
-.safi-morph-strip[data-expanded="true"] {
-  padding: 4px 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.94);
-  border-color: rgba(15, 23, 42, 0.12);
-  box-shadow:
-    0 18px 44px -10px rgba(15, 23, 42, 0.14),
-    0 4px 12px rgba(15, 23, 42, 0.05),
-    0 0 0 1px rgba(255, 255, 255, 0.85) inset;
-}
-
-:root[data-theme="dark"] .safi-morph-strip:hover,
-:root[data-theme="dark"] .safi-morph-strip[data-expanded="true"],
-:root[data-theme="google-gemini"] .safi-morph-strip:hover,
-:root[data-theme="google-gemini"] .safi-morph-strip[data-expanded="true"] {
-  background: rgba(15, 23, 42, 0.94);
-  border-color: rgba(148, 163, 184, 0.32);
-  box-shadow:
-    0 20px 48px -10px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.12) inset;
-}
-
-.safi-strip-compact {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  height: 36px;
-  padding: 0 14px;
-  max-width: 260px;
-  opacity: 1;
-  transform: scale(1);
-  transition:
-    max-width 0.72s cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 0.45s ease,
-    transform 0.65s cubic-bezier(0.16, 1, 0.3, 1),
-    padding 0.65s cubic-bezier(0.16, 1, 0.3, 1);
-  white-space: nowrap;
-}
-
-.safi-morph-strip:hover .safi-strip-compact,
-.safi-morph-strip[data-expanded="true"] .safi-strip-compact {
-  max-width: 0;
-  opacity: 0;
-  padding: 0;
-  pointer-events: none;
-  transform: scale(0.95);
-  overflow: hidden;
-}
-
-.safi-strip-pulse-orb {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  flex-shrink: 0;
-}
-
-.safi-strip-current-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.safi-strip-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.safi-strip-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(100, 116, 139, 0.35);
-  transition: all 0.55s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.safi-strip-dot[data-active="true"] {
-  width: 14px;
-  background: var(--text-primary);
-}
-
-.safi-strip-chevron {
-  color: var(--text-secondary);
-  opacity: 0.75;
-  flex-shrink: 0;
-}
-
-.safi-strip-expanded-content {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: nowrap;
-  height: 36px;
-  max-height: 36px;
-  gap: 2px;
-  max-width: 0;
-  opacity: 0;
-  pointer-events: none;
-  transform: scale(0.96);
-  overflow: hidden;
-  white-space: nowrap;
-  transition:
-    max-width 0.75s cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 0.52s ease,
-    transform 0.68s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.safi-morph-strip:hover .safi-strip-expanded-content,
-.safi-morph-strip[data-expanded="true"] .safi-strip-expanded-content {
-  max-width: 620px;
-  opacity: 1;
-  pointer-events: auto;
-  transform: scale(1);
-}
-
-.safi-segmented-btn {
-  position: relative;
-  z-index: 1;
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 0 15px;
-  height: 36px;
-  min-height: 36px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  text-decoration: none;
-  transition:
-    background-color 0.45s cubic-bezier(0.16, 1, 0.3, 1),
-    color 0.35s ease,
-    box-shadow 0.45s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.safi-segmented-btn:hover {
-  color: var(--text-primary);
-}
-
-.safi-segmented-btn[data-active="true"],
-.safi-segmented-btn[aria-current="page"] {
-  background: #FFFFFF;
-  color: #0F172A;
-  font-weight: 700;
-  box-shadow:
-    0 2px 8px rgba(15, 23, 42, 0.08),
-    0 0 0 1px rgba(15, 23, 42, 0.05);
-}
-
-:root[data-theme="dark"] .safi-segmented-btn[data-active="true"],
-:root[data-theme="dark"] .safi-segmented-btn[aria-current="page"],
-:root[data-theme="google-gemini"] .safi-segmented-btn[data-active="true"],
-:root[data-theme="google-gemini"] .safi-segmented-btn[aria-current="page"] {
-  background: rgba(255, 255, 255, 0.14);
-  color: #F8FAFC;
-  box-shadow:
-    0 2px 10px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(255, 255, 255, 0.12);
-}
-
-.safi-topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.safi-topbar-btn {
-  appearance: none;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  padding: 6px 14px;
-  min-height: 44px;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.safi-topbar-btn:hover {
-  background: var(--bg-surface);
-  border-color: var(--border-strong);
-}
-
-/* ============================================================================
- * 5. Apple Website Sections, Cards & Buttons
- * ========================================================================== */
-
-.safi-card,
-.safi-spotlight {
-  position: relative;
-  background: var(--bg-surface-soft);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid var(--border-subtle);
-  border-radius: 28px;
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
-  transition:
-    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.3s ease,
-    border-color 0.3s ease;
-}
-
-.safi-spotlight-chromeless {
-  background: transparent !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  border: none !important;
-  box-shadow: none !important;
-  overflow: visible !important;
-}
-
-.safi-spotlight:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-elevated);
-}
-
-.safi-btn {
-  appearance: none;
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  min-height: 44px;
-  padding: 11px 24px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  text-decoration: none;
-  transition: all 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.safi-btn:hover {
-  transform: translateY(-1px);
-}
-
-.safi-btn-primary {
-  background: var(--text-primary);
-  color: var(--bg-surface);
-}
-
-.safi-btn-secondary {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-
-/* 12-Column Fluid Bento Grid */
-.safi-bento {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 22px;
-}
-
-.safi-bento-wide { grid-column: span 7; }
-.safi-bento-half { grid-column: span 5; }
-.safi-bento-third { grid-column: span 6; }
-.safi-bento-full { grid-column: span 12; }
-
-@media (max-width: 1080px) {
-  .safi-bento-wide,
-  .safi-bento-half,
-  .safi-bento-third {
-    grid-column: span 12;
-  }
-}
-
-/* ============================================================================
- * 6. Cinematic Intro Splash (Calm Apple Keynote Curtain)
- * ========================================================================== */
-
-.safi-intro-splash {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: flex;
+  max-width: 540px;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background:
-    radial-gradient(800px 480px at 50% 35%, rgba(59, 130, 246, 0.14), transparent 70%),
-    #090B10;
-  color: #F5F5F7;
-  overflow: hidden;
 }
 
-.safi-intro-stage {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  max-width: 640px;
-  width: 100%;
-}
-
-.safi-intro-orb {
-  position: relative;
-  width: 196px;
-  height: 196px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 24px;
-}
-
-.safi-intro-orb-ring {
-  position: absolute;
-  inset: -6px;
-  border-radius: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  animation: safiPulseRing 2.4s ease-in-out infinite;
-  pointer-events: none;
+.safi-intro-splash[data-fonts-ready="false"] .safi-intro-copy {
+  visibility: hidden;
 }
 
 .safi-intro-title {
-  margin: 0 0 10px;
-  font-size: clamp(28px, 4vw, 44px);
-  font-weight: 800;
-  letter-spacing: -0.025em;
-  color: #F5F5F7;
+  display: flex;
+  min-height: 1.3em;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.24em;
+  direction: rtl;
+  text-align: center;
+}
+
+.safi-intro-title bdi {
+  unicode-bidi: isolate;
+}
+
+.safi-intro-title bdi[dir="ltr"] {
+  direction: ltr;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.02em;
 }
 
 .safi-intro-tagline {
-  margin: 0 0 24px;
-  font-size: 16px;
-  color: #94A3B8;
-  max-width: 500px;
+  display: flex;
+  min-height: 3.3em;
+  align-items: flex-start;
+  justify-content: center;
+  line-height: 1.65;
+  text-wrap: balance;
 }
 
-.safi-intro-progress-track {
-  width: 240px;
-  height: 4px;
+.safi-intro-progress-fill {
+  width: 100%;
+  height: 100%;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-  margin-bottom: 20px;
+  background: linear-gradient(90deg, #60A5FA 0%, #CBD5E1 50%, #F8FAFC 100%);
+  transform: scaleX(0);
+  transform-origin: right center;
+}
+
+.safi-intro-splash:not([data-motion-ready="true"]) [data-intro-dot],
+.safi-intro-splash:not([data-motion-ready="true"]) [data-intro-bar] {
+  opacity: 0;
+}
+
+.safi-intro-splash[data-motion-ready="true"] [data-intro-dot],
+.safi-intro-splash[data-motion-ready="true"] [data-intro-bar] {
+  opacity: 1;
+}
+
+.safi-intro-splash:not([data-motion-ready="true"]) [data-intro-trend] {
+  stroke-dasharray: 120;
+  stroke-dashoffset: 120;
 }
 
 .safi-intro-skip {
-  appearance: none;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #F5F5F7;
-  font-family: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-  padding: 10px 24px;
-  min-height: 44px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.safi-intro-skip:hover {
-  background: #F5F5F7;
-  color: #090B10;
-}
-
-/* ============================================================================
- * 7. Tables, Inputs, Modals & Legacy Compatibility
- * ========================================================================== */
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13.5px;
-}
-
-th {
-  text-align: start;
-  font-weight: 700;
-  color: var(--text-secondary);
-  background-color: var(--bg-elevated);
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-strong);
-}
-
-td {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary);
-}
-
-input[type="text"],
-input[type="number"],
-input[type="search"],
-textarea,
-select {
-  font-family: inherit;
-  font-size: 13.5px;
-  color: var(--text-primary);
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  padding: 10px 14px;
-  min-height: 42px;
-}
-
-.safi-overlay-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  background-color: rgba(9, 11, 16, 0.55);
-  backdrop-filter: blur(12px);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 80px 16px 24px;
-}
-
-.safi-modal {
-  width: 100%;
-  max-width: 600px;
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 24px;
-  box-shadow: var(--shadow-elevated);
-  overflow: hidden;
-}
-
-.safi-owner-frame {
-  max-width: 1380px;
-  margin: 0 auto;
-}
-
-/* ============================================================================
- * 8. ReactBits.dev + Prompt-Motion.com (Product-UI) Choreography
- * ========================================================================== */
-
-@keyframes safiCursorBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-@keyframes safiStepReveal {
-  0% {
-    opacity: 0;
-    transform: translateY(10px) scale(0.96);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes safiTrajectoryFlow {
-  0% {
-    stroke-dashoffset: 240;
-  }
-  100% {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes safiBeaconPing {
-  0% {
-    transform: scale(0.9);
-    opacity: 0.9;
-  }
-  70% {
-    transform: scale(2.2);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(2.2);
-    opacity: 0;
-  }
-}
-
-.safi-pm-caret {
-  display: inline-block;
-  width: 2px;
-  height: 1.1em;
-  background: #60A5FA;
-  vertical-align: middle;
-  margin-inline-start: 4px;
-  animation: safiCursorBlink 0.9s infinite;
-}
-
-.safi-pm-step-active {
-  animation: safiStepReveal 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
-.safi-rb-trajectory-line {
-  stroke-dasharray: 12 6;
-  animation: safiTrajectoryFlow 6s linear infinite;
-}
-
-.safi-rb-beacon-ring {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: safiBeaconPing 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-
-.safi-rb-showcase-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 22px;
-  width: 100%;
-}
-
-.safi-rb-col-7 {
-  grid-column: span 7;
-}
-
-.safi-rb-col-5 {
-  grid-column: span 5;
-}
-
-.safi-rb-col-12 {
-  grid-column: span 12;
-}
-
-@media (max-width: 1080px) {
-  .safi-rb-col-7,
-  .safi-rb-col-5 {
-    grid-column: span 12;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+  min-width: 200px;
 }

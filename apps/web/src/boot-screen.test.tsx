@@ -24,5 +24,8 @@ describe("SafiData first-paint introduction", () => {
     expect(curtainIndex).toBeLessThan(rootIndex);
     expect(bootCss).toContain("background: #090B10;");
     expect(bootCss).toContain("@media (prefers-reduced-motion: reduce)");
+    const firstPaintMarkup = entryHtml.slice(curtainIndex, rootIndex);
+    expect(firstPaintMarkup).not.toContain("صافي البيانات");
+    expect(firstPaintMarkup).not.toContain("SafiData");
   });
 });

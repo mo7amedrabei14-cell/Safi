@@ -1,186 +1,246 @@
 /**
- * `apps/web/src/components/brand/SafiIntroSplash.tsx`
+ * Cinematic SafiData intro.
  *
- * Apple Keynote-Style Cinematic Intro Before Entering the Website
- * Calm Slate & Silver-Blue Palette (`#090B10`, `#1E293B`, `#60A5FA`, `#34D399`, `#F8FAFC`).
+ * The title is kept as intact Arabic/English runs. The animation waits for the
+ * actual local fonts and hands off to the application without unmounting the
+ * intro until the application has committed.
  */
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { MOTION_DOTS } from "./SafiPrismLogo";
-import { BlurWordText } from "../ui/BlurWordText";
 
 export interface SafiIntroSplashProps {
   readonly open: boolean;
-  readonly onComplete?: (() => void) | undefined;
-  readonly onFinish?: (() => void) | undefined;
+  readonly onAnimationComplete?: (() => void) | undefined;
 }
 
 function canRunIntroTimeline(): boolean {
-  if (typeof window === "undefined" || typeof document === "undefined") {
+  if (
+    typeof window === "undefined" ||
+    typeof document === "undefined" ||
+    typeof window.requestAnimationFrame !== "function"
+  ) {
     return false;
   }
-  if (typeof window.requestAnimationFrame !== "function") {
-    return false;
+
+  return (
+    typeof window.matchMedia !== "function" ||
+    !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+async function waitForIntroFonts(): Promise<void> {
+  if (typeof document === "undefined" || !document.fonts) {
+    return;
   }
-  if (typeof window.matchMedia === "function") {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      return false;
-    }
-  }
-  return true;
+
+  await Promise.all([
+    document.fonts.load('800 44px "IBM Plex Sans Arabic"'),
+    document.fonts.load('600 16px "IBM Plex Sans Arabic"'),
+    document.fonts.load('700 44px "Inter"')
+  ]);
+  await document.fonts.ready;
 }
 
 export function SafiIntroSplash({
   open,
-  onComplete,
-  onFinish
+  onAnimationComplete
 }: SafiIntroSplashProps): ReactNode {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
-  const finishedRef = useRef<boolean>(false);
+  const timelineRef = useRef<gsap.core.Timeline | null>(null);
+  const finishedRef = useRef(false);
+  const [fontsReady, setFontsReady] = useState(false);
 
-  const completeOnce = useCallback((): void => {
+  const finishOnce = useCallback((): void => {
     if (finishedRef.current) {
       return;
     }
     finishedRef.current = true;
-    onComplete?.();
-    onFinish?.();
-  }, [onComplete, onFinish]);
+    onAnimationComplete?.();
+  }, [onAnimationComplete]);
+
+  const skipIntro = useCallback((): void => {
+    const timeline = timelineRef.current;
+    if (timeline !== null) {
+      timeline.progress(1);
+    }
+    finishOnce();
+  }, [finishOnce]);
 
   useEffect(() => {
     if (!open) {
-      finishedRef.current = false;
+      timelineRef.current?.kill();
+      timelineRef.current = null;
       return;
     }
 
-    if (!canRunIntroTimeline()) {
-      const quickTimer =
-        typeof window !== "undefined" ? window.setTimeout(completeOnce, 160) : undefined;
-      return () => {
-        if (quickTimer !== undefined && typeof window !== "undefined") {
-          window.clearTimeout(quickTimer);
-        }
-      };
-    }
+    let cancelled = false;
+    let fallbackTimer: number | undefined;
 
-    const root = rootRef.current;
-    const svg = svgRef.current;
-    const progress = progressRef.current;
-    if (root === null || svg === null) {
-      completeOnce();
-      return;
-    }
-
-    const hardFallbackTimer = window.setTimeout(() => {
-      completeOnce();
-    }, 2400);
-
-    const dots = Array.from(svg.querySelectorAll<SVGCircleElement>("[data-intro-dot]"));
-    const bars = Array.from(svg.querySelectorAll<SVGRectElement>("[data-intro-bar]"));
-    const trendPath = svg.querySelector<SVGPathElement>("[data-intro-trend]");
-
-    if (trendPath !== null && typeof trendPath.getTotalLength === "function") {
-      const len = trendPath.getTotalLength();
-      trendPath.style.strokeDasharray = `${len}`;
-      trendPath.style.strokeDashoffset = `${len}`;
-    }
-
-    const tl = gsap.timeline({
-      defaults: { ease: "power3.out" },
-      onComplete: () => {
-        gsap.to(root, {
-          opacity: 0,
-          y: -18,
-          duration: 0.35,
-          ease: "power2.inOut",
-          onComplete: completeOnce
-        });
+    const startTimeline = async (): Promise<void> => {
+      try {
+        await waitForIntroFonts();
+      } catch {
+        // A local font failure falls back to the system font; it must not trap startup.
       }
-    });
 
-    if (progress !== null) {
-      tl.fromTo(
-        progress,
-        { scaleX: 0, transformOrigin: "right center" },
-        { scaleX: 1, duration: 1.95, ease: "power1.inOut" },
-        0
-      );
-    }
+      if (cancelled || finishedRef.current) {
+        return;
+      }
 
-    tl.fromTo(
-      dots,
-      { scale: 0, opacity: 0, transformOrigin: "50% 50%" },
-      {
-        scale: 1,
-        opacity: 1,
-        duration: 0.28,
-        stagger: 0.02,
-        ease: "back.out(2.2)"
-      },
-      0
-    );
+      setFontsReady(true);
 
-    dots.forEach((dot, idx) => {
-      const spec = MOTION_DOTS[idx];
-      if (spec !== undefined) {
-        tl.to(
-          dot,
+      const root = rootRef.current;
+      const svg = svgRef.current;
+      if (root === null || svg === null) {
+        finishOnce();
+        return;
+      }
+
+      const dots = Array.from(svg.querySelectorAll<SVGCircleElement>("[data-intro-dot]"));
+      const bars = Array.from(svg.querySelectorAll<SVGRectElement>("[data-intro-bar]"));
+      const trendPath = svg.querySelector<SVGPathElement>("[data-intro-trend]");
+      const title = titleRef.current;
+      const progress = progressRef.current;
+
+      if (trendPath !== null && typeof trendPath.getTotalLength === "function") {
+        const length = trendPath.getTotalLength();
+        trendPath.style.strokeDasharray = String(length);
+        trendPath.style.strokeDashoffset = String(length);
+      }
+
+      if (!canRunIntroTimeline()) {
+        root.dataset.motionReady = "true";
+        if (progress !== null) {
+          gsap.set(progress, { scaleX: 1 });
+        }
+        if (trendPath !== null) {
+          trendPath.style.strokeDasharray = "none";
+          trendPath.style.strokeDashoffset = "0";
+        }
+        finishOnce();
+        return;
+      }
+
+      const timeline = gsap.timeline({
+        defaults: { ease: "power3.out" },
+        onComplete: finishOnce
+      });
+      timelineRef.current = timeline;
+
+      if (title !== null) {
+        timeline.fromTo(
+          title,
+          { autoAlpha: 0, y: 8, filter: "blur(4px)" },
           {
-            attr: { cx: spec.gridX, cy: spec.gridY },
-            duration: 0.44,
-            ease: "elastic.out(1, 0.75)"
+            autoAlpha: 1,
+            y: 0,
+            filter: "blur(0px)",
+            duration: 0.42,
+            ease: "power3.out",
+            clearProps: "filter,transform,opacity,visibility"
           },
-          0.28
+          0
         );
       }
-    });
 
-    tl.to(
-      dots,
-      {
-        opacity: 0,
-        scale: 0.4,
-        duration: 0.24,
-        ease: "power2.in"
-      },
-      0.78
-    );
+      if (progress !== null) {
+        timeline.fromTo(
+          progress,
+          { scaleX: 0, transformOrigin: "right center" },
+          { scaleX: 1, duration: 1.95, ease: "power1.inOut" },
+          0
+        );
+      }
 
-    if (bars.length > 0) {
-      tl.fromTo(
-        bars,
-        { scaleY: 0, opacity: 0, transformOrigin: "center bottom" },
+      timeline.fromTo(
+        dots,
+        { scale: 0, opacity: 0, transformOrigin: "50% 50%" },
         {
-          scaleY: 1,
+          scale: 1,
           opacity: 1,
-          duration: 0.44,
-          stagger: 0.07,
-          ease: "back.out(1.6)"
+          duration: 0.28,
+          stagger: 0.02,
+          ease: "back.out(2.2)"
         },
-        0.9
+        0
       );
-    }
 
-    if (trendPath !== null) {
-      tl.to(
-        trendPath,
+      dots.forEach((dot, index) => {
+        const spec = MOTION_DOTS[index];
+        if (spec !== undefined) {
+          timeline.to(
+            dot,
+            {
+              attr: { cx: spec.gridX, cy: spec.gridY },
+              duration: 0.44,
+              ease: "elastic.out(1, 0.75)"
+            },
+            0.28
+          );
+        }
+      });
+
+      timeline.to(
+        dots,
         {
-          strokeDashoffset: 0,
-          duration: 0.4,
-          ease: "power2.out"
+          opacity: 0,
+          scale: 0.4,
+          duration: 0.24,
+          ease: "power2.in"
         },
-        1.22
+        0.78
       );
-    }
+
+      if (bars.length > 0) {
+        timeline.fromTo(
+          bars,
+          { scaleY: 0, opacity: 0, transformOrigin: "center bottom" },
+          {
+            scaleY: 1,
+            opacity: 1,
+            duration: 0.44,
+            stagger: 0.07,
+            ease: "back.out(1.6)"
+          },
+          0.9
+        );
+      }
+
+      if (trendPath !== null) {
+        timeline.to(
+          trendPath,
+          {
+            strokeDashoffset: 0,
+            duration: 0.4,
+            ease: "power2.out"
+          },
+          1.22
+        );
+      }
+
+      fallbackTimer = window.setTimeout(() => {
+        timeline.kill();
+        timelineRef.current = null;
+        finishOnce();
+      }, 6000);
+    };
+
+    void startTimeline();
 
     return () => {
-      window.clearTimeout(hardFallbackTimer);
-      tl.kill();
+      cancelled = true;
+      if (fallbackTimer !== undefined) {
+        window.clearTimeout(fallbackTimer);
+      }
+      timelineRef.current?.kill();
+      timelineRef.current = null;
     };
-  }, [open, completeOnce]);
+  }, [finishOnce, open]);
 
   if (!open) {
     return null;
@@ -190,12 +250,12 @@ export function SafiIntroSplash({
     <div
       ref={rootRef}
       className="safi-intro-splash"
+      data-fonts-ready={fontsReady ? "true" : "false"}
       role="region"
       aria-label="عرض إقلاع صافي البيانات السينمائي"
       dir="rtl"
-      onClick={completeOnce}
     >
-      <div className="safi-intro-stage" onClick={(e) => e.stopPropagation()}>
+      <div className="safi-intro-stage">
         <div className="safi-intro-orb">
           <div className="safi-intro-orb-ring" aria-hidden="true" />
           <svg
@@ -206,8 +266,7 @@ export function SafiIntroSplash({
             fill="none"
             aria-label="حركة مصفوفة البيانات ومؤشر التحليل"
           >
-            {/* Prompt-Motion S2 Orbital Cross + 4 Satellites */}
-            <g className="safi-pm-logo-orbit" style={{ transformOrigin: "64px 64px" }}>
+            <g className="safi-pm-logo-orbit">
               <circle
                 cx="64"
                 cy="64"
@@ -235,14 +294,14 @@ export function SafiIntroSplash({
             />
 
             <g>
-              {MOTION_DOTS.map((dot, idx) => (
+              {MOTION_DOTS.map((dot, index) => (
                 <circle
                   key={dot.id}
                   data-intro-dot={dot.id}
                   cx={dot.startX}
                   cy={dot.startY}
                   r="5.5"
-                  fill={idx % 3 === 0 ? "#F8FAFC" : idx % 3 === 1 ? "#94A3B8" : "#60A5FA"}
+                  fill={index % 3 === 0 ? "#F8FAFC" : index % 3 === 1 ? "#94A3B8" : "#60A5FA"}
                 />
               ))}
             </g>
@@ -256,7 +315,6 @@ export function SafiIntroSplash({
                 height="30"
                 rx="4"
                 fill="#64748B"
-                style={{ opacity: 0 }}
               />
               <rect
                 data-intro-bar="2"
@@ -266,7 +324,6 @@ export function SafiIntroSplash({
                 height="48"
                 rx="4"
                 fill="#94A3B8"
-                style={{ opacity: 0 }}
               />
               <rect
                 data-intro-bar="3"
@@ -276,7 +333,6 @@ export function SafiIntroSplash({
                 height="64"
                 rx="4"
                 fill="#F8FAFC"
-                style={{ opacity: 0 }}
               />
               <path
                 data-intro-trend="true"
@@ -290,33 +346,29 @@ export function SafiIntroSplash({
           </svg>
         </div>
 
-        <BlurWordText
-          as="h2"
-          className="safi-intro-title"
-          text="صافي البيانات • SafiData"
-          stagger={0.05}
-        />
-
-        <p className="safi-intro-tagline">
-          بياناتك الفوضوية تصبح واضحة في ثوانٍ • خصوصية مطلقة على جهازك
-        </p>
+        <div className="safi-intro-copy">
+          <h2
+            ref={titleRef}
+            className="safi-intro-title"
+            aria-label="صافي البيانات • SafiData"
+          >
+            <bdi dir="rtl">صافي البيانات</bdi>
+            <span aria-hidden="true">•</span>
+            <bdi dir="ltr">SafiData</bdi>
+          </h2>
+          <p className="safi-intro-tagline">
+            بياناتك الفوضوية تصبح واضحة في ثوانٍ • خصوصية مطلقة على جهازك
+          </p>
+        </div>
 
         <div className="safi-intro-progress-track" aria-hidden="true">
-          <div
-            ref={progressRef}
-            style={{
-              width: "100%",
-              height: "100%",
-              borderRadius: "999px",
-              background: "linear-gradient(90deg, #60A5FA 0%, #CBD5E1 50%, #F8FAFC 100%)"
-            }}
-          />
+          <div ref={progressRef} className="safi-intro-progress-fill" />
         </div>
 
         <button
           type="button"
           className="safi-intro-skip"
-          onClick={completeOnce}
+          onClick={skipIntro}
           aria-label="الدخول إلى الموقع"
         >
           الدخول إلى الموقع ←

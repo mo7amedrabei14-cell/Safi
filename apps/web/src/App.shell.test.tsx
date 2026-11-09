@@ -1,14 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import { App, SHELL_TABS, renderStudio } from "./App";
+import { App } from "./App";
+import { ApplicationShell, SHELL_TABS, renderStudio } from "./ApplicationShell";
 import { DOCK_TABS } from "./components/layout/FloatingGlassDock";
 
 const noop = (): void => undefined;
 
-describe("UI-Phase-5 application shell", () => {
-  it("renders the home stage, the six-tab dock and the preserved semantic strings", () => {
+describe("SafiData startup and application shell", () => {
+  it("renders only the intro during the initial application commit", () => {
     const html = renderToString(createElement(App, null));
+
+    expect(html).toContain('class="safi-intro-splash"');
+    expect(html).toContain("عرض إقلاع صافي البيانات السينمائي");
+    expect(html).toContain('<bdi dir="rtl">صافي البيانات</bdi>');
+    expect(html).toContain('<bdi dir="ltr">SafiData</bdi>');
+    expect(html).not.toContain('class="safi-shell"');
+    expect(html).not.toContain("data-safi-ambient");
+    expect(html).not.toContain('data-active-tab="home"');
+    expect(html).not.toContain("data-safi-word");
+  });
+
+  it("renders the home stage and six-tab dock after the intro handoff", () => {
+    const html = renderToString(createElement(ApplicationShell, { onReady: noop }));
 
     expect(SHELL_TABS).toEqual(["home", "cleaning", "recipes", "charts", "library", "owner"]);
     expect(html).toContain('data-active-tab="home"');
@@ -20,8 +34,6 @@ describe("UI-Phase-5 application shell", () => {
     }
     expect(html.split("data-tab-id=").length - 1).toBe(DOCK_TABS.length);
     expect(html).toContain("⌘K");
-
-    // Both overlays start closed, so no dialog is in the tree.
     expect(html).not.toContain('role="dialog"');
     expect(html).toContain('role="status"');
   });

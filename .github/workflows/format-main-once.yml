@@ -37,6 +37,7 @@ jobs:
             apps/web/src/components/brand/SafiIntroSplash.tsx \
             apps/web/src/components/brand/SafiMotionShowcase.tsx \
             apps/web/src/components/brand/SafiPrismLogo.tsx \
+            apps/web/src/components/brand/SafiMotionShowcase.tsx \
             apps/web/src/components/home/BentoCommandCenter.tsx \
             apps/web/src/components/home/LivePipelineVisualizer.tsx \
             apps/web/src/components/home/SmartDropzone.tsx \

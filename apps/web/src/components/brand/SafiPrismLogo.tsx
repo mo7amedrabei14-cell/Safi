@@ -8,6 +8,7 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef } from "react";
 import { gsap } from "gsap";
+import { BRAND_CONFIG } from "@safi/brand";
 
 export type SafiPrismLogoSize = "sm" | "md" | "lg";
 
@@ -15,7 +16,7 @@ export interface SafiPrismLogoProps {
   readonly size?: SafiPrismLogoSize;
   readonly showTagline?: boolean;
   readonly hideText?: boolean;
-}
+  readonly lang?: "ar" | "en";
 
 interface SizeScale {
   readonly svg: number;
@@ -30,9 +31,7 @@ const SIZES: Record<SafiPrismLogoSize, SizeScale> = {
   lg: { svg: 112, title: 32, subtitle: 14, gap: 18 }
 };
 
-const WORDMARK_TITLE = "صافي البيانات";
-const WORDMARK_SUBTITLE = "SafiData • Gold Master v1.0";
-const LOGO_LABEL = "شعار صافي البيانات";
+const WORDMARK_SUBTITLE = "Gold Master v1.0";
 
 export const MOTION_DOTS: ReadonlyArray<{
   readonly id: number;
@@ -68,9 +67,12 @@ function isBrowserWithMotion(): boolean {
 export function SafiPrismLogo({
   size = "sm",
   showTagline = false,
-  hideText = false
+  hideText = false,
+  lang = "en"
 }: SafiPrismLogoProps): ReactNode {
   const scale = SIZES[size];
+  const wordmarkTitle = lang === "ar" ? BRAND_CONFIG.displayNameAr : BRAND_CONFIG.displayNameEn;
+  const logoLabel = lang === "ar" ? "شعار صافي البيانات" : "SafiData logo";
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pulseTweenRef = useRef<gsap.core.Tween | null>(null);
 
@@ -198,7 +200,7 @@ export function SafiPrismLogo({
         viewBox="0 0 128 128"
         fill="none"
         role="img"
-        aria-label={LOGO_LABEL}
+        aria-label={logoLabel}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         style={{
@@ -436,7 +438,7 @@ export function SafiPrismLogo({
               color: "var(--text-primary)"
             }}
           >
-            {WORDMARK_TITLE}
+            {wordmarkTitle}
           </span>
           <span
             className="safi-mono"
@@ -448,7 +450,7 @@ export function SafiPrismLogo({
             }}
             dir="ltr"
           >
-            {WORDMARK_SUBTITLE}
+            {lang === "ar" ? `البيانات النظيفة • ${WORDMARK_SUBTITLE}` : WORDMARK_SUBTITLE}
           </span>
         </div>
       ) : null}

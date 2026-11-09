@@ -285,8 +285,17 @@ const CLEANING_EN: Readonly<Record<string, string>> = {
   "أيقونة تبويب صافي": "SafiData browser tab icon",
   "✓ مفعّل في تبويب المتصفح (/favicon.svg)": "✓ Enabled in the browser tab (/favicon.svg)",
   "معاينة عند إرسال الرابط في أي رسالة (WhatsApp • Telegram • Slack • X)": "Preview when sharing the link in any message (WhatsApp • Telegram • Slack • X)",
-  "بطاقة معاينة رابط صافي البيانات في تطبيقات المراسلة": "SafiData link preview card in messaging apps"
-};
+  "بطاقة معاينة رابط صافي البيانات في تطبيقات المراسلة": "SafiData link preview card in messaging apps",
+  "اسم شخص": "Person name", "رقم هاتف": "Phone number", "بريد إلكتروني": "Email", "رقم قومي": "National ID", "حساب IBAN": "IBAN account",
+  "الجودة الشاملة:": "Overall quality:", "📊 عدد الصفوف النشطة:": "📊 Active rows:", "(من أصل": "(of",
+  "الأعمدة:": "Columns:", "المحافظة:": "Governorate:", "تاريخ الميلاد:": "Date of birth:",
+  "فاحص الرقم القومي المصري الرسمي (القسم 20.3 — 14 رقمًا + المحافظة + تاريخ الميلاد + معادلة التحقق)": "Official Egyptian national ID validator (Section 20.3 — 14 digits, governorate, date of birth, and checksum)",
+  "أدخل رقمًا قوميًا مصريًا (يقبل الأرقام العربية ٠-٩ أو اللاتينية)": "Enter an Egyptian national ID (Arabic-Indic or Latin digits are accepted)",
+  "الاستبدال الرمزي الحتمي (BLAKE3)": "Deterministic tokenization (BLAKE3)",
+  "الرمز = ‎BLAKE3(salt : النوع : القيمة)‎ بـ16 بايت. نفس الملح والقيمة يعطيان دائمًا نفس الرمز، فيبقى الربط بين الجداول ممكنًا داخل جهازك، ويستحيل خارجه.": "Token = 16-byte BLAKE3(salt : type : value). The same salt and value always produce the same token, allowing joins between datasets on your device without exposing the original value.",
+  "لا توجد بيانات شخصية مطابقة في هذا النص. جرّب رقم هاتف أو بريدًا إلكترونيًا.": "No matching personal data was found in this text. Try a phone number or email address.",
+  "✓ تم حسم أو تأجيل جميع الأسئلة المعلقة بهدوء.": "✓ All pending questions have been resolved or deferred.",
+  "التنظيف وPII": "Cleaning & PII"
 
 function translateCleaningText(value: string): string {
   const trimmed = value.trim();

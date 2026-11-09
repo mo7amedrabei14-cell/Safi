@@ -876,7 +876,10 @@ pre,
   transform: scaleX(0);
 }
 
-.safi-intro-splash:not([data-motion-ready="true"]) [data-intro-dot],
+.safi-intro-splash:not([data-motion-ready="true"]) [data-intro-dot] {
+  opacity: 1;
+}
+
 .safi-intro-splash:not([data-motion-ready="true"]) [data-intro-bar] {
   opacity: 0;
 }

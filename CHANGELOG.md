@@ -1,5 +1,13 @@
 # سجل التغييرات (`CHANGELOG.md`)
 
+## 2026-11-09 — English-first localization
+
+- Set English (`en-US`) as the first-run default across the active web, PWA, desktop, and CLI interfaces.
+- Kept Arabic (`ar-EG`) available and persistent; added locale-specific PWA manifests and an English public share preview.
+- Preserved source-language data and generated file content when the UI language changes.
+- Verified the rollout on Ubuntu and Windows, including web tests, Rust tests, desktop compilation, intro visual regression, and PostgreSQL migration checks.
+
+
 جميع التغييرات المهمة في مشروع **«صافي البيانات | SafiData»** تُوثَّق هنا بالعربية البسيطة وفق القسم 11.2.
 
 ## [0.1.0-alpha.65] — 2026-11-08 (إعادة تصميم الواجهة الفائقة `UI-Phase-1` حتى `UI-Phase-5`)

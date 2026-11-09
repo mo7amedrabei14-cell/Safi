@@ -20,7 +20,7 @@ export interface AccountAccessSheetProps {
   readonly onLoggedOut: () => void;
 }
 
-function getRequestError(error: unknown, isAr: boolean, isVerification = false): string {
+function getRequestError(error: unknown, isAr: boolean): string {
   if (error instanceof SafiAuthApiError) {
     if (error.code === "SF-AUTH-007") {
       return isAr
@@ -114,7 +114,7 @@ export function AccountAccessSheet({
       .catch((error: unknown) => {
         setFeedback({
           kind: "error",
-          message: getRequestError(error, isAr, true)
+          message: getRequestError(error, isAr)
         });
       })
       .finally(() => setBusy(false));

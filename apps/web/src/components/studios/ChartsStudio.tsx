@@ -385,7 +385,7 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
                 type="button"
                 onClick={() => {
                   setActivePresetId(preset.id);
-                  setTitleAr(preset.titleAr);
+                  setCustomTitles(null);
                   setRows(preset.rows.map((r) => ({ ...r })));
                 }}
                 style={{

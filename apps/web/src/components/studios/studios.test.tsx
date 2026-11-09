@@ -13,7 +13,7 @@ import { RECIPE_TEMPLATES, recipeDigest } from "../../lib/recipe";
 
 describe("UI-Phase-5 Cleaning & PII studio", () => {
   it("renders the normalization, masking and token tables", () => {
-    const html = renderToString(createElement(CleaningStudio, null));
+    const html = renderToString(createElement(CleaningStudio, { lang: "ar" }));
 
     expect(html).toContain("التنظيف وPII");
     expect(html).toContain("نتيجة التطبيع العربي");
@@ -25,6 +25,17 @@ describe("UI-Phase-5 Cleaning & PII studio", () => {
     expect(html).toContain("لا يُرسل هذا النص إلى أي خادم");
   });
 
+  it("defaults to English UI while retaining Arabic sample data", () => {
+    const html = renderToString(createElement(CleaningStudio, null));
+
+    expect(html).toContain("Cleaning & PII");
+    expect(html).toContain("Normalization result");
+    expect(html).toContain("Deterministic tokenization (BLAKE3)");
+    expect(html).not.toContain("نتيجة التطبيع العربي");
+    expect(html).not.toContain("الاستبدال الرمزي الحتمي (BLAKE3)");
+    expect(html).toContain("أَحْمَدُ محمد عبد الله");
+  });
+
   it("finds the four personal fields in the sample text", () => {
     const matches = detectPii(normalizeLines(SAMPLE_CLEANING_TEXT));
     expect(matches.map((match) => match.kind)).toEqual(["name", "phone", "email", "national_id"]);
@@ -33,7 +44,7 @@ describe("UI-Phase-5 Cleaning & PII studio", () => {
 
 describe("UI-Phase-5 Recipes studio", () => {
   it("renders a deterministic canonical recipe pointing at a valid F1 folder", () => {
-    const html = renderToString(createElement(RecipesStudio, null));
+    const html = renderToString(createElement(RecipesStudio, { lang: "ar" }));
 
     expect(html).toContain("الوصفات");
     expect(html).toContain("الوصفة القانونية");
@@ -42,6 +53,15 @@ describe("UI-Phase-5 Recipes studio", () => {
     expect(html).toContain("تنزيل الوصفة");
     expect(html).toMatch(/[0-9a-f]{64}/);
     expect(html).toContain("الكتابة الذرية");
+  });
+  it("defaults to English and keeps the recipe output copy localized", () => {
+    const html = renderToString(createElement(RecipesStudio, null));
+
+    expect(html).toContain("Recipes");
+    expect(html).toContain("Canonical recipe");
+    expect(html).toContain("Atomic file writing");
+    expect(html).not.toContain("الوصفة القانونية");
+    expect(html).not.toContain("الكتابة الذرية");
   });
 });
 
@@ -62,7 +82,7 @@ describe("UI-Phase-5 Chart studio", () => {
   );
 
   it("renders the preview, credibility guard and contrast table", () => {
-    const html = renderToString(createElement(ChartsStudio, null));
+    const html = renderToString(createElement(ChartsStudio, { lang: "ar" }));
 
     expect(html).toContain("الرسوم البيانية");
     expect(html).toContain("التحقق من تباين WCAG 2.2 AA");
@@ -71,11 +91,21 @@ describe("UI-Phase-5 Chart studio", () => {
     expect(html).toContain("يجتاز");
     expect(html).toContain("data:image/svg+xml");
   });
+
+  it("defaults to English labels and validation guidance", () => {
+    const html = renderToString(createElement(ChartsStudio, null));
+
+    expect(html).toContain("Charts");
+    expect(html).toContain("WCAG 2.2 AA contrast audit");
+    expect(html).toContain("Credibility Guard");
+    expect(html).not.toContain("الرسوم البيانية");
+    expect(html).not.toContain("حارس المصداقية");
+  });
 });
 
 describe("UI-Phase-5 Library studio", () => {
   it("lists the four templates with stable digests and honest signing copy", () => {
-    const html = renderToString(createElement(LibraryStudio, null));
+    const html = renderToString(createElement(LibraryStudio, { lang: "ar" }));
 
     expect(html.split("data-template-id=").length - 1).toBe(RECIPE_TEMPLATES.length);
     for (const template of RECIPE_TEMPLATES) {
@@ -84,5 +114,15 @@ describe("UI-Phase-5 Library studio", () => {
     }
     expect(html).toContain("عن التوقيع الرقمي");
     expect(html).toContain("ولا تدّعي هذه الصفحة أنها وقّعت شيئًا");
+  });
+
+  it("defaults to English template and signature guidance", () => {
+    const html = renderToString(createElement(LibraryStudio, null));
+
+    expect(html).toContain("Template library & quality reports");
+    expect(html).toContain("Recipe digest (BLAKE3)");
+    expect(html).toContain("About digital signatures");
+    expect(html).not.toContain("بصمة الوصفة (BLAKE3)");
+    expect(html).not.toContain("عن التوقيع الرقمي");
   });
 });

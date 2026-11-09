@@ -80,5 +80,5 @@ export function postSafiAuth<T>(path: string, body: unknown): Promise<T> {
 }
 
 export function deleteSafiAuth(path: string, sessionToken: string): Promise<void> {
-  return sendAuthRequest<void>(path, "DELETE", undefined, sessionToken);
+  return sendAuthRequest<undefined>(path, "DELETE", undefined, sessionToken);
 }

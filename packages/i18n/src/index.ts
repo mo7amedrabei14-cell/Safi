@@ -82,7 +82,8 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
       document.documentElement.dataset.safiLocale = locale === "ar-EG" ? "ar" : "en";
       const manifestLink = document.querySelector<HTMLLinkElement>("#safi-manifest");
       if (manifestLink !== null) {
-        manifestLink.href = locale === "ar-EG" ? "/manifest.ar.webmanifest" : "/manifest.webmanifest";
+        manifestLink.href =
+          locale === "ar-EG" ? "/manifest.ar.webmanifest" : "/manifest.webmanifest";
       }
     }
   }, [locale]);

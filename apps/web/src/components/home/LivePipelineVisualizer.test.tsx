@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { LivePipelineVisualizer, PIPELINE_STAGES, simulatedDigest } from "./LivePipelineVisualizer";
 
@@ -21,7 +20,7 @@ describe("UI-Phase-4 live pipeline visualizer", () => {
   });
 
   it("exposes the run control, four data packets and the fingerprint slot", () => {
-    const html = renderToString(createElement(LivePipelineVisualizer, null));
+    const html = renderToString(<LivePipelineVisualizer lang="ar" />);
 
     expect(html).toContain("تشغيل محاكاة فورية");
     expect(html.split('data-packet="').length - 1).toBe(4);

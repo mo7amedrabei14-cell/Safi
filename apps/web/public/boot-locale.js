@@ -20,6 +20,7 @@
     document.querySelectorAll("[data-locale-en][data-locale-ar]").forEach((element) => {
       const value = locale === "ar" ? element.getAttribute("data-locale-ar") : element.getAttribute("data-locale-en");
       if (value !== null) element.textContent = value;
+      if (element.tagName === "BDI") element.setAttribute("dir", locale === "ar" ? "rtl" : "ltr");
     });
 
     document.querySelectorAll("[data-locale-aria-en][data-locale-aria-ar]").forEach((element) => {

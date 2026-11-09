@@ -38,7 +38,6 @@ export function renderStudio(
           lang={lang}
           onStart={() => onSelectTab("cleaning")}
           onOpenLibrary={() => onSelectTab("library")}
-          onSelectTab={onSelectTab}
         />
       );
     case "cleaning":

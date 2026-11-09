@@ -40,7 +40,6 @@ import { SmartDropzone } from "./SmartDropzone";
 export interface BentoCommandCenterProps {
   readonly onStart?: () => void;
   readonly onOpenLibrary?: () => void;
-  readonly onSelectTab?: (tab: SafiDockTabId) => void;
   readonly lang?: SafiLang;
 }
 
@@ -482,7 +481,6 @@ const COMPARISON_ROWS = [
 export function BentoCommandCenter({
   onStart,
   onOpenLibrary: _onOpenLibrary,
-  onSelectTab,
   lang = "ar"
 }: BentoCommandCenterProps): ReactNode {
   const isAr = lang === "ar";

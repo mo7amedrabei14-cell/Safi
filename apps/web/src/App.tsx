@@ -32,7 +32,11 @@ export function App(): ReactNode {
     if (verificationToken !== null) {
       const url = new URL(window.location.href);
       url.searchParams.delete("verify_email");
-      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      );
     }
   }, [verificationToken]);
 

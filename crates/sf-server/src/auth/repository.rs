@@ -285,6 +285,22 @@ impl ApiKeyRepository for SqlxApiKeyRepository {
             .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;
+        let workspace_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT workspace_id FROM api_keys WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| backend_error())?;
+        let Some(workspace_id) = workspace_id else {
+            transaction.commit().await.map_err(|_| backend_error())?;
+            return Ok(());
+        };
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(workspace_id.to_string())
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
         sqlx::query("UPDATE api_keys SET last_used_at = to_timestamp($2) WHERE id = $1")
             .bind(id)
             .bind(at)
@@ -426,6 +442,22 @@ impl SessionRepository for SqlxSessionRepository {
             .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;
+        let workspace_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT workspace_id FROM sessions WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| backend_error())?;
+        let Some(workspace_id) = workspace_id else {
+            transaction.commit().await.map_err(|_| backend_error())?;
+            return Ok(());
+        };
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(workspace_id.to_string())
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
         sqlx::query("UPDATE sessions SET last_seen_at = to_timestamp($2) WHERE id = $1")
             .bind(id)
             .bind(at)
@@ -439,6 +471,22 @@ impl SessionRepository for SqlxSessionRepository {
     async fn revoke(&self, id: Uuid, at: i64) -> Result<(), AuthError> {
         let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
         sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+        let workspace_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT workspace_id FROM sessions WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| backend_error())?;
+        let Some(workspace_id) = workspace_id else {
+            transaction.commit().await.map_err(|_| backend_error())?;
+            return Ok(());
+        };
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(workspace_id.to_string())
             .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;

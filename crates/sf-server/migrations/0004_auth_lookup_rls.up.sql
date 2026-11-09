@@ -1,53 +1,26 @@
 -- 0004_auth_lookup_rls.up.sql
--- Permit the trusted authentication service to perform narrow account/key/session
--- lookups before it knows a workspace or user id. The marker is transaction-local
--- (set_config(..., true)) and is never derived from request headers or user input.
--- Workspace and user write checks remain enforced by their original identifiers.
+-- Permit the trusted authentication service to resolve credentials before it
+-- knows the caller's workspace/user id. This adds SELECT-only policies; the
+-- original FOR ALL policies continue to enforce write isolation.
+-- The marker is transaction-local and is never derived from request input.
 
 BEGIN;
 
-DROP POLICY memberships_workspace_isolation ON memberships;
-CREATE POLICY memberships_workspace_isolation ON memberships
-    USING (
-        workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::UUID
-        OR current_setting('app.auth_lookup', true) = 'true'
-    )
-    WITH CHECK (
-        workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::UUID
-        OR current_setting('app.auth_lookup', true) = 'true'
-    );
+CREATE POLICY memberships_auth_lookup_read ON memberships
+    FOR SELECT
+    USING (current_setting('app.auth_lookup', true) = 'true');
 
-DROP POLICY api_keys_workspace_isolation ON api_keys;
-CREATE POLICY api_keys_workspace_isolation ON api_keys
-    USING (
-        workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::UUID
-        OR current_setting('app.auth_lookup', true) = 'true'
-    )
-    WITH CHECK (
-        workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::UUID
-        OR current_setting('app.auth_lookup', true) = 'true'
-    );
+CREATE POLICY api_keys_auth_lookup_read ON api_keys
+    FOR SELECT
+    USING (current_setting('app.auth_lookup', true) = 'true');
 
-DROP POLICY sessions_workspace_isolation ON sessions;
-CREATE POLICY sessions_workspace_isolation ON sessions
-    USING (
-        workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::UUID
-        OR current_setting('app.auth_lookup', true) = 'true'
-    )
-    WITH CHECK (
-        workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::UUID
-        OR current_setting('app.auth_lookup', true) = 'true'
-    );
+CREATE POLICY sessions_auth_lookup_read ON sessions
+    FOR SELECT
+    USING (current_setting('app.auth_lookup', true) = 'true');
 
-DROP POLICY user_credentials_user_isolation ON user_credentials;
-CREATE POLICY user_credentials_user_isolation ON user_credentials
-    USING (
-        user_id = NULLIF(current_setting('app.user_id', true), '')::UUID
-        OR current_setting('app.auth_lookup', true) = 'true'
-    )
-    WITH CHECK (
-        user_id = NULLIF(current_setting('app.user_id', true), '')::UUID
-    );
+CREATE POLICY user_credentials_auth_lookup_read ON user_credentials
+    FOR SELECT
+    USING (current_setting('app.auth_lookup', true) = 'true');
 
 -- Identifiers continue to use PostgreSQL's native uuidv7() generator.
 COMMIT;

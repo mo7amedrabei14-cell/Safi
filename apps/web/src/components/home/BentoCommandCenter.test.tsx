@@ -6,7 +6,7 @@ import { inspectImportFile, MAX_FILE_BYTES, WARN_FILE_BYTES } from "./SmartDropz
 
 describe("UI-Phase-4 Bento command centre", () => {
   it("renders the gold badge, the word-split headline and the magnetic CTAs", () => {
-    const html = renderToString(createElement(BentoCommandCenter, null));
+    const html = renderToString(createElement(BentoCommandCenter, { lang: "ar" }));
 
     expect(html).toContain("الإصدار الذهبي المعتمد v1.0.0-s5-gold • معالجة محلية 100% بلا إنترنت");
     expect(html.startsWith("<div")).toBe(true);
@@ -18,8 +18,14 @@ describe("UI-Phase-4 Bento command centre", () => {
     expect(html).toContain("استعرض القوالب");
   });
 
-  it("renders all four Bento cards with live metrics and the offline shield", () => {
+  it("defaults to English copy when no locale is supplied", () => {
     const html = renderToString(createElement(BentoCommandCenter, null));
+    expect(html).toContain("Welcome to SafiData");
+    expect(html).not.toContain("مرحبًا بك في منصة صافي البيانات");
+  });
+
+  it("renders all four Bento cards with live metrics and the offline shield", () => {
+    const html = renderToString(createElement(BentoCommandCenter, { lang: "ar" }));
 
     expect(html.split('data-bento-card="true"').length - 1).toBe(4);
     expect(html).toContain("safi-bento-wide");

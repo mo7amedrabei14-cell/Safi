@@ -292,18 +292,7 @@ const CLEANING_EN: Readonly<Record<string, string>> = {
   "فاحص الرقم القومي المصري الرسمي (القسم 20.3 — 14 رقمًا + المحافظة + تاريخ الميلاد + معادلة التحقق)": "Official Egyptian national ID validator (Section 20.3 — 14 digits, governorate, date of birth, and checksum)",
   "أدخل رقمًا قوميًا مصريًا (يقبل الأرقام العربية ٠-٩ أو اللاتينية)": "Enter an Egyptian national ID (Arabic-Indic or Latin digits are accepted)",
   "الاستبدال الرمزي الحتمي (BLAKE3)": "Deterministic tokenization (BLAKE3)",
-  "الرمز = ‎BLAKE3(salt : النوع : القيمة)‎ بـ16 بايت. نفس الملح والقيمة يعطيان دائمًا نفس الرمز، فيبقى الربط بين الجداول ممكنًا داخل جهازك، ويستحيل خارجه.": "Token = 16-byte BLAKE3(salt : type : value). The same salt and value always produce the same token, allowing joins between datasets on your device without exposing the original value.",,
-  "الجودة الشاملة:": "Overall quality:",
-  "📊 عدد الصفوف النشطة:": "📊 Active rows:",
-  "(من أصل": "(of",
-  "الأعمدة:": "Columns:",
-  "المحافظة:": "Governorate:",
-  "تاريخ الميلاد:": "Date of birth:",
-  "اسم شخص": "Person name",
-  "رقم هاتف": "Phone number",
-  "بريد إلكتروني": "Email",
-  "رقم قومي": "National ID",
-  "حساب IBAN": "IBAN account"
+  "الرمز = ‎BLAKE3(salt : النوع : القيمة)‎ بـ16 بايت. نفس الملح والقيمة يعطيان دائمًا نفس الرمز، فيبقى الربط بين الجداول ممكنًا داخل جهازك، ويستحيل خارجه.": "Token = 16-byte BLAKE3(salt : type : value). The same salt and value always produce the same token, allowing joins between datasets on your device without exposing the original value.",
 };
 
 function translateCleaningText(value: string): string {

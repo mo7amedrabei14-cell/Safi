@@ -150,9 +150,9 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
           padding: "8px 4px"
         }}
       >
-        <span className="safi-eyebrow">مكتبة القوالب وتقارير الجودة • Section 6.5 & 15</span>
+        <span className="safi-eyebrow">{isAr ? "مكتبة القوالب وتقارير الجودة • القسمان 6.5 و15" : "Template library & quality reports • Sections 6.5 & 15"}</span>
         <h1 id="safi-library-title" className="safi-studio-title safi-rb-shiny-text">
-          المكتبة
+          {isAr ? "المكتبة" : "Library"}
         </h1>
         <p className="safi-studio-lead">
           {isAr

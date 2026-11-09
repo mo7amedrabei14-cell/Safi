@@ -211,7 +211,13 @@ export const CleaningWorkspace: React.FC = () => {
             key: "toast-container",
             style: { position: "fixed", top: "70px", left: "24px", zIndex: 1000 }
           },
-          [React.createElement(Toast, { message: toastMsg, onClose: () => setToastMsg(null) })]
+          [
+            React.createElement(Toast, {
+              key: "toast-item",
+              message: toastMsg,
+              onClose: () => setToastMsg(null)
+            })
+          ]
         ),
 
       // 2. Main Workspace Layout (Sidebar Left, Grid Center, Sidebar Right)
@@ -422,6 +428,7 @@ export const CleaningWorkspace: React.FC = () => {
                 },
                 [
                   React.createElement(GlideDataGrid, {
+                    key: "glide-grid",
                     columns: columns.map((c) => `${c.name} (${c.type.split(" ")[0]})`),
                     data: data,
                     diffMask: [

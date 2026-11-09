@@ -96,6 +96,25 @@ function mapCharacter(char: string, options: NormOptions): string {
   return result === "؟" ? "?" : result;
 }
 
+/**
+ * Converts Arabic-Indic (٠-٩) and Extended Arabic-Indic / Persian (۰-۹) digits
+ * to ASCII 0-9. Every other character is returned unchanged.
+ */
+export function normalizeDigits(input: string): string {
+  let result = "";
+  for (const char of input) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code >= 0x0660 && code <= 0x0669) {
+      result += String.fromCodePoint(code - 0x0660 + 0x30);
+    } else if (code >= 0x06f0 && code <= 0x06f9) {
+      result += String.fromCodePoint(code - 0x06f0 + 0x30);
+    } else {
+      result += char;
+    }
+  }
+  return result;
+}
+
 function joinCompoundNames(value: string): string {
   let result = value;
   for (const compound of COMPOUNDS) {

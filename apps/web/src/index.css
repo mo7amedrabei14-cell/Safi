@@ -1,125 +1,215 @@
 /**
  * `apps/web/src/index.css`
  *
- * SafiData v5.0 Official Color System & Full-Viewport Layout
- * Locked 4-Color Palette:
- *   1. `#F9F7F7` (Warm Alabaster Ivory)
- *   2. `#DBE2EF` (Soft Mist Slate)
- *   3. `#3F72AF` (Classic Steel Accent)
- *   4. `#112D4E` (Deep Midnight Ink)
- *
- * Strictly offline: zero remote URLs.
+ * SafiData — Apple.com Flagship Product Website Design System
+ * - Calm, simple colors & soft gradients
+ * - Two modes only: Daylight (`light` / `apple-light`) & Midnight (`dark` / `google-gemini`)
+ * - Rich, continuous 60/120fps motion keyframes + GSAP choreography
+ * - Full RTL (Arabic) & LTR (English) support
+ * - Zero external network URLs
  */
 
-/* --------------------------------------------------------------------------
- * 1. Locked 4-Color Palette (`#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`)
- * -------------------------------------------------------------------------- */
+/* ============================================================================
+ * 1. Calm Apple Daylight & Midnight Palettes (2 Modes Only)
+ * ========================================================================== */
+
 :root,
-[data-theme="apple-light"],
-[data-theme="light"] {
+:root[data-theme="light"],
+:root[data-theme="apple-light"],
+:root[data-theme="vision-glass"] {
+  --bg-canvas: #F5F5F7;
+  --bg-surface: rgba(255, 255, 255, 0.65);
+  --bg-surface-soft: rgba(255, 255, 255, 0.56);
+  --bg-elevated: rgba(238, 242, 246, 0.72);
+  --bg-glass: rgba(255, 255, 255, 0.78);
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.15);
+
+  --text-primary: #1D1D1F;
+  --text-secondary: #515154;
+  --text-muted: #86868B;
+
+  --accent-primary: #1E293B;
+  --accent-soft: #3B82F6;
+  --accent-calm-gradient: linear-gradient(135deg, #1E293B 0%, #334155 50%, #475569 100%);
+  --accent-hero-glow: radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.10) 0%, rgba(148, 163, 184, 0.06) 45%, transparent 75%);
+  --accent-tint: rgba(59, 130, 246, 0.08);
+
+  --status-ok: #10B981;
+  --status-warn: #F59E0B;
+  --status-danger: #EF4444;
+
+  --shadow-card:
+    0 2px 6px rgba(15, 23, 42, 0.03),
+    0 18px 42px -12px rgba(15, 23, 42, 0.07),
+    0 0 0 1px rgba(15, 23, 42, 0.06);
+  --shadow-elevated:
+    0 28px 64px -16px rgba(15, 23, 42, 0.12),
+    0 0 0 1px rgba(15, 23, 42, 0.10);
+  --spotlight-glow: rgba(59, 130, 246, 0.07);
+
+  --safi-font-sans: "IBM Plex Sans Arabic", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --safi-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
   color-scheme: light;
-  --palette-ivory: #F9F7F7;
-  --palette-mist: #DBE2EF;
-  --palette-steel: #3F72AF;
-  --palette-ink: #112D4E;
-
-  --bg-canvas: #F9F7F7;
-  --bg-surface: #FFFFFF;
-  --bg-elevated: #DBE2EF;
-  --bg-glass: rgba(249, 247, 247, 0.92);
-  --border-subtle: #DBE2EF;
-  --border-strong: #3F72AF;
-  --text-primary: #112D4E;
-  --text-secondary: #3F72AF;
-  --text-muted: rgba(17, 45, 78, 0.68);
-  --accent-primary: #3F72AF;
-  --accent-hover: #112D4E;
-  --accent-brand: #3F72AF;
-  --accent-gradient: linear-gradient(135deg, #3F72AF 0%, #112D4E 100%);
-  --accent-tint: #DBE2EF;
-  --status-ok: #112D4E;
-  --status-warn: #3F72AF;
-  --status-danger: #991B1B;
-  --card-shadow: 0 6px 24px rgba(17, 45, 78, 0.06);
-  --card-backdrop: none;
-  --spotlight-glow: rgba(63, 114, 175, 0.08);
-
-  /* Spec Typography & Geometry Tokens */
-  --font-arabic: "IBM Plex Sans Arabic", "Cairo", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
-
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-12: 48px;
-  --space-16: 64px;
-
-  --radius-field: 8px;
-  --radius-card: 14px;
-  --radius-panel: 18px;
-  --radius-pill: 999px;
-
-  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --ease-move: cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
-[data-theme="vision-glass"] {
-  color-scheme: light;
-  --bg-canvas: #DBE2EF;
-  --bg-surface: #F9F7F7;
-  --bg-elevated: #FFFFFF;
-  --bg-glass: rgba(249, 247, 247, 0.90);
-  --border-subtle: rgba(63, 114, 175, 0.24);
-  --border-strong: #3F72AF;
-  --text-primary: #112D4E;
-  --text-secondary: #3F72AF;
-  --text-muted: rgba(17, 45, 78, 0.72);
-  --accent-primary: #112D4E;
-  --accent-hover: #3F72AF;
-  --accent-brand: #112D4E;
-  --accent-gradient: linear-gradient(135deg, #112D4E 0%, #3F72AF 100%);
-  --accent-tint: rgba(63, 114, 175, 0.16);
-  --status-ok: #112D4E;
-  --status-warn: #3F72AF;
-  --status-danger: #991B1B;
-  --card-shadow: 0 8px 28px rgba(17, 45, 78, 0.09);
-  --card-backdrop: blur(20px);
-  --spotlight-glow: rgba(17, 45, 78, 0.07);
-}
+:root[data-theme="dark"],
+:root[data-theme="google-gemini"] {
+  --bg-canvas: #090B10;
+  --bg-surface: rgba(18, 22, 32, 0.65);
+  --bg-surface-soft: rgba(18, 22, 32, 0.56);
+  --bg-elevated: rgba(27, 33, 48, 0.72);
+  --bg-glass: rgba(18, 22, 32, 0.78);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
 
-[data-theme="google-gemini"],
-[data-theme="dark"] {
+  --text-primary: #F5F5F7;
+  --text-secondary: #A1A1AA;
+  --text-muted: #71717A;
+
+  --accent-primary: #F5F5F7;
+  --accent-soft: #60A5FA;
+  --accent-calm-gradient: linear-gradient(135deg, #F8FAFC 0%, #CBD5E1 55%, #94A3B8 100%);
+  --accent-hero-glow: radial-gradient(circle at 50% 0%, rgba(96, 165, 250, 0.14) 0%, rgba(148, 163, 184, 0.05) 45%, transparent 75%);
+  --accent-tint: rgba(96, 165, 250, 0.12);
+
+  --status-ok: #34D399;
+  --status-warn: #FBBF24;
+  --status-danger: #F87171;
+
+  --shadow-card:
+    0 20px 50px -12px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-elevated:
+    0 32px 72px -14px rgba(0, 0, 0, 0.75),
+    0 0 0 1px rgba(255, 255, 255, 0.16);
+  --spotlight-glow: rgba(96, 165, 250, 0.10);
+
   color-scheme: dark;
-  --bg-canvas: #112D4E;
-  --bg-surface: #17375E;
-  --bg-elevated: #1E4372;
-  --bg-glass: rgba(17, 45, 78, 0.90);
-  --border-subtle: rgba(219, 226, 239, 0.18);
-  --border-strong: #3F72AF;
-  --text-primary: #F9F7F7;
-  --text-secondary: #DBE2EF;
-  --text-muted: rgba(219, 226, 239, 0.75);
-  --accent-primary: #DBE2EF;
-  --accent-hover: #F9F7F7;
-  --accent-brand: #3F72AF;
-  --accent-gradient: linear-gradient(135deg, #3F72AF 0%, #112D4E 100%);
-  --accent-tint: rgba(219, 226, 239, 0.16);
-  --status-ok: #DBE2EF;
-  --status-warn: #F9F7F7;
-  --status-danger: #FCA5A5;
-  --card-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
-  --card-backdrop: blur(18px);
-  --spotlight-glow: rgba(219, 226, 239, 0.08);
 }
 
-/* --------------------------------------------------------------------------
- * 2. Reset & Base Typography
- * -------------------------------------------------------------------------- */
+/* ============================================================================
+ * 2. Continuous Visible Motion Keyframes (Apple Showcase Motion)
+ * ========================================================================== */
+
+@keyframes safiFloatSlow {
+  0%, 100% {
+    transform: translateY(0px) rotateX(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotateX(1.5deg);
+  }
+}
+
+@keyframes safiScanBeam {
+  0% {
+    top: 8%;
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    top: 88%;
+    opacity: 0;
+  }
+}
+
+@keyframes safiPulseRing {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.9;
+  }
+}
+
+@keyframes safiBarWave1 {
+  0%, 100% { transform: scaleY(0.72); }
+  50% { transform: scaleY(1.05); }
+}
+
+@keyframes safiBarWave2 {
+  0%, 100% { transform: scaleY(1.02); }
+  50% { transform: scaleY(0.68); }
+}
+
+@keyframes safiBarWave3 {
+  0%, 100% { transform: scaleY(0.84); }
+  50% { transform: scaleY(1.12); }
+}
+
+@keyframes safiMarqueeScroll {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(50%);
+  }
+}
+
+@keyframes safiOrbitGlow {
+  0% {
+    transform: rotate(0deg) translateX(18px) rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg) translateX(18px) rotate(-360deg);
+  }
+}
+
+.safi-float-hardware {
+  animation: safiFloatSlow 5.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+.safi-scan-line {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #60A5FA 50%, transparent 100%);
+  box-shadow: 0 0 18px 2px rgba(96, 165, 250, 0.55);
+  pointer-events: none;
+  animation: safiScanBeam 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.safi-bar-anim-1 {
+  transform-origin: center bottom;
+  animation: safiBarWave1 2.4s ease-in-out infinite;
+}
+
+.safi-bar-anim-2 {
+  transform-origin: center bottom;
+  animation: safiBarWave2 2.8s ease-in-out infinite;
+}
+
+.safi-bar-anim-3 {
+  transform-origin: center bottom;
+  animation: safiBarWave3 2.2s ease-in-out infinite;
+}
+
+.safi-marquee-track {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: max-content;
+  animation: safiMarqueeScroll 28s linear infinite;
+}
+
+.safi-marquee-track:hover {
+  animation-play-state: paused;
+}
+
+/* ============================================================================
+ * 3. Base Reset & Typography
+ * ========================================================================== */
+
 *,
 *::before,
 *::after {
@@ -127,15 +217,14 @@
 }
 
 html {
-  direction: rtl;
-  font-family: var(--font-arabic);
-  font-size: 14px;
-  line-height: 1.65;
+  font-family: var(--safi-font-sans);
   background-color: var(--bg-canvas);
   color: var(--text-primary);
+  scroll-behavior: smooth;
+  scroll-padding-top: 88px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+  transition: background-color 0.35s ease, color 0.25s ease;
 }
 
 body {
@@ -143,30 +232,16 @@ body {
   min-height: 100vh;
   background-color: var(--bg-canvas);
   color: var(--text-primary);
-  font-family: var(--font-arabic);
-  font-size: 14px;
-  line-height: 1.65;
   overflow-x: hidden;
-  transition:
-    background-color 0.25s var(--ease-move),
-    color 0.25s var(--ease-move);
+  line-height: 1.65;
 }
 
-h1,
-h2,
-h3,
-h4,
-p {
-  margin: 0;
-}
-
-.safi-mono {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
+.safi-mono,
+code,
+pre,
+[dir="ltr"] {
+  font-family: var(--safi-font-mono);
+  unicode-bidi: isolate;
 }
 
 .safi-visually-hidden {
@@ -181,461 +256,484 @@ p {
   border: 0;
 }
 
-/* --------------------------------------------------------------------------
- * 3. Full-Viewport Fluid Layout (`max-width: 1820px`) & Topbar
- * -------------------------------------------------------------------------- */
+/* ============================================================================
+ * 4. Apple Website Layout & Floating Glass Navbar
+ * ========================================================================== */
+
 .safi-shell {
   position: relative;
   z-index: 1;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  width: 100%;
+}
+
+@keyframes safiShinySweep {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+@keyframes safiWordFlipIn {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) rotateX(-40deg) scale(0.95);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotateX(0deg) scale(1);
+    filter: blur(0px);
+  }
+}
+
+@keyframes safiStarGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 10px 30px -8px rgba(59, 130, 246, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.55), 0 14px 38px -6px rgba(59, 130, 246, 0.45);
+  }
+}
+
+.safi-rb-shiny-text {
+  background: linear-gradient(
+    110deg,
+    var(--text-primary) 25%,
+    #3B82F6 48%,
+    #10B981 54%,
+    var(--text-primary) 75%
+  );
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: safiShinySweep 4.5s linear infinite;
+}
+
+.safi-rb-rotating-word {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.14) 0%, rgba(16, 185, 129, 0.14) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.32);
+  color: #2563EB;
+  animation: safiWordFlipIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root[data-theme="dark"] .safi-rb-rotating-word,
+:root[data-theme="google-gemini"] .safi-rb-rotating-word {
+  color: #60A5FA;
+  border-color: rgba(96, 165, 250, 0.4);
+}
+
+.safi-rb-star-cta {
+  animation: safiStarGlow 3s ease-in-out infinite;
+}
+
+.safi-rb-hero-grid {
+  display: grid;
+  grid-template-columns: 1.04fr 0.96fr;
+  gap: clamp(24px, 3vw, 48px);
+  align-items: center;
+  min-height: calc(100vh - 118px);
+}
+
+@media (max-width: 1100px) {
+  .safi-rb-hero-grid {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
 }
 
 .safi-container {
   width: 100%;
-  max-width: 1820px;
+  max-width: 100%;
   margin-inline: auto;
-  padding-inline: clamp(16px, 2.2vw, 36px);
-  padding-top: var(--space-6);
-  padding-bottom: 72px;
-}
-
-.safi-stage {
-  flex: 1 1 auto;
+  padding-inline: clamp(20px, 2.6vw, 48px);
+  padding-top: 16px;
+  padding-bottom: 96px;
 }
 
 .safi-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  min-height: 62px;
+  position: relative;
+  z-index: 60;
   width: 100%;
-  background: var(--bg-glass);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  border-bottom: none;
 }
 
 .safi-topbar-inner {
+  width: 100%;
+  max-width: 100%;
+  margin-inline: auto;
+  padding-inline: clamp(20px, 2.6vw, 48px);
+  min-height: 74px;
+  padding-block: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  width: 100%;
-  max-width: 1820px;
-  margin-inline: auto;
-  padding-inline: clamp(16px, 2.2vw, 36px);
-  padding-block: 8px;
-  min-height: 62px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
 .safi-topbar-brand {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  flex: 0 0 auto;
+  gap: 12px;
 }
 
-.safi-segmented-nav {
-  position: relative;
+@keyframes safiOrbitSpin {
+  0% { transform: rotate(0deg); }
+  50% { transform: rotate(180deg) scale(1.03); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes safiStripShimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.safi-pm-logo-orbit {
+  animation: safiOrbitSpin 18s linear infinite;
+}
+
+/* THE ONLY PINNED ELEMENT: Pure Apple Minimalist Glass Pill (Single-Row 44px height) */
+.safi-morph-strip {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 130;
+  height: 44px;
+  max-height: 44px;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  padding: 4px;
-  overflow-x: auto;
-  max-width: 100%;
+  justify-content: center;
+  flex-wrap: nowrap;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 12px 32px -8px rgba(15, 23, 42, 0.10),
+    0 2px 6px rgba(15, 23, 42, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset;
+  overflow: hidden;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    padding 0.72s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.55s ease,
+    border-color 0.55s ease,
+    box-shadow 0.72s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.72s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.safi-segmented-pill {
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 0;
-  border-radius: calc(var(--radius-card) - 4px);
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 2px 8px rgba(17, 45, 78, 0.08);
+:root[data-theme="dark"] .safi-morph-strip,
+:root[data-theme="google-gemini"] .safi-morph-strip {
+  background: rgba(15, 23, 42, 0.86);
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow:
+    0 16px 40px -10px rgba(0, 0, 0, 0.48),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+}
+
+.safi-morph-strip:hover,
+.safi-morph-strip[data-expanded="true"] {
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow:
+    0 18px 44px -10px rgba(15, 23, 42, 0.14),
+    0 4px 12px rgba(15, 23, 42, 0.05),
+    0 0 0 1px rgba(255, 255, 255, 0.85) inset;
+}
+
+:root[data-theme="dark"] .safi-morph-strip:hover,
+:root[data-theme="dark"] .safi-morph-strip[data-expanded="true"],
+:root[data-theme="google-gemini"] .safi-morph-strip:hover,
+:root[data-theme="google-gemini"] .safi-morph-strip[data-expanded="true"] {
+  background: rgba(15, 23, 42, 0.94);
+  border-color: rgba(148, 163, 184, 0.32);
+  box-shadow:
+    0 20px 48px -10px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+}
+
+.safi-strip-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 14px;
+  max-width: 260px;
+  opacity: 1;
+  transform: scale(1);
+  transition:
+    max-width 0.72s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.45s ease,
+    transform 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+    padding 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.safi-morph-strip:hover .safi-strip-compact,
+.safi-morph-strip[data-expanded="true"] .safi-strip-compact {
+  max-width: 0;
+  opacity: 0;
+  padding: 0;
   pointer-events: none;
+  transform: scale(0.95);
+  overflow: hidden;
+}
+
+.safi-strip-pulse-orb {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  flex-shrink: 0;
+}
+
+.safi-strip-current-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.safi-strip-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.safi-strip-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.35);
+  transition: all 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.safi-strip-dot[data-active="true"] {
+  width: 14px;
+  background: var(--text-primary);
+}
+
+.safi-strip-chevron {
+  color: var(--text-secondary);
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.safi-strip-expanded-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  height: 36px;
+  max-height: 36px;
+  gap: 2px;
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.96);
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    max-width 0.75s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.52s ease,
+    transform 0.68s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.safi-morph-strip:hover .safi-strip-expanded-content,
+.safi-morph-strip[data-expanded="true"] .safi-strip-expanded-content {
+  max-width: 620px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
 }
 
 .safi-segmented-btn {
   position: relative;
   z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 13px;
-  height: 36px;
-  min-height: 44px;
+  appearance: none;
   border: none;
-  border-radius: calc(var(--radius-card) - 4px);
   background: transparent;
-  color: var(--text-primary);
-  font-family: var(--font-arabic);
+  color: var(--text-secondary);
+  font-family: inherit;
   font-size: 13px;
   font-weight: 600;
-  white-space: nowrap;
+  padding: 0 15px;
+  height: 36px;
+  min-height: 36px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   cursor: pointer;
-  transition: color 0.16s var(--ease-move);
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.35s ease,
+    box-shadow 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.safi-segmented-btn:hover {
+  color: var(--text-primary);
+}
+
+.safi-segmented-btn[data-active="true"],
 .safi-segmented-btn[aria-current="page"] {
-  color: var(--accent-primary);
+  background: #FFFFFF;
+  color: #0F172A;
   font-weight: 700;
+  box-shadow:
+    0 2px 8px rgba(15, 23, 42, 0.08),
+    0 0 0 1px rgba(15, 23, 42, 0.05);
+}
+
+:root[data-theme="dark"] .safi-segmented-btn[data-active="true"],
+:root[data-theme="dark"] .safi-segmented-btn[aria-current="page"],
+:root[data-theme="google-gemini"] .safi-segmented-btn[data-active="true"],
+:root[data-theme="google-gemini"] .safi-segmented-btn[aria-current="page"] {
+  background: rgba(255, 255, 255, 0.14);
+  color: #F8FAFC;
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
 .safi-topbar-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  flex: 0 0 auto;
-  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .safi-topbar-btn {
+  appearance: none;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 6px 14px;
+  min-height: 44px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  height: 36px;
-  min-height: 44px;
-  padding: 0 12px;
-  border-radius: var(--radius-field);
-  border: 1px solid var(--border-subtle);
-  background-color: var(--bg-elevated);
-  color: var(--text-primary);
-  font-family: var(--font-arabic);
-  font-size: 12px;
-  font-weight: 600;
   cursor: pointer;
-  transition: all 0.16s var(--ease-move);
+  transition: all 0.2s ease;
 }
 
 .safi-topbar-btn:hover {
+  background: var(--bg-surface);
   border-color: var(--border-strong);
 }
 
-.safi-theme-switcher {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border-radius: var(--radius-field);
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-}
+/* ============================================================================
+ * 5. Apple Website Sections, Cards & Buttons
+ * ========================================================================== */
 
-.safi-theme-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 10px;
-  height: 30px;
-  min-height: 38px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-primary);
-  font-family: var(--font-arabic);
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.16s var(--ease-move);
-  white-space: nowrap;
-}
-
-.safi-theme-option[aria-pressed="true"] {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  box-shadow: 0 1px 4px rgba(17, 45, 78, 0.12);
-  border: 1px solid var(--border-strong);
-}
-
-/* --------------------------------------------------------------------------
- * 4. Cards, Spotlight, ShinyText & StarBorder
- * -------------------------------------------------------------------------- */
 .safi-card,
-.safi-glass,
 .safi-spotlight {
   position: relative;
-  background-color: var(--bg-surface);
-  backdrop-filter: var(--card-backdrop);
-  -webkit-backdrop-filter: var(--card-backdrop);
+  background: var(--bg-surface-soft);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  padding: var(--space-6);
-  box-shadow: var(--card-shadow);
+  border-radius: 28px;
+  box-shadow: var(--shadow-card);
   overflow: hidden;
+  transition:
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
 }
 
-.safi-spotlight::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(
-    520px circle at var(--mouse-x, 50%) var(--mouse-y, 0%),
-    var(--spotlight-glow),
-    transparent 65%
-  );
-  opacity: 0;
-  transition: opacity 0.25s var(--ease-move);
+.safi-spotlight-chromeless {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  overflow: visible !important;
 }
 
-.safi-spotlight:hover::before {
-  opacity: 1;
-}
-
-.safi-shiny-text {
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
-.safi-star-border {
-  position: relative;
-}
-
-/* --------------------------------------------------------------------------
- * 5. Standard Buttons
- * -------------------------------------------------------------------------- */
-button {
-  font-family: var(--font-arabic);
-  background-color: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-field);
-  cursor: pointer;
+.safi-spotlight:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-elevated);
 }
 
 .safi-btn {
+  appearance: none;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 44px;
+  padding: 11px 24px;
+  border-radius: 999px;
+  border: 1px solid transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  min-height: 44px;
-  padding: 10px 20px;
-  border-radius: var(--radius-pill);
-  font-family: var(--font-arabic);
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.25;
-  text-decoration: none;
+  gap: 8px;
   cursor: pointer;
-  transition: all 0.16s var(--ease-move);
+  text-decoration: none;
+  transition: all 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.safi-btn:active {
-  transform: scale(0.985);
+.safi-btn:hover {
+  transform: translateY(-1px);
 }
 
 .safi-btn-primary {
-  background: #112D4E;
-  color: #F9F7F7;
-  border: 1px solid #112D4E;
-  box-shadow: 0 4px 12px rgba(17, 45, 78, 0.16);
-}
-
-.safi-btn-primary:hover {
-  background: #3F72AF;
-  border-color: #3F72AF;
+  background: var(--text-primary);
+  color: var(--bg-surface);
 }
 
 .safi-btn-secondary {
-  background-color: var(--bg-elevated);
+  background: var(--bg-elevated);
   color: var(--text-primary);
-  border: 1px solid var(--border-strong);
-}
-
-.safi-btn-secondary:hover {
-  background-color: var(--bg-surface);
-  border-color: var(--text-primary);
-}
-
-/* --------------------------------------------------------------------------
- * 6. Inputs, Textareas, Selects & Data Tables
- * -------------------------------------------------------------------------- */
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-textarea,
-select,
-.safi-input,
-.safi-textarea,
-.safi-select {
-  width: 100%;
-  background-color: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-field);
-  padding: 10px 14px;
-  font-family: var(--font-arabic);
-  font-size: 14px;
-  line-height: 1.5;
-  outline: none;
-}
-
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
-textarea:focus,
-select:focus,
-.safi-input:focus,
-.safi-textarea:focus,
-.safi-select:focus {
   border-color: var(--border-strong);
-  box-shadow: 0 0 0 3px var(--accent-tint);
 }
 
-textarea,
-.safi-textarea {
-  resize: vertical;
-  min-height: 110px;
-}
-
-input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  accent-color: #112D4E;
-  cursor: pointer;
-}
-
-input[type="range"] {
-  accent-color: #112D4E;
-  cursor: pointer;
-}
-
-.safi-table-wrap {
-  width: 100%;
-  overflow-x: auto;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  background-color: var(--bg-surface);
-}
-
-table,
-.safi-table {
-  width: 100%;
-  border-collapse: collapse;
-  text-align: right;
-  font-size: 13px;
-}
-
-th,
-.safi-table th {
-  padding: 12px 16px;
-  font-weight: 700;
-  font-size: 12px;
-  color: var(--text-primary);
-  background-color: var(--bg-elevated);
-  border-bottom: 1px solid var(--border-subtle);
-  white-space: nowrap;
-}
-
-td,
-.safi-table td {
-  padding: 12px 16px;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--border-subtle);
-  vertical-align: middle;
-}
-
-tbody tr:last-child td {
-  border-bottom: none;
-}
-
-tbody tr:hover td {
-  background-color: var(--accent-tint);
-}
-
-/* --------------------------------------------------------------------------
- * 7. Hero & 12-Column Full-Viewport Bento Grid (`Task 2`)
- * -------------------------------------------------------------------------- */
-.safi-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: var(--space-4);
-  padding: 28px 24px 24px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-panel);
-  box-shadow: var(--card-shadow);
-}
-
-.safi-hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 16px;
-  border-radius: var(--radius-pill);
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.safi-hero-title {
-  font-size: clamp(26px, 3.2vw, 44px);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--text-primary);
-  max-width: 980px;
-}
-
-.safi-hero-subtitle {
-  font-size: 15px;
-  color: var(--text-secondary);
-  max-width: 760px;
-  line-height: 1.65;
-}
-
-.safi-hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-3);
-  margin-top: var(--space-1);
-}
-
+/* 12-Column Fluid Bento Grid */
 .safi-bento {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 20px;
-  align-items: stretch;
+  gap: 22px;
 }
 
-.safi-bento-wide {
-  grid-column: span 7;
+.safi-bento-wide { grid-column: span 7; }
+.safi-bento-half { grid-column: span 5; }
+.safi-bento-third { grid-column: span 6; }
+.safi-bento-full { grid-column: span 12; }
+
+@media (max-width: 1080px) {
+  .safi-bento-wide,
+  .safi-bento-half,
+  .safi-bento-third {
+    grid-column: span 12;
+  }
 }
 
-.safi-bento-half {
-  grid-column: span 5;
-}
+/* ============================================================================
+ * 6. Cinematic Intro Splash (Calm Apple Keynote Curtain)
+ * ========================================================================== */
 
-.safi-bento-third {
-  grid-column: span 6;
-}
-
-.safi-bento > div > .safi-spotlight {
-  height: 100%;
-}
-
-.safi-grid-2,
-.safi-studio-grid,
-.safi-template-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-}
-
-/* --------------------------------------------------------------------------
- * 8. Cinematic Motion Graphic Intro Splash (`#112D4E` & `#F9F7F7`)
- * -------------------------------------------------------------------------- */
 .safi-intro-splash {
   position: fixed;
   inset: 0;
@@ -645,445 +743,244 @@ tbody tr:hover td {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: radial-gradient(
-      circle at 50% 42%,
-      rgba(63, 114, 175, 0.25) 0%,
-      rgba(219, 226, 239, 0.08) 40%,
-      transparent 70%
-    ),
-    #112D4E;
-  color: #F9F7F7;
+  background:
+    radial-gradient(800px 480px at 50% 35%, rgba(59, 130, 246, 0.14), transparent 70%),
+    #090B10;
+  color: #F5F5F7;
   overflow: hidden;
-  cursor: pointer;
 }
 
-.safi-intro-conic-ring {
+.safi-intro-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 640px;
+  width: 100%;
+}
+
+.safi-intro-orb {
+  position: relative;
+  width: 196px;
+  height: 196px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.safi-intro-orb-ring {
   position: absolute;
-  width: 260px;
-  height: 260px;
-  border-radius: 50%;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    #DBE2EF 90deg,
-    #3F72AF 180deg,
-    #F9F7F7 270deg,
-    transparent 360deg
-  );
-  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-  -webkit-mask: radial-gradient(
-    farthest-side,
-    transparent calc(100% - 3px),
-    #000 calc(100% - 2px)
-  );
-  opacity: 0.75;
+  inset: -6px;
+  border-radius: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  animation: safiPulseRing 2.4s ease-in-out infinite;
   pointer-events: none;
 }
 
-.safi-intro-shard {
-  position: absolute;
-  padding: 5px 12px;
-  border-radius: var(--radius-pill);
-  background: rgba(249, 247, 247, 0.12);
-  border: 1px solid rgba(219, 226, 239, 0.35);
-  color: #F9F7F7;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  pointer-events: none;
-  white-space: nowrap;
+.safi-intro-title {
+  margin: 0 0 10px;
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: #F5F5F7;
+}
+
+.safi-intro-tagline {
+  margin: 0 0 24px;
+  font-size: 16px;
+  color: #94A3B8;
+  max-width: 500px;
+}
+
+.safi-intro-progress-track {
+  width: 240px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  margin-bottom: 20px;
 }
 
 .safi-intro-skip {
-  position: absolute;
-  top: 24px;
-  left: 24px;
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #F5F5F7;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 10px 24px;
   min-height: 44px;
-  padding: 8px 18px;
-  border-radius: var(--radius-pill);
-  background: #F9F7F7;
-  border: 1px solid #DBE2EF;
-  color: #112D4E;
-  font-family: var(--font-arabic);
-  font-size: 13px;
-  font-weight: 700;
+  border-radius: 999px;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-/* --------------------------------------------------------------------------
- * 9. Studios & Utility Classes
- * -------------------------------------------------------------------------- */
-.safi-studio {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
+.safi-intro-skip:hover {
+  background: #F5F5F7;
+  color: #090B10;
 }
 
-.safi-studio-header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
-}
+/* ============================================================================
+ * 7. Tables, Inputs, Modals & Legacy Compatibility
+ * ========================================================================== */
 
-.safi-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-secondary);
-}
-
-.safi-studio-title {
-  font-size: 32px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--text-primary);
-}
-
-.safi-studio-lead {
-  font-size: 15px;
-  color: var(--text-secondary);
-  max-width: 860px;
-  line-height: 1.65;
-}
-
-.safi-card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: var(--space-3);
-}
-
-.safi-label,
-.safi-field-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: var(--space-2);
-}
-
-.safi-mini-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  margin-top: var(--space-3);
-  margin-bottom: 6px;
-}
-
-.safi-hint {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  margin-top: var(--space-2);
-}
-
-.safi-chip-row,
-.safi-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-.safi-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: var(--radius-pill);
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-button.safi-chip:hover,
-.safi-chip--active,
-.safi-chip--accent {
-  background-color: #112D4E;
-  border-color: #112D4E;
-  color: #F9F7F7;
-}
-
-.safi-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.safi-badge--ok,
-.safi-badge--accent {
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  color: var(--text-primary);
-}
-
-.safi-badge--warn {
-  background-color: var(--bg-elevated);
-  color: var(--text-secondary);
-}
-
-.safi-status {
-  margin-top: var(--space-3);
-  padding: 10px 14px;
-  border-radius: var(--radius-field);
-  font-size: 13px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.safi-status--ok {
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  color: var(--text-primary);
-}
-
-.safi-status--err,
-.safi-status--bad {
-  background-color: rgba(153, 27, 27, 0.12);
-  border: 1px solid var(--status-danger);
-  color: var(--status-danger);
-}
-
-.safi-output,
-.safi-code,
-.safi-pre {
-  margin: 0;
-  padding: 14px;
-  border-radius: var(--radius-field);
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.65;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.safi-compare {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.safi-fieldset {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-card);
-  padding: 14px;
-  margin-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.safi-toggle-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius-field);
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  cursor: pointer;
-}
-
-.safi-toggle-label {
-  display: block;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.safi-toggle-detail {
-  display: block;
-  font-size: 11.5px;
-  color: var(--text-secondary);
-}
-
-.safi-list {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.safi-digest-line {
-  font-size: 12px;
-  color: var(--text-primary);
-  word-break: break-all;
-}
-
-.safi-chart-canvas,
-.safi-chart-img {
+table {
   width: 100%;
-  max-width: 100%;
-  height: auto;
-  display: block;
-  margin-top: 12px;
-  border-radius: var(--radius-card);
-  border: 1px solid var(--border-subtle);
-  background: #FFFFFF;
+  border-collapse: collapse;
+  font-size: 13.5px;
 }
 
-/* --------------------------------------------------------------------------
- * 10. Overlays: Command Palette & Settings Sheet
- * -------------------------------------------------------------------------- */
-.safi-overlay-backdrop,
-.safi-palette-backdrop {
+th {
+  text-align: start;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background-color: var(--bg-elevated);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="search"],
+textarea,
+select {
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 10px 14px;
+  min-height: 42px;
+}
+
+.safi-overlay-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 100;
-  background-color: rgba(17, 45, 78, 0.58);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  z-index: 90;
+  background-color: rgba(9, 11, 16, 0.55);
+  backdrop-filter: blur(12px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 80px 16px 24px;
 }
 
-.safi-dialog,
-.safi-palette,
-.safi-settings {
+.safi-modal {
   width: 100%;
   max-width: 600px;
   background-color: var(--bg-surface);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-panel);
-  padding: 20px;
-  box-shadow: 0 24px 48px rgba(17, 45, 78, 0.28);
-}
-
-.safi-palette-search,
-.safi-settings-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.safi-palette-list {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.safi-palette-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: 10px 14px;
-  border-radius: var(--radius-field);
-  cursor: pointer;
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.safi-palette-option[aria-selected="true"],
-.safi-palette-option:hover {
-  background-color: var(--bg-elevated);
-  font-weight: 700;
-}
-
-.safi-palette-footer {
-  display: flex;
-  gap: 16px;
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.safi-settings-list {
-  margin: 14px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.safi-settings-row {
-  padding: 10px 12px;
-  border-radius: var(--radius-field);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-}
-
-.safi-settings-row dt {
-  font-weight: 700;
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.safi-settings-row dd {
-  margin: 4px 0 0;
-  color: var(--text-secondary);
-  font-size: 12.5px;
+  border-radius: 24px;
+  box-shadow: var(--shadow-elevated);
+  overflow: hidden;
 }
 
 .safi-owner-frame {
-  border-radius: var(--radius-panel);
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
+  max-width: 1380px;
+  margin: 0 auto;
 }
 
-/* --------------------------------------------------------------------------
- * 11. Responsive Breakpoints
- * -------------------------------------------------------------------------- */
-@media (max-width: 1180px) {
-  .safi-bento-wide,
-  .safi-bento-half {
-    grid-column: span 12;
-  }
+/* ============================================================================
+ * 8. ReactBits.dev + Prompt-Motion.com (Product-UI) Choreography
+ * ========================================================================== */
 
-  .safi-bento-third {
-    grid-column: span 6;
+@keyframes safiCursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes safiStepReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
-@media (max-width: 820px) {
-  .safi-bento-third {
-    grid-column: span 12;
+@keyframes safiTrajectoryFlow {
+  0% {
+    stroke-dashoffset: 240;
   }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
 
-  .safi-grid-2,
-  .safi-studio-grid,
-  .safi-template-grid,
-  .safi-compare {
-    grid-template-columns: 1fr;
+@keyframes safiBeaconPing {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+  70% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.safi-pm-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: #60A5FA;
+  vertical-align: middle;
+  margin-inline-start: 4px;
+  animation: safiCursorBlink 0.9s infinite;
+}
+
+.safi-pm-step-active {
+  animation: safiStepReveal 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.safi-rb-trajectory-line {
+  stroke-dasharray: 12 6;
+  animation: safiTrajectoryFlow 6s linear infinite;
+}
+
+.safi-rb-beacon-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: safiBeaconPing 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.safi-rb-showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 22px;
+  width: 100%;
+}
+
+.safi-rb-col-7 {
+  grid-column: span 7;
+}
+
+.safi-rb-col-5 {
+  grid-column: span 5;
+}
+
+.safi-rb-col-12 {
+  grid-column: span 12;
+}
+
+@media (max-width: 1080px) {
+  .safi-rb-col-7,
+  .safi-rb-col-5 {
+    grid-column: span 12;
   }
 }
 
@@ -1094,6 +991,5 @@ button.safi-chip:hover,
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
   }
 }

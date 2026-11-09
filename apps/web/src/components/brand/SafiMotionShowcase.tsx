@@ -33,13 +33,13 @@ const CHOREOGRAPHY_PHASES: ReadonlyArray<{
     id: "gooey",
     time: "1.00s – 1.50s",
     title: "٣. الاندماج الغروي في قطرة صافي",
-    desc: "مرشح Gooey يدمج النقاط في قطرة متماثلة بدرجات #3F72AF و #112D4E."
+    desc: "مرشح Gooey يدمج النقاط في قطرة متماثلة بدرجات #E2D8E4 و #AD97B0 و #7A5B7E."
   },
   {
     id: "check",
     time: "1.50s – 2.60s",
     title: "٤. رسم علامة الصح وحلقة التموّج",
-    desc: "رسم علامة الصح بلون #F9F7F7 مع حلقة تموّج وكشف اسم «صافي البيانات»."
+    desc: "رسم علامة الصح بلون #FAF8FB مع حلقة تموّج وكشف اسم «صافي البيانات»."
   }
 ];
 
@@ -238,8 +238,8 @@ export function SafiMotionShowcase(): ReactNode {
             >
               <defs>
                 <linearGradient id="stage-drop-grad" x1="64" y1="10" x2="64" y2="120" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stopColor="#3F72AF" />
-                  <stop offset="100%" stopColor="#112D4E" />
+                  <stop offset="0%" stopColor="#AD97B0" />
+                  <stop offset="100%" stopColor="#7A5B7E" />
                 </linearGradient>
                 <filter id="stage-gooey">
                   <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
@@ -253,7 +253,7 @@ export function SafiMotionShowcase(): ReactNode {
                 </filter>
               </defs>
 
-              <g data-stage-grid="true" opacity="0" stroke="#3F72AF" strokeWidth="0.75" strokeDasharray="2 3">
+              <g data-stage-grid="true" opacity="0" stroke="#7A5B7E" strokeWidth="0.75" strokeDasharray="2 3">
                 <line x1="44" y1="48" x2="44" y2="108" />
                 <line x1="64" y1="48" x2="64" y2="108" />
                 <line x1="84" y1="48" x2="84" y2="108" />
@@ -268,7 +268,7 @@ export function SafiMotionShowcase(): ReactNode {
                 cy="78"
                 r="42"
                 fill="none"
-                stroke="#3F72AF"
+                stroke="#7A5B7E"
                 strokeWidth="2.5"
                 opacity="0"
               />
@@ -281,7 +281,7 @@ export function SafiMotionShowcase(): ReactNode {
                     cx={dot.gridX}
                     cy={dot.gridY}
                     r="5"
-                    fill="#3F72AF"
+                    fill="#7A5B7E"
                     opacity="0"
                   />
                 ))}
@@ -297,7 +297,7 @@ export function SafiMotionShowcase(): ReactNode {
                 data-stage-check="true"
                 d="M45 82L58 95L84 66"
                 fill="none"
-                stroke="#F9F7F7"
+                stroke="#FAF8FB"
                 strokeWidth="10"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -368,7 +368,7 @@ export function SafiMotionShowcase(): ReactNode {
               <path
                 d="M64 10C64 10 26 54 26 82C26 103 43 120 64 120C85 120 102 103 102 82C102 54 64 10 64 10Z"
                 fill="none"
-                stroke="#3F72AF"
+                stroke="#7A5B7E"
                 strokeWidth="4"
                 strokeOpacity="0.5"
               />
@@ -376,7 +376,7 @@ export function SafiMotionShowcase(): ReactNode {
                 <rect x="0" y={waterY} width="128" height="128" fill="url(#stage-drop-grad)" />
                 <path
                   d={`M0 ${waterY} Q 32 ${waterY - 6}, 64 ${waterY} T 128 ${waterY} V 128 H 0 Z`}
-                  fill="#3F72AF"
+                  fill="#AD97B0"
                   fillOpacity="0.65"
                 />
               </g>
@@ -384,7 +384,7 @@ export function SafiMotionShowcase(): ReactNode {
                 <path
                   d="M45 82L58 95L84 66"
                   fill="none"
-                  stroke="#F9F7F7"
+                  stroke="#FAF8FB"
                   strokeWidth="10"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -462,6 +462,8 @@ export function SafiMotionShowcase(): ReactNode {
               alt="أيقونة تبويب صافي"
               width={20}
               height={20}
+              loading="lazy"
+              decoding="async"
               style={{ borderRadius: "4px", display: "block" }}
             />
             <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-primary)" }}>
@@ -505,6 +507,10 @@ export function SafiMotionShowcase(): ReactNode {
           <img
             src="/og-preview.svg"
             alt="بطاقة معاينة رابط صافي البيانات في تطبيقات المراسلة"
+            width={1200}
+            height={630}
+            loading="lazy"
+            decoding="async"
             style={{ width: "100%", height: "auto", display: "block" }}
           />
 

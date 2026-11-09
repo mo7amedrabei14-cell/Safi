@@ -1,141 +1,254 @@
 /**
  * `apps/web/src/components/motion/AmbientBackground.tsx`
  *
- * Subtle Ambient Mesh locked to the 4-Color Palette:
- * `#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`.
+ * ReactBits-Style Living Aurora + Interactive Data Constellation Canvas (60fps)
+ * - Full-bleed 100vw x 100vh animated canvas with floating connected data nodes
+ *   and flowing calm aurora waves that react to pointer movement
+ * - Preserves the 3 `blur(130px)` halos and `28px 28px` grid for `motion-infrastructure.test.tsx`
  */
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { gsap } from "gsap";
+import { canAnimate } from "../ui/motion-preference";
 
-interface AuroraHalo {
+interface HaloSpec {
   readonly id: string;
-  readonly gradient: string;
+  readonly width: number;
+  readonly height: number;
   readonly top: string;
   readonly left: string;
-  readonly size: string;
-  readonly drift: {
-    readonly x: number;
-    readonly y: number;
-    readonly scale: number;
-    readonly duration: number;
-  };
+  readonly gradient: string;
+  readonly opacity: number;
 }
 
-const AURORA_HALOS: readonly AuroraHalo[] = [
+const HALO_SPECS: readonly HaloSpec[] = [
   {
-    id: "safi-mist",
-    gradient: "radial-gradient(circle at 50% 50%, #DBE2EF 0%, transparent 70%)",
-    top: "-18%",
-    left: "-10%",
-    size: "52vw",
-    drift: { x: 80, y: 50, scale: 1.08, duration: 20 }
+    id: "halo-calm-sky",
+    width: 920,
+    height: 520,
+    top: "-12%",
+    left: "52%",
+    gradient: "radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.18) 0%, transparent 72%)",
+    opacity: 0.85
   },
   {
-    id: "safi-steel",
-    gradient: "radial-gradient(circle at 50% 50%, #3F72AF 0%, transparent 70%)",
-    top: "12%",
-    left: "48%",
-    size: "48vw",
-    drift: { x: -90, y: 65, scale: 1.06, duration: 24 }
+    id: "halo-calm-indigo",
+    width: 820,
+    height: 460,
+    top: "24%",
+    left: "4%",
+    gradient: "radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.14) 0%, transparent 72%)",
+    opacity: 0.75
   },
   {
-    id: "safi-ink",
-    gradient: "radial-gradient(circle at 50% 50%, #112D4E 0%, transparent 70%)",
-    top: "54%",
-    left: "8%",
-    size: "42vw",
-    drift: { x: 60, y: -70, scale: 1.1, duration: 28 }
+    id: "halo-calm-emerald",
+    width: 740,
+    height: 420,
+    top: "64%",
+    left: "40%",
+    gradient: "radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.12) 0%, transparent 72%)",
+    opacity: 0.65
   }
 ];
 
-const DOT_GRID_STYLE = {
-  position: "absolute",
-  inset: 0,
-  backgroundImage: "radial-gradient(rgba(17, 45, 78, 0.08) 1px, transparent 1px)",
-  backgroundSize: "28px 28px",
-  maskImage: "radial-gradient(ellipse at center, black 45%, transparent 85%)",
-  WebkitMaskImage: "radial-gradient(ellipse at center, black 45%, transparent 85%)"
-} as const;
-
-function shouldAnimate(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    !window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
 }
 
 export function AmbientBackground(): ReactNode {
-  const halosRef = useRef<Array<HTMLDivElement | null>>([]);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    if (!shouldAnimate()) {
+    const stage = stageRef.current;
+    if (stage === null || !canAnimate()) {
       return;
     }
 
-    const halos = halosRef.current.filter((halo): halo is HTMLDivElement => halo !== null);
-    if (halos.length === 0) {
-      return;
-    }
+    const halos = Array.from(stage.querySelectorAll<HTMLDivElement>("[data-safi-halo]"));
+    const setters = halos.map((el, index) => ({
+      x: gsap.quickTo(el, "x", { duration: 1.1 + index * 0.2, ease: "power3.out" }),
+      y: gsap.quickTo(el, "y", { duration: 1.1 + index * 0.2, ease: "power3.out" }),
+      factor: (index + 1) * 22
+    }));
 
-    const context = gsap.context(() => {
-      halos.forEach((halo, index) => {
-        const config = AURORA_HALOS[index];
-        if (config === undefined) {
-          return;
-        }
-        gsap.to(halo, {
-          x: config.drift.x,
-          y: config.drift.y,
-          scale: config.drift.scale,
-          duration: config.drift.duration,
-          delay: index * 1.4,
-          repeat: -1,
-          yoyo: true,
-          ease: "sine.inOut"
-        });
-      });
-    });
+    let pointerX = window.innerWidth * 0.5;
+    let pointerY = window.innerHeight * 0.35;
+
+    const onPointerMove = (event: PointerEvent): void => {
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      const nx = event.clientX / Math.max(1, window.innerWidth) - 0.5;
+      const ny = event.clientY / Math.max(1, window.innerHeight) - 0.5;
+      for (const s of setters) {
+        s.x(nx * s.factor);
+        s.y(ny * s.factor);
+      }
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+
+    // ReactBits Interactive Constellation & Aurora Wave Canvas
+    const canvas = canvasRef.current;
+    let rafId = 0;
+    if (canvas !== null && typeof HTMLCanvasElement !== "undefined") {
+      let ctx: CanvasRenderingContext2D | null = null;
+      try {
+        ctx = canvas.getContext("2d");
+      } catch {
+        ctx = null;
+      }
+
+      if (ctx !== null) {
+        const resize = (): void => {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+        };
+        resize();
+        window.addEventListener("resize", resize);
+
+        const count = 44;
+        const particles: Particle[] = Array.from({ length: count }, (_, i) => ({
+          x: ((i * 137.5) % 100) * 0.01 * canvas.width,
+          y: ((i * 73.1) % 100) * 0.01 * canvas.height,
+          vx: (i % 2 === 0 ? 1 : -1) * (0.38 + (i % 5) * 0.08),
+          vy: (i % 3 === 0 ? 1 : -1) * (0.3 + (i % 4) * 0.07),
+          r: 2.2 + (i % 3) * 0.85
+        }));
+
+        const render = (): void => {
+          const isDark =
+            document.documentElement.getAttribute("data-theme") === "google-gemini" ||
+            document.documentElement.getAttribute("data-theme") === "dark";
+
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          const dotColor = isDark ? "rgba(148, 163, 184, 0.55)" : "rgba(37, 99, 235, 0.42)";
+          const lineColor = isDark ? "rgba(96, 165, 250, 0.2)" : "rgba(37, 99, 235, 0.18)";
+
+          for (let i = 0; i < particles.length; i += 1) {
+            const p = particles[i];
+            if (!p) continue;
+            p.x += p.vx;
+            p.y += p.vy;
+
+            if (p.x < 0) p.x = canvas.width;
+            if (p.x > canvas.width) p.x = 0;
+            if (p.y < 0) p.y = canvas.height;
+            if (p.y > canvas.height) p.y = 0;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            ctx.fillStyle = dotColor;
+            ctx.fill();
+
+            // Connect nearby particles
+            for (let j = i + 1; j < particles.length; j += 1) {
+              const q = particles[j];
+              if (!q) continue;
+              const dx = p.x - q.x;
+              const dy = p.y - q.y;
+              const distSq = dx * dx + dy * dy;
+              if (distSq < 32000) {
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(q.x, q.y);
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = 1.1;
+                ctx.stroke();
+              }
+            }
+
+            // Connect to pointer (ReactBits Magnet/Constellation effect)
+            const pdx = p.x - pointerX;
+            const pdy = p.y - pointerY;
+            if (pdx * pdx + pdy * pdy < 36000) {
+              ctx.beginPath();
+              ctx.moveTo(p.x, p.y);
+              ctx.lineTo(pointerX, pointerY);
+              ctx.strokeStyle = isDark
+                ? "rgba(96, 165, 250, 0.28)"
+                : "rgba(37, 99, 235, 0.22)";
+              ctx.lineWidth = 1.2;
+              ctx.stroke();
+            }
+          }
+
+          rafId = window.requestAnimationFrame(render);
+        };
+
+        rafId = window.requestAnimationFrame(render);
+
+        return () => {
+          window.removeEventListener("pointermove", onPointerMove);
+          window.removeEventListener("resize", resize);
+          window.cancelAnimationFrame(rafId);
+        };
+      }
+    }
 
     return () => {
-      context.revert();
+      window.removeEventListener("pointermove", onPointerMove);
     };
   }, []);
 
   return (
     <div
+      ref={stageRef}
       aria-hidden="true"
-      data-testid="safi-ambient-background"
+      data-safi-ambient="true"
       style={{
         position: "fixed",
         inset: 0,
         zIndex: 0,
-        overflow: "hidden",
-        pointerEvents: "none"
+        pointerEvents: "none",
+        overflow: "hidden"
       }}
     >
-      {AURORA_HALOS.map((halo, index) => (
+      {HALO_SPECS.map((halo) => (
         <div
           key={halo.id}
-          ref={(element) => {
-            halosRef.current[index] = element;
-          }}
+          data-safi-halo={halo.id}
           style={{
             position: "absolute",
             top: halo.top,
             left: halo.left,
-            width: halo.size,
-            height: halo.size,
+            width: `${halo.width}px`,
+            height: `${halo.height}px`,
             background: halo.gradient,
-            borderRadius: "50%",
+            opacity: halo.opacity,
             filter: "blur(130px)",
-            opacity: 0.1,
+            borderRadius: "999px",
             willChange: "transform"
           }}
         />
       ))}
-      <div style={DOT_GRID_STYLE} />
+
+      <div
+        data-safi-grid="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: "radial-gradient(rgba(148, 163, 184, 0.32) 1px, transparent 1px)",
+          backgroundSize: "28px 28px",
+          opacity: 0.28
+        }}
+      />
+
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          display: "block"
+        }}
+      />
     </div>
   );
 }

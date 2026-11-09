@@ -1,12 +1,9 @@
 /**
  * `apps/web/src/components/brand/SafiPrismLogo.tsx`
  *
- * SafiData Brand Emblem & Motion Graphics ("مصفاة النقاء وحرف ص والقطرة")
- * Strictly locked to the 4-color palette:
- *   - `#F9F7F7`
- *   - `#DBE2EF`
- *   - `#3F72AF`
- *   - `#112D4E`
+ * SafiData Data-Engineering & Analytics Emblem (Apple Studio Slate & Calm Gradient)
+ * - Clean, meaningful mark representing Data Structuring + 3 Ascending Analytics Columns + Trend Line
+ * - Calm Apple Slate & Soft Sky-Silver gradients (no harsh colors)
  */
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef } from "react";
@@ -37,9 +34,6 @@ const WORDMARK_TITLE = "صافي البيانات";
 const WORDMARK_SUBTITLE = "SafiData • Gold Master v1.0";
 const LOGO_LABEL = "شعار صافي البيانات";
 
-/**
- * 9 scattered-to-grid coordinates for the Motion Studio showcase (Section 7.2):
- */
 export const MOTION_DOTS: ReadonlyArray<{
   readonly id: number;
   readonly startX: number;
@@ -58,409 +52,369 @@ export const MOTION_DOTS: ReadonlyArray<{
   { id: 9, startX: 84, startY: 60, gridX: 84, gridY: 98 }
 ];
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
-function canAnimate(): boolean {
-  return (
-    typeof window !== "undefined" && typeof document !== "undefined" && !prefersReducedMotion()
-  );
+function isBrowserWithMotion(): boolean {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return false;
+  }
+  if (typeof window.requestAnimationFrame !== "function") {
+    return false;
+  }
+  if (typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 export function SafiPrismLogo({
-  size = "md",
-  showTagline = true,
+  size = "sm",
+  showTagline = false,
   hideText = false
 }: SafiPrismLogoProps): ReactNode {
   const scale = SIZES[size];
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const tiltRef = useRef<HTMLDivElement | null>(null);
-  const timelineRef = useRef<gsap.core.Timeline | null>(null);
-  const tiltSetters = useRef<{
-    rotationX: (value: number) => void;
-    rotationY: (value: number) => void;
-    scale: (value: number) => void;
-  } | null>(null);
-
-  const runChoreography = useCallback((): void => {
-    const svg = svgRef.current;
-    if (svg === null || !canAnimate()) {
-      return;
-    }
-
-    timelineRef.current?.kill();
-
-    const drawPaths = Array.from(svg.querySelectorAll<SVGPathElement>("path[data-draw]"));
-    const nodes = Array.from(svg.querySelectorAll<SVGCircleElement>(".safi-node"));
-    const corePulse = svg.querySelector<SVGCircleElement>("[data-safi-core-pulse]");
-
-    const tl = gsap.timeline();
-    timelineRef.current = tl;
-
-    drawPaths.forEach((path, index) => {
-      let length = 220;
-      if (typeof path.getTotalLength === "function") {
-        try {
-          const measured = path.getTotalLength();
-          if (Number.isFinite(measured) && measured > 0) {
-            length = measured;
-          }
-        } catch {
-          length = 220;
-        }
-      }
-
-      tl.fromTo(
-        path,
-        {
-          strokeDasharray: length,
-          strokeDashoffset: length,
-          opacity: 0.4
-        },
-        {
-          strokeDashoffset: 0,
-          opacity: 1,
-          duration: 0.9,
-          ease: "expo.out",
-          clearProps: "strokeDasharray,strokeDashoffset,opacity"
-        },
-        index * 0.05
-      );
-    });
-
-    const nodeTargets = [
-      { startX: 108, startY: 20, midX: 84, midY: 42 },
-      { startX: 98, startY: 12, midX: 76, midY: 34 },
-      { startX: 114, startY: 34, midX: 88, midY: 50 }
-    ];
-
-    nodes.forEach((node, idx) => {
-      const target = nodeTargets[idx] ?? nodeTargets[0]!;
-      gsap.fromTo(
-        node,
-        { attr: { cx: target.startX, cy: target.startY }, opacity: 0.55, scale: 0.9 },
-        {
-          attr: { cx: target.midX, cy: target.midY },
-          opacity: 1,
-          scale: 1.15,
-          duration: 1.4 + idx * 0.25,
-          repeat: -1,
-          yoyo: true,
-          ease: "sine.inOut",
-          delay: idx * 0.2
-        }
-      );
-    });
-
-    if (corePulse !== null) {
-      gsap.fromTo(
-        corePulse,
-        { scale: 0.9, opacity: 0.22, transformOrigin: "64px 58px" },
-        {
-          scale: 1.18,
-          opacity: 0.45,
-          duration: 1.8,
-          repeat: -1,
-          yoyo: true,
-          ease: "sine.inOut"
-        }
-      );
-    }
-  }, []);
+  const pulseTweenRef = useRef<gsap.core.Tween | null>(null);
 
   useEffect(() => {
-    runChoreography();
+    const svg = svgRef.current;
+    if (svg === null || !isBrowserWithMotion()) {
+      return;
+    }
+
+    const drawables = Array.from(svg.querySelectorAll<SVGGeometryElement>("[data-draw='true']"));
+    const nodes = Array.from(svg.querySelectorAll<SVGCircleElement>(".safi-node"));
+
+    drawables.forEach((path) => {
+      if (typeof path.getTotalLength === "function") {
+        const length = path.getTotalLength();
+        path.style.strokeDasharray = `${length}`;
+        path.style.strokeDashoffset = `${length}`;
+      }
+    });
+
+    const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
+    tl.fromTo(
+      drawables,
+      { opacity: 0.35 },
+      {
+        strokeDashoffset: 0,
+        opacity: 1,
+        duration: 0.75,
+        stagger: 0.045,
+        onComplete: () => {
+          drawables.forEach((path) => {
+            path.style.strokeDasharray = "";
+            path.style.strokeDashoffset = "";
+            path.style.opacity = "";
+          });
+        }
+      }
+    );
+
+    if (nodes.length > 0) {
+      tl.fromTo(
+        nodes,
+        { scale: 0.35, opacity: 0.3, transformOrigin: "50% 50%" },
+        {
+          scale: 1,
+          opacity: 1,
+          duration: 0.4,
+          stagger: 0.07,
+          ease: "back.out(2.2)",
+          clearProps: "transform,opacity"
+        },
+        "-=0.35"
+      );
+
+      pulseTweenRef.current = gsap.to(nodes, {
+        scale: 1.25,
+        transformOrigin: "50% 50%",
+        duration: 1.5,
+        stagger: 0.2,
+        repeat: -1,
+        yoyo: true,
+        ease: "sine.inOut"
+      });
+    }
+
     return () => {
-      timelineRef.current?.kill();
+      tl.kill();
+      pulseTweenRef.current?.kill();
+      pulseTweenRef.current = null;
+      drawables.forEach((path) => {
+        path.style.strokeDasharray = "";
+        path.style.strokeDashoffset = "";
+        path.style.opacity = "";
+      });
     };
-  }, [runChoreography]);
+  }, []);
 
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    const element = tiltRef.current;
-    if (element === null || !canAnimate()) {
+  const handlePointerMove = useCallback((event: ReactPointerEvent<SVGSVGElement>): void => {
+    const svg = svgRef.current;
+    if (svg === null || !isBrowserWithMotion()) {
       return;
     }
-
-    if (tiltSetters.current === null) {
-      tiltSetters.current = {
-        rotationX: gsap.quickTo(element, "rotationX", { duration: 0.38, ease: "power2.out" }),
-        rotationY: gsap.quickTo(element, "rotationY", { duration: 0.38, ease: "power2.out" }),
-        scale: gsap.quickTo(element, "scale", { duration: 0.38, ease: "power2.out" })
-      };
-    }
-
-    const bounds = element.getBoundingClientRect();
-    const offsetX = (event.clientX - bounds.left) / bounds.width - 0.5;
-    const offsetY = (event.clientY - bounds.top) / bounds.height - 0.5;
-
-    tiltSetters.current.rotationY(offsetX * 18);
-    tiltSetters.current.rotationX(offsetY * -18);
-    tiltSetters.current.scale(1.06);
-  };
-
-  const handlePointerLeave = (): void => {
-    const element = tiltRef.current;
-    if (element === null) {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
       return;
     }
-    if (prefersReducedMotion()) {
-      gsap.set(element, { rotationX: 0, rotationY: 0, scale: 1 });
+    const dx = (event.clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
+    const dy = (event.clientY - (rect.top + rect.height / 2)) / (rect.height / 2);
+    gsap.to(svg, {
+      rotateY: dx * 10,
+      rotateX: -dy * 10,
+      scale: 1.05,
+      duration: 0.3,
+      ease: "power2.out"
+    });
+  }, []);
+
+  const handlePointerLeave = useCallback((): void => {
+    const svg = svgRef.current;
+    if (svg === null || !isBrowserWithMotion()) {
       return;
     }
-    gsap.to(element, {
-      rotationX: 0,
-      rotationY: 0,
+    gsap.to(svg, {
+      rotateX: 0,
+      rotateY: 0,
       scale: 1,
-      duration: 0.7,
+      duration: 0.5,
       ease: "elastic.out(1, 0.5)"
     });
-  };
+  }, []);
 
   return (
     <div
-      dir="rtl"
-      onClick={runChoreography}
-      title="انقر لإعادة تشغيل موشن شعار صافي"
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: `${scale.gap}px`,
-        fontFamily: "var(--font-arabic)",
-        cursor: "pointer",
         userSelect: "none"
       }}
     >
-      <div
-        ref={tiltRef}
+      <svg
+        ref={svgRef}
+        width={scale.svg}
+        height={scale.svg}
+        viewBox="0 0 128 128"
+        fill="none"
+        role="img"
+        aria-label={LOGO_LABEL}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         style={{
-          width: `${scale.svg}px`,
-          height: `${scale.svg}px`,
-          perspective: "700px",
-          transformStyle: "preserve-3d",
-          willChange: "transform",
-          flex: "0 0 auto"
+          flexShrink: 0,
+          overflow: "visible",
+          filter: "drop-shadow(0 8px 18px rgba(15, 23, 42, 0.16))"
         }}
       >
-        <svg
-          ref={svgRef}
-          role="img"
-          aria-label={LOGO_LABEL}
-          viewBox="0 0 128 128"
-          width={scale.svg}
-          height={scale.svg}
-          focusable="false"
-          style={{ overflow: "visible", display: "block" }}
-        >
-          <defs>
-            {/* Locked 4-Color Palette Gradients (`#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`) */}
-            <linearGradient
-              id="safi-crystal-grad"
-              x1="18"
-              y1="12"
-              x2="110"
-              y2="116"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0%" stopColor="#3F72AF" />
-              <stop offset="100%" stopColor="#112D4E" />
-            </linearGradient>
+        <defs>
+          <linearGradient id="safi-slate-tile" x1="10" y1="8" x2="118" y2="120" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#1E293B" />
+            <stop offset="100%" stopColor="#0F172A" />
+          </linearGradient>
+          <linearGradient id="safi-bar-a" x1="34" y1="68" x2="34" y2="100" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#94A3B8" />
+            <stop offset="100%" stopColor="#64748B" />
+          </linearGradient>
+          <linearGradient id="safi-bar-b" x1="64" y1="50" x2="64" y2="100" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#CBD5E1" />
+            <stop offset="100%" stopColor="#94A3B8" />
+          </linearGradient>
+          <linearGradient id="safi-bar-c" x1="94" y1="32" x2="94" y2="100" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#F8FAFC" />
+            <stop offset="100%" stopColor="#CBD5E1" />
+          </linearGradient>
+          <filter id="safi-prism-glow" x="-25%" y="-25%" width="150%" height="150%">
+            <feGaussianBlur stdDeviation="2.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
 
-            <linearGradient
-              id="safi-pure-drop-fill"
-              x1="64"
-              y1="68"
-              x2="64"
-              y2="112"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0%" stopColor="#3F72AF" />
-              <stop offset="100%" stopColor="#112D4E" />
-            </linearGradient>
-
-            <linearGradient
-              id="safi-sad-grad"
-              x1="36"
-              y1="44"
-              x2="92"
-              y2="74"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0%" stopColor="#F9F7F7" />
-              <stop offset="100%" stopColor="#DBE2EF" />
-            </linearGradient>
-
-            <filter id="safi-prism-glow" x="-35%" y="-35%" width="170%" height="170%">
-              <feGaussianBlur stdDeviation="2.5" result="safi-glow-blur" />
-              <feMerge>
-                <feMergeNode in="safi-glow-blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-
+        {/* Prompt-Motion S2 Orbital Ice Halo + 4 Orbiting Satellite Squares */}
+        <g className="safi-pm-logo-orbit" style={{ transformOrigin: "64px 64px" }}>
           <circle
-            data-safi-core-pulse="true"
             cx="64"
-            cy="58"
-            r="34"
-            fill="#DBE2EF"
-            opacity="0.35"
+            cy="64"
+            r="60"
+            stroke="url(#safi-bar-b)"
+            strokeOpacity="0.35"
+            strokeWidth="1.2"
+            strokeDasharray="6 6"
           />
+          {/* Top Satellite (#2F6BFF) */}
+          <rect x="60" y="1" width="8" height="8" rx="2.5" fill="#2F6BFF" />
+          {/* Right Satellite (#3CC8F0) */}
+          <rect x="119" y="60" width="8" height="8" rx="2.5" fill="#3CC8F0" />
+          {/* Bottom Satellite (#4ED6A0) */}
+          <rect x="60" y="119" width="8" height="8" rx="2.5" fill="#4ED6A0" />
+          {/* Left Satellite (#F8FAFC) */}
+          <rect x="1" y="60" width="8" height="8" rx="2.5" fill="#F8FAFC" stroke="#3B82F6" strokeWidth="1" />
+        </g>
 
-          {/* 1. Outer Hexagonal Crystal Purifier Shield */}
-          <path
-            data-draw="true"
-            d="M64 10 L106 33 L106 79 L64 102 L22 79 L22 33 Z"
-            fill="#112D4E"
-            stroke="#3F72AF"
-            strokeWidth="3.2"
-            strokeLinejoin="round"
-            filter="url(#safi-prism-glow)"
-          />
+        {/* Apple Squircle Tile */}
+        <rect
+          x="10"
+          y="10"
+          width="108"
+          height="108"
+          rx="26"
+          fill="url(#safi-slate-tile)"
+          stroke="rgba(255,255,255,0.22)"
+          strokeWidth="2"
+        />
 
-          {/* 2. Inner Faceted Purifier Funnel */}
-          <path
-            data-draw="true"
-            d="M32 39 L64 21 L96 39 L82 72 L46 72 Z"
-            fill="#3F72AF"
-            fillOpacity="0.28"
-            stroke="#DBE2EF"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
+        {/* 1. Data Matrix Frame (data-draw #1) */}
+        <path
+          data-draw="true"
+          d="M22 26H106V102H22V26Z"
+          stroke="#94A3B8"
+          strokeOpacity="0.2"
+          strokeWidth="1.2"
+        />
 
-          {/* 3. Raw Intake Stream 1 */}
-          <path
-            data-draw="true"
-            d="M110 18 C98 24 90 30 80 39"
-            fill="none"
-            stroke="#3F72AF"
-            strokeWidth="2"
-            strokeDasharray="4 3"
-            strokeLinecap="round"
-          />
+        {/* 2. Grid Guide 1 (data-draw #2) */}
+        <path
+          data-draw="true"
+          d="M24 52H104"
+          stroke="#94A3B8"
+          strokeOpacity="0.16"
+          strokeWidth="1"
+          strokeDasharray="3 3"
+        />
 
-          {/* 4. Raw Intake Stream 2 */}
-          <path
-            data-draw="true"
-            d="M116 32 C104 38 94 42 84 48"
-            fill="none"
-            stroke="#112D4E"
-            strokeWidth="1.8"
-            strokeDasharray="3 3"
-            strokeLinecap="round"
-          />
+        {/* 3. Grid Guide 2 (data-draw #3) */}
+        <path
+          data-draw="true"
+          d="M24 76H104"
+          stroke="#94A3B8"
+          strokeOpacity="0.16"
+          strokeWidth="1"
+          strokeDasharray="3 3"
+        />
 
-          {/* 5. Prism Internal Refraction Axis */}
-          <path
-            data-draw="true"
-            d="M64 21 L64 74"
-            fill="none"
-            stroke="#DBE2EF"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            opacity="0.65"
-          />
+        {/* 4. Animated Analytics Column 1 (data-draw #4) */}
+        <path
+          data-draw="true"
+          className="safi-bar-anim-1"
+          d="M28 72C28 69.8 29.8 68 32 68H42C44.2 68 46 69.8 46 72V98H28V72Z"
+          fill="url(#safi-bar-a)"
+        />
 
-          {/* 6. Geometric Arabic Letter "ص" (Sad) at the Heart of the Purifier */}
-          <path
-            data-draw="true"
-            d="M88 55 C88 45 73 45 66 53 C62 57 66 61 76 61 L88 61 M65 56 L58 56 C58 68 41 69 40 57 C39 49 44 45 48 45"
-            fill="none"
-            stroke="url(#safi-sad-grad)"
-            strokeWidth="4.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            filter="url(#safi-prism-glow)"
-          />
+        {/* 5. Animated Analytics Column 2 (data-draw #5) */}
+        <path
+          data-draw="true"
+          className="safi-bar-anim-2"
+          d="M55 54C55 51.8 56.8 50 59 50H69C71.2 50 73 51.8 73 54V98H55V54Z"
+          fill="url(#safi-bar-b)"
+        />
 
-          {/* 7. Pure Data Drop Emerging Below */}
-          <path
-            data-draw="true"
-            d="M64 74 C64 74 51 90 51 99 C51 106.5 56.8 112 64 112 C71.2 112 77 106.5 77 99 C77 90 64 74 64 74 Z"
-            fill="url(#safi-pure-drop-fill)"
-            stroke="#F9F7F7"
-            strokeWidth="2.2"
-            filter="url(#safi-prism-glow)"
-          />
+        {/* 6. Animated Analytics Column 3 (data-draw #6) */}
+        <path
+          data-draw="true"
+          className="safi-bar-anim-3"
+          d="M82 38C82 35.8 83.8 34 86 34H96C98.2 34 100 35.8 100 38V98H82V38Z"
+          fill="url(#safi-bar-c)"
+        />
 
-          {/* 8. Pure Output Harmonic Wave 1 */}
-          <path
-            data-draw="true"
-            d="M44 115 Q64 121 84 115"
-            fill="none"
-            stroke="#3F72AF"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-          />
+        {/* 7. Baseline Axis (data-draw #7) */}
+        <path
+          data-draw="true"
+          d="M22 98H106"
+          stroke="#CBD5E1"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+        />
 
-          {/* 9. Pure Output Harmonic Wave 2 */}
-          <path
-            data-draw="true"
-            d="M34 120 Q64 127 94 120"
-            fill="none"
-            stroke="#112D4E"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
+        {/* 8. Ascending Analytics Trend Vector (data-draw #8) */}
+        <path
+          data-draw="true"
+          d="M32 58L60 40L91 23"
+          stroke="#60A5FA"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          filter="url(#safi-prism-glow)"
+        />
 
-          {/* 10. Pure Output Harmonic Wave 3 */}
-          <path
-            data-draw="true"
-            d="M24 125 Q64 132 104 125"
-            fill="none"
-            stroke="#3F72AF"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
+        {/* 9. Trend Vector Arrowhead (data-draw #9) */}
+        <path
+          data-draw="true"
+          d="M81 22H92V33"
+          stroke="#60A5FA"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
 
-          {/* 3 Raw Data Particles (`.safi-node` x3) */}
-          <circle className="safi-node" cx="108" cy="20" r="3.4" fill="#3F72AF" />
-          <circle className="safi-node" cx="98" cy="12" r="2.8" fill="#112D4E" />
-          <circle className="safi-node" cx="114" cy="34" r="3.1" fill="#DBE2EF" stroke="#112D4E" strokeWidth="1" />
-        </svg>
-      </div>
+        {/* 10. Verified Check Indicator (data-draw #10) */}
+        <path
+          data-draw="true"
+          d="M28 32L33 37L43 26"
+          stroke="#34D399"
+          strokeWidth="2.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+
+        {/* 3 Precision Data Nodes (.safi-node) */}
+        <circle
+          className="safi-node"
+          cx="32"
+          cy="58"
+          r="3.8"
+          fill="#F8FAFC"
+          stroke="#3B82F6"
+          strokeWidth="1.6"
+        />
+        <circle
+          className="safi-node"
+          cx="60"
+          cy="40"
+          r="4"
+          fill="#F8FAFC"
+          stroke="#3B82F6"
+          strokeWidth="1.6"
+        />
+        <circle
+          className="safi-node"
+          cx="91"
+          cy="23"
+          r="4.2"
+          fill="#34D399"
+          stroke="#0F172A"
+          strokeWidth="1.6"
+        />
+      </svg>
 
       {!hideText ? (
-        <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.25 }}>
+        <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
           <span
             style={{
               fontSize: `${scale.title}px`,
-              fontWeight: 700,
-              color: "var(--text-primary)",
-              letterSpacing: "-0.01em",
-              whiteSpace: "nowrap"
+              fontWeight: 800,
+              letterSpacing: "-0.02em",
+              color: "var(--text-primary)"
             }}
           >
             {WORDMARK_TITLE}
           </span>
-          {showTagline ? (
-            <span
-              className="safi-shiny-text"
-              style={{
-                fontSize: `${scale.subtitle}px`,
-                fontWeight: 600,
-                marginTop: "2px",
-                whiteSpace: "nowrap"
-              }}
-            >
-              مصفاة النقاء الذكية • SafiData
-            </span>
-          ) : null}
-          <span className="safi-visually-hidden">{WORDMARK_SUBTITLE}</span>
-        </span>
-      ) : (
-        <span className="safi-visually-hidden">
-          {WORDMARK_TITLE} — {WORDMARK_SUBTITLE}
-        </span>
-      )}
+          <span
+            className="safi-mono"
+            style={{
+              fontSize: `${scale.subtitle}px`,
+              fontWeight: 600,
+              color: "var(--text-secondary)",
+              opacity: showTagline ? 0.95 : 0.8
+            }}
+            dir="ltr"
+          >
+            {WORDMARK_SUBTITLE}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

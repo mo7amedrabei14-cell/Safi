@@ -1,345 +1,327 @@
 /**
  * `apps/web/src/components/brand/SafiIntroSplash.tsx`
  *
- * Cinematic Motion Graphic Intro Preloader (2.2s @ 120fps via GSAP Timeline)
- * Locked to the 4-Color Palette: `#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`.
- * Includes a hard `setTimeout` safety guard AND click-anywhere-to-skip so it
- * can never block the main UI even if the browser tab is backgrounded.
+ * Apple Keynote-Style Cinematic Intro Before Entering the Website
+ * Calm Slate & Silver-Blue Palette (`#090B10`, `#1E293B`, `#60A5FA`, `#34D399`, `#F8FAFC`).
  */
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef } from "react";
 import { gsap } from "gsap";
-import { SafiPrismLogo } from "./SafiPrismLogo";
+import { MOTION_DOTS } from "./SafiPrismLogo";
 import { BlurWordText } from "../ui/BlurWordText";
-import { canAnimate } from "../ui/motion-preference";
 
 export interface SafiIntroSplashProps {
   readonly open: boolean;
-  readonly onComplete: () => void;
+  readonly onComplete?: (() => void) | undefined;
+  readonly onFinish?: (() => void) | undefined;
 }
 
-interface RawDataShard {
-  readonly id: string;
-  readonly label: string;
-  readonly startX: number;
-  readonly startY: number;
-  readonly rotation: number;
+function canRunIntroTimeline(): boolean {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return false;
+  }
+  if (typeof window.requestAnimationFrame !== "function") {
+    return false;
+  }
+  if (typeof window.matchMedia === "function") {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return false;
+    }
+  }
+  return true;
 }
 
-export const INTRO_RAW_SHARDS: readonly RawDataShard[] = [
-  { id: "s1", label: "أَحْمَدُ مُحَمَّدْ ـــ", startX: -260, startY: -150, rotation: -12 },
-  { id: "s2", label: "٠١٠١٢٣٤٥٦٧٨", startX: 250, startY: -140, rotation: 10 },
-  { id: "s3", label: "29801011234567", startX: -290, startY: 20, rotation: -6 },
-  { id: "s4", label: "#N/A • NULL • CSV", startX: 280, startY: 30, rotation: 8 },
-  { id: "s5", label: "١٢,٥٠٠ ج.م", startX: -220, startY: 155, rotation: 9 },
-  { id: "s6", label: "عبد الله / ابوبكر", startX: 230, startY: 150, rotation: -11 },
-  { id: "s7", label: "XLSX • UTF-8 BOM", startX: 0, startY: -195, rotation: 4 },
-  { id: "s8", label: "PII -> sf_ph_b3a8", startX: 0, startY: 195, rotation: -5 }
-];
+export function SafiIntroSplash({
+  open,
+  onComplete,
+  onFinish
+}: SafiIntroSplashProps): ReactNode {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const progressRef = useRef<HTMLDivElement | null>(null);
+  const finishedRef = useRef<boolean>(false);
 
-export function SafiIntroSplash({ open, onComplete }: SafiIntroSplashProps): ReactNode {
-  const overlayRef = useRef<HTMLElement | null>(null);
-  const ringRef = useRef<HTMLDivElement | null>(null);
-  const logoWrapRef = useRef<HTMLDivElement | null>(null);
-  const identityRef = useRef<HTMLDivElement | null>(null);
-  const progressFillRef = useRef<HTMLDivElement | null>(null);
-  const timelineRef = useRef<gsap.core.Timeline | null>(null);
-
-  const handleSkip = useCallback((): void => {
-    timelineRef.current?.kill();
-    onComplete();
-  }, [onComplete]);
+  const completeOnce = useCallback((): void => {
+    if (finishedRef.current) {
+      return;
+    }
+    finishedRef.current = true;
+    onComplete?.();
+    onFinish?.();
+  }, [onComplete, onFinish]);
 
   useEffect(() => {
     if (!open) {
+      finishedRef.current = false;
       return;
     }
 
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" || event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        handleSkip();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open, handleSkip]);
+    if (!canRunIntroTimeline()) {
+      const quickTimer =
+        typeof window !== "undefined" ? window.setTimeout(completeOnce, 160) : undefined;
+      return () => {
+        if (quickTimer !== undefined && typeof window !== "undefined") {
+          window.clearTimeout(quickTimer);
+        }
+      };
+    }
 
-  useEffect(() => {
-    if (!open) {
+    const root = rootRef.current;
+    const svg = svgRef.current;
+    const progress = progressRef.current;
+    if (root === null || svg === null) {
+      completeOnce();
       return;
     }
 
-    // Hard timeout guarantee: even if rAF is paused in a background tab, close after 2.4s
-    const safetyTimer = window.setTimeout(() => {
-      onComplete();
+    const hardFallbackTimer = window.setTimeout(() => {
+      completeOnce();
     }, 2400);
 
-    const overlay = overlayRef.current;
-    if (overlay === null || !canAnimate() || typeof requestAnimationFrame !== "function") {
-      window.clearTimeout(safetyTimer);
-      onComplete();
-      return;
-    }
+    const dots = Array.from(svg.querySelectorAll<SVGCircleElement>("[data-intro-dot]"));
+    const bars = Array.from(svg.querySelectorAll<SVGRectElement>("[data-intro-bar]"));
+    const trendPath = svg.querySelector<SVGPathElement>("[data-intro-trend]");
 
-    timelineRef.current?.kill();
-
-    const shards = Array.from(overlay.querySelectorAll<HTMLElement>("[data-intro-shard]"));
-    const ring = ringRef.current;
-    const logoWrap = logoWrapRef.current;
-    const identity = identityRef.current;
-    const progressFill = progressFillRef.current;
-
-    gsap.set(overlay, { opacity: 1, scale: 1, filter: "blur(0px)" });
-
-    shards.forEach((shard, idx) => {
-      const spec = INTRO_RAW_SHARDS[idx];
-      if (!spec) return;
-      gsap.set(shard, {
-        x: spec.startX,
-        y: spec.startY,
-        rotation: spec.rotation,
-        scale: 0.8,
-        opacity: 0
-      });
-    });
-
-    if (ring !== null) {
-      gsap.set(ring, { scale: 0.6, opacity: 0.3, rotation: 0 });
-    }
-    if (logoWrap !== null) {
-      gsap.set(logoWrap, { scale: 0.8, opacity: 1 });
-    }
-    if (identity !== null) {
-      gsap.set(identity, { y: 12, opacity: 1 });
-    }
-    if (progressFill !== null) {
-      gsap.set(progressFill, { scaleX: 0.15, transformOrigin: "right center" });
+    if (trendPath !== null && typeof trendPath.getTotalLength === "function") {
+      const len = trendPath.getTotalLength();
+      trendPath.style.strokeDasharray = `${len}`;
+      trendPath.style.strokeDashoffset = `${len}`;
     }
 
     const tl = gsap.timeline({
+      defaults: { ease: "power3.out" },
       onComplete: () => {
-        window.clearTimeout(safetyTimer);
-        onComplete();
+        gsap.to(root, {
+          opacity: 0,
+          y: -18,
+          duration: 0.35,
+          ease: "power2.inOut",
+          onComplete: completeOnce
+        });
       }
     });
-    timelineRef.current = tl;
 
-    tl.to(
-      shards,
+    if (progress !== null) {
+      tl.fromTo(
+        progress,
+        { scaleX: 0, transformOrigin: "right center" },
+        { scaleX: 1, duration: 1.95, ease: "power1.inOut" },
+        0
+      );
+    }
+
+    tl.fromTo(
+      dots,
+      { scale: 0, opacity: 0, transformOrigin: "50% 50%" },
       {
-        opacity: 0.95,
         scale: 1,
-        duration: 0.22,
+        opacity: 1,
+        duration: 0.28,
         stagger: 0.02,
-        ease: "power2.out"
+        ease: "back.out(2.2)"
       },
       0
     );
 
+    dots.forEach((dot, idx) => {
+      const spec = MOTION_DOTS[idx];
+      if (spec !== undefined) {
+        tl.to(
+          dot,
+          {
+            attr: { cx: spec.gridX, cy: spec.gridY },
+            duration: 0.44,
+            ease: "elastic.out(1, 0.75)"
+          },
+          0.28
+        );
+      }
+    });
+
     tl.to(
-      shards,
+      dots,
       {
-        x: 0,
-        y: 0,
-        rotation: 0,
-        scale: 0.35,
         opacity: 0,
-        duration: 0.5,
-        stagger: 0.02,
-        ease: "power3.in"
+        scale: 0.4,
+        duration: 0.24,
+        ease: "power2.in"
       },
-      0.26
+      0.78
     );
 
-    if (ring !== null) {
-      tl.to(
-        ring,
+    if (bars.length > 0) {
+      tl.fromTo(
+        bars,
+        { scaleY: 0, opacity: 0, transformOrigin: "center bottom" },
         {
-          scale: 1.05,
-          opacity: 0.85,
-          rotation: 220,
-          duration: 0.85,
-          ease: "expo.out"
+          scaleY: 1,
+          opacity: 1,
+          duration: 0.44,
+          stagger: 0.07,
+          ease: "back.out(1.6)"
         },
-        0.45
+        0.9
       );
     }
 
-    if (logoWrap !== null) {
+    if (trendPath !== null) {
       tl.to(
-        logoWrap,
+        trendPath,
         {
-          scale: 1,
-          opacity: 1,
-          duration: 0.6,
-          ease: "back.out(1.4)"
-        },
-        0.5
-      );
-    }
-
-    if (identity !== null) {
-      tl.to(
-        identity,
-        {
-          y: 0,
-          opacity: 1,
+          strokeDashoffset: 0,
           duration: 0.4,
           ease: "power2.out"
         },
-        0.95
+        1.22
       );
     }
-
-    if (progressFill !== null) {
-      tl.to(
-        progressFill,
-        {
-          scaleX: 1,
-          duration: 0.7,
-          ease: "power2.inOut"
-        },
-        0.95
-      );
-    }
-
-    tl.to(
-      overlay,
-      {
-        scale: 1.05,
-        opacity: 0,
-        filter: "blur(14px)",
-        duration: 0.38,
-        ease: "power3.inOut"
-      },
-      1.78
-    );
 
     return () => {
-      window.clearTimeout(safetyTimer);
+      window.clearTimeout(hardFallbackTimer);
       tl.kill();
     };
-  }, [open, onComplete]);
+  }, [open, completeOnce]);
 
   if (!open) {
     return null;
   }
 
   return (
-    <aside
-      ref={overlayRef}
-      dir="rtl"
-      onClick={handleSkip}
+    <div
+      ref={rootRef}
       className="safi-intro-splash"
-      aria-label="العرض الافتتاحي لمنصة صافي البيانات"
-      data-safi-intro="true"
+      role="region"
+      aria-label="عرض إقلاع صافي البيانات السينمائي"
+      dir="rtl"
+      onClick={completeOnce}
     >
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          handleSkip();
-        }}
-        className="safi-intro-skip"
-        aria-label="تخطي العرض الافتتاحي"
-      >
-        تخطي العرض ⏭
-      </button>
+      <div className="safi-intro-stage" onClick={(e) => e.stopPropagation()}>
+        <div className="safi-intro-orb">
+          <div className="safi-intro-orb-ring" aria-hidden="true" />
+          <svg
+            ref={svgRef}
+            width={168}
+            height={168}
+            viewBox="0 0 128 128"
+            fill="none"
+            aria-label="حركة مصفوفة البيانات ومؤشر التحليل"
+          >
+            {/* Prompt-Motion S2 Orbital Cross + 4 Satellites */}
+            <g className="safi-pm-logo-orbit" style={{ transformOrigin: "64px 64px" }}>
+              <circle
+                cx="64"
+                cy="64"
+                r="60"
+                stroke="#60A5FA"
+                strokeOpacity="0.38"
+                strokeWidth="1.4"
+                strokeDasharray="6 6"
+              />
+              <rect x="60" y="1" width="8" height="8" rx="2.5" fill="#2F6BFF" />
+              <rect x="119" y="60" width="8" height="8" rx="2.5" fill="#3CC8F0" />
+              <rect x="60" y="119" width="8" height="8" rx="2.5" fill="#4ED6A0" />
+              <rect x="1" y="60" width="8" height="8" rx="2.5" fill="#F8FAFC" />
+            </g>
 
-      <div
-        aria-hidden="true"
-        style={{
-          position: "relative",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: "260px",
-          height: "200px"
-        }}
-      >
-        {INTRO_RAW_SHARDS.map((shard) => (
-          <span key={shard.id} data-intro-shard={shard.id} className="safi-intro-shard">
-            {shard.label}
-          </span>
-        ))}
+            <rect
+              x="10"
+              y="10"
+              width="108"
+              height="108"
+              rx="26"
+              fill="#121620"
+              stroke="rgba(255,255,255,0.22)"
+              strokeWidth="2"
+            />
 
-        <div ref={ringRef} className="safi-intro-conic-ring" />
+            <g>
+              {MOTION_DOTS.map((dot, idx) => (
+                <circle
+                  key={dot.id}
+                  data-intro-dot={dot.id}
+                  cx={dot.startX}
+                  cy={dot.startY}
+                  r="5.5"
+                  fill={idx % 3 === 0 ? "#F8FAFC" : idx % 3 === 1 ? "#94A3B8" : "#60A5FA"}
+                />
+              ))}
+            </g>
 
-        <div
-          ref={logoWrapRef}
-          style={{
-            position: "relative",
-            zIndex: 2,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center"
-          }}
-        >
-          <SafiPrismLogo size="lg" hideText />
+            <g>
+              <rect
+                data-intro-bar="1"
+                x="26"
+                y="68"
+                width="18"
+                height="30"
+                rx="4"
+                fill="#64748B"
+                style={{ opacity: 0 }}
+              />
+              <rect
+                data-intro-bar="2"
+                x="55"
+                y="50"
+                width="18"
+                height="48"
+                rx="4"
+                fill="#94A3B8"
+                style={{ opacity: 0 }}
+              />
+              <rect
+                data-intro-bar="3"
+                x="84"
+                y="34"
+                width="18"
+                height="64"
+                rx="4"
+                fill="#F8FAFC"
+                style={{ opacity: 0 }}
+              />
+              <path
+                data-intro-trend="true"
+                d="M32 56L62 38L93 22"
+                stroke="#60A5FA"
+                strokeWidth="4.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </g>
+          </svg>
         </div>
-      </div>
 
-      <div
-        ref={identityRef}
-        style={{
-          marginTop: "24px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "12px",
-          textAlign: "center",
-          maxWidth: "560px",
-          width: "100%"
-        }}
-      >
         <BlurWordText
           as="h2"
-          text="صافي البيانات | SafiData"
-          stagger={0.04}
-          style={{
-            fontSize: "28px",
-            fontWeight: 700,
-            color: "#F9F7F7",
-            letterSpacing: "-0.02em"
-          }}
+          className="safi-intro-title"
+          text="صافي البيانات • SafiData"
+          stagger={0.05}
         />
 
-        <p
-          className="safi-mono"
-          style={{
-            fontSize: "12.5px",
-            color: "#DBE2EF",
-            fontWeight: 600
-          }}
-        >
-          تهيئة نواة Rust • فحص خزنة SQLCipher • التحقق من بصمة BLAKE3
+        <p className="safi-intro-tagline">
+          بياناتك الفوضوية تصبح واضحة في ثوانٍ • خصوصية مطلقة على جهازك
         </p>
 
-        <div
-          aria-hidden="true"
-          style={{
-            width: "320px",
-            maxWidth: "85vw",
-            height: "5px",
-            borderRadius: "999px",
-            background: "rgba(249, 247, 247, 0.2)",
-            overflow: "hidden"
-          }}
-        >
+        <div className="safi-intro-progress-track" aria-hidden="true">
           <div
-            ref={progressFillRef}
+            ref={progressRef}
             style={{
               width: "100%",
               height: "100%",
               borderRadius: "999px",
-              background: "linear-gradient(90deg, #F9F7F7 0%, #DBE2EF 50%, #3F72AF 100%)"
+              background: "linear-gradient(90deg, #60A5FA 0%, #CBD5E1 50%, #F8FAFC 100%)"
             }}
           />
         </div>
+
+        <button
+          type="button"
+          className="safi-intro-skip"
+          onClick={completeOnce}
+          aria-label="الدخول إلى الموقع"
+        >
+          الدخول إلى الموقع ←
+        </button>
       </div>
-    </aside>
+    </div>
   );
 }

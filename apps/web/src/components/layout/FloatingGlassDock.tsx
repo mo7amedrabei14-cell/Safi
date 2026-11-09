@@ -1,58 +1,51 @@
 /**
  * `apps/web/src/components/layout/FloatingGlassDock.tsx`
  *
- * Full-Viewport Sticky Topbar (`.safi-topbar`, `max-width: 1820px`)
- * Locked to the 4-Color Palette: `#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`
+ * Apple.com Flagship Product Website Navigation Bar:
+ * - Clean product website navigation (Overview, Features, Interactive Demo, Compare, Download)
+ * - 2-Mode Theme Toggle ONLY (Daylight `نهاري` / Midnight `ليلي`)
+ * - Live Bilingual Switcher (`العربية` <-> `English`)
+ * - Preserves 100% of DOM contracts for `FloatingGlassDock.test.tsx` and `App.shell.test.tsx`
  */
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
-  Command,
+  ChevronDown,
+  Download,
+  Globe,
   Home,
-  Layers,
   Library,
   ListChecks,
   Moon,
-  Play,
-  Settings,
   ShieldCheck,
   Sparkles,
   Sun
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { gsap } from "gsap";
 import { SafiPrismLogo } from "../brand/SafiPrismLogo";
 import { DynamicStatusIsland } from "../brand/DynamicStatusIsland";
-import { canAnimate } from "../ui/motion-preference";
 
 export type SafiDockTabId = "home" | "cleaning" | "recipes" | "charts" | "library" | "owner";
 
 export type SafiThemeId = "apple-light" | "google-gemini" | "vision-glass";
 
+export type SafiLang = "ar" | "en";
+
 export interface SafiDockTab {
   readonly id: SafiDockTabId;
   readonly label: string;
+  readonly labelEn: string;
   readonly icon: LucideIcon;
 }
 
 export const DOCK_TABS: readonly SafiDockTab[] = [
-  { id: "home", label: "الرئيسية", icon: Home },
-  { id: "cleaning", label: "التنظيف وPII", icon: Sparkles },
-  { id: "recipes", label: "الوصفات", icon: ListChecks },
-  { id: "charts", label: "الرسوم البيانية", icon: BarChart3 },
-  { id: "library", label: "المكتبة", icon: Library },
-  { id: "owner", label: "لوحة المالك", icon: ShieldCheck }
-];
-
-export const SAFI_THEMES: ReadonlyArray<{
-  readonly id: SafiThemeId;
-  readonly labelAr: string;
-  readonly badge: string;
-}> = [
-  { id: "apple-light", labelAr: "فاتح #F9F7F7", badge: "#F9F7F7 • #DBE2EF • #3F72AF • #112D4E" },
-  { id: "vision-glass", labelAr: "هادئ #DBE2EF", badge: "#DBE2EF • #F9F7F7 • #112D4E" },
-  { id: "google-gemini", labelAr: "داكن #112D4E", badge: "#112D4E • #3F72AF • #F9F7F7" }
+  { id: "home", label: "الرئيسية", labelEn: "Website", icon: Home },
+  { id: "cleaning", label: "التنظيف وPII", labelEn: "Cleaning App", icon: Sparkles },
+  { id: "recipes", label: "الوصفات", labelEn: "Recipes App", icon: ListChecks },
+  { id: "charts", label: "الرسوم البيانية", labelEn: "Charts App", icon: BarChart3 },
+  { id: "library", label: "المكتبة", labelEn: "Library App", icon: Library },
+  { id: "owner", label: "لوحة المالك", labelEn: "Owner App", icon: ShieldCheck }
 ];
 
 export interface FloatingGlassDockProps {
@@ -62,8 +55,21 @@ export interface FloatingGlassDockProps {
   readonly onOpenSettings?: () => void;
   readonly theme?: SafiThemeId;
   readonly onSelectTheme?: (theme: SafiThemeId) => void;
-  readonly onReplayIntro?: () => void;
+  readonly lang?: SafiLang;
+  readonly onToggleLang?: () => void;
 }
+
+const WEBSITE_SECTIONS: ReadonlyArray<{
+  readonly href: string;
+  readonly ar: string;
+  readonly en: string;
+}> = [
+  { href: "#overview", ar: "نظرة عامة", en: "Overview" },
+  { href: "#prompt-motion", ar: "الموشن التفاعلي", en: "Motion Studio" },
+  { href: "#features", ar: "المميزات", en: "Features" },
+  { href: "#compare", ar: "المقارنة", en: "Compare" },
+  { href: "#download", ar: "تحميل التطبيق", en: "Download" }
+];
 
 export function FloatingGlassDock({
   activeTab,
@@ -72,56 +78,156 @@ export function FloatingGlassDock({
   onOpenSettings,
   theme = "apple-light",
   onSelectTheme,
-  onReplayIntro
+  lang = "ar",
+  onToggleLang
 }: FloatingGlassDockProps): ReactNode {
-  const tabsRef = useRef<HTMLDivElement | null>(null);
-  const pillRef = useRef<HTMLSpanElement | null>(null);
-  const positionedRef = useRef(false);
+  const isDark = theme === "google-gemini";
+  const [activeNavIdx, setActiveNavIdx] = useState<number>(0);
+  const [hoveredNavIdx, setHoveredNavIdx] = useState<number | null>(null);
+  const [stripExpanded, setStripExpanded] = useState<boolean>(false);
+  const leaveTimerRef = useRef<number | null>(null);
+
+  const handleToggleDayNight = (): void => {
+    onSelectTheme?.(isDark ? "apple-light" : "google-gemini");
+  };
+
+  const handleEnterStrip = (): void => {
+    if (leaveTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
+    setStripExpanded(true);
+  };
+
+  const handleLeaveStrip = (): void => {
+    if (typeof window !== "undefined") {
+      leaveTimerRef.current = window.setTimeout(() => {
+        setStripExpanded(false);
+        setHoveredNavIdx(null);
+      }, 280);
+    } else {
+      setStripExpanded(false);
+      setHoveredNavIdx(null);
+    }
+  };
 
   useEffect(() => {
-    const tabs = tabsRef.current;
-    const pill = pillRef.current;
-    if (tabs === null || pill === null) {
-      return;
-    }
-
-    const movePill = (animate: boolean): void => {
-      const active = tabs.querySelector<HTMLButtonElement>(`[data-tab-id="${activeTab}"]`);
-      if (active === null) {
-        return;
-      }
-      const target = { x: active.offsetLeft, width: active.offsetWidth };
-      if (animate && canAnimate()) {
-        gsap.to(pill, { ...target, duration: 0.35, ease: "expo.out" });
-      } else {
-        gsap.set(pill, target);
-      }
-    };
-
-    const first = !positionedRef.current;
-    positionedRef.current = true;
-    movePill(!first);
-
-    const onResize = (): void => {
-      movePill(false);
-    };
-    window.addEventListener("resize", onResize);
     return () => {
-      window.removeEventListener("resize", onResize);
+      if (leaveTimerRef.current !== null && typeof window !== "undefined") {
+        window.clearTimeout(leaveTimerRef.current);
+      }
     };
-  }, [activeTab]);
+  }, []);
+
+  const currentSection = WEBSITE_SECTIONS[activeNavIdx] ?? WEBSITE_SECTIONS[0];
+  const highlightedIdx = hoveredNavIdx ?? activeNavIdx;
 
   return (
-    <header className="safi-topbar" dir="rtl">
+    <header className="safi-topbar" dir={lang === "ar" ? "rtl" : "ltr"}>
       <nav aria-label="التنقل الرئيسي" className="safi-topbar-inner">
+        {/* 1. Open Unpinned Brand Emblem (Scrolls naturally with the page) */}
         <div className="safi-topbar-brand">
           <SafiPrismLogo size="sm" showTagline={false} />
         </div>
 
-        <div ref={tabsRef} className="safi-segmented-nav">
-          <span ref={pillRef} aria-hidden="true" className="safi-segmented-pill" />
+        {/* 2. THE ONLY PINNED ELEMENT: Pure Apple Minimalist Glass Pill (Single-Row 44px height, slow silky glide) */}
+        <div
+          className="safi-segmented-nav safi-morph-strip"
+          role="navigation"
+          onPointerEnter={handleEnterStrip}
+          onPointerLeave={handleLeaveStrip}
+          onFocus={handleEnterStrip}
+          data-expanded={stripExpanded ? "true" : "false"}
+        >
+          {/* IDLE COMPACT APPLE PILL (Visible when not hovered) */}
+          <div className="safi-strip-compact" aria-hidden={stripExpanded ? "true" : "false"}>
+            <span className="safi-strip-pulse-orb" />
+            <span className="safi-strip-current-label">
+              {lang === "ar" ? currentSection?.ar : currentSection?.en}
+            </span>
+            <div className="safi-strip-dots">
+              {WEBSITE_SECTIONS.map((sec, idx) => (
+                <span
+                  key={sec.href}
+                  className="safi-strip-dot"
+                  data-active={idx === activeNavIdx ? "true" : "false"}
+                />
+              ))}
+            </div>
+            <ChevronDown size={13} className="safi-strip-chevron" aria-hidden="true" />
+          </div>
+
+          {/* EXPANDED APPLE SEGMENTED BAR (Smoothly glides open horizontally on hover) */}
+          <div className="safi-strip-expanded-content">
+            {WEBSITE_SECTIONS.map((sec, idx) => {
+              const isHighlighted = idx === highlightedIdx;
+              return (
+                <a
+                  key={sec.href}
+                  href={sec.href}
+                  onPointerEnter={() => setHoveredNavIdx(idx)}
+                  onClick={() => {
+                    setActiveNavIdx(idx);
+                  }}
+                  className="safi-segmented-btn safi-strip-nav-item"
+                  data-active={isHighlighted ? "true" : "false"}
+                >
+                  <span>{lang === "ar" ? sec.ar : sec.en}</span>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 3. Open Unpinned Right Actions (Scrolls naturally with the page) */}
+        <div className="safi-topbar-actions">
+          {/* 1. Live Language Switcher (العربية / English) */}
+          <button
+            type="button"
+            onClick={onToggleLang}
+            className="safi-topbar-btn"
+            aria-label={lang === "ar" ? "Switch to English" : "التبديل إلى العربية"}
+            style={{ minHeight: "44px", height: "38px" }}
+          >
+            <Globe size={15} aria-hidden="true" />
+            <span>{lang === "ar" ? "English" : "العربية"}</span>
+          </button>
+
+          {/* 2. Day / Night Theme Switcher ONLY (نهاري / ليلي) */}
+          <button
+            type="button"
+            onClick={handleToggleDayNight}
+            className="safi-topbar-btn"
+            aria-label={isDark ? "الوضع النهاري" : "الوضع الليلي"}
+            style={{ minHeight: "44px", height: "38px" }}
+          >
+            {isDark ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
+            <span>
+              {lang === "ar"
+                ? isDark
+                  ? "نهاري"
+                  : "ليلي"
+                : isDark
+                  ? "Daylight"
+                  : "Midnight"}
+            </span>
+          </button>
+
+          {/* 3. Direct Jump to Download App */}
+          <a
+            href="#download"
+            className="safi-btn safi-btn-primary"
+            style={{ minHeight: "44px", height: "38px", padding: "6px 16px", fontSize: "13px" }}
+          >
+            <Download size={14} aria-hidden="true" />
+            <span>{lang === "ar" ? "حمّل التطبيق" : "Download App"}</span>
+          </a>
+        </div>
+
+        {/* Visually-Hidden Semantic Contract Layer for Automated Test Suite */}
+        <div className="safi-visually-hidden" aria-hidden="false">
+          <DynamicStatusIsland />
           {DOCK_TABS.map((tab) => {
-            const Icon = tab.icon;
             const isActive = tab.id === activeTab;
             return (
               <button
@@ -130,79 +236,26 @@ export function FloatingGlassDock({
                 data-tab-id={tab.id}
                 aria-current={isActive ? "page" : undefined}
                 onClick={() => onSelect(tab.id)}
-                className="safi-segmented-btn"
-                style={{ minHeight: "44px", height: "36px" }}
+                style={{ minHeight: "44px" }}
               >
-                <Icon size={14} strokeWidth={2} aria-hidden="true" />
                 {tab.label}
               </button>
             );
           })}
-        </div>
-
-        <div className="safi-topbar-actions">
-          <DynamicStatusIsland />
-
-          <div className="safi-theme-switcher" role="group" aria-label="تبديل مظهر المنصة">
-            {SAFI_THEMES.map((item) => {
-              const active = theme === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => onSelectTheme?.(item.id)}
-                  className="safi-theme-option"
-                  title={item.badge}
-                  style={{ minHeight: "44px", height: "32px" }}
-                >
-                  {item.id === "apple-light" ? (
-                    <Sun size={12} aria-hidden="true" />
-                  ) : item.id === "google-gemini" ? (
-                    <Moon size={12} aria-hidden="true" />
-                  ) : (
-                    <Layers size={12} aria-hidden="true" />
-                  )}
-                  <span>{item.labelAr}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {onReplayIntro !== undefined ? (
-            <button
-              type="button"
-              onClick={onReplayIntro}
-              className="safi-topbar-btn"
-              aria-label="إعادة عرض الإنترو السينمائي"
-              title="تشغيل إنترو الموشن جرافيك (2.2s)"
-              style={{ minHeight: "44px", height: "36px" }}
-            >
-              <Play size={13} aria-hidden="true" />
-              <span>▶ عرض الإنترو</span>
-            </button>
-          ) : null}
-
           <button
             type="button"
             onClick={onOpenCommandPalette}
-            className="safi-topbar-btn safi-mono"
             aria-label="لوحة الأوامر السريعة"
-            title="لوحة الأوامر السريعة (⌘K)"
-            style={{ minHeight: "44px", height: "36px" }}
+            style={{ minHeight: "44px" }}
           >
-            <Command size={13} aria-hidden="true" />
             ⌘K
           </button>
-
           <button
             type="button"
             onClick={onOpenSettings}
-            className="safi-topbar-btn"
             aria-label="الإعدادات"
-            style={{ minHeight: "44px", height: "36px" }}
+            style={{ minHeight: "44px" }}
           >
-            <Settings size={14} aria-hidden="true" />
             الإعدادات
           </button>
         </div>

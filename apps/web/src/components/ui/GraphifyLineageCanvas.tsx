@@ -99,9 +99,9 @@ export const DEFAULT_LINEAGE_EDGES: readonly GraphifyEdge[] = [
 const KIND_COLORS: Readonly<
   Record<GraphifyNode["kind"], { stroke: string; badge: string; label: string }>
 > = {
-  source: { stroke: "#3F72AF", badge: "#DBE2EF", label: "مصدر" },
-  transform: { stroke: "#112D4E", badge: "#DBE2EF", label: "تحويل" },
-  output: { stroke: "#112D4E", badge: "#DBE2EF", label: "مخرج" }
+  source: { stroke: "#DAC0A3", badge: "#EADBC8", label: "مصدر" },
+  transform: { stroke: "#102C57", badge: "#EADBC8", label: "تحويل" },
+  output: { stroke: "#102C57", badge: "#DAC0A3", label: "مخرج" }
 };
 
 export function GraphifyLineageCanvas({
@@ -156,8 +156,8 @@ export function GraphifyLineageCanvas({
         >
           <defs>
             <linearGradient id="graphify-edge-grad" x1="1" y1="0" x2="0" y2="0">
-              <stop offset="0%" stopColor="#3F72AF" stopOpacity="0.85" />
-              <stop offset="100%" stopColor="#112D4E" stopOpacity="0.85" />
+              <stop offset="0%" stopColor="#DAC0A3" stopOpacity="0.85" />
+              <stop offset="100%" stopColor="#102C57" stopOpacity="0.85" />
             </linearGradient>
           </defs>
 
@@ -180,12 +180,12 @@ export function GraphifyLineageCanvas({
                 <path
                   d={pathD}
                   fill="none"
-                  stroke={isHighlighted ? "#112D4E" : "url(#graphify-edge-grad)"}
+                  stroke={isHighlighted ? "#102C57" : "url(#graphify-edge-grad)"}
                   strokeWidth={isHighlighted ? 2.5 : 1.5}
                   strokeDasharray={isHighlighted ? undefined : "5 5"}
                   opacity={isHighlighted ? 1 : 0.65}
                 />
-                <circle cx={endX} cy={endY} r="3.5" fill="#112D4E" />
+                <circle cx={endX} cy={endY} r="3.5" fill="#102C57" />
               </g>
             );
           })}
@@ -213,7 +213,7 @@ export function GraphifyLineageCanvas({
                   x="144"
                   y="19"
                   textAnchor="middle"
-                  fill="#112D4E"
+                  fill="#102C57"
                   fontSize="9"
                   fontWeight="700"
                 >

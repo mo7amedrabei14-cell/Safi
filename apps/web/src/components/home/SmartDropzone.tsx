@@ -70,7 +70,7 @@ export function inspectImportFile(file: FileLike): ImportInspection {
 }
 
 export interface SmartDropzoneProps {
-  readonly onOpenCleaning?: () => void;
+  readonly onOpenCleaning?: (() => void) | undefined;
 }
 
 interface ParsedSummary {

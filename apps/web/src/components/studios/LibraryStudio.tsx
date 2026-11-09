@@ -10,7 +10,19 @@
  */
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { Download, Eye, FileText, Library, ShieldCheck } from "lucide-react";
+import {
+  BarChart3,
+  Download,
+  Eye,
+  FileText,
+  Home,
+  Library,
+  ListChecks,
+  ShieldCheck,
+  Sparkles,
+  Zap
+} from "lucide-react";
+import type { SafiDockTabId, SafiLang } from "../layout/FloatingGlassDock";
 import { downloadTextFile } from "../../lib/download";
 import {
   RECIPE_STEPS,
@@ -23,7 +35,13 @@ import { buildRecipeReportHtml } from "../../lib/report";
 import { MagneticButton } from "../ui/MagneticButton";
 import { SpotlightCard } from "../ui/SpotlightCard";
 
-export function LibraryStudio(): ReactNode {
+export interface LibraryStudioProps {
+  readonly lang?: SafiLang;
+  readonly onSelectTab?: (tab: SafiDockTabId) => void;
+}
+
+export function LibraryStudio({ lang = "ar", onSelectTab }: LibraryStudioProps = {}): ReactNode {
+  const isAr = lang === "ar";
   const [exported, setExported] = useState<string | null>(null);
   const [previewTemplateId, setPreviewTemplateId] = useState<string>(
     RECIPE_TEMPLATES[0]?.id ?? "hr-payroll"
@@ -46,15 +64,95 @@ export function LibraryStudio(): ReactNode {
     templates.find((item) => item.id === previewTemplateId) ?? templates[0];
 
   return (
-    <section className="safi-studio" aria-labelledby="safi-library-title" dir="rtl">
-      <header className="safi-studio-header">
+    <section
+      className="safi-studio"
+      aria-labelledby="safi-library-title"
+      dir={isAr ? "rtl" : "ltr"}
+    >
+      {/* Apple Dynamic Island Template Vault & App Switcher Bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "12px",
+          flexWrap: "wrap"
+        }}
+      >
+        <div className="safi-dynamic-island" style={{ cursor: "default" }}>
+          <span className="safi-island-dot" />
+          <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#F8FAFC" }}>
+            {isAr ? "خزنة القوالب الموثّقة • BLAKE3 + JCS" : "Verified Template Vault • BLAKE3 + JCS"}
+          </span>
+          <span className="safi-mono" dir="ltr" style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}>
+            {templates.length} Verified Templates • 100% Auditable
+          </span>
+        </div>
+
+        {onSelectTab ? (
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => onSelectTab("home")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <Home size={13} /> {isAr ? "الرئيسية" : "Website"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("cleaning")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <Sparkles size={13} /> {isAr ? "التنظيف وPII" : "Cleaning"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("recipes")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <ListChecks size={13} /> {isAr ? "الوصفات" : "Recipes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("charts")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <BarChart3 size={13} /> {isAr ? "الرسوم البيانية" : "Charts"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("owner")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <ShieldCheck size={13} /> {isAr ? "لوحة المالك" : "Owner"}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Open Unboxed Header Sitting Directly on the Interactive Background */}
+      <header
+        className="safi-studio-header"
+        style={{
+          background: "transparent",
+          border: "none",
+          boxShadow: "none",
+          padding: "8px 4px"
+        }}
+      >
         <span className="safi-eyebrow">مكتبة القوالب وتقارير الجودة • Section 6.5 & 15</span>
-        <h1 id="safi-library-title" className="safi-studio-title">
+        <h1 id="safi-library-title" className="safi-studio-title safi-rb-shiny-text">
           المكتبة
         </h1>
         <p className="safi-studio-lead">
-          وصفات جاهزة قابلة للتدقيق: كل قالب يحمل بصمة BLAKE3 ثابتة، ويمكنك معاينة الوصفة مباشرة أو
-          تنزيلها أو تصدير تقرير الجودة الخاص بها كملفات جديدة.
+          {isAr
+            ? "وصفات جاهزة قابلة للتدقيق: كل قالب يحمل بصمة BLAKE3 ثابتة، ويمكنك معاينة الوصفة مباشرة أو تنزيلها أو تصدير تقرير الجودة الخاص بها كملفات جديدة."
+            : "Audit-ready deterministic templates: every template carries a stable BLAKE3 digest, live before/after sandbox preview, and 1-click recipe & HTML quality report export."}
         </p>
       </header>
 
@@ -163,7 +261,7 @@ export function LibraryStudio(): ReactNode {
               justifyContent: "space-between",
               flexWrap: "wrap",
               gap: "12px",
-              marginBottom: "12px"
+              marginBottom: "14px"
             }}
           >
             <div>
@@ -174,10 +272,64 @@ export function LibraryStudio(): ReactNode {
                 تمثيل JCS القانوني وبصمة BLAKE3 الكاملة ({activePreview.enabledSteps.length} خطوات مفعّلة)
               </p>
             </div>
-            <span className="safi-mono safi-badge safi-badge--ok" dir="ltr">
-              BLAKE3: {activePreview.digest.slice(0, 16)}…
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span className="safi-mono safi-badge safi-badge--ok" dir="ltr">
+                BLAKE3: {activePreview.digest.slice(0, 16)}…
+              </span>
+              {onSelectTab ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectTab("recipes")}
+                  className="safi-btn safi-btn-primary"
+                  style={{ minHeight: "34px", padding: "4px 14px", fontSize: "12px" }}
+                >
+                  <Zap size={13} /> {isAr ? "تخصيص في محرك الوصفات" : "Customize in Recipes"}
+                </button>
+              ) : null}
+            </div>
           </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              gap: "12px",
+              marginBottom: "14px"
+            }}
+          >
+            <div
+              style={{
+                padding: "12px 14px",
+                borderRadius: "14px",
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-subtle)"
+              }}
+            >
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+                {isAr ? "عينة البيانات الخام قبل القالب" : "Sample Raw Input"}
+              </span>
+              <span style={{ fontSize: "13px", color: "var(--text-secondary)", textDecoration: "line-through" }}>
+                أَحْمَدُ السيّد ـــ ١٥٠٠.٥٠ ج.م • ٠١٠١٢٣٤٥٦٧٨
+              </span>
+            </div>
+
+            <div
+              style={{
+                padding: "12px 14px",
+                borderRadius: "14px",
+                background: "var(--accent-tint)",
+                border: "1px solid var(--border-strong)"
+              }}
+            >
+              <span style={{ fontSize: "11px", color: "var(--accent-primary)", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                {isAr ? "المخرج المنقّى بعد تطبيق القالب" : "Purified Output After Template"}
+              </span>
+              <span style={{ fontSize: "13.5px", fontWeight: 800, color: "var(--text-primary)" }}>
+                ✓ أحمد السيد | 1500.50 | 010••••5678
+              </span>
+            </div>
+          </div>
+
           <pre className="safi-code" dir="ltr">
             {activePreview.canonicalJson}
           </pre>

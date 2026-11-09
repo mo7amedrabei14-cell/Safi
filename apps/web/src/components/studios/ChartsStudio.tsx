@@ -9,7 +9,22 @@
  */
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { AlertTriangle, BarChart3, CheckCircle2, Download, Eye, Plus, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  Download,
+  Eye,
+  FileCode2,
+  Home,
+  Library,
+  ListChecks,
+  Plus,
+  ShieldCheck,
+  Sparkles,
+  XCircle
+} from "lucide-react";
+import type { SafiDockTabId, SafiLang } from "../layout/FloatingGlassDock";
 import {
   DARK_COLORS,
   WCAG_AA_TEXT_MIN_RATIO,
@@ -21,6 +36,7 @@ import type { ChartSpec, ChartType } from "../../charts/chart-spec";
 import { checkChartCredibility } from "../../charts/credibility-guard";
 import { recommendCharts } from "../../charts/smart-chart-recommender";
 import { downloadTextFile } from "../../lib/download";
+import { CountUpMetric } from "../ui/CountUpMetric";
 import { SpotlightCard } from "../ui/SpotlightCard";
 
 export const SAMPLE_CHART_DATA: ReadonlyArray<{
@@ -80,7 +96,55 @@ export function extractSvgColors(svg: string): string[] {
   return [...colors];
 }
 
-export function ChartsStudio(): ReactNode {
+const CHART_PRESETS: ReadonlyArray<{
+  readonly id: string;
+  readonly labelAr: string;
+  readonly labelEn: string;
+  readonly titleAr: string;
+  readonly rows: ReadonlyArray<{ readonly region: string; readonly completion: number }>;
+}> = [
+  {
+    id: "governorates",
+    labelAr: "اكتمال بيانات المحافظات",
+    labelEn: "Regional Completion",
+    titleAr: "نسبة اكتمال البيانات حسب المحافظة (بيانات تجريبية)",
+    rows: SAMPLE_CHART_DATA
+  },
+  {
+    id: "revenue",
+    labelAr: "نمو الإيرادات الفصلية",
+    labelEn: "Quarterly Revenue Growth",
+    titleAr: "معدل نمو الإيرادات التشغيلية عبر الفروع (%)",
+    rows: [
+      { region: "الربع الأول", completion: 72 },
+      { region: "الربع الثاني", completion: 84 },
+      { region: "الربع الثالث", completion: 91 },
+      { region: "الربع الرابع", completion: 98 }
+    ]
+  },
+  {
+    id: "sectors",
+    labelAr: "جودة القطاعات المؤسسية",
+    labelEn: "Enterprise Sector Quality",
+    titleAr: "درجة نقاء البيانات حسب القطاع المؤسسي (%)",
+    rows: [
+      { region: "القطاع المالي", completion: 99 },
+      { region: "الرعاية الصحية", completion: 94 },
+      { region: "التجارة الإلكترونية", completion: 89 },
+      { region: "الخدمات اللوجستية", completion: 86 },
+      { region: "التعليم والبحث", completion: 92 }
+    ]
+  }
+];
+
+export interface ChartsStudioProps {
+  readonly lang?: SafiLang;
+  readonly onSelectTab?: (tab: SafiDockTabId) => void;
+}
+
+export function ChartsStudio({ lang = "ar", onSelectTab }: ChartsStudioProps = {}): ReactNode {
+  const isAr = lang === "ar";
+  const [activePresetId, setActivePresetId] = useState<string>("governorates");
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [titleAr, setTitleAr] = useState<string>(SAMPLE_CHART_SPEC.titleAr);
   const [rows, setRows] = useState<Array<{ region: string; completion: number }>>(
@@ -129,8 +193,10 @@ export function ChartsStudio(): ReactNode {
 
   const svgAudit = useMemo(
     () =>
-      extractSvgColors(svg).map((colour) => ({
+      extractSvgColors(svg).map((colour, idx) => ({
         colour,
+        nameAr: `لون المخطط #${idx + 1}`,
+        bgNameAr: "لوحة الرسم القياسية",
         background: WHITE_CANVAS,
         ratio: contrastRatio(colour, WHITE_CANVAS),
         minimum: WCAG_AA_UI_GRAPHIC_MIN_RATIO
@@ -141,15 +207,17 @@ export function ChartsStudio(): ReactNode {
   const paletteAudit = useMemo(
     () =>
       [
-        DARK_COLORS.primary,
-        DARK_COLORS.success,
-        DARK_COLORS.warning,
-        DARK_COLORS.danger,
-        DARK_COLORS.info
-      ].map((colour) => ({
-        colour,
+        { c: DARK_COLORS.primary, n: "الأزرق الملكي الأساسي" },
+        { c: DARK_COLORS.success, n: "الأخضر الزمردي للنجاح" },
+        { c: DARK_COLORS.warning, n: "الكهرماني التنبيهي" },
+        { c: DARK_COLORS.danger, n: "الأحمر المرجاني للخطر" },
+        { c: DARK_COLORS.info, n: "السماوي الفيروزي للمعلومات" }
+      ].map((item) => ({
+        colour: item.c,
+        nameAr: item.n,
+        bgNameAr: "السطح الليلي الداكن",
         background: DARK_COLORS.surface,
-        ratio: contrastRatio(colour, DARK_COLORS.surface),
+        ratio: contrastRatio(item.c, DARK_COLORS.surface),
         minimum: WCAG_AA_TEXT_MIN_RATIO
       })),
     []
@@ -157,24 +225,194 @@ export function ChartsStudio(): ReactNode {
 
   const allPass = [...svgAudit, ...paletteAudit].every((row) => row.ratio >= row.minimum);
 
+  const avgCompletion = useMemo(() => {
+    if (rows.length === 0) return 0;
+    const sum = rows.reduce((acc, r) => acc + r.completion, 0);
+    return Math.round(sum / rows.length);
+  }, [rows]);
+
+  const maxCompletion = useMemo(() => {
+    if (rows.length === 0) return 0;
+    return Math.max(...rows.map((r) => r.completion));
+  }, [rows]);
+
   const handleDownloadSvg = (): void => {
     if (svg.length > 0) {
       downloadTextFile(`safi-chart-${chartType}.svg`, svg, "image/svg+xml");
     }
   };
 
+  const handleDownloadSpecJson = (): void => {
+    downloadTextFile(
+      `safi-chart-spec-${chartType}.json`,
+      JSON.stringify(spec, null, 2),
+      "application/json"
+    );
+  };
+
   return (
-    <section className="safi-studio" aria-labelledby="safi-charts-title" dir="rtl">
-      <header className="safi-studio-header">
+    <section
+      className="safi-studio"
+      aria-labelledby="safi-charts-title"
+      dir={isAr ? "rtl" : "ltr"}
+    >
+      {/* Apple Dynamic Island Contrast & App Switcher Bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "12px",
+          flexWrap: "wrap"
+        }}
+      >
+        <div className="safi-dynamic-island" style={{ cursor: "default" }}>
+          <span className="safi-island-dot" />
+          <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#F8FAFC" }}>
+            {isAr ? "محرك الرسوم المتجهة • Vega-Lite RTL + WCAG 2.2 AA" : "Vector Chart Engine • Vega-Lite RTL + WCAG 2.2 AA"}
+          </span>
+          <span className="safi-mono" dir="ltr" style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}>
+            Avg <CountUpMetric value={avgCompletion} suffix="%" /> • Peak {maxCompletion}%
+          </span>
+        </div>
+
+        {onSelectTab ? (
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => onSelectTab("home")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <Home size={13} /> {isAr ? "الرئيسية" : "Website"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("cleaning")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <Sparkles size={13} /> {isAr ? "التنظيف وPII" : "Cleaning"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("recipes")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <ListChecks size={13} /> {isAr ? "الوصفات" : "Recipes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("library")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <Library size={13} /> {isAr ? "المكتبة" : "Library"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("owner")}
+              className="safi-btn safi-btn-secondary"
+              style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
+            >
+              <ShieldCheck size={13} /> {isAr ? "لوحة المالك" : "Owner"}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Open Unboxed Header Sitting Directly on the Interactive Background */}
+      <header
+        className="safi-studio-header"
+        style={{
+          background: "transparent",
+          border: "none",
+          boxShadow: "none",
+          padding: "8px 4px"
+        }}
+      >
         <span className="safi-eyebrow">استوديو الرسوم</span>
-        <h1 id="safi-charts-title" className="safi-studio-title">
+        <h1 id="safi-charts-title" className="safi-studio-title safi-rb-shiny-text">
           الرسوم البيانية
         </h1>
         <p className="safi-studio-lead">
-          مخططات حتمية من نفس المواصفة، مع تحرير حي للبيانات، وحارس المصداقية، وفحص تباين WCAG 2.2
-          AA لكل لون يرسمه المخطط فعلًا.
+          {isAr
+            ? "مخططات حتمية من نفس المواصفة، مع تحرير حي للبيانات، وحارس المصداقية، وفحص تباين WCAG 2.2 AA لكل لون يرسمه المخطط فعلًا."
+            : "Deterministic vector charts from the exact same spec, with live data editing, Credibility Guard, and real-time WCAG 2.2 AA contrast verification."}
         </p>
       </header>
+
+      {/* Preset Dataset Switcher + Live KPI Summary Bar */}
+      <div
+        style={{
+          padding: "14px 18px",
+          borderRadius: "20px",
+          background: "linear-gradient(135deg, #090D16 0%, #111827 100%)",
+          color: "#F8FAFC",
+          border: "1px solid rgba(96, 165, 250, 0.35)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "12px",
+          flexWrap: "wrap"
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#93C5FD" }}>
+            {isAr ? "مجموعات البيانات الجاهزة:" : "Chart Datasets:"}
+          </span>
+          {CHART_PRESETS.map((preset) => {
+            const active = preset.id === activePresetId;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => {
+                  setActivePresetId(preset.id);
+                  setTitleAr(preset.titleAr);
+                  setRows(preset.rows.map((r) => ({ ...r })));
+                }}
+                style={{
+                  minHeight: "34px",
+                  padding: "4px 14px",
+                  borderRadius: "999px",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  border: active ? "1px solid #60A5FA" : "1px solid rgba(255,255,255,0.16)",
+                  background: active ? "#2563EB" : "rgba(255,255,255,0.06)",
+                  color: "#F8FAFC"
+                }}
+              >
+                {isAr ? preset.labelAr : preset.labelEn}
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleDownloadSpecJson}
+          style={{
+            minHeight: "34px",
+            padding: "4px 14px",
+            borderRadius: "999px",
+            fontSize: "12px",
+            fontWeight: 700,
+            cursor: "pointer",
+            border: "1px solid rgba(52, 211, 153, 0.45)",
+            background: "rgba(16, 185, 129, 0.14)",
+            color: "#34D399",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px"
+          }}
+        >
+          <FileCode2 size={13} />
+          <span>{isAr ? "تصدير مواصفة JSON" : "Export JSON Spec"}</span>
+        </button>
+      </div>
 
       <div className="safi-grid-2">
         <SpotlightCard padding={24}>
@@ -326,21 +564,22 @@ export function ChartsStudio(): ReactNode {
             <tbody>
               {[...svgAudit, ...paletteAudit].map((row) => (
                 <tr key={`${row.colour}-${row.background}`}>
-                  <td className="safi-mono" dir="ltr">
+                  <td>
                     <span
                       style={{
                         display: "inline-block",
-                        width: "10px",
-                        height: "10px",
-                        borderRadius: "2px",
+                        width: "12px",
+                        height: "12px",
+                        borderRadius: "4px",
                         backgroundColor: row.colour,
-                        marginInlineEnd: "6px"
+                        marginInlineEnd: "8px",
+                        verticalAlign: "middle"
                       }}
                     />
-                    {row.colour}
+                    <strong>{row.nameAr}</strong>
                   </td>
-                  <td className="safi-mono" dir="ltr">
-                    {row.background}
+                  <td>
+                    {row.bgNameAr}
                   </td>
                   <td className="safi-mono" dir="ltr">
                     {row.ratio.toFixed(2)}:1

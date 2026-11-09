@@ -1,11 +1,10 @@
 /**
  * `apps/web/src/App.tsx`
  *
- * The SafiData v5.0 Full-Viewport Shell
- * Locked to the 4-Color Palette: `#F9F7F7`, `#DBE2EF`, `#3F72AF`, `#112D4E`.
- * Renders the main interface immediately at 100% opacity so `<StrictMode>`
- * or background tabs never show a blank screen, while allowing instant replay
- * of the 2.2s `SafiIntroSplash` from the topbar.
+ * SafiData — Apple.com Flagship Product Website Shell
+ * - Supports live Arabic (`rtl`) & English (`ltr`) switching
+ * - Supports 2-mode theme toggle (Daylight / Midnight)
+ * - Automatically plays the cinematic Intro Splash before entering the website
  */
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,10 +12,11 @@ import { gsap } from "gsap";
 import { AmbientBackground } from "./components/motion/AmbientBackground";
 import { SmoothScrollProvider } from "./components/motion/SmoothScrollProvider";
 import { DOCK_TABS, FloatingGlassDock } from "./components/layout/FloatingGlassDock";
-import type { SafiDockTabId, SafiThemeId } from "./components/layout/FloatingGlassDock";
+import type { SafiDockTabId, SafiLang, SafiThemeId } from "./components/layout/FloatingGlassDock";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { SettingsSheet } from "./components/layout/SettingsSheet";
 import { SafiIntroSplash } from "./components/brand/SafiIntroSplash";
+import { useAnimatedFavicon } from "./components/brand/useAnimatedFavicon";
 import { BentoCommandCenter } from "./components/home/BentoCommandCenter";
 import { CleaningStudio } from "./components/studios/CleaningStudio";
 import { RecipesStudio } from "./components/studios/RecipesStudio";
@@ -29,28 +29,31 @@ export const SHELL_TABS: readonly SafiDockTabId[] = DOCK_TABS.map((tab) => tab.i
 
 export function renderStudio(
   tab: SafiDockTabId,
-  onSelectTab: (tab: SafiDockTabId) => void
+  onSelectTab: (tab: SafiDockTabId) => void,
+  lang: SafiLang = "ar"
 ): ReactNode {
   switch (tab) {
     case "home":
       return (
         <BentoCommandCenter
+          lang={lang}
           onStart={() => onSelectTab("cleaning")}
           onOpenLibrary={() => onSelectTab("library")}
+          onSelectTab={onSelectTab}
         />
       );
     case "cleaning":
-      return <CleaningStudio />;
+      return <CleaningStudio lang={lang} onSelectTab={onSelectTab} />;
     case "recipes":
-      return <RecipesStudio />;
+      return <RecipesStudio lang={lang} onSelectTab={onSelectTab} />;
     case "charts":
-      return <ChartsStudio />;
+      return <ChartsStudio lang={lang} onSelectTab={onSelectTab} />;
     case "library":
-      return <LibraryStudio />;
+      return <LibraryStudio lang={lang} onSelectTab={onSelectTab} />;
     case "owner":
       return (
         <div className="safi-owner-frame">
-          <OwnerDashboard />
+          <OwnerDashboard lang={lang} onSelectTab={onSelectTab} />
         </div>
       );
     default: {
@@ -63,11 +66,13 @@ export function renderStudio(
 export function App(): ReactNode {
   const [activeTab, setActiveTab] = useState<SafiDockTabId>("home");
   const [theme, setTheme] = useState<SafiThemeId>("apple-light");
+  const [lang, setLang] = useState<SafiLang>("ar");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [introOpen, setIntroOpen] = useState<boolean>(false);
-  const [introKey, setIntroKey] = useState<number>(0);
   const stageRef = useRef<HTMLDivElement | null>(null);
+
+  useAnimatedFavicon();
 
   const selectTab = useCallback((tab: SafiDockTabId): void => {
     setActiveTab(tab);
@@ -77,13 +82,19 @@ export function App(): ReactNode {
     setTheme(nextTheme);
   }, []);
 
-  const replayIntro = useCallback((): void => {
-    setIntroKey((prev) => prev + 1);
-    setIntroOpen(true);
+  const toggleLang = useCallback((): void => {
+    setLang((prev) => (prev === "ar" ? "en" : "ar"));
   }, []);
 
   const closeIntro = useCallback((): void => {
     setIntroOpen(false);
+  }, []);
+
+  // Automatically play the cinematic intro splash on real browser startup
+  useEffect(() => {
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      setIntroOpen(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -91,6 +102,13 @@ export function App(): ReactNode {
       document.documentElement.setAttribute("data-theme", theme);
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = lang;
+      document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+    }
+  }, [lang]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -113,11 +131,11 @@ export function App(): ReactNode {
     }
     const tween = gsap.fromTo(
       stage,
-      { opacity: 0.35, y: 8 },
+      { opacity: 0.35, y: 10 },
       {
         opacity: 1,
         y: 0,
-        duration: 0.24,
+        duration: 0.28,
         ease: "power2.out",
         clearProps: "transform,opacity"
       }
@@ -126,7 +144,7 @@ export function App(): ReactNode {
       tween.kill();
       gsap.set(stage, { clearProps: "transform,opacity" });
     };
-  }, [activeTab]);
+  }, [activeTab, lang]);
 
   const activeLabel = DOCK_TABS.find((tab) => tab.id === activeTab)?.label ?? "الرئيسية";
 
@@ -134,7 +152,7 @@ export function App(): ReactNode {
     <>
       <AmbientBackground />
       <SmoothScrollProvider>
-        <div className="safi-shell">
+        <div className="safi-shell" dir={lang === "ar" ? "rtl" : "ltr"}>
           <FloatingGlassDock
             activeTab={activeTab}
             onSelect={selectTab}
@@ -142,19 +160,20 @@ export function App(): ReactNode {
             onOpenSettings={() => setSettingsOpen(true)}
             theme={theme}
             onSelectTheme={selectTheme}
-            onReplayIntro={replayIntro}
+            lang={lang}
+            onToggleLang={toggleLang}
           />
 
           <main id="safi-main" className="safi-container safi-stage">
             <p className="safi-visually-hidden" role="status">
               {`الآن في ${activeLabel}`}
             </p>
-            <div ref={stageRef} key={activeTab} data-active-tab={activeTab}>
-              {renderStudio(activeTab, selectTab)}
+            <div ref={stageRef} key={`${activeTab}-${lang}`} data-active-tab={activeTab}>
+              {renderStudio(activeTab, selectTab, lang)}
             </div>
           </main>
 
-          <SafiIntroSplash key={introKey} open={introOpen} onComplete={closeIntro} />
+          <SafiIntroSplash open={introOpen} onComplete={closeIntro} onFinish={closeIntro} />
 
           <CommandPalette
             open={paletteOpen}

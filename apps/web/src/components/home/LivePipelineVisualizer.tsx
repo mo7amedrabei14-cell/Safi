@@ -136,8 +136,8 @@ export function LivePipelineVisualizer(): ReactNode {
         >
           <defs>
             <linearGradient id="safi-pipeline-bus" x1="1" y1="0" x2="0" y2="0">
-              <stop offset="0%" stopColor="#3F72AF" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="#112D4E" stopOpacity="0.9" />
+              <stop offset="0%" stopColor="#DAC0A3" stopOpacity="0.9" />
+              <stop offset="100%" stopColor="#102C57" stopOpacity="0.9" />
             </linearGradient>
           </defs>
           <path
@@ -157,7 +157,7 @@ export function LivePipelineVisualizer(): ReactNode {
               cx={960}
               cy={16}
               r="5"
-              fill="#112D4E"
+              fill="#102C57"
               opacity="0.95"
             />
           ))}

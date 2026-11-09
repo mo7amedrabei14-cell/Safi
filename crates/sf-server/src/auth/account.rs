@@ -13,8 +13,8 @@ use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 use async_trait::async_trait;
 use lettre::message::header::ContentType;
-use lettre::transport::smtp::authentication::Credentials;
 use lettre::message::Mailbox;
+use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -413,7 +413,9 @@ impl SmtpVerificationEmailSender {
             .map(|value| value.parse::<u16>().map_err(|_| AuthError::InvalidRequest))
             .transpose()?
             .unwrap_or(587);
-        let from = from_raw.parse::<Mailbox>().map_err(|_| AuthError::InvalidRequest)?;
+        let from = from_raw
+            .parse::<Mailbox>()
+            .map_err(|_| AuthError::InvalidRequest)?;
         let credentials = Credentials::new(username, password);
         let transport = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)
             .map_err(|_| AuthError::BackendUnavailable)?
@@ -436,7 +438,9 @@ impl VerificationEmailSender for SmtpVerificationEmailSender {
         recipient: &str,
         verification_url: &str,
     ) -> Result<(), AuthError> {
-        let to = recipient.parse::<Mailbox>().map_err(|_| AuthError::InvalidRequest)?;
+        let to = recipient
+            .parse::<Mailbox>()
+            .map_err(|_| AuthError::InvalidRequest)?;
         let message = Message::builder()
             .from(self.from.clone())
             .to(to)
@@ -730,8 +734,8 @@ mod tests {
     use super::*;
     use crate::auth::service::in_memory_service;
     use std::collections::HashMap;
-    use tokio::sync::RwLock;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::RwLock;
 
     #[derive(Default)]
     struct MemoryState {

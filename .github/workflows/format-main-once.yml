@@ -55,6 +55,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
+            apps/web/src/components/brand/SafiMotionShowcase.tsx \
             apps/web/src/App.tsx \
             apps/web/src/ApplicationShell.tsx \
             apps/web/src/components/brand/SafiIntroSplash.tsx \

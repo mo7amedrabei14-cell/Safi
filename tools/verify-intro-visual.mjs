@@ -62,75 +62,13 @@ try {
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
 
   await page.addInitScript(() => {
-    const trace = {
-      introMountedAt: null,
+    window.__safiIntroTrace = {
       fontsReadyAt: null,
       motionStartedAt: null,
       progressFullAt: null,
       progressWidthRatio: null,
       introRemovedAt: null
     };
-    window.__safiIntroTrace = trace;
-
-    const observeRoot = (root) => {
-      if (trace.introMountedAt !== null) return;
-      trace.introMountedAt = performance.now();
-
-      const markAttributes = () => {
-        if (root.dataset.fontsReady === "true" && trace.fontsReadyAt === null) {
-          trace.fontsReadyAt = performance.now();
-        }
-        if (root.dataset.motionReady === "true" && trace.motionStartedAt === null) {
-          trace.motionStartedAt = performance.now();
-        }
-      };
-      markAttributes();
-
-      const attributeObserver = new MutationObserver(markAttributes);
-      attributeObserver.observe(root, {
-        attributes: true,
-        attributeFilter: ["data-fonts-ready", "data-motion-ready"]
-      });
-
-      const removalObserver = new MutationObserver(() => {
-        if (!root.isConnected && trace.introRemovedAt === null) {
-          trace.introRemovedAt = performance.now();
-          removalObserver.disconnect();
-        }
-      });
-      removalObserver.observe(document.documentElement, { childList: true, subtree: true });
-
-      const sampleProgress = () => {
-        if (!root.isConnected) {
-          if (trace.introRemovedAt === null) trace.introRemovedAt = performance.now();
-          return;
-        }
-
-        const fill = root.querySelector(".safi-intro-progress-fill");
-        const track = root.querySelector(".safi-intro-progress-track");
-        if (fill && track) {
-          const matrix = new DOMMatrixReadOnly(getComputedStyle(fill).transform);
-          const ratio = track.getBoundingClientRect().width > 0
-            ? fill.getBoundingClientRect().width / track.getBoundingClientRect().width
-            : 0;
-          if (matrix.a >= 0.999 && ratio >= 0.995 && trace.progressFullAt === null) {
-            trace.progressFullAt = performance.now();
-            trace.progressWidthRatio = ratio;
-          }
-        }
-        requestAnimationFrame(sampleProgress);
-      };
-      requestAnimationFrame(sampleProgress);
-    };
-
-    const treeObserver = new MutationObserver(() => {
-      const root = document.querySelector(".safi-intro-splash");
-      if (root) observeRoot(root);
-    });
-    treeObserver.observe(document.documentElement, { childList: true, subtree: true });
-
-    const existingRoot = document.querySelector(".safi-intro-splash");
-    if (existingRoot) observeRoot(existingRoot);
   });
 
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
@@ -192,11 +130,46 @@ try {
     `Expected a one-second pause after fonts became ready; measured ${timing.fontsReadyToMotionMs}ms.`
   );
 
-  await page.waitForFunction(
-    () => Boolean(window.__safiIntroTrace && window.__safiIntroTrace.progressFullAt !== null),
-    undefined,
-    { timeout: 20_000 }
-  );
+  try {
+    await page.waitForFunction(() => {
+      const root = document.querySelector(".safi-intro-splash");
+      const fill = root?.querySelector(".safi-intro-progress-fill");
+      const track = root?.querySelector(".safi-intro-progress-track");
+      if (!fill || !track) return false;
+
+      const trackWidth = track.getBoundingClientRect().width;
+      const fillWidth = fill.getBoundingClientRect().width;
+      const ratio = trackWidth > 0 ? fillWidth / trackWidth : 0;
+      if (ratio < 0.995) return false;
+
+      const trace = window.__safiIntroTrace;
+      if (trace && trace.progressFullAt === null) {
+        trace.progressFullAt = performance.now();
+        trace.progressWidthRatio = ratio;
+      }
+      return true;
+    }, undefined, { timeout: 10_000 });
+  } catch (error) {
+    const state = await page.evaluate(() => {
+      const root = document.querySelector(".safi-intro-splash");
+      const fill = root?.querySelector(".safi-intro-progress-fill");
+      const track = root?.querySelector(".safi-intro-progress-track");
+      const trackWidth = track?.getBoundingClientRect().width ?? 0;
+      const fillWidth = fill?.getBoundingClientRect().width ?? 0;
+      return {
+        introPresent: Boolean(root),
+        motionReady: root?.dataset.motionReady ?? null,
+        progressTransform: fill ? getComputedStyle(fill).transform : null,
+        progressWidth: fillWidth,
+        trackWidth,
+        progressWidthRatio: trackWidth > 0 ? fillWidth / trackWidth : null,
+        trace: window.__safiIntroTrace
+      };
+    });
+    await page.screenshot({ path: resolve(artifactDir, "intro-progress-timeout.png"), fullPage: true });
+    await writeFile(resolve(artifactDir, "visual-debug.json"), JSON.stringify(state, null, 2) + "\\n");
+    throw new Error(`The intro progress bar did not reach 100% in Chromium: ${JSON.stringify(state)}; ${String(error)}`);
+  }
 
   const completedFrame = await page.evaluate(() => ({
     progressWidthRatio: window.__safiIntroTrace?.progressWidthRatio ?? 0
@@ -207,11 +180,11 @@ try {
   );
   await page.screenshot({ path: resolve(artifactDir, "intro-progress-100-percent.png"), fullPage: true });
 
-  await page.waitForFunction(
-    () => Boolean(window.__safiIntroTrace && window.__safiIntroTrace.introRemovedAt !== null),
-    undefined,
-    { timeout: 30_000 }
-  );
+  await page.waitForSelector(".safi-intro-splash", { state: "detached", timeout: 30_000 });
+  await page.evaluate(() => {
+    const trace = window.__safiIntroTrace;
+    if (trace) trace.introRemovedAt = performance.now();
+  });
 
   const finalTrace = await page.evaluate(() => ({ ...window.__safiIntroTrace }));
   const fullProgressHoldMs = finalTrace.introRemovedAt - finalTrace.progressFullAt;

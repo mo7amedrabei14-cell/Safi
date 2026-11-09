@@ -56,6 +56,8 @@ echo "[test-migrations] applying 0002 and P0.01 migration 0003"
     -f "$MIGRATIONS/0002_one_active_session_per_user.up.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0003_accounts_subscriptions_devices.up.sql" >/dev/null
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0004_auth_lookup_rls.up.sql" >/dev/null
 
 echo "[test-migrations] verifying account, token, device, plan, subscription, and webhook constraints"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
@@ -290,6 +292,17 @@ BEGIN
         RAISE EXCEPTION 'Credential rows leaked without app.user_id: saw % rows', row_count;
     END IF;
 
+    PERFORM set_config('app.auth_lookup', 'true', true);
+    SELECT count(*) INTO row_count FROM user_credentials;
+    IF row_count <> 2 THEN
+        RAISE EXCEPTION 'Trusted auth lookup could not read the credential records: saw % rows', row_count;
+    END IF;
+    PERFORM set_config('app.auth_lookup', 'false', true);
+    SELECT count(*) INTO row_count FROM user_credentials;
+    IF row_count <> 0 THEN
+        RAISE EXCEPTION 'Disabling auth lookup did not restore user isolation';
+    END IF;
+
     PERFORM set_config('app.workspace_id', '20000000-0000-7000-8000-000000000002', true);
     SELECT count(*) INTO row_count FROM devices;
     IF row_count <> 1 THEN
@@ -305,7 +318,9 @@ $$;
 COMMIT;
 SQL
 
-echo "[test-migrations] rolling back 0003, 0002, and 0001 in reverse order"
+echo "[test-migrations] rolling back 0004, 0003, 0002, and 0001 in reverse order"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0004_auth_lookup_rls.down.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0003_accounts_subscriptions_devices.down.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \

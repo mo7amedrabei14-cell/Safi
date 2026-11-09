@@ -249,7 +249,7 @@ echo "[test-migrations] verifying real RLS isolation as a non-owner, NOBYPASSRLS
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE ROLE safi_p0_01_app NOLOGIN NOBYPASSRLS;
 GRANT USAGE ON SCHEMA public TO safi_p0_01_app;
-GRANT SELECT ON memberships, devices, subscriptions, user_credentials TO safi_p0_01_app;
+GRANT SELECT, INSERT, UPDATE ON users, workspaces, memberships, sessions, devices, subscriptions, user_credentials, email_verification_tokens TO safi_p0_01_app;
 
 BEGIN;
 SET LOCAL ROLE safi_p0_01_app;
@@ -317,6 +317,9 @@ END
 $$;
 COMMIT;
 SQL
+
+echo "[test-migrations] exercising SQLx account registration, verification, and login under the restricted app role"
+SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test account_postgres -- --test-threads=1
 
 echo "[test-migrations] rolling back 0004, 0003, 0002, and 0001 in reverse order"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \

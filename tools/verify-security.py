@@ -194,7 +194,8 @@ def check_tasks_generated() -> list[str]:
     # separately numbered owner tasks (for example T0.00 and T0.05).
     handoff = handoff_path.read_text(encoding="utf-8")
     canonical_ids = {"T0.01"}
-    canonical_ids.update(re.findall(r"^\\|\\s*(T[1-6]\\.\\d{2})\\s*\\|", handoff, re.MULTILINE))
+    task_id_pattern = re.compile(r"^\|\s*(T[1-6]\.\d{2})\s*\|", re.MULTILINE)
+    canonical_ids.update(task_id_pattern.findall(handoff))
 
     expected_count = 110
     if len(canonical_ids) != expected_count:

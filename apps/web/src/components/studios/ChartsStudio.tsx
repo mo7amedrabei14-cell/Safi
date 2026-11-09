@@ -165,7 +165,11 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
   );
 
   const activePreset =
-    CHART_PRESETS.find((preset) => preset.id === activePresetId) ?? CHART_PRESETS[0]!;
+    CHART_PRESETS.find((preset) => preset.id === activePresetId) ??
+    CHART_PRESETS.find((preset) => preset.id === "governorates");
+  if (activePreset === undefined) {
+    throw new Error("At least one chart preset must be defined.");
+  }
   const chartTitle =
     customTitles?.[isAr ? "ar" : "en"] ?? (isAr ? activePreset.titleAr : activePreset.titleEn);
 

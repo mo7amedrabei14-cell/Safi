@@ -387,7 +387,10 @@ function translateCleaningText(value: string): string {
   const patterns: ReadonlyArray<readonly [RegExp, (m: RegExpMatchArray) => string]> = [
     [
       /^تم تحميل مجموعة بيانات «(.+)» بنجاح في الذاكرة المحلية\.$/,
-      (m) => 'Loaded dataset "' + (CLEANING_EN[m[1]!] ?? m[1]) + '" successfully into local memory.'
+      (m) => {
+        const label = m[1] ?? "";
+        return 'Loaded dataset "' + (CLEANING_EN[label] ?? label) + '" successfully into local memory.';
+      }
     ],
     [
       /^تم تأكيد نوع العمود «(.+)» وحفظه في ذاكرة التعلم\.$/,
@@ -395,7 +398,11 @@ function translateCleaningText(value: string): string {
     ],
     [
       /^تم تبديل نوع «(.+)» إلى (.+)\.$/,
-      (m) => 'Changed "' + m[1] + '" to ' + (CLEANING_EN[m[2]!] ?? m[2]) + "."
+      (m) => {
+        const label = m[1] ?? "";
+        const nextType = m[2] ?? "";
+        return 'Changed "' + label + '" to ' + (CLEANING_EN[nextType] ?? nextType) + ".";
+      }
     ],
     [
       /^⚡ طيار التنقية الذكي \(Prompt-Motion Auto-Pilot\): تم تفعيل جميع الفلاتر وتحييد الصيغ وإخفاء PII في 1\.2ms!$/,
@@ -411,8 +418,20 @@ function translateCleaningText(value: string): string {
       () => "Automatic data dictionary (U8) generated and exported."
     ],
     [/^(.+)% ثقة$/, (m) => m[1] + "% confidence"],
-    [/^النوع: (.+)$/, (m) => "Type: " + (CLEANING_EN[m[1]!] ?? m[1])],
-    [/^تبديل \((.+)\)$/, (m) => "Change (" + (CLEANING_EN[m[1]!] ?? m[1]) + ")"],
+    [
+      /^النوع: (.+)$/,
+      (m) => {
+        const type = m[1] ?? "";
+        return "Type: " + (CLEANING_EN[type] ?? type);
+      }
+    ],
+    [
+      /^تبديل \((.+)\)$/,
+      (m) => {
+        const type = m[1] ?? "";
+        return "Change (" + (CLEANING_EN[type] ?? type) + ")";
+      }
+    ],
     [/^(\d+) حقلًا شخصيًا$/, (m) => m[1] + " personal-data fields"],
     [/^⚠ خانة التحقق المتوقعة: (.+)$/, (m) => "⚠ Expected check digit: " + m[1]]
   ];

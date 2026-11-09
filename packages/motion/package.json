@@ -1,0 +1,17 @@
+{
+  "name": "@safi/motion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "gsap": "3.12.7",
+    "lenis": "1.2.3",
+    "react": "19.1.0"
+  }
+}

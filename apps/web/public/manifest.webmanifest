@@ -1,0 +1,16 @@
+{
+  "name": "صافي البيانات | SafiData",
+  "short_name": "صافي",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F9F7F7",
+  "theme_color": "#112D4E",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

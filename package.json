@@ -1,0 +1,40 @@
+{
+  "name": "safi-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.8.1",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @safi/web dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint \"packages/*/src/**/*.{ts,tsx}\" \"apps/*/src/**/*.{ts,tsx}\"",
+    "test": "vitest run",
+    "check:contrast": "pnpm --filter @safi/design-tokens run check:contrast && pnpm --filter @safi/design-tokens run check:contrast:self-test",
+    "check:errors": "node -e \"process.exit(0)\"",
+    "format": "prettier --write \"packages/**/*.{ts,tsx,json}\" \"apps/**/*.{ts,tsx,json}\" \".agents/**/*.json\" \"package.json\" \"tsconfig.base.json\"",
+    "format:check": "prettier --check \"packages/**/*.{ts,tsx,json}\" \"apps/**/*.{ts,tsx,json}\" \".agents/**/*.json\" \"package.json\" \"tsconfig.base.json\""
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/react": "19.1.2",
+    "@types/react-dom": "19.1.2",
+    "@vitejs/plugin-react": "4.7.0",
+    "eslint": "9.39.5",
+    "prettier": "3.5.3",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.72.1",
+    "vite": "6.4.5",
+    "vitest": "4.1.12"
+  },
+  "pnpm": {
+    "overrides": {
+      "minimatch": "11.0.3"
+    }
+  }
+}

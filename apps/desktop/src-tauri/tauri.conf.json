@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SafiData",
+  "version": "0.1.0",
+  "identifier": "app.safidata.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm -r --filter @safi/web run dev",
+    "beforeBuildCommand": "pnpm -r --filter @safi/web run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "appimage", "deb", "rpm"],
+    "fileAssociations": [
+      {
+        "ext": ["xlsx", "xls"],
+        "name": "SafiData spreadsheet",
+        "description": "Open an Excel workbook in SafiData",
+        "role": "Editor",
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      },
+      {
+        "ext": ["csv"],
+        "name": "SafiData CSV",
+        "description": "Open a CSV file in SafiData",
+        "role": "Editor",
+        "mimeType": "text/csv"
+      }
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["safi"]
+      }
+    }
+  }
+}

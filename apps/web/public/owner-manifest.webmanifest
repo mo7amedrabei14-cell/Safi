@@ -1,0 +1,17 @@
+{
+  "name": "لوحة تحكم مالك صافي | Safi Owner PWA",
+  "short_name": "صافي مالك",
+  "start_url": "/owner.html",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#0B7C8C",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

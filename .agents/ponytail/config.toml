@@ -1,0 +1,15 @@
+# Ponytail ADR & Session Persistence — SafiData v5.0 Gold Master (Section 20.1 #16)
+version = "5.0.0"
+source = "github.com/DietrichGebert/ponytail"
+project = "safi"
+
+[decisions]
+primary_adr_file = "docs/DECISIONS.md"
+owner_decisions_file = "OWNER_DECISIONS.md"
+require_adr_for_architecture_changes = true
+
+[sessions]
+sync_manifest = ".agents/ponytail/sync.json"
+tasks_dir = "docs/tasks"
+plans_dir = "docs/plans"
+reports_dir = "docs/reports"

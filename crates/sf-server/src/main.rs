@@ -8,8 +8,8 @@ use std::io;
 
 use axum::serve;
 use sqlx::postgres::PgPoolOptions;
-use tokio::net::TcpListener;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 
 use sf_server::auth::account::{
     AccountAuthService, SmtpVerificationEmailSender, SqlxAccountRepository,

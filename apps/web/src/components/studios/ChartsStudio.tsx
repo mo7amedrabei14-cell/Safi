@@ -283,7 +283,7 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
             dir="ltr"
             style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}
           >
-            Avg <CountUpMetric value={avgCompletion} suffix="%" /> • Peak {maxCompletion}%
+            {isAr ? "المتوسط" : "Avg"} <CountUpMetric value={avgCompletion} suffix="%" /> • {isAr ? "الذروة" : "Peak"} {maxCompletion}%
           </span>
         </div>
 
@@ -343,9 +343,9 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
           padding: "8px 4px"
         }}
       >
-        <span className="safi-eyebrow">استوديو الرسوم</span>
+        <span className="safi-eyebrow">{isAr ? "استوديو الرسوم" : "Chart Studio"}</span>
         <h1 id="safi-charts-title" className="safi-studio-title safi-rb-shiny-text">
-          الرسوم البيانية
+          {isAr ? "الرسوم البيانية" : "Charts"}
         </h1>
         <p className="safi-studio-lead">
           {isAr
@@ -442,7 +442,7 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
               htmlFor="safi-chart-title-input"
               style={{ margin: 0 }}
             >
-              عنوان المخطط
+              {isAr ? "عنوان المخطط" : "Chart title"}
             </label>
             <button
               type="button"
@@ -451,17 +451,23 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
               style={{ minHeight: "36px", padding: "4px 12px", fontSize: "12px" }}
             >
               <Download size={13} aria-hidden="true" />
-              تنزيل SVG
+              {isAr ? "تنزيل SVG" : "Download SVG"}
             </button>
           </div>
           <input
             id="safi-chart-title-input"
             className="safi-input"
-            value={titleAr}
-            onChange={(e) => setTitleAr(e.target.value)}
+            value={chartTitle}
+            onChange={(e) =>
+              setCustomTitles((current) => ({
+                ar: current?.ar ?? activePreset.titleAr,
+                en: current?.en ?? activePreset.titleEn,
+                [isAr ? "ar" : "en"]: e.target.value
+              }))
+            }
           />
 
-          <div className="safi-chip-row" role="group" aria-label="نوع المخطط">
+          <div className="safi-chip-row" role="group" aria-label={isAr ? "نوع المخطط" : "Chart type"}>
             {CHART_TYPES.map((type) => (
               <button
                 key={type}
@@ -470,21 +476,21 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
                 aria-pressed={type === chartType}
                 onClick={() => setChartType(type)}
               >
-                {CHART_TYPE_LABELS[type]}
+                {CHART_TYPE_LABELS[type][isAr ? "ar" : "en"]}
               </button>
             ))}
           </div>
 
           <img
             src={imageUri}
-            alt={titleAr}
+            alt={chartTitle}
             className="safi-chart-canvas"
             data-testid="safi-chart-image"
           />
 
           <p className="safi-hint">
-            <BarChart3 size={13} aria-hidden="true" /> المواصفة صالحة:{" "}
-            {validation.valid ? "نعم" : validation.errors.join(" · ")}
+            <BarChart3 size={13} aria-hidden="true" /> {isAr ? "المواصفة صالحة:" : "Valid specification:"}{" "}
+            {validation.valid ? (isAr ? "نعم" : "Yes") : validation.errors.join(" · ")}
           </p>
         </SpotlightCard>
 
@@ -498,7 +504,7 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
             }}
           >
             <h2 className="safi-card-title" style={{ margin: 0 }}>
-              تحرير بيانات المخطط مباشرةً
+              {isAr ? "تحرير بيانات المخطط مباشرةً" : "Edit chart data"}
             </h2>
             <button
               type="button"
@@ -507,7 +513,7 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
               }
               style={{ minHeight: "32px", padding: "4px 10px", fontSize: "11px" }}
             >
-              <Plus size={12} aria-hidden="true" /> إضافة صف
+              <Plus size={12} aria-hidden="true" /> {isAr ? "إضافة صف" : "Add row"}
             </button>
           </div>
 
@@ -532,7 +538,7 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
                     setRows(next);
                   }}
                   style={{ minHeight: "34px", padding: "4px 8px", fontSize: "12px" }}
-                  aria-label={`اسم المحافظة ${idx + 1}`}
+                  aria-label={isAr ? `اسم المحافظة ${idx + 1}` : `Region name ${idx + 1}`}
                 />
                 <input
                   type="number"
@@ -545,18 +551,18 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
                     setRows(next);
                   }}
                   style={{ minHeight: "34px", padding: "4px 8px", fontSize: "12px" }}
-                  aria-label={`نسبة الاكتمال ${idx + 1}`}
+                  aria-label={isAr ? `نسبة الاكتمال ${idx + 1}` : `Completion rate ${idx + 1}`}
                 />
               </div>
             ))}
           </div>
 
           <h2 className="safi-card-title">
-            <AlertTriangle size={16} aria-hidden="true" /> حارس المصداقية
+            <AlertTriangle size={16} aria-hidden="true" /> {isAr ? "حارس المصداقية" : "Credibility Guard"}
           </h2>
           {credibility.length === 0 ? (
             <p className="safi-status safi-status--ok">
-              <CheckCircle2 size={14} aria-hidden="true" /> لا توجد ملاحظات على هذا المخطط.
+              <CheckCircle2 size={14} aria-hidden="true" /> {isAr ? "لا توجد ملاحظات على هذا المخطط." : "No issues found in this chart."}
             </p>
           ) : (
             <ul className="safi-list">
@@ -570,13 +576,13 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
           )}
 
           <h2 className="safi-card-title" style={{ marginTop: "18px" }}>
-            <Eye size={16} aria-hidden="true" /> التوصيات الذكية
+            <Eye size={16} aria-hidden="true" /> {isAr ? "التوصيات الذكية" : "Smart recommendations"}
           </h2>
           <ul className="safi-list">
             {recommendations.map((recommendation) => (
               <li key={recommendation.type}>
-                <strong>{recommendation.titleAr}</strong>
-                <span className="safi-hint">{recommendation.reasonAr}</span>
+                <strong>{isAr ? recommendation.titleAr : recommendation.titleEn}</strong>
+                <span className="safi-hint">{isAr ? recommendation.reasonAr : recommendation.reasonEn}</span>
               </li>
             ))}
           </ul>
@@ -590,18 +596,18 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
           ) : (
             <XCircle size={16} aria-hidden="true" />
           )}
-          التحقق من تباين WCAG 2.2 AA
+          {isAr ? "التحقق من تباين WCAG 2.2 AA" : "WCAG 2.2 AA contrast audit"}
         </h2>
 
         <div className="safi-table-wrap">
           <table className="safi-table">
             <thead>
               <tr>
-                <th scope="col">اللون</th>
-                <th scope="col">الخلفية</th>
-                <th scope="col">النسبة</th>
-                <th scope="col">الحد المطلوب</th>
-                <th scope="col">الحالة</th>
+                <th scope="col">{isAr ? "اللون" : "Colour"}</th>
+                <th scope="col">{isAr ? "الخلفية" : "Background"}</th>
+                <th scope="col">{isAr ? "النسبة" : "Ratio"}</th>
+                <th scope="col">{isAr ? "الحد المطلوب" : "Minimum"}</th>
+                <th scope="col">{isAr ? "الحالة" : "Status"}</th>
               </tr>
             </thead>
             <tbody>

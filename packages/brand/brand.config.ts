@@ -4,7 +4,7 @@
  */
 export interface SafiBrandConfig {
   readonly internalName: "safi";
-  readonly displayName: "صافي البيانات | SafiData";
+  readonly displayName: "SafiData";
   readonly displayNameAr: "صافي البيانات";
   readonly displayNameEn: "SafiData";
   readonly deepLinkScheme: "safi";
@@ -13,7 +13,7 @@ export interface SafiBrandConfig {
 
 export const BRAND_CONFIG: SafiBrandConfig = {
   internalName: "safi",
-  displayName: "صافي البيانات | SafiData",
+  displayName: "SafiData",
   displayNameAr: "صافي البيانات",
   displayNameEn: "SafiData",
   deepLinkScheme: "safi",

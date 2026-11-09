@@ -15,6 +15,10 @@ export interface SafiIntroSplashProps {
   readonly onAnimationComplete?: (() => void) | undefined;
 }
 
+export const INTRO_START_PAUSE_MS = 1_000;
+export const INTRO_PROGRESS_DURATION_SECONDS = 2.25;
+export const INTRO_PROGRESS_COMPLETION_HOLD_SECONDS = 0.22;
+
 function canRunIntroTimeline(): boolean {
   if (
     typeof window === "undefined" ||
@@ -77,6 +81,8 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
 
     let cancelled = false;
     let fallbackTimer: number | undefined;
+    let startDelayTimer: number | undefined;
+    let startDelayResolve: (() => void) | null = null;
 
     const startTimeline = async (): Promise<void> => {
       try {
@@ -110,8 +116,21 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
         trendPath.style.strokeDashoffset = String(length);
       }
 
+      // Keep every part of the intro still for one full second after fonts are ready.
+      await new Promise<void>((resolve) => {
+        startDelayResolve = resolve;
+        startDelayTimer = window.setTimeout(resolve, INTRO_START_PAUSE_MS);
+      });
+      startDelayTimer = undefined;
+      startDelayResolve = null;
+
+      if (cancelled || finishedRef.current) {
+        return;
+      }
+
+      root.dataset.motionReady = "true";
+
       if (!canRunIntroTimeline()) {
-        root.dataset.motionReady = "true";
         if (progress !== null) {
           gsap.set(progress, { scaleX: 1 });
         }
@@ -125,7 +144,18 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
 
       const timeline = gsap.timeline({
         defaults: { ease: "power3.out" },
-        onComplete: finishOnce
+        onComplete: () => {
+          // Never hand off with a partially filled progress indicator.
+          if (progress !== null) {
+            gsap.set(progress, { scaleX: 1, transformOrigin: "right center" });
+          }
+          if (fallbackTimer !== undefined) {
+            window.clearTimeout(fallbackTimer);
+            fallbackTimer = undefined;
+          }
+          timelineRef.current = null;
+          finishOnce();
+        }
       });
       timelineRef.current = timeline;
 
@@ -149,7 +179,7 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
         timeline.fromTo(
           progress,
           { scaleX: 0, transformOrigin: "right center" },
-          { scaleX: 1, duration: 1.95, ease: "power1.inOut" },
+          { scaleX: 1, duration: INTRO_PROGRESS_DURATION_SECONDS, ease: "power2.inOut" },
           0
         );
       }
@@ -220,6 +250,9 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
         );
       }
 
+      // Let the fully filled bar remain visible briefly before the handoff.
+      timeline.to({}, { duration: INTRO_PROGRESS_COMPLETION_HOLD_SECONDS }, INTRO_PROGRESS_DURATION_SECONDS);
+
       fallbackTimer = window.setTimeout(() => {
         timeline.kill();
         timelineRef.current = null;
@@ -233,6 +266,10 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
       cancelled = true;
       if (fallbackTimer !== undefined) {
         window.clearTimeout(fallbackTimer);
+      }
+      if (startDelayTimer !== undefined) {
+        window.clearTimeout(startDelayTimer);
+        startDelayResolve?.();
       }
       timelineRef.current?.kill();
       timelineRef.current = null;

@@ -864,6 +864,18 @@ pre,
   animation: safiIntroFontWait 1.15s ease-in-out infinite alternate;
 }
 
+/* The first second is a deliberate, completely still composition. */
+.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-orb-ring,
+.safi-intro-splash:not([data-motion-ready="true"]) .safi-pm-logo-orbit {
+  animation: none !important;
+}
+
+.safi-intro-splash:not([data-motion-ready="true"]) .safi-intro-progress-fill {
+  width: 100%;
+  animation: none !important;
+  transform: scaleX(0);
+}
+
 .safi-intro-splash:not([data-motion-ready="true"]) [data-intro-dot],
 .safi-intro-splash:not([data-motion-ready="true"]) [data-intro-bar] {
   opacity: 0;

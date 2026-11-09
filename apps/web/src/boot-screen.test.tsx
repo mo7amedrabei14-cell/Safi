@@ -26,6 +26,12 @@ describe("SafiData first-paint introduction", () => {
     expect(bootCss).toContain(".safi-intro-copy");
     expect(bootCss).toContain(".safi-intro-progress-fill");
     expect(bootCss).toContain('data-fonts-ready="false"');
+    expect(bootCss).toContain(
+      '#safi-boot-screen[data-fonts-ready="false"] .safi-intro-progress-fill'
+    );
+    expect(bootCss).not.toContain(
+      '.safi-intro-splash[data-fonts-ready="false"] .safi-intro-progress-fill'
+    );
     expect(appCss).not.toContain(".safi-intro-splash {");
     expect(appCss.trimStart().startsWith("import ")).toBe(false);
     expect(appCss).not.toContain('describe("UI-Phase-5');

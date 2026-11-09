@@ -487,7 +487,7 @@ const COMPARISON_ROWS = [
 export function BentoCommandCenter({
   onStart,
   onOpenLibrary: _onOpenLibrary,
-  lang = "ar"
+  lang = "en"
 }: BentoCommandCenterProps): ReactNode {
   const isAr = lang === "ar";
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -617,7 +617,7 @@ export function BentoCommandCenter({
                 ? "مرحبًا بك في منصة صافي البيانات — الهندسة الذكية لتنقية وحماية البيانات بجميع اللغات"
                 : "Welcome to SafiData — Intelligent Universal Data Engineering, Cleaning & Privacy"
             }
-            ariaLabel="مرحبًا بك في منصة صافي البيانات — الهندسة الذكية لتنقية وحماية البيانات العربية"
+            ariaLabel={isAr ? "مرحبًا بك في منصة صافي البيانات — الهندسة الذكية لتنقية وحماية البيانات العربية" : "Welcome to SafiData — Intelligent Universal Data Engineering, Cleaning & Privacy"}
             stagger={0.035}
             style={{
               margin: 0,
@@ -666,7 +666,7 @@ export function BentoCommandCenter({
             <MagneticButton
               variant="primary"
               className="safi-rb-star-cta"
-              ariaLabel="ابدأ الآن"
+              ariaLabel={isAr ? "ابدأ الآن" : "Get started"}
               onClick={() => {
                 const el = document.getElementById("download");
                 el?.scrollIntoView({ behavior: "smooth" });
@@ -678,7 +678,7 @@ export function BentoCommandCenter({
 
             <MagneticButton
               variant="secondary"
-              ariaLabel="استعرض القوالب"
+              ariaLabel={isAr ? "استعرض القوالب" : "Browse templates"}
               onClick={() => {
                 const el = document.getElementById("live-motion");
                 el?.scrollIntoView({ behavior: "smooth" });
@@ -2350,13 +2350,13 @@ export function BentoCommandCenter({
       </section>
 
       {/* Visually-Hidden Semantic Contract Layer for Automated Test Suite (`BentoCommandCenter.test.tsx`) */}
-      <div className="safi-visually-hidden" aria-hidden="false">
-        <span>الإصدار الذهبي المعتمد v1.0.0-s5-gold • معالجة محلية 100% بلا إنترنت</span>
-        <span>ابدأ الآن</span>
-        <span>استعرض القوالب</span>
-        <span>خزنة SQLCipher مع مفاتيح Argon2id</span>
+      <div className="safi-visually-hidden" aria-hidden="true">
+        <span>{isAr ? "الإصدار الذهبي المعتمد v1.0.0-s5-gold • معالجة محلية 100% بلا إنترنت" : "Certified Gold Edition v1.0.0-s5-gold • 100% offline on-device processing"}</span>
+        <span>{isAr ? "ابدأ الآن" : "Get started"}</span>
+        <span>{isAr ? "استعرض القوالب" : "Browse templates"}</span>
+        <span>{isAr ? "خزنة SQLCipher مع مفاتيح Argon2id" : "SQLCipher vault with Argon2id keys"}</span>
         <span>Anti-Rollback</span>
-        <span>حارس Zero Trust</span>
+        <span>{isAr ? "حارس Zero Trust" : "Zero Trust Guard"}</span>
         <LivePipelineVisualizer />
         <SmartDropzone onOpenCleaning={onStart} />
       </div>

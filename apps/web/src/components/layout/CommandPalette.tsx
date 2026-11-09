@@ -58,7 +58,10 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   }
 ];
 
-export function filterCommands(items: readonly PaletteItem[], query: string): readonly PaletteItem[] {
+export function filterCommands(
+  items: readonly PaletteItem[],
+  query: string
+): readonly PaletteItem[] {
   const needle = normalizeText(query.trim()).toLowerCase();
   if (needle.length === 0) return items;
   return items.filter((item) =>
@@ -81,7 +84,12 @@ export interface CommandPaletteProps {
   readonly lang?: SafiLang;
 }
 
-export function CommandPalette({ open, onClose, onSelectTab, lang = "en" }: CommandPaletteProps): ReactNode {
+export function CommandPalette({
+  open,
+  onClose,
+  onSelectTab,
+  lang = "en"
+}: CommandPaletteProps): ReactNode {
   const isAr = lang === "ar";
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -90,11 +98,12 @@ export function CommandPalette({ open, onClose, onSelectTab, lang = "en" }: Comm
   const restoreFocusRef = useRef<Element | null>(null);
 
   const sourceItems = useMemo(
-    () => PALETTE_ITEMS.map((item) => ({
-      ...item,
-      label: isAr ? item.label : item.labelEn,
-      hint: isAr ? item.hint : item.hintEn
-    })),
+    () =>
+      PALETTE_ITEMS.map((item) => ({
+        ...item,
+        label: isAr ? item.label : item.labelEn,
+        hint: isAr ? item.hint : item.hintEn
+      })),
     [isAr]
   );
   const items = useMemo(() => filterCommands(sourceItems, query), [sourceItems, query]);
@@ -223,7 +232,9 @@ export function CommandPalette({ open, onClose, onSelectTab, lang = "en" }: Comm
                 }}
               >
                 <span className="safi-palette-option-label">
-                  {item.action === "security-audit" ? <ShieldCheck size={15} aria-hidden="true" /> : null}
+                  {item.action === "security-audit" ? (
+                    <ShieldCheck size={15} aria-hidden="true" />
+                  ) : null}
                   {item.label}
                 </span>
                 <span className="safi-palette-option-hint">{item.hint}</span>
@@ -249,7 +260,11 @@ export function CommandPalette({ open, onClose, onSelectTab, lang = "en" }: Comm
                     {check.passed ? "✓" : "✗"} {isAr ? check.labelAr : check.id}
                   </strong>
                   <span className="safi-hint">
-                    {isAr ? check.detailAr : (check.passed ? "Passed." : "Review this security check.")}
+                    {isAr
+                      ? check.detailAr
+                      : check.passed
+                        ? "Passed."
+                        : "Review this security check."}
                   </span>
                 </li>
               ))}

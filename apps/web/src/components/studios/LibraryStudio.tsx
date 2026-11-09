@@ -54,7 +54,7 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
         displayName: isAr ? template.nameAr : template.nameEn,
         displayDescription: isAr ? template.descriptionAr : template.descriptionEn,
         enabledSteps: RECIPE_STEPS.filter((step) => template.toggles[step.id]).map((step) =>
-          (isAr ? step.labelAr : step.labelEn)
+          isAr ? step.labelAr : step.labelEn
         ),
         digest: recipeDigest(template.nameAr, template.toggles),
         canonicalJson: canonicalRecipeJson(template.nameAr, template.toggles)
@@ -152,7 +152,11 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
           padding: "8px 4px"
         }}
       >
-        <span className="safi-eyebrow">{isAr ? "مكتبة القوالب وتقارير الجودة • القسمان 6.5 و15" : "Template library & quality reports • Sections 6.5 & 15"}</span>
+        <span className="safi-eyebrow">
+          {isAr
+            ? "مكتبة القوالب وتقارير الجودة • القسمان 6.5 و15"
+            : "Template library & quality reports • Sections 6.5 & 15"}
+        </span>
         <h1 id="safi-library-title" className="safi-studio-title safi-rb-shiny-text">
           {isAr ? "المكتبة" : "Library"}
         </h1>
@@ -165,7 +169,8 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
 
       {exported !== null && (
         <p className="safi-status safi-status--ok" role="status">
-          {isAr ? "✓ تم إنشاء ملف جديد بنجاح:" : "✓ File created successfully:"} <span className="safi-mono">{exported}</span>
+          {isAr ? "✓ تم إنشاء ملف جديد بنجاح:" : "✓ File created successfully:"}{" "}
+          <span className="safi-mono">{exported}</span>
         </p>
       )}
 
@@ -188,7 +193,9 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                     <Library size={16} aria-hidden="true" /> {template.displayName}
                   </h2>
                   {isPreviewed && (
-                    <span className="safi-badge safi-badge--accent">{isAr ? "قيد المعاينة" : "Previewing"}</span>
+                    <span className="safi-badge safi-badge--accent">
+                      {isAr ? "قيد المعاينة" : "Previewing"}
+                    </span>
                   )}
                 </div>
                 <p className="safi-hint">{template.displayDescription}</p>
@@ -201,7 +208,9 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                   ))}
                 </div>
 
-                <p className="safi-mini-label">{isAr ? "بصمة الوصفة (BLAKE3)" : "Recipe digest (BLAKE3)"}</p>
+                <p className="safi-mini-label">
+                  {isAr ? "بصمة الوصفة (BLAKE3)" : "Recipe digest (BLAKE3)"}
+                </p>
                 <p className="safi-mono safi-digest-line" dir="ltr">
                   {template.digest.slice(0, 24)}…
                 </p>
@@ -214,7 +223,9 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                         setExported(fileName);
                       }
                     }}
-                    ariaLabel={isAr ? `تنزيل وصفة ${template.nameAr}` : `Download ${template.nameEn} recipe`}
+                    ariaLabel={
+                      isAr ? `تنزيل وصفة ${template.nameAr}` : `Download ${template.nameEn} recipe`
+                    }
                   >
                     <Download size={16} aria-hidden="true" />
                     {isAr ? "تنزيل الوصفة" : "Download recipe"}
@@ -232,7 +243,11 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                         setExported(fileName);
                       }
                     }}
-                    ariaLabel={isAr ? `تصدير تقرير جودة ${template.nameAr}` : `Export ${template.nameEn} quality report`}
+                    ariaLabel={
+                      isAr
+                        ? `تصدير تقرير جودة ${template.nameAr}`
+                        : `Export ${template.nameEn} quality report`
+                    }
                   >
                     <FileText size={16} aria-hidden="true" />
                     {isAr ? "تقرير الجودة" : "Quality report"}
@@ -267,7 +282,9 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
           >
             <div>
               <h2 className="safi-card-title" style={{ marginBottom: "4px" }}>
-                <Eye size={16} aria-hidden="true" /> {isAr ? "معاينة القالب الحي:" : "Live template preview:"} {activePreview.displayName}
+                <Eye size={16} aria-hidden="true" />{" "}
+                {isAr ? "معاينة القالب الحي:" : "Live template preview:"}{" "}
+                {activePreview.displayName}
               </h2>
               <p className="safi-hint" style={{ margin: 0 }}>
                 {isAr
@@ -362,7 +379,8 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
 
       <SpotlightCard padding={24}>
         <h2 className="safi-card-title">
-          <ShieldCheck size={16} aria-hidden="true" /> {isAr ? "عن التوقيع الرقمي" : "About digital signatures"}
+          <ShieldCheck size={16} aria-hidden="true" />{" "}
+          {isAr ? "عن التوقيع الرقمي" : "About digital signatures"}
         </h2>
         <p className="safi-hint">
           {isAr

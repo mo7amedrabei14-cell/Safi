@@ -124,7 +124,10 @@ export function FloatingGlassDock({
 
   return (
     <header className="safi-topbar" dir={lang === "ar" ? "rtl" : "ltr"}>
-      <nav aria-label={lang === "ar" ? "التنقل الرئيسي" : "Main navigation"} className="safi-topbar-inner">
+      <nav
+        aria-label={lang === "ar" ? "التنقل الرئيسي" : "Main navigation"}
+        className="safi-topbar-inner"
+      >
         {/* 1. Open Unpinned Brand Emblem (Scrolls naturally with the page) */}
         <div className="safi-topbar-brand">
           <SafiPrismLogo size="sm" showTagline={false} lang={lang} />
@@ -198,7 +201,15 @@ export function FloatingGlassDock({
             type="button"
             onClick={handleToggleDayNight}
             className="safi-topbar-btn"
-            aria-label={lang === "ar" ? (isDark ? "الوضع النهاري" : "الوضع الليلي") : (isDark ? "Switch to daylight theme" : "Switch to midnight theme")}
+            aria-label={
+              lang === "ar"
+                ? isDark
+                  ? "الوضع النهاري"
+                  : "الوضع الليلي"
+                : isDark
+                  ? "Switch to daylight theme"
+                  : "Switch to midnight theme"
+            }
             style={{ minHeight: "44px", height: "38px" }}
           >
             {isDark ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}

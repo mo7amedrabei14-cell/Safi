@@ -107,7 +107,9 @@ export function DynamicStatusIsland({ lang = "en" }: { readonly lang?: SafiLang 
               fontSize: "12px"
             }}
           >
-            <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{isAr ? metric.labelAr : metric.label}</span>
+            <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>
+              {isAr ? metric.labelAr : metric.label}
+            </span>
             <span className="safi-mono" style={{ color: "var(--accent-primary)", fontWeight: 600 }}>
               {metric.value}
             </span>

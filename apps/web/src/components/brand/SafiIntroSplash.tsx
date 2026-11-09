@@ -296,7 +296,9 @@ export function SafiIntroSplash({
       className="safi-intro-splash"
       data-fonts-ready={fontsReady ? "true" : "false"}
       role="region"
-      aria-label={lang === "ar" ? "عرض إقلاع صافي البيانات السينمائي" : "SafiData cinematic startup"}
+      aria-label={
+        lang === "ar" ? "عرض إقلاع صافي البيانات السينمائي" : "SafiData cinematic startup"
+      }
       dir={lang === "ar" ? "rtl" : "ltr"}
     >
       <div className="safi-intro-stage">
@@ -308,7 +310,11 @@ export function SafiIntroSplash({
             height={168}
             viewBox="0 0 128 128"
             fill="none"
-            aria-label={lang === "ar" ? "حركة مصفوفة البيانات ومؤشر التحليل" : "Data matrix and analytics indicator animation"}
+            aria-label={
+              lang === "ar"
+                ? "حركة مصفوفة البيانات ومؤشر التحليل"
+                : "Data matrix and analytics indicator animation"
+            }
           >
             <g className="safi-pm-logo-orbit">
               <circle
@@ -367,8 +373,13 @@ export function SafiIntroSplash({
         </div>
 
         <div className="safi-intro-copy">
-          <h2 className="safi-intro-title" aria-label={lang === "ar" ? "صافي البيانات" : "SafiData"}>
-            <bdi dir={lang === "ar" ? "rtl" : "ltr"}>{lang === "ar" ? "صافي البيانات" : "SafiData"}</bdi>
+          <h2
+            className="safi-intro-title"
+            aria-label={lang === "ar" ? "صافي البيانات" : "SafiData"}
+          >
+            <bdi dir={lang === "ar" ? "rtl" : "ltr"}>
+              {lang === "ar" ? "صافي البيانات" : "SafiData"}
+            </bdi>
           </h2>
           <p className="safi-intro-tagline">
             {lang === "ar"

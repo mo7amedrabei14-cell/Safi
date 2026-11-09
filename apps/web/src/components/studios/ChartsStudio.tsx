@@ -164,8 +164,10 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
     SAMPLE_CHART_DATA.map((r) => ({ ...r }))
   );
 
-  const activePreset = CHART_PRESETS.find((preset) => preset.id === activePresetId) ?? CHART_PRESETS[0]!;
-  const chartTitle = customTitles?.[isAr ? "ar" : "en"] ?? (isAr ? activePreset.titleAr : activePreset.titleEn);
+  const activePreset =
+    CHART_PRESETS.find((preset) => preset.id === activePresetId) ?? CHART_PRESETS[0]!;
+  const chartTitle =
+    customTitles?.[isAr ? "ar" : "en"] ?? (isAr ? activePreset.titleAr : activePreset.titleEn);
 
   const effectiveRenderType: ChartType =
     chartType === "area" || chartType === "scatter"
@@ -295,7 +297,8 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
             dir="ltr"
             style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}
           >
-            {isAr ? "المتوسط" : "Avg"} <CountUpMetric value={avgCompletion} suffix="%" /> • {isAr ? "الذروة" : "Peak"} {maxCompletion}%
+            {isAr ? "المتوسط" : "Avg"} <CountUpMetric value={avgCompletion} suffix="%" /> •{" "}
+            {isAr ? "الذروة" : "Peak"} {maxCompletion}%
           </span>
         </div>
 
@@ -479,7 +482,11 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
             }
           />
 
-          <div className="safi-chip-row" role="group" aria-label={isAr ? "نوع المخطط" : "Chart type"}>
+          <div
+            className="safi-chip-row"
+            role="group"
+            aria-label={isAr ? "نوع المخطط" : "Chart type"}
+          >
             {CHART_TYPES.map((type) => (
               <button
                 key={type}
@@ -501,9 +508,12 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
           />
 
           <p className="safi-hint">
-            <BarChart3 size={13} aria-hidden="true" /> {isAr ? "المواصفة صالحة:" : "Valid specification:"}{" "}
+            <BarChart3 size={13} aria-hidden="true" />{" "}
+            {isAr ? "المواصفة صالحة:" : "Valid specification:"}{" "}
             {validation.valid
-              ? (isAr ? "نعم" : "Yes")
+              ? isAr
+                ? "نعم"
+                : "Yes"
               : validation.errors
                   .map((error) => {
                     if (isAr) return error;
@@ -530,7 +540,13 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
             <button
               type="button"
               onClick={() =>
-                setRows([...rows, { region: isAr ? `محافظة ${rows.length + 1}` : `Region ${rows.length + 1}`, completion: 80 }])
+                setRows([
+                  ...rows,
+                  {
+                    region: isAr ? `محافظة ${rows.length + 1}` : `Region ${rows.length + 1}`,
+                    completion: 80
+                  }
+                ])
               }
               style={{ minHeight: "32px", padding: "4px 10px", fontSize: "11px" }}
             >
@@ -579,31 +595,39 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
           </div>
 
           <h2 className="safi-card-title">
-            <AlertTriangle size={16} aria-hidden="true" /> {isAr ? "حارس المصداقية" : "Credibility Guard"}
+            <AlertTriangle size={16} aria-hidden="true" />{" "}
+            {isAr ? "حارس المصداقية" : "Credibility Guard"}
           </h2>
           {credibility.length === 0 ? (
             <p className="safi-status safi-status--ok">
-              <CheckCircle2 size={14} aria-hidden="true" /> {isAr ? "لا توجد ملاحظات على هذا المخطط." : "No issues found in this chart."}
+              <CheckCircle2 size={14} aria-hidden="true" />{" "}
+              {isAr ? "لا توجد ملاحظات على هذا المخطط." : "No issues found in this chart."}
             </p>
           ) : (
             <ul className="safi-list">
               {credibility.map((warning) => (
                 <li key={warning.code} data-credibility-code={warning.code}>
-                  <strong className="safi-mono">{warning.code}</strong> — {isAr ? warning.messageAr : warning.messageEn}
-                  <span className="safi-hint">{isAr ? warning.suggestionAr : warning.suggestionEn}</span>
+                  <strong className="safi-mono">{warning.code}</strong> —{" "}
+                  {isAr ? warning.messageAr : warning.messageEn}
+                  <span className="safi-hint">
+                    {isAr ? warning.suggestionAr : warning.suggestionEn}
+                  </span>
                 </li>
               ))}
             </ul>
           )}
 
           <h2 className="safi-card-title" style={{ marginTop: "18px" }}>
-            <Eye size={16} aria-hidden="true" /> {isAr ? "التوصيات الذكية" : "Smart recommendations"}
+            <Eye size={16} aria-hidden="true" />{" "}
+            {isAr ? "التوصيات الذكية" : "Smart recommendations"}
           </h2>
           <ul className="safi-list">
             {recommendations.map((recommendation) => (
               <li key={recommendation.type}>
                 <strong>{isAr ? recommendation.titleAr : recommendation.titleEn}</strong>
-                <span className="safi-hint">{isAr ? recommendation.reasonAr : recommendation.reasonEn}</span>
+                <span className="safi-hint">
+                  {isAr ? recommendation.reasonAr : recommendation.reasonEn}
+                </span>
               </li>
             ))}
           </ul>
@@ -657,9 +681,13 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
                   </td>
                   <td>
                     {row.ratio >= row.minimum ? (
-                      <span className="safi-status safi-status--ok">{isAr ? "✓ يجتاز" : "✓ Pass"}</span>
+                      <span className="safi-status safi-status--ok">
+                        {isAr ? "✓ يجتاز" : "✓ Pass"}
+                      </span>
                     ) : (
-                      <span className="safi-status safi-status--bad">{isAr ? "✗ يرسب" : "✗ Fail"}</span>
+                      <span className="safi-status safi-status--bad">
+                        {isAr ? "✗ يرسب" : "✗ Fail"}
+                      </span>
                     )}
                   </td>
                 </tr>

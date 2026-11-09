@@ -20,13 +20,55 @@ export interface RecipeStepDefinition {
 
 /** Canonical order: the digest depends on it, so it is never sorted at runtime. */
 export const RECIPE_STEPS: readonly RecipeStepDefinition[] = [
-  { id: "unifyAlif", labelAr: "توحيد الألف", labelEn: "Normalize Alif", detailAr: "أ إ آ ٱ ← ا", detailEn: "أ / إ / آ / ٱ → ا" },
-  { id: "unifyYa", labelAr: "توحيد الياء", labelEn: "Normalize Ya", detailAr: "ى ← ي", detailEn: "ى → ي" },
-  { id: "unifyHa", labelAr: "توحيد التاء المربوطة", labelEn: "Normalize Taa Marbuta", detailAr: "ة ← ه", detailEn: "ة → ه" },
-  { id: "removeTatweel", labelAr: "إزالة التطويل", labelEn: "Remove Tatweel", detailAr: "حذف ـ الكاشيدة", detailEn: "Remove the kashida elongation mark" },
-  { id: "removeDiacritics", labelAr: "إزالة التشكيل", labelEn: "Remove Diacritics", detailAr: "حذف الفتحات والضمات والتنوين", detailEn: "Remove Arabic vowel marks and tanween" },
-  { id: "normalizeDigits", labelAr: "توحيد الأرقام", labelEn: "Normalize Digits", detailAr: "٠-٩ و۰-۹ ← 0-9", detailEn: "٠-٩ and ۰-۹ → 0-9" },
-  { id: "joinCompoundNames", labelAr: "وصل الأسماء المركبة", labelEn: "Join Compound Names", detailAr: "عبد الله ← عبدالله", detailEn: "عبد الله → عبدالله" },
+  {
+    id: "unifyAlif",
+    labelAr: "توحيد الألف",
+    labelEn: "Normalize Alif",
+    detailAr: "أ إ آ ٱ ← ا",
+    detailEn: "أ / إ / آ / ٱ → ا"
+  },
+  {
+    id: "unifyYa",
+    labelAr: "توحيد الياء",
+    labelEn: "Normalize Ya",
+    detailAr: "ى ← ي",
+    detailEn: "ى → ي"
+  },
+  {
+    id: "unifyHa",
+    labelAr: "توحيد التاء المربوطة",
+    labelEn: "Normalize Taa Marbuta",
+    detailAr: "ة ← ه",
+    detailEn: "ة → ه"
+  },
+  {
+    id: "removeTatweel",
+    labelAr: "إزالة التطويل",
+    labelEn: "Remove Tatweel",
+    detailAr: "حذف ـ الكاشيدة",
+    detailEn: "Remove the kashida elongation mark"
+  },
+  {
+    id: "removeDiacritics",
+    labelAr: "إزالة التشكيل",
+    labelEn: "Remove Diacritics",
+    detailAr: "حذف الفتحات والضمات والتنوين",
+    detailEn: "Remove Arabic vowel marks and tanween"
+  },
+  {
+    id: "normalizeDigits",
+    labelAr: "توحيد الأرقام",
+    labelEn: "Normalize Digits",
+    detailAr: "٠-٩ و۰-۹ ← 0-9",
+    detailEn: "٠-٩ and ۰-۹ → 0-9"
+  },
+  {
+    id: "joinCompoundNames",
+    labelAr: "وصل الأسماء المركبة",
+    labelEn: "Join Compound Names",
+    detailAr: "عبد الله ← عبدالله",
+    detailEn: "عبد الله → عبدالله"
+  },
   {
     id: "cleanWhitespace",
     labelAr: "تنظيف المسافات",
@@ -34,7 +76,13 @@ export const RECIPE_STEPS: readonly RecipeStepDefinition[] = [
     detailAr: "حذف المحارف غير المرئية والمسافات المكررة",
     detailEn: "Remove invisible characters and repeated whitespace"
   },
-  { id: "removeTitles", labelAr: "إزالة الألقاب", labelEn: "Remove Titles", detailAr: "د. م. أ. الأستاذ دكتور", detailEn: "Remove common professional and academic titles" }
+  {
+    id: "removeTitles",
+    labelAr: "إزالة الألقاب",
+    labelEn: "Remove Titles",
+    detailAr: "د. م. أ. الأستاذ دكتور",
+    detailEn: "Remove common professional and academic titles"
+  }
 ];
 
 export type RecipeToggles = Readonly<Record<RecipeStepId, boolean>>;
@@ -93,7 +141,12 @@ export function enabledStepCount(toggles: RecipeToggles): number {
 
 export type WatchFolderValidation =
   | { readonly ok: true; readonly normalized: string }
-  | { readonly ok: false; readonly code: "SF-EXP-001"; readonly messageAr: string; readonly messageEn: string };
+  | {
+      readonly ok: false;
+      readonly code: "SF-EXP-001";
+      readonly messageAr: string;
+      readonly messageEn: string;
+    };
 
 const ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\/)/;
 
@@ -112,7 +165,12 @@ export function validateWatchFolder(raw: string): WatchFolderValidation {
     };
   }
   if (trimmed.includes("\u0000")) {
-    return { ok: false, code: "SF-EXP-001", messageAr: "مسار المجلد يحتوي محرفًا غير صالح.", messageEn: "The folder path contains an invalid character." };
+    return {
+      ok: false,
+      code: "SF-EXP-001",
+      messageAr: "مسار المجلد يحتوي محرفًا غير صالح.",
+      messageEn: "The folder path contains an invalid character."
+    };
   }
   if (!ABSOLUTE_PATH.test(trimmed)) {
     return {
@@ -153,7 +211,8 @@ export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
     nameAr: "تنقية أسماء العملاء",
     nameEn: "Clean Customer Names",
     descriptionAr: "توحيد الألف والتاء المربوطة، إزالة اللقب، ووصل الأسماء المركبة قبل المطابقة.",
-    descriptionEn: "Normalize Arabic letter variants, remove titles, and join compound names before matching.",
+    descriptionEn:
+      "Normalize Arabic letter variants, remove titles, and join compound names before matching.",
     toggles: {
       ...DEFAULT_RECIPE_TOGGLES,
       unifyHa: true,
@@ -180,7 +239,8 @@ export const RECIPE_TEMPLATES: readonly RecipeTemplate[] = [
     nameAr: "تقارير المدارس",
     nameEn: "School Reports",
     descriptionAr: "تنظيف أسماء الطلاب مع إبقاء التشكيل عند الحاجة لإظهار الاسم كما ورد.",
-    descriptionEn: "Clean student names while preserving diacritics when the original spelling matters.",
+    descriptionEn:
+      "Clean student names while preserving diacritics when the original spelling matters.",
     toggles: {
       ...DEFAULT_RECIPE_TOGGLES,
       removeDiacritics: false,

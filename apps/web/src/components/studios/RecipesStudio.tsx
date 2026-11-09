@@ -198,7 +198,9 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
           padding: "8px 4px"
         }}
       >
-        <span className="safi-eyebrow">{isAr ? "محرك الوصفات الحتمية" : "Deterministic Recipe Engine"}</span>
+        <span className="safi-eyebrow">
+          {isAr ? "محرك الوصفات الحتمية" : "Deterministic Recipe Engine"}
+        </span>
         <h1 id="safi-recipes-title" className="safi-studio-title safi-rb-shiny-text">
           {isAr ? "الوصفات" : "Recipes"}
         </h1>
@@ -252,8 +254,13 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
                   fontWeight: 700,
                   cursor: "pointer",
                   border:
-                    name === (isAr ? tpl.nameAr : tpl.nameEn) ? "1px solid #60A5FA" : "1px solid rgba(255,255,255,0.16)",
-                  background: name === (isAr ? tpl.nameAr : tpl.nameEn) ? "#2563EB" : "rgba(255,255,255,0.06)",
+                    name === (isAr ? tpl.nameAr : tpl.nameEn)
+                      ? "1px solid #60A5FA"
+                      : "1px solid rgba(255,255,255,0.16)",
+                  background:
+                    name === (isAr ? tpl.nameAr : tpl.nameEn)
+                      ? "#2563EB"
+                      : "rgba(255,255,255,0.06)",
                   color: "#F8FAFC"
                 }}
               >
@@ -346,7 +353,9 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
 
           <fieldset className="safi-fieldset">
             <legend className="safi-field-label">
-              {isAr ? "خطوات التنظيف (مع أزرار نقل لأعلى/لأسفل كبديل للسحب 2.5.7)" : "Cleaning steps (with Up/Down controls as a drag alternative)"}
+              {isAr
+                ? "خطوات التنظيف (مع أزرار نقل لأعلى/لأسفل كبديل للسحب 2.5.7)"
+                : "Cleaning steps (with Up/Down controls as a drag alternative)"}
             </legend>
             {orderedSteps.map((step, idx) => (
               <div
@@ -372,7 +381,9 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
                   />
                   <span>
                     <span className="safi-toggle-label">{isAr ? step.labelAr : step.labelEn}</span>
-                    <span className="safi-toggle-detail">{isAr ? step.detailAr : step.detailEn}</span>
+                    <span className="safi-toggle-detail">
+                      {isAr ? step.detailAr : step.detailEn}
+                    </span>
                   </span>
                 </label>
 
@@ -403,7 +414,8 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
 
         <SpotlightCard padding={24}>
           <h2 className="safi-card-title">
-            <FileCode2 size={16} aria-hidden="true" /> {isAr ? "الوصفة القانونية" : "Canonical recipe"}
+            <FileCode2 size={16} aria-hidden="true" />{" "}
+            {isAr ? "الوصفة القانونية" : "Canonical recipe"}
           </h2>
           <p className="safi-hint" data-testid="safi-recipe-stats">
             {isAr ? "خطوات مفعّلة" : "Enabled steps"}: {enabled} / {RECIPE_STEPS.length}
@@ -412,7 +424,9 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
             {canonicalJson}
           </pre>
 
-          <span className="safi-mini-label">{isAr ? "بصمة BLAKE3 للوصفة" : "Recipe BLAKE3 digest"}</span>
+          <span className="safi-mini-label">
+            {isAr ? "بصمة BLAKE3 للوصفة" : "Recipe BLAKE3 digest"}
+          </span>
           <p className="safi-digest-line">
             <DecryptedMonoText value={digest} />
           </p>
@@ -437,7 +451,8 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
           >
             {folderCheck.ok ? (
               <>
-                <CheckCircle2 size={14} aria-hidden="true" /> {isAr ? "مسار مطلق صالح:" : "Valid absolute path:"}{" "}
+                <CheckCircle2 size={14} aria-hidden="true" />{" "}
+                {isAr ? "مسار مطلق صالح:" : "Valid absolute path:"}{" "}
                 <span className="safi-mono">{folderCheck.normalized}</span>
               </>
             ) : (
@@ -469,7 +484,8 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
 
           {exported !== null && (
             <p className="safi-hint" role="status">
-              {isAr ? "تم إنشاء ملف جديد:" : "New file created:"} <span className="safi-mono">{exported}</span>
+              {isAr ? "تم إنشاء ملف جديد:" : "New file created:"}{" "}
+              <span className="safi-mono">{exported}</span>
             </p>
           )}
 
@@ -482,7 +498,11 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
         </SpotlightCard>
       </div>
 
-      <GraphifyLineageCanvas titleAr="مخطط Graphify التفاعلي لمسار تنفيذ الوصفة الحتمية (DAG)" titleEn="Interactive Graphify deterministic recipe pipeline (DAG)" lang={lang} />
+      <GraphifyLineageCanvas
+        titleAr="مخطط Graphify التفاعلي لمسار تنفيذ الوصفة الحتمية (DAG)"
+        titleEn="Interactive Graphify deterministic recipe pipeline (DAG)"
+        lang={lang}
+      />
     </section>
   );
 }

@@ -27,7 +27,8 @@ export function checkChartCredibility(spec: {
         code: "SF-CHT-006",
         messageAr: "مخطط الأعمدة يبدأ بمحور صادي أعلى من الصفر، مما قد يوحي بفروق مبالغ فيها.",
         suggestionAr: "نفضل بدء محور صادي من الصفر لضمان التمثيل البصري العادل.",
-        messageEn: "The bar chart starts its value axis above zero, which may exaggerate differences.",
+        messageEn:
+          "The bar chart starts its value axis above zero, which may exaggerate differences.",
         suggestionEn: "Start the value axis at zero to preserve a fair visual comparison."
       });
     }

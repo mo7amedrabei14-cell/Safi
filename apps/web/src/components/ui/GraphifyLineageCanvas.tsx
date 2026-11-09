@@ -115,13 +115,39 @@ export function GraphifyLineageCanvas({
 }: GraphifyLineageCanvasProps): ReactNode {
   const isAr = lang === "ar";
   const title = isAr ? titleAr : titleEn;
-  const englishNodes: Readonly<Record<string, { title: string; subtitle: string; detail: string }>> = {
-    "src-raw": { title: "Raw customer file (CSV)", subtitle: "4 columns • unnormalized text", detail: "The original source is never modified (Rule 13). It is read in isolated memory." },
-    "src-nid": { title: "National ID and phone columns", subtitle: "14 digits + Arabic-Indic numerals", detail: "Contains sensitive personal information (PII) and Arabic-Indic digits." },
-    "tr-arabic": { title: "Arabic normalization (sf-arabic)", subtitle: "Normalize Alif and Ya; remove Tatweel", detail: "Deterministically normalizes Alif variants, Taa Marbuta, and Arabic-Indic digits." },
-    "tr-pii": { title: "BLAKE3 masking and governorate validation", subtitle: "Extract governorate and date of birth", detail: "Validates the Egyptian national ID checksum and generates a salted BLAKE3 token." },
-    "out-clean": { title: "Clean table + atomic fsync write", subtitle: "A11 formula-injection protection", detail: "Written as a new file with a change log and CSV/Excel formula-injection protection." },
-    "out-chart": { title: "Governorate chart and Typst PDF report", subtitle: "WCAG 2.2 AA contrast ≥ 3.0:1", detail: "Data lineage maps every chart column directly to cleaned source cells." }
+  const englishNodes: Readonly<
+    Record<string, { title: string; subtitle: string; detail: string }>
+  > = {
+    "src-raw": {
+      title: "Raw customer file (CSV)",
+      subtitle: "4 columns • unnormalized text",
+      detail: "The original source is never modified (Rule 13). It is read in isolated memory."
+    },
+    "src-nid": {
+      title: "National ID and phone columns",
+      subtitle: "14 digits + Arabic-Indic numerals",
+      detail: "Contains sensitive personal information (PII) and Arabic-Indic digits."
+    },
+    "tr-arabic": {
+      title: "Arabic normalization (sf-arabic)",
+      subtitle: "Normalize Alif and Ya; remove Tatweel",
+      detail: "Deterministically normalizes Alif variants, Taa Marbuta, and Arabic-Indic digits."
+    },
+    "tr-pii": {
+      title: "BLAKE3 masking and governorate validation",
+      subtitle: "Extract governorate and date of birth",
+      detail: "Validates the Egyptian national ID checksum and generates a salted BLAKE3 token."
+    },
+    "out-clean": {
+      title: "Clean table + atomic fsync write",
+      subtitle: "A11 formula-injection protection",
+      detail: "Written as a new file with a change log and CSV/Excel formula-injection protection."
+    },
+    "out-chart": {
+      title: "Governorate chart and Typst PDF report",
+      subtitle: "WCAG 2.2 AA contrast ≥ 3.0:1",
+      detail: "Data lineage maps every chart column directly to cleaned source cells."
+    }
   };
   const englishKinds: Readonly<Record<GraphifyNode["kind"], string>> = {
     source: "Source",
@@ -278,8 +304,15 @@ export function GraphifyLineageCanvas({
           }}
         >
           <div>
-            <strong style={{ color: "var(--text-primary)" }}>{isAr ? selectedNode.titleAr : (englishNodes[selectedNode.id]?.title ?? selectedNode.id)}: </strong>
-            <span style={{ color: "var(--text-secondary)" }}>{isAr ? selectedNode.detailAr : (englishNodes[selectedNode.id]?.detail ?? "")}</span>
+            <strong style={{ color: "var(--text-primary)" }}>
+              {isAr
+                ? selectedNode.titleAr
+                : (englishNodes[selectedNode.id]?.title ?? selectedNode.id)}
+              :{" "}
+            </strong>
+            <span style={{ color: "var(--text-secondary)" }}>
+              {isAr ? selectedNode.detailAr : (englishNodes[selectedNode.id]?.detail ?? "")}
+            </span>
           </div>
           <span
             className="safi-mono"

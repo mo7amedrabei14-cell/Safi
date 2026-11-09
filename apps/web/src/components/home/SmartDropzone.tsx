@@ -21,7 +21,12 @@ export interface FileLike {
 
 export type ImportInspection =
   | { readonly ok: true; readonly kind: "csv" | "xlsx"; readonly fileName: string }
-  | { readonly ok: false; readonly code: string; readonly message: string; readonly messageEn: string };
+  | {
+      readonly ok: false;
+      readonly code: string;
+      readonly message: string;
+      readonly messageEn: string;
+    };
 
 export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 export const WARN_FILE_BYTES = 50 * 1024 * 1024;
@@ -67,7 +72,8 @@ export function inspectImportFile(file: FileLike): ImportInspection {
       ok: false,
       code: "SF-IMP-003",
       message: "SF-IMP-003 · الملف أكبر من الحد الآمن على المتصفح (50MB). استخدم نسخة سطح المكتب.",
-      messageEn: "SF-IMP-003 · The file exceeds the browser safety limit (50 MB). Use the desktop app."
+      messageEn:
+        "SF-IMP-003 · The file exceeds the browser safety limit (50 MB). Use the desktop app."
     };
   }
 
@@ -157,7 +163,9 @@ export function SmartDropzone({ onOpenCleaning, lang = "en" }: SmartDropzoneProp
         rows: 120,
         cols: 6,
         piiCount: 4,
-        previewLine: isAr ? "ملف جدول بيانات XLSX جاهز للتحليل المحلي" : "XLSX spreadsheet ready for local analysis"
+        previewLine: isAr
+          ? "ملف جدول بيانات XLSX جاهز للتحليل المحلي"
+          : "XLSX spreadsheet ready for local analysis"
       });
     } else {
       setSummary(null);
@@ -176,7 +184,10 @@ export function SmartDropzone({ onOpenCleaning, lang = "en" }: SmartDropzoneProp
   };
 
   return (
-    <div dir={isAr ? "rtl" : "ltr"} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+    <div
+      dir={isAr ? "rtl" : "ltr"}
+      style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+    >
       <div
         style={{
           display: "flex",
@@ -185,7 +196,9 @@ export function SmartDropzone({ onOpenCleaning, lang = "en" }: SmartDropzoneProp
           gap: "8px"
         }}
       >
-        <h2 style={{ fontSize: "16px", fontWeight: 600 }}>{isAr ? "استيراد ذكي وفحص فوري" : "Smart import & instant inspection"}</h2>
+        <h2 style={{ fontSize: "16px", fontWeight: 600 }}>
+          {isAr ? "استيراد ذكي وفحص فوري" : "Smart import & instant inspection"}
+        </h2>
         <span style={{ fontSize: "11px", color: "var(--accent-primary)", fontWeight: 600 }}>
           DQNamo WASM Ready
         </span>
@@ -254,7 +267,9 @@ export function SmartDropzone({ onOpenCleaning, lang = "en" }: SmartDropzoneProp
       </div>
 
       <p style={{ margin: 0, fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.6 }}>
-        {isAr ? "فحص Zip Bomb وكشف الترميز العربي (UTF-8 / Windows-1256) قبل القراءة — الملف لا يغادر جهازك." : "ZIP-bomb checks and encoding detection (UTF-8 / Windows-1256) run before parsing. Your file stays on this device."}
+        {isAr
+          ? "فحص Zip Bomb وكشف الترميز العربي (UTF-8 / Windows-1256) قبل القراءة — الملف لا يغادر جهازك."
+          : "ZIP-bomb checks and encoding detection (UTF-8 / Windows-1256) run before parsing. Your file stays on this device."}
       </p>
 
       {inspection !== null ? (
@@ -285,7 +300,13 @@ export function SmartDropzone({ onOpenCleaning, lang = "en" }: SmartDropzoneProp
             ) : (
               <FileSpreadsheet size={14} aria-hidden="true" />
             )}
-            {inspection.ok ? (isAr ? `جاهز للفحص: ${inspection.fileName}` : `Ready to inspect: ${inspection.fileName}`) : (isAr ? inspection.message : inspection.messageEn)}
+            {inspection.ok
+              ? isAr
+                ? `جاهز للفحص: ${inspection.fileName}`
+                : `Ready to inspect: ${inspection.fileName}`
+              : isAr
+                ? inspection.message
+                : inspection.messageEn}
           </div>
 
           {inspection.ok && summary !== null ? (
@@ -300,9 +321,15 @@ export function SmartDropzone({ onOpenCleaning, lang = "en" }: SmartDropzoneProp
             >
               <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
                 {isAr ? (
-                  <>تم استخراج <strong>{summary.rows}</strong> صفوف و<strong>{summary.cols}</strong> أعمدة • <strong>{summary.piiCount}</strong> حقول شخصية PII</>
+                  <>
+                    تم استخراج <strong>{summary.rows}</strong> صفوف و<strong>{summary.cols}</strong>{" "}
+                    أعمدة • <strong>{summary.piiCount}</strong> حقول شخصية PII
+                  </>
                 ) : (
-                  <>Detected <strong>{summary.rows}</strong> rows, <strong>{summary.cols}</strong> columns, and <strong>{summary.piiCount}</strong> PII fields</>
+                  <>
+                    Detected <strong>{summary.rows}</strong> rows, <strong>{summary.cols}</strong>{" "}
+                    columns, and <strong>{summary.piiCount}</strong> PII fields
+                  </>
                 )}
               </span>
               {onOpenCleaning !== undefined ? (

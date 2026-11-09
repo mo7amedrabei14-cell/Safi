@@ -217,82 +217,167 @@ const DATASET_PRESETS: ReadonlyArray<{
   }
 ];
 
-
 const CLEANING_EN: Readonly<Record<string, string>> = {
-  "الاسم الكامل": "Full name", "نص عربي (Text)": "Arabic text", "اسم مركب": "Compound name",
-  "الرقم القومي": "National ID", "رقم قومي مصري (14 رقمًا)": "Egyptian national ID (14 digits)",
-  "معرّف نصي": "Text identifier", "تاريخ الصرف": "Payment date", "تاريخ (ISO Date)": "Date (ISO)",
-  "تاريخ هجري": "Hijri date", "المبلغ (ج.م)": "Amount (EGP)", "مبلغ مالي (Decimal)": "Monetary amount (decimal)",
-  "رقم صحيح": "Integer", "رقم الهاتف": "Phone number", "هاتف محمول (Phone)": "Mobile phone", "نص": "Text",
-  "القيمة (0) في عمود «المبلغ (ج.م)» بالصف 3: هل تعني صفرًا فعليًا أم «لم يستلم / فارغ»؟": "The value (0) in Amount (EGP), row 3: does it mean a real zero or “not received / blank”?",
-  "الصف 4 مكرر بالكامل مع الصف 1: هل ترغب في دمج السجلات المتطابقة؟": "Row 4 is an exact duplicate of row 1. Would you like to merge the matching records?",
-  "الخلية الأولى في الصف 5 تبدأ بعلامة صيغة (=HYPERLINK): سيتم تحييدها تلقائيًا لحمايتك (A11).": "The first cell in row 5 starts with a formula (=HYPERLINK). It will be neutralized automatically for your protection (A11).",
-  "سجل العملاء والمرتبات": "Payroll & Clients Ledger", "المدفوعات والتجارة العالمية": "Global E-Commerce Payments",
-  "السجل الطبي المشفّر": "Encrypted Clinical Registry", "0 معناها لم يستلم": "0 means not received",
+  "الاسم الكامل": "Full name",
+  "نص عربي (Text)": "Arabic text",
+  "اسم مركب": "Compound name",
+  "الرقم القومي": "National ID",
+  "رقم قومي مصري (14 رقمًا)": "Egyptian national ID (14 digits)",
+  "معرّف نصي": "Text identifier",
+  "تاريخ الصرف": "Payment date",
+  "تاريخ (ISO Date)": "Date (ISO)",
+  "تاريخ هجري": "Hijri date",
+  "المبلغ (ج.م)": "Amount (EGP)",
+  "مبلغ مالي (Decimal)": "Monetary amount (decimal)",
+  "رقم صحيح": "Integer",
+  "رقم الهاتف": "Phone number",
+  "هاتف محمول (Phone)": "Mobile phone",
+  نص: "Text",
+  "القيمة (0) في عمود «المبلغ (ج.م)» بالصف 3: هل تعني صفرًا فعليًا أم «لم يستلم / فارغ»؟":
+    "The value (0) in Amount (EGP), row 3: does it mean a real zero or “not received / blank”?",
+  "الصف 4 مكرر بالكامل مع الصف 1: هل ترغب في دمج السجلات المتطابقة؟":
+    "Row 4 is an exact duplicate of row 1. Would you like to merge the matching records?",
+  "الخلية الأولى في الصف 5 تبدأ بعلامة صيغة (=HYPERLINK): سيتم تحييدها تلقائيًا لحمايتك (A11).":
+    "The first cell in row 5 starts with a formula (=HYPERLINK). It will be neutralized automatically for your protection (A11).",
+  "سجل العملاء والمرتبات": "Payroll & Clients Ledger",
+  "المدفوعات والتجارة العالمية": "Global E-Commerce Payments",
+  "السجل الطبي المشفّر": "Encrypted Clinical Registry",
+  "0 معناها لم يستلم": "0 means not received",
   "تطبيع الحروف والأرقام العربية": "Normalize Arabic letters and digits",
-  "توحيد أ/إ/آ، التاء المربوطة، والأرقام ٠-٩": "Unify Alif variants, taa marbuta, and Arabic-Indic digits",
-  "توحيد التواريخ القياسي": "Standardize dates", "تحويل جميع الصيغ إلى YYYY-MM-DD": "Convert all formats to YYYY-MM-DD",
-  "إزالة الصفوف المكررة": "Remove duplicate rows", "حذف الصفوف المتطابقة 100%": "Remove 100% identical rows",
+  "توحيد أ/إ/آ، التاء المربوطة، والأرقام ٠-٩":
+    "Unify Alif variants, taa marbuta, and Arabic-Indic digits",
+  "توحيد التواريخ القياسي": "Standardize dates",
+  "تحويل جميع الصيغ إلى YYYY-MM-DD": "Convert all formats to YYYY-MM-DD",
+  "إزالة الصفوف المكررة": "Remove duplicate rows",
+  "حذف الصفوف المتطابقة 100%": "Remove 100% identical rows",
   "إخفاء الهاتف والرقم القومي": "Mask phone numbers and national IDs",
   "قناع جزئي مع الحفاظ على المحافظة": "Partial masking while preserving the governorate",
-  "مختبر التنقية والخصوصية ومساحة العمل": "Cleaning, Privacy & Workspace Lab", "التنظيف وPII": "Cleaning & PII",
+  "مختبر التنقية والخصوصية ومساحة العمل": "Cleaning, Privacy & Workspace Lab",
+  "التنظيف وPII": "Cleaning & PII",
   "محرك التنقية وPII المباشر • Rust + Arrow": "Live Cleaning & PII Engine • Rust + Arrow",
-  "مساحة التنضيف الكاملة (الشبكة + لوحة الفهم + الخطوات + بطاقة الأسئلة المجمّعة U6) مع مختبر التطبيع متعدد اللغات وإخفاء PII ومحرك الرقم القومي — كل ذلك محليًا 100% داخل جهازك.": "The complete cleaning workspace (grid, understanding panel, steps, and aggregated questions U6), with multilingual normalization, PII masking, and national ID validation — all processed 100% locally on your device.",
-  "اختر سيناريو البيانات الحي:": "Choose a live data scenario:", "إضافة صف حي": "Add live row",
-  "تشغيل طيار التنقية الذكي (Prompt-Motion Auto-Pilot)": "Run Smart Cleaning Autopilot (Prompt-Motion)",
+  "مساحة التنضيف الكاملة (الشبكة + لوحة الفهم + الخطوات + بطاقة الأسئلة المجمّعة U6) مع مختبر التطبيع متعدد اللغات وإخفاء PII ومحرك الرقم القومي — كل ذلك محليًا 100% داخل جهازك.":
+    "The complete cleaning workspace (grid, understanding panel, steps, and aggregated questions U6), with multilingual normalization, PII masking, and national ID validation — all processed 100% locally on your device.",
+  "اختر سيناريو البيانات الحي:": "Choose a live data scenario:",
+  "إضافة صف حي": "Add live row",
+  "تشغيل طيار التنقية الذكي (Prompt-Motion Auto-Pilot)":
+    "Run Smart Cleaning Autopilot (Prompt-Motion)",
   "مساحة التنضيف التفاعلية (Section 6.5.4)": "Interactive Cleaning Workspace (Section 6.5.4)",
-  "تراجع": "Undo", "إعادة": "Redo", "الكثافة:": "Density:", "مريح (44px)": "Comfortable (44px)",
-  "مدمج للمحترفين (28px)": "Compact (28px)", "قاموس البيانات (U8)": "Data Dictionary (U8)",
-  "تصدير CSV نظيف (حماية A11)": "Export clean CSV (A11 protection)", "إغلاق": "Close",
-  "لوحة الفهم والأعمدة (16.2)": "Column Understanding Panel (16.2)", "طي لوحة الأعمدة": "Collapse columns panel",
-  "فتح لوحة الأعمدة": "Expand columns panel", "ثقة": "confidence", "النوع:": "Type:", "✓ صحيح": "✓ Confirmed",
-  "تبديل": "Change", "قاعدة فهم بالعربية (القسم 16.3)": "Natural-language understanding rule (Section 16.3)",
-  "إلغاء القاعدة المطبّقة": "Clear applied rule", "تطبيق القاعدة على العمود": "Apply rule to column",
-  "خلية تم تنظيفها وتوحيدها": "Cell cleaned and normalized", "معدّل": "Edited", "⚡ منقّى": "⚡ Cleaned",
-  "الفروق مميّزة بالرمز (⚡ منقّى) واللون معًا التزامًا بمعيار WCAG 2.2 AA": "Changes are marked with both the (⚡ Cleaned) symbol and colour to meet WCAG 2.2 AA.",
-  "طي لوحة الخطوات": "Collapse steps panel", "فتح لوحة الخطوات": "Expand steps panel",
-  "الخطوات والأسئلة المجمّعة": "Steps & Aggregated Questions", "بطاقة الأسئلة المجمّعة (U6)": "Aggregated Questions (U6)",
-  "✓ تم حسم أو تأجيل جميع الأسئلة المعلقة بهدوء.": "✓ All pending questions have been resolved or deferred.",
-  "اعتماد الحلول": "Apply decisions", "اسألني لاحقًا": "Ask me later",
+  تراجع: "Undo",
+  إعادة: "Redo",
+  "الكثافة:": "Density:",
+  "مريح (44px)": "Comfortable (44px)",
+  "مدمج للمحترفين (28px)": "Compact (28px)",
+  "قاموس البيانات (U8)": "Data Dictionary (U8)",
+  "تصدير CSV نظيف (حماية A11)": "Export clean CSV (A11 protection)",
+  إغلاق: "Close",
+  "لوحة الفهم والأعمدة (16.2)": "Column Understanding Panel (16.2)",
+  "طي لوحة الأعمدة": "Collapse columns panel",
+  "فتح لوحة الأعمدة": "Expand columns panel",
+  ثقة: "confidence",
+  "النوع:": "Type:",
+  "✓ صحيح": "✓ Confirmed",
+  تبديل: "Change",
+  "قاعدة فهم بالعربية (القسم 16.3)": "Natural-language understanding rule (Section 16.3)",
+  "إلغاء القاعدة المطبّقة": "Clear applied rule",
+  "تطبيق القاعدة على العمود": "Apply rule to column",
+  "خلية تم تنظيفها وتوحيدها": "Cell cleaned and normalized",
+  معدّل: "Edited",
+  "⚡ منقّى": "⚡ Cleaned",
+  "الفروق مميّزة بالرمز (⚡ منقّى) واللون معًا التزامًا بمعيار WCAG 2.2 AA":
+    "Changes are marked with both the (⚡ Cleaned) symbol and colour to meet WCAG 2.2 AA.",
+  "طي لوحة الخطوات": "Collapse steps panel",
+  "فتح لوحة الخطوات": "Expand steps panel",
+  "الخطوات والأسئلة المجمّعة": "Steps & Aggregated Questions",
+  "بطاقة الأسئلة المجمّعة (U6)": "Aggregated Questions (U6)",
+  "✓ تم حسم أو تأجيل جميع الأسئلة المعلقة بهدوء.":
+    "✓ All pending questions have been resolved or deferred.",
+  "اعتماد الحلول": "Apply decisions",
+  "اسألني لاحقًا": "Ask me later",
   "النص التجريبي (مثال ببيانات وهمية)": "Sample text (synthetic example data)",
-  "ملح الترميز (Salt) — يغيّر البصمات دون تغيير النص": "Tokenization salt — changes fingerprints without changing the text",
-  "شغّل التنقية محليًا": "Run cleaning locally", "استعادة المثال": "Restore example",
-  "لا يُرسل هذا النص إلى أي خادم، ولا يُكتب في السجلات. المعالجة الفعلية للملفات تتم في": "This text is never sent to a server or written to logs. Actual file processing runs in the",
-  "نواة Rust المعزولة.": "isolated Rust engine.", "نتيجة التطبيع العربي": "Normalization result", "قبل": "Before",
-  "بعد (sf-arabic)": "After (sf-arabic)", "الإخفاء الجزئي": "Partial masking",
-  "النوع": "Type", "القيمة المخفية": "Masked value", "الرمز (Token)": "Token",
-  "لا توجد بيانات شخصية مطابقة في هذا النص. جرّب رقم هاتف أو بريدًا إلكترونيًا.": "No matching personal data was found in this text. Try a phone number or email address.",
-  "ذكر": "Male", "أنثى": "Female", "القاهرة": "Cairo", "الإسكندرية": "Alexandria", "الجيزة": "Giza", "أسوان": "Aswan",
-  "الاسم:": "Name:", "الهاتف:": "Phone:", "البريد:": "Email:", "الرقم القومي:": "National ID:", "العنوان:": "Address:", "المبلغ:": "Amount:",
-  "تم تحديث خطوات التنضيف وإعادة حساب الجدول فورًا.": "Cleaning steps updated and the table recalculated.",
-  "تمت إضافة صف جديد وتطبيق قواعد التنقية والحماية عليه فورًا.": "A new row was added and cleaning and protection rules were applied.",
-  "تم تطبيق قاعدة الفهم الطبيعية على الجدول.": "The natural-language understanding rule was applied to the table.",
-  "تم التراجع عن الخطوة الأخيرة.": "The last step was undone.", "تمت إعادة الخطوة.": "The step was redone.",
-  "تم اعتماد توصيات بطاقة الأسئلة المجمّعة (U6) دفعة واحدة.": "All recommendations in the aggregated questions card (U6) were applied.",
-  "تم تأجيل الأسئلة — يمكنك متابعة العمل بلا مقاطعة.": "Questions deferred — you can continue working without interruption.",
-  "غير متاح (Null)": "Unavailable (Null)", "✓ خانة التحقق (Modulo-11) صحيحة": "✓ Check digit (Modulo-11) is valid",
-  "القسم 7.1 و 7.2 • الموشن جرافيك الرسمي (2.6 ثانية)": "Sections 7.1 and 7.2 • Official motion graphic (2.6 seconds)",
+  "ملح الترميز (Salt) — يغيّر البصمات دون تغيير النص":
+    "Tokenization salt — changes fingerprints without changing the text",
+  "شغّل التنقية محليًا": "Run cleaning locally",
+  "استعادة المثال": "Restore example",
+  "لا يُرسل هذا النص إلى أي خادم، ولا يُكتب في السجلات. المعالجة الفعلية للملفات تتم في":
+    "This text is never sent to a server or written to logs. Actual file processing runs in the",
+  "نواة Rust المعزولة.": "isolated Rust engine.",
+  "نتيجة التطبيع العربي": "Normalization result",
+  قبل: "Before",
+  "بعد (sf-arabic)": "After (sf-arabic)",
+  "الإخفاء الجزئي": "Partial masking",
+  النوع: "Type",
+  "القيمة المخفية": "Masked value",
+  "الرمز (Token)": "Token",
+  "لا توجد بيانات شخصية مطابقة في هذا النص. جرّب رقم هاتف أو بريدًا إلكترونيًا.":
+    "No matching personal data was found in this text. Try a phone number or email address.",
+  ذكر: "Male",
+  أنثى: "Female",
+  القاهرة: "Cairo",
+  الإسكندرية: "Alexandria",
+  الجيزة: "Giza",
+  أسوان: "Aswan",
+  "الاسم:": "Name:",
+  "الهاتف:": "Phone:",
+  "البريد:": "Email:",
+  "الرقم القومي:": "National ID:",
+  "العنوان:": "Address:",
+  "المبلغ:": "Amount:",
+  "تم تحديث خطوات التنضيف وإعادة حساب الجدول فورًا.":
+    "Cleaning steps updated and the table recalculated.",
+  "تمت إضافة صف جديد وتطبيق قواعد التنقية والحماية عليه فورًا.":
+    "A new row was added and cleaning and protection rules were applied.",
+  "تم تطبيق قاعدة الفهم الطبيعية على الجدول.":
+    "The natural-language understanding rule was applied to the table.",
+  "تم التراجع عن الخطوة الأخيرة.": "The last step was undone.",
+  "تمت إعادة الخطوة.": "The step was redone.",
+  "تم اعتماد توصيات بطاقة الأسئلة المجمّعة (U6) دفعة واحدة.":
+    "All recommendations in the aggregated questions card (U6) were applied.",
+  "تم تأجيل الأسئلة — يمكنك متابعة العمل بلا مقاطعة.":
+    "Questions deferred — you can continue working without interruption.",
+  "غير متاح (Null)": "Unavailable (Null)",
+  "✓ خانة التحقق (Modulo-11) صحيحة": "✓ Check digit (Modulo-11) is valid",
+  "القسم 7.1 و 7.2 • الموشن جرافيك الرسمي (2.6 ثانية)":
+    "Sections 7.1 and 7.2 • Official motion graphic (2.6 seconds)",
   "مبعثر ← شبكة 3×3 ← قطرة صافي النقية": "Scattered → 3×3 grid → Safi's clean droplet",
-  "تشغيل الموشن (2.6s)": "Play motion (2.6s)", "عرض موشن لوجو صافي التفاعلي": "Interactive SafiData logo animation",
-  "صافي البيانات": "SafiData", "بياناتك... صافية": "Your data, clarified.",
+  "تشغيل الموشن (2.6s)": "Play motion (2.6s)",
+  "عرض موشن لوجو صافي التفاعلي": "Interactive SafiData logo animation",
+  "صافي البيانات": "SafiData",
+  "بياناتك... صافية": "Your data, clarified.",
   "مؤشر امتلاء قطرة صافي": "SafiData droplet fill indicator",
   "حركة التحميل بالقطرة الحية (القسم 7.3):": "Live droplet loading animation (Section 7.3):",
-  "تمتلئ القطرة من الأسفل للأعلى مع موجة سطح الماء وتُرسم علامة الصح عند 100%": "The droplet fills from bottom to top with a water-surface wave; a checkmark appears at 100%.",
+  "تمتلئ القطرة من الأسفل للأعلى مع موجة سطح الماء وتُرسم علامة الصح عند 100%":
+    "The droplet fills from bottom to top with a water-surface wave; a checkmark appears at 100%.",
   "نسبة امتلاء قطرة التحميل": "Loading droplet fill percentage",
-  "القسم 7.4 • أيقونة المتصفح ومعاينة الروابط في الرسائل": "Section 7.4 • Browser icon and messaging link preview",
-  "مظهر التبويب (Favicon) وبطاقة المشاركة (OpenGraph)": "Browser tab icon (favicon) and sharing card (OpenGraph)",
-  "تم نسخ الرابط!": "Link copied!", "نسخ رابط المنصة": "Copy platform link",
+  "القسم 7.4 • أيقونة المتصفح ومعاينة الروابط في الرسائل":
+    "Section 7.4 • Browser icon and messaging link preview",
+  "مظهر التبويب (Favicon) وبطاقة المشاركة (OpenGraph)":
+    "Browser tab icon (favicon) and sharing card (OpenGraph)",
+  "تم نسخ الرابط!": "Link copied!",
+  "نسخ رابط المنصة": "Copy platform link",
   "أيقونة تبويب صافي": "SafiData browser tab icon",
   "✓ مفعّل في تبويب المتصفح (/favicon.svg)": "✓ Enabled in the browser tab (/favicon.svg)",
-  "معاينة عند إرسال الرابط في أي رسالة (WhatsApp • Telegram • Slack • X)": "Preview when sharing the link in any message (WhatsApp • Telegram • Slack • X)",
-  "بطاقة معاينة رابط صافي البيانات في تطبيقات المراسلة": "SafiData link preview card in messaging apps",
-  "اسم شخص": "Person name", "رقم هاتف": "Phone number", "بريد إلكتروني": "Email", "رقم قومي": "National ID", "حساب IBAN": "IBAN account",
-  "الجودة الشاملة:": "Overall quality:", "📊 عدد الصفوف النشطة:": "📊 Active rows:", "(من أصل": "(of",
-  "الأعمدة:": "Columns:", "المحافظة:": "Governorate:", "تاريخ الميلاد:": "Date of birth:",
-  "فاحص الرقم القومي المصري الرسمي (القسم 20.3 — 14 رقمًا + المحافظة + تاريخ الميلاد + معادلة التحقق)": "Official Egyptian national ID validator (Section 20.3 — 14 digits, governorate, date of birth, and checksum)",
-  "أدخل رقمًا قوميًا مصريًا (يقبل الأرقام العربية ٠-٩ أو اللاتينية)": "Enter an Egyptian national ID (Arabic-Indic or Latin digits are accepted)",
+  "معاينة عند إرسال الرابط في أي رسالة (WhatsApp • Telegram • Slack • X)":
+    "Preview when sharing the link in any message (WhatsApp • Telegram • Slack • X)",
+  "بطاقة معاينة رابط صافي البيانات في تطبيقات المراسلة":
+    "SafiData link preview card in messaging apps",
+  "اسم شخص": "Person name",
+  "رقم هاتف": "Phone number",
+  "بريد إلكتروني": "Email",
+  "رقم قومي": "National ID",
+  "حساب IBAN": "IBAN account",
+  "الجودة الشاملة:": "Overall quality:",
+  "📊 عدد الصفوف النشطة:": "📊 Active rows:",
+  "(من أصل": "(of",
+  "الأعمدة:": "Columns:",
+  "المحافظة:": "Governorate:",
+  "تاريخ الميلاد:": "Date of birth:",
+  "فاحص الرقم القومي المصري الرسمي (القسم 20.3 — 14 رقمًا + المحافظة + تاريخ الميلاد + معادلة التحقق)":
+    "Official Egyptian national ID validator (Section 20.3 — 14 digits, governorate, date of birth, and checksum)",
+  "أدخل رقمًا قوميًا مصريًا (يقبل الأرقام العربية ٠-٩ أو اللاتينية)":
+    "Enter an Egyptian national ID (Arabic-Indic or Latin digits are accepted)",
   "الاستبدال الرمزي الحتمي (BLAKE3)": "Deterministic tokenization (BLAKE3)",
-  "الرمز = ‎BLAKE3(salt : النوع : القيمة)‎ بـ16 بايت. نفس الملح والقيمة يعطيان دائمًا نفس الرمز، فيبقى الربط بين الجداول ممكنًا داخل جهازك، ويستحيل خارجه.": "Token = 16-byte BLAKE3(salt : type : value). The same salt and value always produce the same token, allowing joins between datasets on your device without exposing the original value.",
+  "الرمز = ‎BLAKE3(salt : النوع : القيمة)‎ بـ16 بايت. نفس الملح والقيمة يعطيان دائمًا نفس الرمز، فيبقى الربط بين الجداول ممكنًا داخل جهازك، ويستحيل خارجه.":
+    "Token = 16-byte BLAKE3(salt : type : value). The same salt and value always produce the same token, allowing joins between datasets on your device without exposing the original value."
 };
 
 function translateCleaningText(value: string): string {
@@ -300,12 +385,31 @@ function translateCleaningText(value: string): string {
   const exact = CLEANING_EN[trimmed];
   if (exact !== undefined) return value.replace(trimmed, exact);
   const patterns: ReadonlyArray<readonly [RegExp, (m: RegExpMatchArray) => string]> = [
-    [/^تم تحميل مجموعة بيانات «(.+)» بنجاح في الذاكرة المحلية\.$/, (m) => "Loaded dataset \"" + (CLEANING_EN[m[1]!] ?? m[1]) + "\" successfully into local memory."],
-    [/^تم تأكيد نوع العمود «(.+)» وحفظه في ذاكرة التعلم\.$/, (m) => "Confirmed the type of column \"" + m[1] + "\" and saved it to learning memory."],
-    [/^تم تبديل نوع «(.+)» إلى (.+)\.$/, (m) => "Changed \"" + m[1] + "\" to " + (CLEANING_EN[m[2]!] ?? m[2]) + "."],
-    [/^⚡ طيار التنقية الذكي \(Prompt-Motion Auto-Pilot\): تم تفعيل جميع الفلاتر وتحييد الصيغ وإخفاء PII في 1\.2ms!$/, () => "⚡ Smart Cleaning Autopilot (Prompt-Motion): all filters enabled, formulas neutralized, and PII masked in 1.2ms!"],
-    [/^تم تصدير الملف النظيف \((.+)\) مع تحييد حقن الصيغ A11\.$/, (m) => "Clean file exported (" + m[1] + ") with A11 formula injection neutralization."],
-    [/^تم توليد وتصدير قاموس البيانات التلقائي \(U8\)\.$/, () => "Automatic data dictionary (U8) generated and exported."],
+    [
+      /^تم تحميل مجموعة بيانات «(.+)» بنجاح في الذاكرة المحلية\.$/,
+      (m) => 'Loaded dataset "' + (CLEANING_EN[m[1]!] ?? m[1]) + '" successfully into local memory.'
+    ],
+    [
+      /^تم تأكيد نوع العمود «(.+)» وحفظه في ذاكرة التعلم\.$/,
+      (m) => 'Confirmed the type of column "' + m[1] + '" and saved it to learning memory.'
+    ],
+    [
+      /^تم تبديل نوع «(.+)» إلى (.+)\.$/,
+      (m) => 'Changed "' + m[1] + '" to ' + (CLEANING_EN[m[2]!] ?? m[2]) + "."
+    ],
+    [
+      /^⚡ طيار التنقية الذكي \(Prompt-Motion Auto-Pilot\): تم تفعيل جميع الفلاتر وتحييد الصيغ وإخفاء PII في 1\.2ms!$/,
+      () =>
+        "⚡ Smart Cleaning Autopilot (Prompt-Motion): all filters enabled, formulas neutralized, and PII masked in 1.2ms!"
+    ],
+    [
+      /^تم تصدير الملف النظيف \((.+)\) مع تحييد حقن الصيغ A11\.$/,
+      (m) => "Clean file exported (" + m[1] + ") with A11 formula injection neutralization."
+    ],
+    [
+      /^تم توليد وتصدير قاموس البيانات التلقائي \(U8\)\.$/,
+      () => "Automatic data dictionary (U8) generated and exported."
+    ],
     [/^(.+)% ثقة$/, (m) => m[1] + "% confidence"],
     [/^النوع: (.+)$/, (m) => "Type: " + (CLEANING_EN[m[1]!] ?? m[1])],
     [/^تبديل \((.+)\)$/, (m) => "Change (" + (CLEANING_EN[m[1]!] ?? m[1]) + ")"],
@@ -325,7 +429,10 @@ function localizeCleaningNode(node: ReactNode): ReactNode {
   if (isValidElement<Record<string, unknown>>(node)) {
     const next: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(node.props)) {
-      if (typeof value === "string" && ["aria-label", "title", "placeholder", "alt"].includes(key)) {
+      if (
+        typeof value === "string" &&
+        ["aria-label", "title", "placeholder", "alt"].includes(key)
+      ) {
         next[key] = translateCleaningText(value);
       } else if (key === "children") {
         next[key] = localizeCleaningNode(value as ReactNode);

@@ -143,7 +143,10 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
   }, [activeTab, lang]);
 
   const activeTabConfig = DOCK_TABS.find((tab) => tab.id === activeTab);
-  const activeLabel = lang === "ar" ? activeTabConfig?.label ?? "الرئيسية" : activeTabConfig?.labelEn ?? "Website";
+  const activeLabel =
+    lang === "ar"
+      ? (activeTabConfig?.label ?? "الرئيسية")
+      : (activeTabConfig?.labelEn ?? "Website");
 
   return (
     <>

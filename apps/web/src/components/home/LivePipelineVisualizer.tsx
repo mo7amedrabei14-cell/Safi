@@ -115,7 +115,10 @@ export function LivePipelineVisualizer({ lang = "en" }: { readonly lang?: SafiLa
   const digest = runs === 0 ? "0000000000000000" : simulatedDigest(runs);
 
   return (
-    <div dir={isAr ? "rtl" : "ltr"} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+    <div
+      dir={isAr ? "rtl" : "ltr"}
+      style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+    >
       <header
         style={{
           display: "flex",
@@ -248,7 +251,11 @@ export function LivePipelineVisualizer({ lang = "en" }: { readonly lang?: SafiLa
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
-          <CountUpMetric value={processedRows} suffix={isAr ? "صف" : " rows"} label={isAr ? "الصفوف المعالجة" : "Rows processed"} />
+          <CountUpMetric
+            value={processedRows}
+            suffix={isAr ? "صف" : " rows"}
+            label={isAr ? "الصفوف المعالجة" : "Rows processed"}
+          />
           <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
             <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>
               {isAr ? "بصمة BLAKE3" : "BLAKE3 digest"}
@@ -257,7 +264,11 @@ export function LivePipelineVisualizer({ lang = "en" }: { readonly lang?: SafiLa
           </div>
         </div>
 
-        <MagneticButton variant="primary" onClick={handleRun} ariaLabel={isAr ? "تشغيل محاكاة فورية" : "Run simulation now"}>
+        <MagneticButton
+          variant="primary"
+          onClick={handleRun}
+          ariaLabel={isAr ? "تشغيل محاكاة فورية" : "Run simulation now"}
+        >
           {isAr ? "تشغيل محاكاة فورية" : "Run simulation now"}
         </MagneticButton>
       </div>

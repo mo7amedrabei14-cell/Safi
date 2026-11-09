@@ -26,7 +26,8 @@ const SETTINGS_FACTS = [
     labelAr: "التخزين",
     labelEn: "Storage",
     valueAr: "محلي على جهازك؛ الخزنة مشفّرة AES-256-GCM ولا تغادر الملفات الجهاز.",
-    valueEn: "Stored locally on your device. The vault is encrypted with AES-256-GCM and your files stay on-device."
+    valueEn:
+      "Stored locally on your device. The vault is encrypted with AES-256-GCM and your files stay on-device."
   },
   {
     id: "network",
@@ -39,15 +40,18 @@ const SETTINGS_FACTS = [
     id: "motion",
     labelAr: "الحركة",
     labelEn: "Motion",
-    valueAr: "يتبع إعداد النظام تلقائيًا؛ عند تفعيل تقليل الحركة تتوقف الأنيميشن وتظهر الحالة النهائية.",
-    valueEn: "Follows your system preference. Reduced Motion disables animations and displays their final state."
+    valueAr:
+      "يتبع إعداد النظام تلقائيًا؛ عند تفعيل تقليل الحركة تتوقف الأنيميشن وتظهر الحالة النهائية.",
+    valueEn:
+      "Follows your system preference. Reduced Motion disables animations and displays their final state."
   },
   {
     id: "trust",
     labelAr: "حارس Zero Trust",
     labelEn: "Zero Trust guard",
     valueAr: "لا تُنفَّذ أي صيغة أو ماكرو، وكل ملف يُفحص قبل التحليل بسقوف للذاكرة والوقت.",
-    valueEn: "Formulas and macros are never executed. Files are checked before parsing with memory and time limits."
+    valueEn:
+      "Formulas and macros are never executed. Files are checked before parsing with memory and time limits."
   }
 ] as const;
 

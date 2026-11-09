@@ -2134,12 +2134,13 @@ dependencies = [
  "lettre",
  "rand",
  "redis",
- "serde",
  "serde_json",
+ "serde",
  "sqlx",
  "subtle",
  "tokio",
  "tower",
+ "tracing",
  "uuid",
 ]
 

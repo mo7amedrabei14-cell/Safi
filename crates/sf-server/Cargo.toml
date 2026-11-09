@@ -17,6 +17,7 @@ serde_json = "=1.0.135"
 sqlx = { version = "=0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "uuid"] }
 subtle = "=2.6.1"
 tokio = { version = "=1.54.1", features = ["full"] }
+tracing = "=0.1.44"
 uuid = { version = "=1.10.0", features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]

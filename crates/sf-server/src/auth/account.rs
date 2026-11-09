@@ -914,7 +914,7 @@ mod tests {
         assert_eq!(messages[0].0, "user@example.test");
         assert!(messages[0]
             .1
-            .starts_with("https://safidata.example/?verify_email="));
+            .starts_with("https://safidata.example/#verify_email="));
 
         let failed = fixture
             .service

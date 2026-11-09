@@ -82,6 +82,20 @@ describe("UI-Phase-5 Chart studio", () => {
     }
   );
 
+  it("uses the selected locale for the deterministic SVG title", () => {
+    const englishSvg = generateDeterministicSvg(
+      { ...SAMPLE_CHART_SPEC, titleEn: "English chart title" },
+      "en"
+    );
+    const arabicSvg = generateDeterministicSvg(
+      { ...SAMPLE_CHART_SPEC, titleEn: "English chart title" },
+      "ar"
+    );
+
+    expect(englishSvg).toContain(">English chart title</text>");
+    expect(arabicSvg).toContain("نسبة اكتمال البيانات");
+  });
+
   it("renders the preview, credibility guard and contrast table", () => {
     const html = renderToString(<ChartsStudio lang="ar" />);
 

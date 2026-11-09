@@ -521,7 +521,7 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
               : validation.errors
                   .map((error) => {
                     if (isAr) return error;
-                    const code = error.slice(0, 11);
+                    const code = error.match(/^SF-CHT-\d{3}/)?.[0] ?? "";
                     const message = CHART_VALIDATION_EN[code];
                     return message ? `${code}: ${message}` : error;
                   })

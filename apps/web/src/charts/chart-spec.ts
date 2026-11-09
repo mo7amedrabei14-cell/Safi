@@ -51,7 +51,7 @@ export function generateDeterministicSvg(spec: ChartSpec, lang: "ar" | "en" = "a
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
   svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
   const chartTitle = lang === "ar" ? spec.titleAr : (spec.titleEn ?? spec.titleAr);
-  svg += `<text x="20" y="30" font-family="Inter, sans-serif" font-size="18" font-weight="bold" fill="#111827">${chartTitle}</text>`;
+  svg += `<text x="20" y="30" font-family="${lang === "ar" ? "IBM Plex Sans Arabic" : "Inter"}, sans-serif" font-size="18" font-weight="bold" fill="#111827">${chartTitle}</text>`;
 
   const count = spec.data.length;
   if (count > 0) {

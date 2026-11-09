@@ -256,6 +256,9 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
       fallbackTimer = window.setTimeout(() => {
         timeline.kill();
         timelineRef.current = null;
+        if (progress !== null) {
+          gsap.set(progress, { scaleX: 1, transformOrigin: "right center" });
+        }
         finishOnce();
       }, 6000);
     };

@@ -39,7 +39,7 @@ async function sendAuthRequest<T>(
     response = await fetch(`/v1/auth${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       cache: "no-store",
       credentials: "omit",
       referrerPolicy: "no-referrer",

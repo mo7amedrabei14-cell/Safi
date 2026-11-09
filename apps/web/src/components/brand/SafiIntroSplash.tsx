@@ -308,7 +308,7 @@ export function SafiIntroSplash({
             height={168}
             viewBox="0 0 128 128"
             fill="none"
-            aria-label="حركة مصفوفة البيانات ومؤشر التحليل"
+            aria-label={lang === "ar" ? "حركة مصفوفة البيانات ومؤشر التحليل" : "Data matrix and analytics indicator animation"}
           >
             <g className="safi-pm-logo-orbit">
               <circle

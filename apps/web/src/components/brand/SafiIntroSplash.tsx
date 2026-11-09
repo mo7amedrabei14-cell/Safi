@@ -104,6 +104,9 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
         return;
       }
 
+      // Make the font-ready frame visible before starting the one-second pause.
+      root.dataset.fontsReady = "true";
+
       const dots = Array.from(svg.querySelectorAll<SVGCircleElement>("[data-intro-dot]"));
       const bars = Array.from(svg.querySelectorAll<SVGRectElement>("[data-intro-bar]"));
       const trendPath = svg.querySelector<SVGPathElement>("[data-intro-trend]");
@@ -251,7 +254,11 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
       }
 
       // Let the fully filled bar remain visible briefly before the handoff.
-      timeline.to({}, { duration: INTRO_PROGRESS_COMPLETION_HOLD_SECONDS }, INTRO_PROGRESS_DURATION_SECONDS);
+      timeline.to(
+        {},
+        { duration: INTRO_PROGRESS_COMPLETION_HOLD_SECONDS },
+        INTRO_PROGRESS_DURATION_SECONDS
+      );
 
       fallbackTimer = window.setTimeout(() => {
         timeline.kill();

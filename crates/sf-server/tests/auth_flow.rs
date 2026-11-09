@@ -371,19 +371,11 @@ async fn a_new_device_session_revokes_the_previous_session_on_its_next_request()
     )
     .await;
     assert_eq!(first.status(), StatusCode::CREATED);
-    let first_token = json_body(first).await["token"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let first_token = json_body(first).await["token"].as_str().unwrap().to_owned();
 
     let first_before_replacement = send(
         &fixture.router,
-        request(
-            "GET",
-            "/v1/auth/sessions/current",
-            Some(&first_token),
-            None,
-        ),
+        request("GET", "/v1/auth/sessions/current", Some(&first_token), None),
     )
     .await;
     assert_eq!(first_before_replacement.status(), StatusCode::OK);
@@ -415,7 +407,10 @@ async fn a_new_device_session_revokes_the_previous_session_on_its_next_request()
     )
     .await;
     assert_eq!(first_after_replacement.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(json_body(first_after_replacement).await["code"], "SF-AUTH-003");
+    assert_eq!(
+        json_body(first_after_replacement).await["code"],
+        "SF-AUTH-003"
+    );
 
     let second_after_replacement = send(
         &fixture.router,

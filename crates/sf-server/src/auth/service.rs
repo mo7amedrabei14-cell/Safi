@@ -185,7 +185,10 @@ impl AuthService {
     ) -> Result<(), AuthError> {
         self.sessions.revoke(session_id, unix_now()).await?;
         // PostgreSQL is authoritative; a stale legacy cache entry is never read.
-        let _ = self.cache.delete(&session_cache_key(session_token_hash)).await;
+        let _ = self
+            .cache
+            .delete(&session_cache_key(session_token_hash))
+            .await;
         Ok(())
     }
 
@@ -213,7 +216,6 @@ impl AuthService {
             let _ = self.cache.set(key, serialized, ttl).await;
         }
     }
-
 }
 
 fn session_view(record: &SessionRecord) -> SessionView {

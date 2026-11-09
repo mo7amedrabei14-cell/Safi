@@ -8,9 +8,11 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { MOTION_DOTS } from "./SafiPrismLogo";
+import type { SafiLang } from "../layout/FloatingGlassDock";
 
 export interface SafiIntroSplashProps {
   readonly open: boolean;
+  readonly lang?: SafiLang;
   readonly exiting?: boolean | undefined;
   readonly onAnimationComplete?: (() => void) | undefined;
   readonly onExitComplete?: (() => void) | undefined;
@@ -50,6 +52,7 @@ async function waitForIntroFonts(): Promise<void> {
 
 export function SafiIntroSplash({
   open,
+  lang = "en",
   exiting = false,
   onAnimationComplete,
   onExitComplete
@@ -293,8 +296,8 @@ export function SafiIntroSplash({
       className="safi-intro-splash"
       data-fonts-ready={fontsReady ? "true" : "false"}
       role="region"
-      aria-label="عرض إقلاع صافي البيانات السينمائي"
-      dir="rtl"
+      aria-label={lang === "ar" ? "عرض إقلاع صافي البيانات السينمائي" : "SafiData cinematic startup"}
+      dir={lang === "ar" ? "rtl" : "ltr"}
     >
       <div className="safi-intro-stage">
         <div className="safi-intro-orb">
@@ -364,13 +367,13 @@ export function SafiIntroSplash({
         </div>
 
         <div className="safi-intro-copy">
-          <h2 className="safi-intro-title" aria-label="صافي البيانات • SafiData">
-            <bdi dir="rtl">صافي البيانات</bdi>
-            <span aria-hidden="true">•</span>
-            <bdi dir="ltr">SafiData</bdi>
+          <h2 className="safi-intro-title" aria-label={lang === "ar" ? "صافي البيانات" : "SafiData"}>
+            <bdi dir={lang === "ar" ? "rtl" : "ltr"}>{lang === "ar" ? "صافي البيانات" : "SafiData"}</bdi>
           </h2>
           <p className="safi-intro-tagline">
-            بياناتك الفوضوية تصبح واضحة في ثوانٍ • خصوصية مطلقة على جهازك
+            {lang === "ar"
+              ? "حوّل بياناتك الفوضوية إلى بيانات واضحة في ثوانٍ • خصوصيتك تبقى على جهازك"
+              : "Turn messy data into clear, reliable data in seconds • Your files stay on your device"}
           </p>
         </div>
 
@@ -382,9 +385,9 @@ export function SafiIntroSplash({
           type="button"
           className="safi-intro-skip"
           onClick={skipIntro}
-          aria-label="الدخول إلى الموقع"
+          aria-label={lang === "ar" ? "الدخول إلى الموقع" : "Enter SafiData"}
         >
-          الدخول إلى الموقع ←
+          {lang === "ar" ? "الدخول إلى الموقع ←" : "Enter SafiData →"}
         </button>
       </div>
     </div>

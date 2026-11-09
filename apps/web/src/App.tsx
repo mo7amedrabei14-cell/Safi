@@ -69,7 +69,8 @@ export function App(): ReactNode {
   const [lang, setLang] = useState<SafiLang>("ar");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [introOpen, setIntroOpen] = useState<boolean>(false);
+  // Render the intro on the first React commit; never reveal the website before it.
+  const [introOpen, setIntroOpen] = useState<boolean>(true);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   useAnimatedFavicon();
@@ -88,13 +89,6 @@ export function App(): ReactNode {
 
   const closeIntro = useCallback((): void => {
     setIntroOpen(false);
-  }, []);
-
-  // Automatically play the cinematic intro splash on real browser startup
-  useEffect(() => {
-    if (typeof window !== "undefined" && typeof document !== "undefined") {
-      setIntroOpen(true);
-    }
   }, []);
 
   useEffect(() => {

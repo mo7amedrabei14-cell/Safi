@@ -12,5 +12,7 @@
       "type": "image/svg+xml",
       "purpose": "any"
     }
-  ]
+  ],
+  "lang": "en-US",
+  "dir": "ltr"
 }

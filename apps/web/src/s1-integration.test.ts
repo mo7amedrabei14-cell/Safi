@@ -9,6 +9,8 @@ describe("S1 End-to-End Vertical Slice Integration Verification (Section 19.7)",
     const content = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
     expect(content.name).toBe("SafiData");
     expect(content.short_name).toBe("SafiData");
+    expect(content.lang).toBe("en-US");
+    expect(content.dir).toBe("ltr");
     expect(content.display).toBe("standalone");
 
     const arabicManifestPath = path.resolve(

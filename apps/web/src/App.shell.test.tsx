@@ -54,6 +54,8 @@ describe("SafiData startup and application shell", () => {
 
     expect(englishManifest.name).toBe("SafiData");
     expect(englishManifest.short_name).toBe("SafiData");
+    expect(englishManifest.lang).toBe("en-US");
+    expect(englishManifest.dir).toBe("ltr");
     expect(arabicManifest.name).toBe("صافي البيانات");
     expect(arabicManifest.short_name).toBe("صافي");
     expect(html).toContain('id="safi-manifest"');

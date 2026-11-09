@@ -15,6 +15,7 @@ import { DOCK_TABS, FloatingGlassDock } from "./components/layout/FloatingGlassD
 import type { SafiDockTabId, SafiLang, SafiThemeId } from "./components/layout/FloatingGlassDock";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { SettingsSheet } from "./components/layout/SettingsSheet";
+import { AccountAccessSheet } from "./components/layout/AccountAccessSheet";
 import { useAnimatedFavicon } from "./components/brand/useAnimatedFavicon";
 import { BentoCommandCenter } from "./components/home/BentoCommandCenter";
 import { CleaningStudio } from "./components/studios/CleaningStudio";
@@ -64,14 +65,20 @@ export function renderStudio(
 
 export interface ApplicationShellProps {
   readonly onReady?: (() => void) | undefined;
+  readonly initialVerificationToken?: string | null;
 }
 
-export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode {
+export function ApplicationShell({
+  onReady,
+  initialVerificationToken = null
+}: ApplicationShellProps): ReactNode {
   const [activeTab, setActiveTab] = useState<SafiDockTabId>("home");
   const [theme, setTheme] = useState<SafiThemeId>("apple-light");
   const [lang, setLang] = useState<SafiLang>(getInitialSafiLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(initialVerificationToken !== null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   useAnimatedFavicon();
@@ -162,6 +169,8 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
             onSelectTheme={selectTheme}
             lang={lang}
             onToggleLang={toggleLang}
+            onOpenAccount={() => setAccountOpen(true)}
+            authenticated={sessionToken !== null}
           />
 
           <main id="safi-main" className="safi-container safi-stage">
@@ -181,6 +190,15 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
           />
 
           <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} lang={lang} />
+          <AccountAccessSheet
+            open={accountOpen}
+            onClose={() => setAccountOpen(false)}
+            lang={lang}
+            verificationToken={initialVerificationToken}
+            sessionToken={sessionToken}
+            onAuthenticated={setSessionToken}
+            onLoggedOut={() => setSessionToken(null)}
+          />
         </div>
       </SmoothScrollProvider>
     </>

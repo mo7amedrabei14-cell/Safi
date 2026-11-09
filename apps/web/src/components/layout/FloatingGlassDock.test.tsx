@@ -24,6 +24,7 @@ describe("UI-Phase-4 floating glass dock", () => {
     // Legacy semantic strings must survive so earlier suites keep passing.
     expect(html).toContain("Library");
     expect(html).toContain("Settings");
+    expect(html).toContain("Account");
     expect(html).toContain("Main navigation");
   });
 

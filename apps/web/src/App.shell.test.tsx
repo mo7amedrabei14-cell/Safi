@@ -30,6 +30,7 @@ describe("SafiData startup and application shell", () => {
     expect(html).toContain("Welcome");
     expect(html).toContain("SafiData");
     expect(html).toContain("Intelligent Universal Data Engineering");
+    expect(html).toContain("Account");
     expect(html).toContain("Certified Gold Edition v1.0.0-s5-gold");
 
     for (const label of ["Website", "Library", "Settings"]) {

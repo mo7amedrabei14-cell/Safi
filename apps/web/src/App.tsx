@@ -16,11 +16,28 @@ const loadApplicationShell = async () => {
 
 const ApplicationShell = lazy(loadApplicationShell);
 
+function consumeVerificationToken(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const url = new URL(window.location.href);
+  const token = url.searchParams.get("verify_email");
+  if (token === null) return null;
+
+  url.searchParams.delete("verify_email");
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${url.pathname}${url.search}${url.hash}`
+  );
+  return token;
+}
+
 export function App(): ReactNode {
   const [applicationRequested, setApplicationRequested] = useState(false);
   const [applicationReady, setApplicationReady] = useState(false);
   const [introMounted, setIntroMounted] = useState(true);
   const [initialLang] = useState(getInitialSafiLang);
+  const [verificationToken] = useState(consumeVerificationToken);
 
   useEffect(() => {
     const preloadTimer = window.setTimeout(() => {
@@ -52,7 +69,10 @@ export function App(): ReactNode {
       />
       {applicationRequested ? (
         <Suspense fallback={null}>
-          <ApplicationShell onReady={markApplicationReady} />
+          <ApplicationShell
+            onReady={markApplicationReady}
+            initialVerificationToken={verificationToken}
+          />
         </Suspense>
       ) : null}
     </>

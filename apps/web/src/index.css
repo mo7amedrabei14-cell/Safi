@@ -954,3 +954,253 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* P0.02 — Account registration and sign-in */
+.safi-account-backdrop {
+  z-index: 120;
+  align-items: center;
+  overflow-y: auto;
+  padding: 24px 14px;
+}
+
+.safi-account-modal {
+  width: min(100%, 520px);
+  max-height: min(90vh, 820px);
+  overflow-y: auto;
+  padding: clamp(22px, 4vw, 34px);
+  color: var(--text-primary);
+}
+
+.safi-account-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.safi-account-header h2 {
+  margin: 7px 0 0;
+  color: var(--text-primary);
+  font-size: clamp(23px, 4vw, 30px);
+  line-height: 1.2;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+}
+
+.safi-account-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.safi-account-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.safi-account-close:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.safi-account-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 5px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  background: var(--bg-elevated);
+}
+
+.safi-account-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.safi-account-tabs button.is-active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-card);
+}
+
+.safi-account-description {
+  margin: 0 0 19px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.safi-account-form {
+  display: grid;
+  gap: 15px;
+}
+
+.safi-account-field {
+  display: grid;
+  gap: 7px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.safi-account-field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--border-strong);
+  border-radius: 13px;
+  padding: 11px 14px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 500;
+  outline: none;
+}
+
+.safi-account-field input:focus-visible {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 3px var(--border-subtle);
+}
+
+.safi-account-field input:disabled {
+  opacity: 0.65;
+}
+
+.safi-account-field small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.safi-account-submit {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 3px;
+}
+
+.safi-account-submit:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
+}
+
+.safi-account-feedback {
+  margin: 13px 0 0;
+  padding: 11px 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.safi-account-feedback--success {
+  color: #16834a;
+  background: rgba(22, 163, 74, 0.08);
+}
+
+.safi-account-feedback--error {
+  color: #c34242;
+  background: rgba(220, 38, 38, 0.07);
+}
+
+.safi-account-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.safi-account-text-button:hover {
+  color: var(--text-primary);
+}
+
+.safi-account-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 23px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.safi-account-signed-in {
+  padding: 12px 4px 4px;
+  text-align: center;
+}
+
+.safi-account-status-mark {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  background: var(--bg-elevated);
+  color: #16834a;
+}
+
+.safi-account-signed-in h3 {
+  margin: 0 0 8px;
+  font-size: 19px;
+}
+
+.safi-account-signed-in p {
+  margin: 0 0 19px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+@media (max-width: 560px) {
+  .safi-account-backdrop {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  .safi-account-modal {
+    max-height: 94vh;
+    padding: 20px;
+    border-radius: 24px;
+  }
+}

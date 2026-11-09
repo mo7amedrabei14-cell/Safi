@@ -20,7 +20,8 @@ import {
   Moon,
   ShieldCheck,
   Sparkles,
-  Sun
+  Sun,
+  UserRound
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SafiPrismLogo } from "../brand/SafiPrismLogo";
@@ -57,6 +58,8 @@ export interface FloatingGlassDockProps {
   readonly onSelectTheme?: (theme: SafiThemeId) => void;
   readonly lang?: SafiLang;
   readonly onToggleLang?: () => void;
+  readonly onOpenAccount?: () => void;
+  readonly authenticated?: boolean;
 }
 
 const WEBSITE_SECTIONS: ReadonlyArray<{
@@ -79,7 +82,9 @@ export function FloatingGlassDock({
   theme = "apple-light",
   onSelectTheme,
   lang = "en",
-  onToggleLang
+  onToggleLang,
+  onOpenAccount,
+  authenticated = false
 }: FloatingGlassDockProps): ReactNode {
   const isDark = theme === "google-gemini";
   const [activeNavIdx, setActiveNavIdx] = useState<number>(0);
@@ -184,6 +189,25 @@ export function FloatingGlassDock({
 
         {/* 3. Open Unpinned Right Actions (Scrolls naturally with the page) */}
         <div className="safi-topbar-actions">
+          <button
+            type="button"
+            onClick={onOpenAccount}
+            className="safi-topbar-btn"
+            aria-label={lang === "ar" ? "فتح الحساب" : "Open account"}
+            style={{ minHeight: "44px", height: "38px" }}
+          >
+            <UserRound size={15} aria-hidden="true" />
+            <span>
+              {authenticated
+                ? lang === "ar"
+                  ? "تم تسجيل الدخول"
+                  : "Signed in"
+                : lang === "ar"
+                  ? "الحساب"
+                  : "Account"}
+            </span>
+          </button>
+
           {/* 1. Live Language Switcher (العربية / English) */}
           <button
             type="button"

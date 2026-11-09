@@ -78,6 +78,8 @@ CREATE TABLE devices (
     CONSTRAINT devices_platform_valid CHECK (
         platform IN ('windows', 'linux', 'macos', 'web')
     ),
+    CONSTRAINT devices_workspace_membership_fk FOREIGN KEY (workspace_id, user_id)
+        REFERENCES memberships (workspace_id, user_id) ON DELETE CASCADE,
     CONSTRAINT devices_installation_hash_size CHECK (
         octet_length(installation_key_hash) = 32
     )
@@ -197,8 +199,12 @@ INSERT INTO subscriptions (
 SELECT
     workspace.id,
     CASE
-        WHEN EXISTS (SELECT 1 FROM plans WHERE plans.code = workspace.plan_code)
-            THEN workspace.plan_code
+        WHEN EXISTS (
+            SELECT 1
+            FROM plans
+            WHERE plans.code = workspace.plan_code
+              AND plans.status = 'active'
+        ) THEN workspace.plan_code
         ELSE 'free'
     END,
     'active',

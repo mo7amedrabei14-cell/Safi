@@ -232,6 +232,12 @@ fn backend_error() -> AuthError {
 #[async_trait]
 impl ApiKeyRepository for SqlxApiKeyRepository {
     async fn find_by_prefix(&self, prefix: &str) -> Result<Option<ApiKeyRecord>, AuthError> {
+        let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+
         let row = sqlx::query(
             r"
             SELECT id,
@@ -248,35 +254,44 @@ impl ApiKeyRepository for SqlxApiKeyRepository {
             ",
         )
         .bind(prefix)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(|_| backend_error())?;
 
-        let Some(row) = row else {
-            return Ok(None);
+        let record = if let Some(row) = row {
+            let scopes: Vec<String> = row.try_get("scopes").map_err(|_| backend_error())?;
+            Some(ApiKeyRecord {
+                id: row.try_get("id").map_err(|_| backend_error())?,
+                workspace_id: row.try_get("workspace_id").map_err(|_| backend_error())?,
+                user_id: row.try_get("user_id").map_err(|_| backend_error())?,
+                key_prefix: row.try_get("key_prefix").map_err(|_| backend_error())?,
+                secret_hash: row.try_get("secret_hash").map_err(|_| backend_error())?,
+                scopes: super::parse_scopes(&scopes),
+                revoked: row.try_get("revoked").map_err(|_| backend_error())?,
+                expires_at: row.try_get("expires_at").map_err(|_| backend_error())?,
+                last_used_at: row.try_get("last_used_at").map_err(|_| backend_error())?,
+            })
+        } else {
+            None
         };
 
-        let scopes: Vec<String> = row.try_get("scopes").map_err(|_| backend_error())?;
-        Ok(Some(ApiKeyRecord {
-            id: row.try_get("id").map_err(|_| backend_error())?,
-            workspace_id: row.try_get("workspace_id").map_err(|_| backend_error())?,
-            user_id: row.try_get("user_id").map_err(|_| backend_error())?,
-            key_prefix: row.try_get("key_prefix").map_err(|_| backend_error())?,
-            secret_hash: row.try_get("secret_hash").map_err(|_| backend_error())?,
-            scopes: super::parse_scopes(&scopes),
-            revoked: row.try_get("revoked").map_err(|_| backend_error())?,
-            expires_at: row.try_get("expires_at").map_err(|_| backend_error())?,
-            last_used_at: row.try_get("last_used_at").map_err(|_| backend_error())?,
-        }))
+        transaction.commit().await.map_err(|_| backend_error())?;
+        Ok(record)
     }
 
     async fn touch_last_used(&self, id: Uuid, at: i64) -> Result<(), AuthError> {
+        let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
         sqlx::query("UPDATE api_keys SET last_used_at = to_timestamp($2) WHERE id = $1")
             .bind(id)
             .bind(at)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;
+        transaction.commit().await.map_err(|_| backend_error())?;
         Ok(())
     }
 }
@@ -298,6 +313,15 @@ impl SqlxSessionRepository {
 impl SessionRepository for SqlxSessionRepository {
     async fn replace_active(&self, record: &SessionRecord) -> Result<(), AuthError> {
         let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(record.workspace_id.to_string())
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
 
         sqlx::query(
             r"
@@ -346,6 +370,12 @@ impl SessionRepository for SqlxSessionRepository {
     }
 
     async fn find_by_hash(&self, token_hash: &str) -> Result<Option<SessionRecord>, AuthError> {
+        let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+
         let row = sqlx::query(
             r"
             SELECT id,
@@ -363,49 +393,64 @@ impl SessionRepository for SqlxSessionRepository {
             ",
         )
         .bind(token_hash)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(|_| backend_error())?;
 
-        let Some(row) = row else {
-            return Ok(None);
+        let record = if let Some(row) = row {
+            let scopes: Vec<String> = row.try_get("scopes").map_err(|_| backend_error())?;
+            Some(SessionRecord {
+                id: row.try_get("id").map_err(|_| backend_error())?,
+                workspace_id: row.try_get("workspace_id").map_err(|_| backend_error())?,
+                user_id: row.try_get("user_id").map_err(|_| backend_error())?,
+                api_key_id: row.try_get("api_key_id").map_err(|_| backend_error())?,
+                token_hash: token_hash.to_owned(),
+                device_name: row.try_get("device_name").map_err(|_| backend_error())?,
+                scopes: super::parse_scopes(&scopes),
+                created_at: row.try_get("created_at").map_err(|_| backend_error())?,
+                last_seen_at: row.try_get("last_seen_at").map_err(|_| backend_error())?,
+                expires_at: row.try_get("expires_at").map_err(|_| backend_error())?,
+                revoked: row.try_get("revoked").map_err(|_| backend_error())?,
+            })
+        } else {
+            None
         };
 
-        let scopes: Vec<String> = row.try_get("scopes").map_err(|_| backend_error())?;
-        Ok(Some(SessionRecord {
-            id: row.try_get("id").map_err(|_| backend_error())?,
-            workspace_id: row.try_get("workspace_id").map_err(|_| backend_error())?,
-            user_id: row.try_get("user_id").map_err(|_| backend_error())?,
-            api_key_id: row.try_get("api_key_id").map_err(|_| backend_error())?,
-            token_hash: token_hash.to_owned(),
-            device_name: row.try_get("device_name").map_err(|_| backend_error())?,
-            scopes: super::parse_scopes(&scopes),
-            created_at: row.try_get("created_at").map_err(|_| backend_error())?,
-            last_seen_at: row.try_get("last_seen_at").map_err(|_| backend_error())?,
-            expires_at: row.try_get("expires_at").map_err(|_| backend_error())?,
-            revoked: row.try_get("revoked").map_err(|_| backend_error())?,
-        }))
+        transaction.commit().await.map_err(|_| backend_error())?;
+        Ok(record)
     }
 
     async fn touch(&self, id: Uuid, at: i64) -> Result<(), AuthError> {
+        let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
         sqlx::query("UPDATE sessions SET last_seen_at = to_timestamp($2) WHERE id = $1")
             .bind(id)
             .bind(at)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;
+        transaction.commit().await.map_err(|_| backend_error())?;
         Ok(())
     }
 
     async fn revoke(&self, id: Uuid, at: i64) -> Result<(), AuthError> {
+        let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
         sqlx::query(
             "UPDATE sessions SET revoked_at = to_timestamp($2) WHERE id = $1 AND revoked_at IS NULL",
         )
         .bind(id)
         .bind(at)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|_| backend_error())?;
+        transaction.commit().await.map_err(|_| backend_error())?;
         Ok(())
     }
 }

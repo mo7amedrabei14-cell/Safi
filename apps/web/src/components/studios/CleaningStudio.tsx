@@ -648,7 +648,7 @@ export function CleaningStudio({ lang = "en", onSelectTab }: CleaningStudioProps
     return Math.min(100, 82 + enabledCount * 4 + (zeroMeansNull ? 2 : 0));
   }, [currentSteps, zeroMeansNull]);
 
-  return (
+  const content = (
     <section
       className="safi-studio"
       aria-labelledby="safi-cleaning-title"
@@ -1176,7 +1176,7 @@ export function CleaningStudio({ lang = "en", onSelectTab }: CleaningStudioProps
                       </td>
                       {row.cells.map((cell, cIdx) => {
                         const changed = row.diffs[cIdx];
-                        const content = (
+                        return (
                           <td
                             key={cIdx}
                             style={{

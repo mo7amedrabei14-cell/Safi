@@ -78,7 +78,7 @@ export function FloatingGlassDock({
   onOpenSettings,
   theme = "apple-light",
   onSelectTheme,
-  lang = "ar",
+  lang = "en",
   onToggleLang
 }: FloatingGlassDockProps): ReactNode {
   const isDark = theme === "google-gemini";
@@ -124,10 +124,10 @@ export function FloatingGlassDock({
 
   return (
     <header className="safi-topbar" dir={lang === "ar" ? "rtl" : "ltr"}>
-      <nav aria-label="التنقل الرئيسي" className="safi-topbar-inner">
+      <nav aria-label={lang === "ar" ? "التنقل الرئيسي" : "Main navigation"} className="safi-topbar-inner">
         {/* 1. Open Unpinned Brand Emblem (Scrolls naturally with the page) */}
         <div className="safi-topbar-brand">
-          <SafiPrismLogo size="sm" showTagline={false} />
+          <SafiPrismLogo size="sm" showTagline={false} lang={lang} />
         </div>
 
         {/* 2. THE ONLY PINNED ELEMENT: Pure Apple Minimalist Glass Pill (Single-Row 44px height, slow silky glide) */}
@@ -198,7 +198,7 @@ export function FloatingGlassDock({
             type="button"
             onClick={handleToggleDayNight}
             className="safi-topbar-btn"
-            aria-label={isDark ? "الوضع النهاري" : "الوضع الليلي"}
+            aria-label={lang === "ar" ? (isDark ? "الوضع النهاري" : "الوضع الليلي") : (isDark ? "Switch to daylight theme" : "Switch to midnight theme")}
             style={{ minHeight: "44px", height: "38px" }}
           >
             {isDark ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
@@ -232,14 +232,14 @@ export function FloatingGlassDock({
                 onClick={() => onSelect(tab.id)}
                 style={{ minHeight: "44px" }}
               >
-                {tab.label}
+                {lang === "ar" ? tab.label : tab.labelEn}
               </button>
             );
           })}
           <button
             type="button"
             onClick={onOpenCommandPalette}
-            aria-label="لوحة الأوامر السريعة"
+            aria-label={lang === "ar" ? "لوحة الأوامر السريعة" : "Command palette"}
             style={{ minHeight: "44px" }}
           >
             ⌘K
@@ -247,10 +247,10 @@ export function FloatingGlassDock({
           <button
             type="button"
             onClick={onOpenSettings}
-            aria-label="الإعدادات"
+            aria-label={lang === "ar" ? "الإعدادات" : "Settings"}
             style={{ minHeight: "44px" }}
           >
-            الإعدادات
+            {lang === "ar" ? "الإعدادات" : "Settings"}
           </button>
         </div>
       </nav>

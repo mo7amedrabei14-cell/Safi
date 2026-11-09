@@ -27,8 +27,8 @@ describe("UI-Phase-5 Cleaning & PII studio", () => {
   it("defaults to English UI while retaining Arabic sample data", () => {
     const html = renderToString(<CleaningStudio />);
 
-    expect(html).toContain("Cleaning, Privacy & Workspace Lab");
-    expect(html).toContain("Cleaning & PII");
+    expect(html).toContain("Cleaning, Privacy &amp; Workspace Lab");
+    expect(html).toContain("Cleaning &amp; PII");
     expect(html).toContain("Normalization result");
     expect(html).toContain("Deterministic tokenization (BLAKE3)");
     expect(html).not.toContain("نتيجة التطبيع العربي");

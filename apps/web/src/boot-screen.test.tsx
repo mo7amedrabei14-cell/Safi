@@ -22,7 +22,7 @@ describe("SafiData first-paint introduction", () => {
     expect(appCss).toContain(".safi-intro-copy");
     expect(appCss).toContain(".safi-intro-progress-fill");
     expect(appCss).toContain('data-fonts-ready="false"');
-    expect(appCss.trimStart()).not.toMatch(/^import\\s/m);
+    expect(appCss.trimStart().startsWith("import ")).toBe(false);
     expect(appCss).not.toContain('describe("UI-Phase-5');
   });
 

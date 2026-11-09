@@ -93,7 +93,7 @@ export function enabledStepCount(toggles: RecipeToggles): number {
 
 export type WatchFolderValidation =
   | { readonly ok: true; readonly normalized: string }
-  | { readonly ok: false; readonly code: "SF-EXP-001"; readonly messageAr: string };
+  | { readonly ok: false; readonly code: "SF-EXP-001"; readonly messageAr: string; readonly messageEn: string };
 
 const ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\/)/;
 
@@ -107,17 +107,19 @@ export function validateWatchFolder(raw: string): WatchFolderValidation {
     return {
       ok: false,
       code: "SF-EXP-001",
-      messageAr: "اختر مجلدًا مطلقًا للمخرجات، مثل C:\\Safi\\Output أو /home/safi/output."
+      messageAr: "اختر مجلدًا مطلقًا للمخرجات، مثل C:\\Safi\\Output أو /home/safi/output.",
+      messageEn: "Choose an absolute output folder, such as C:\\Safi\\Output or /home/safi/output."
     };
   }
   if (trimmed.includes("\u0000")) {
-    return { ok: false, code: "SF-EXP-001", messageAr: "مسار المجلد يحتوي محرفًا غير صالح." };
+    return { ok: false, code: "SF-EXP-001", messageAr: "مسار المجلد يحتوي محرفًا غير صالح.", messageEn: "The folder path contains an invalid character." };
   }
   if (!ABSOLUTE_PATH.test(trimmed)) {
     return {
       ok: false,
       code: "SF-EXP-001",
-      messageAr: "يجب أن يكون مسار المجلد مطلقًا (يبدأ بمحرك قرص أو بشرطة مائلة)."
+      messageAr: "يجب أن يكون مسار المجلد مطلقًا (يبدأ بمحرك قرص أو بشرطة مائلة).",
+      messageEn: "The folder path must be absolute (start with a drive letter or forward slash)."
     };
   }
   const segments = trimmed.split(/[\\/]+/);
@@ -125,7 +127,8 @@ export function validateWatchFolder(raw: string): WatchFolderValidation {
     return {
       ok: false,
       code: "SF-EXP-001",
-      messageAr: "لا يُسمح بالخروج من المجلد الهدف: احذف أي مقطع ‎..‎ من المسار."
+      messageAr: "لا يُسمح بالخروج من المجلد الهدف: احذف أي مقطع ‎..‎ من المسار.",
+      messageEn: "Path traversal is not allowed. Remove any .. segment from the path."
     };
   }
   let normalized = trimmed.replace(/[\\/]+/g, "/");

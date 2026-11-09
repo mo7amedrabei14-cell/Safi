@@ -40,7 +40,7 @@ export interface LibraryStudioProps {
   readonly onSelectTab?: (tab: SafiDockTabId) => void;
 }
 
-export function LibraryStudio({ lang = "ar", onSelectTab }: LibraryStudioProps = {}): ReactNode {
+export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps = {}): ReactNode {
   const isAr = lang === "ar";
   const [exported, setExported] = useState<string | null>(null);
   const [previewTemplateId, setPreviewTemplateId] = useState<string>(

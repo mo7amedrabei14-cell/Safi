@@ -217,16 +217,15 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
             .await
             .expect("personal workspace should be present");
 
-    assert_eq!(
-        scalar_count(
-            &admin_pool,
-            "SELECT count(*) FROM memberships WHERE workspace_id = $1 AND user_id = $2 AND role = 'owner'",
-            &workspace_id.to_string()
-        )
-        .await,
-        0,
-        "UUID values need their own typed assertion below"
-    );
+    let owner_membership_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM memberships WHERE workspace_id = $1 AND user_id = $2 AND role = 'owner'",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .fetch_one(&admin_pool)
+    .await
+    .expect("owner membership count should be queryable");
+    assert_eq!(owner_membership_count, 1);
 
     let membership_role: String = sqlx::query_scalar(
         "SELECT role FROM memberships WHERE workspace_id = $1 AND user_id = $2",
@@ -308,13 +307,13 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
         .await
         .expect("the replacement token should verify the account");
 
-    let verified_at: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar("SELECT email_verified_at FROM users WHERE id = $1")
+    let is_verified: bool =
+        sqlx::query_scalar("SELECT email_verified_at IS NOT NULL FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_one(&admin_pool)
             .await
             .expect("verification timestamp should be readable");
-    assert!(verified_at.is_some());
+    assert!(is_verified);
 
     let issued = service
         .login(LoginAccountRequest {

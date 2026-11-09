@@ -205,7 +205,9 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
       extractSvgColors(svg).map((colour, idx) => ({
         colour,
         nameAr: `لون المخطط #${idx + 1}`,
+        nameEn: `Chart colour #${idx + 1}`,
         bgNameAr: "لوحة الرسم القياسية",
+        bgNameEn: "Standard chart canvas",
         background: WHITE_CANVAS,
         ratio: contrastRatio(colour, WHITE_CANVAS),
         minimum: WCAG_AA_UI_GRAPHIC_MIN_RATIO
@@ -216,15 +218,17 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
   const paletteAudit = useMemo(
     () =>
       [
-        { c: DARK_COLORS.primary, n: "الأزرق الملكي الأساسي" },
-        { c: DARK_COLORS.success, n: "الأخضر الزمردي للنجاح" },
-        { c: DARK_COLORS.warning, n: "الكهرماني التنبيهي" },
-        { c: DARK_COLORS.danger, n: "الأحمر المرجاني للخطر" },
-        { c: DARK_COLORS.info, n: "السماوي الفيروزي للمعلومات" }
+        { c: DARK_COLORS.primary, n: "الأزرق الملكي الأساسي", en: "Primary royal blue" },
+        { c: DARK_COLORS.success, n: "الأخضر الزمردي للنجاح", en: "Success emerald green" },
+        { c: DARK_COLORS.warning, n: "الكهرماني التنبيهي", en: "Warning amber" },
+        { c: DARK_COLORS.danger, n: "الأحمر المرجاني للخطر", en: "Danger coral red" },
+        { c: DARK_COLORS.info, n: "السماوي الفيروزي للمعلومات", en: "Information turquoise" }
       ].map((item) => ({
         colour: item.c,
         nameAr: item.n,
+        nameEn: item.en,
         bgNameAr: "السطح الليلي الداكن",
+        bgNameEn: "Dark surface",
         background: DARK_COLORS.surface,
         ratio: contrastRatio(item.c, DARK_COLORS.surface),
         minimum: WCAG_AA_TEXT_MIN_RATIO
@@ -509,7 +513,7 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
             <button
               type="button"
               onClick={() =>
-                setRows([...rows, { region: `محافظة ${rows.length + 1}`, completion: 80 }])
+                setRows([...rows, { region: isAr ? `محافظة ${rows.length + 1}` : `Region ${rows.length + 1}`, completion: 80 }])
               }
               style={{ minHeight: "32px", padding: "4px 10px", fontSize: "11px" }}
             >
@@ -568,8 +572,8 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
             <ul className="safi-list">
               {credibility.map((warning) => (
                 <li key={warning.code} data-credibility-code={warning.code}>
-                  <strong className="safi-mono">{warning.code}</strong> — {warning.messageAr}
-                  <span className="safi-hint">{warning.suggestionAr}</span>
+                  <strong className="safi-mono">{warning.code}</strong> — {isAr ? warning.messageAr : warning.messageEn}
+                  <span className="safi-hint">{isAr ? warning.suggestionAr : warning.suggestionEn}</span>
                 </li>
               ))}
             </ul>
@@ -625,9 +629,9 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
                         verticalAlign: "middle"
                       }}
                     />
-                    <strong>{row.nameAr}</strong>
+                    <strong>{isAr ? row.nameAr : row.nameEn}</strong>
                   </td>
-                  <td>{row.bgNameAr}</td>
+                  <td>{isAr ? row.bgNameAr : row.bgNameEn}</td>
                   <td className="safi-mono" dir="ltr">
                     {row.ratio.toFixed(2)}:1
                   </td>
@@ -636,9 +640,9 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
                   </td>
                   <td>
                     {row.ratio >= row.minimum ? (
-                      <span className="safi-status safi-status--ok">✓ يجتاز</span>
+                      <span className="safi-status safi-status--ok">{isAr ? "✓ يجتاز" : "✓ Pass"}</span>
                     ) : (
-                      <span className="safi-status safi-status--bad">✗ يرسب</span>
+                      <span className="safi-status safi-status--bad">{isAr ? "✗ يرسب" : "✗ Fail"}</span>
                     )}
                   </td>
                 </tr>

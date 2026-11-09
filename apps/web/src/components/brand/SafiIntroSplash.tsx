@@ -187,19 +187,6 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
         );
       }
 
-      timeline.fromTo(
-        dots,
-        { scale: 0, opacity: 0, transformOrigin: "50% 50%" },
-        {
-          scale: 1,
-          opacity: 1,
-          duration: 0.28,
-          stagger: 0.02,
-          ease: "back.out(2.2)"
-        },
-        0
-      );
-
       dots.forEach((dot, index) => {
         const spec = MOTION_DOTS[index];
         if (spec !== undefined) {
@@ -253,11 +240,11 @@ export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashPr
         );
       }
 
-      // Let the fully filled bar remain visible briefly before the handoff.
-      timeline.to(
-        {},
-        { duration: INTRO_PROGRESS_COMPLETION_HOLD_SECONDS },
-        INTRO_PROGRESS_DURATION_SECONDS
+      // Mark the progress completion, then delay the handoff without changing the composition.
+      timeline.call(
+        () => undefined,
+        [],
+        INTRO_PROGRESS_DURATION_SECONDS + INTRO_PROGRESS_COMPLETION_HOLD_SECONDS
       );
 
       fallbackTimer = window.setTimeout(() => {

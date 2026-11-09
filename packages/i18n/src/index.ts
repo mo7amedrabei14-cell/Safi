@@ -37,11 +37,6 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
   defaultLocale = "en-US"
 }) => {
   const [locale, setLocaleState] = useState<Locale>(() => {
-    if (typeof document !== "undefined") {
-      const selected = document.documentElement.dataset.safiLocale;
-      if (selected === "ar") return "ar-EG";
-      if (selected === "en") return "en-US";
-    }
     if (typeof window !== "undefined") {
       try {
         const selected = window.localStorage.getItem("safi.locale");
@@ -50,6 +45,11 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
       } catch {
         // The configured default locale remains available without storage.
       }
+    }
+    if (typeof document !== "undefined") {
+      const selected = document.documentElement.dataset.safiLocale;
+      if (selected === "ar") return "ar-EG";
+      if (selected === "en") return "en-US";
     }
     return defaultLocale;
   });

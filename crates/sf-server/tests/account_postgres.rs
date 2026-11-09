@@ -6,20 +6,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
 use sf_server::auth::account::{
-    AccountAuthService, LoginAccountRequest, RegisterAccountRequest,
-    SqlxAccountRepository, VerificationEmailSender,
+    AccountAuthService, LoginAccountRequest, RegisterAccountRequest, SqlxAccountRepository,
+    VerificationEmailSender,
 };
 use sf_server::auth::cache::InMemoryAuthCache;
-use sf_server::auth::repository::{
-    InMemoryApiKeyRepository, SqlxSessionRepository,
-};
+use sf_server::auth::repository::{InMemoryApiKeyRepository, SqlxSessionRepository};
 use sf_server::auth::service::AuthService;
 use sf_server::auth::AuthMethod;
-use sf_server::error::AuthError;
 use sf_server::auth::Scope;
+use sf_server::error::AuthError;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -202,7 +200,9 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
     let first_messages = mailer.messages().await;
     assert_eq!(first_messages.len(), 1);
     assert_eq!(first_messages[0].0, email);
-    assert!(first_messages[0].1.starts_with("https://safidata.example/?verify_email="));
+    assert!(first_messages[0]
+        .1
+        .starts_with("https://safidata.example/?verify_email="));
     let first_token = verification_token(&first_messages[0]);
 
     let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = lower($1)")
@@ -210,12 +210,11 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
         .fetch_one(&admin_pool)
         .await
         .expect("new user should be present");
-    let workspace_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM workspaces WHERE name = $1")
-            .bind(&workspace_name)
-            .fetch_one(&admin_pool)
-            .await
-            .expect("personal workspace should be present");
+    let workspace_id: Uuid = sqlx::query_scalar("SELECT id FROM workspaces WHERE name = $1")
+        .bind(&workspace_name)
+        .fetch_one(&admin_pool)
+        .await
+        .expect("personal workspace should be present");
 
     let owner_membership_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM memberships WHERE workspace_id = $1 AND user_id = $2 AND role = 'owner'",
@@ -227,14 +226,13 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
     .expect("owner membership count should be queryable");
     assert_eq!(owner_membership_count, 1);
 
-    let membership_role: String = sqlx::query_scalar(
-        "SELECT role FROM memberships WHERE workspace_id = $1 AND user_id = $2",
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .fetch_one(&admin_pool)
-    .await
-    .expect("personal owner membership should exist");
+    let membership_role: String =
+        sqlx::query_scalar("SELECT role FROM memberships WHERE workspace_id = $1 AND user_id = $2")
+            .bind(workspace_id)
+            .bind(user_id)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("personal owner membership should exist");
     assert_eq!(membership_role, "owner");
 
     let password_hash: String =
@@ -257,13 +255,12 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
     assert_eq!(stored_token_hash.len(), 32);
     assert_eq!(stored_token_hash, blake3::hash(&token_bytes).as_bytes());
 
-    let subscription: (String, String) = sqlx::query_as(
-        "SELECT plan_code, status FROM subscriptions WHERE workspace_id = $1",
-    )
-    .bind(workspace_id)
-    .fetch_one(&admin_pool)
-    .await
-    .expect("Free subscription should exist");
+    let subscription: (String, String) =
+        sqlx::query_as("SELECT plan_code, status FROM subscriptions WHERE workspace_id = $1")
+            .bind(workspace_id)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("Free subscription should exist");
     assert_eq!(subscription, ("free".to_owned(), "active".to_owned()));
 
     assert_eq!(

@@ -4,7 +4,7 @@
 
 1. **الاسم والهوية (`packages/brand/brand.config.ts`)**:
    - الاسم البرمجي الداخلي: `safi`.
-   - الاسم التجاري الظاهر: `«صافي البيانات | SafiData»`.
+   - الاسم التجاري الظاهر يتبع لغة الواجهة: `SafiData` بالإنجليزية و`صافي البيانات` بالعربية.
 
 2. **المعمارية المحلية أولًا (Local-First & Zero Network Engine)**:
    - محرك Rust موحّد (`crates/sf-*`) يُترجم إلى WASM (داخل Web Worker معزول) وإلى Native (Tauri 2.2 وCLI).
@@ -13,8 +13,8 @@
 
 3. **الواجهة والتخزين المحلي (Zero Next.js)**:
    - Vite 6 + React 19 + TypeScript 5.8 (strict) + TanStack Router + TanStack Query v5 + Zustand v5.
-   - التخزين المحلي عبر OPFS (`wa-sqlite`) وعرض الجداول عبر Glide Data Grid (120 FPS RTL).
-   - نظام التصميم: Tailwind CSS v4 برموز تصميم قياسية، WCAG 2.2 AA، RTL أولًا، وتباين لا يقل عن 4.5 للنصوص و3.0 لعناصر الرسوم.
+   - التخزين المحلي عبر OPFS (`wa-sqlite`) وعرض الجداول عبر Glide Data Grid (120 FPS، مع اتجاه LTR للإنجليزية وRTL للعربية).
+   - نظام التصميم: Tailwind CSS v4 برموز تصميم قياسية، WCAG 2.2 AA، اتجاه يتبع لغة الواجهة، وتباين لا يقل عن 4.5 للنصوص و3.0 لعناصر الرسوم.
 
 4. **الخادم وقاعدة البيانات (Zero Supabase — الشريحة S4)**:
    - Rust (Axum 0.8 + SQLx 0.8) مع **PostgreSQL 18 الأصلي** (`uuidv7()`، `Async I/O`، `Virtual Generated Columns`، `B-Tree Skip Scan`، وسياسات `RLS` الأصلية) + `PgBouncer` + `pg_partman` + `Valkey 8`.

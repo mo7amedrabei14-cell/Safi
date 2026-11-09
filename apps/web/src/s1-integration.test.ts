@@ -11,7 +11,10 @@ describe("S1 End-to-End Vertical Slice Integration Verification (Section 19.7)",
     expect(content.short_name).toBe("SafiData");
     expect(content.display).toBe("standalone");
 
-    const arabicManifestPath = path.resolve(process.cwd(), "apps/web/public/manifest.ar.webmanifest");
+    const arabicManifestPath = path.resolve(
+      process.cwd(),
+      "apps/web/public/manifest.ar.webmanifest"
+    );
     expect(fs.existsSync(arabicManifestPath)).toBe(true);
     const arabicContent = JSON.parse(fs.readFileSync(arabicManifestPath, "utf-8"));
     expect(arabicContent.name).toBe("صافي البيانات");

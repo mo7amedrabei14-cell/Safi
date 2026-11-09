@@ -57,7 +57,7 @@ describe("SafiData startup and application shell", () => {
     expect(arabicManifest.name).toBe("صافي البيانات");
     expect(arabicManifest.short_name).toBe("صافي");
     expect(html).toContain('id="safi-manifest"');
-    expect(bootLocale).toContain('/manifest.ar.webmanifest');
+    expect(bootLocale).toContain("/manifest.ar.webmanifest");
     expect(shareCard).toContain("SafiData");
     expect(shareCard).not.toMatch(/[\\u0600-\\u06FF]/);
   });

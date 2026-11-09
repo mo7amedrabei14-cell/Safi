@@ -16,6 +16,14 @@
   root.lang = locale === "ar" ? "ar-EG" : "en";
   root.dir = locale === "ar" ? "rtl" : "ltr";
 
+  const manifestLink = document.querySelector("#safi-manifest");
+  if (manifestLink) {
+    manifestLink.setAttribute(
+      "href",
+      locale === "ar" ? "/manifest.ar.webmanifest" : "/manifest.webmanifest"
+    );
+  }
+
   const applyLocalizedMarkup = () => {
     document.querySelectorAll("[data-locale-en][data-locale-ar]").forEach((element) => {
       const value = locale === "ar" ? element.getAttribute("data-locale-ar") : element.getAttribute("data-locale-en");

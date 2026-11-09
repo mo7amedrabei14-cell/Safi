@@ -32,6 +32,10 @@ export function applySafiLang(lang: SafiLang): void {
     root.dataset.safiLocale = lang;
     root.lang = lang === "ar" ? "ar-EG" : "en";
     root.dir = lang === "ar" ? "rtl" : "ltr";
+    const manifestLink = document.querySelector<HTMLLinkElement>("#safi-manifest");
+    if (manifestLink !== null) {
+      manifestLink.href = lang === "ar" ? "/manifest.ar.webmanifest" : "/manifest.webmanifest";
+    }
   }
 
   if (typeof window !== "undefined") {

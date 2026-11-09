@@ -1,6 +1,6 @@
 {
-  "name": "صافي البيانات | SafiData",
-  "short_name": "صافي",
+  "name": "SafiData",
+  "short_name": "SafiData",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F9F7F7",

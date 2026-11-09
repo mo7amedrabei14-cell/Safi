@@ -60,6 +60,11 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
       document.documentElement.lang = newLocale;
       document.documentElement.dir = newLocale === "ar-EG" ? "rtl" : "ltr";
       document.documentElement.dataset.safiLocale = newLocale === "ar-EG" ? "ar" : "en";
+      const manifestLink = document.querySelector<HTMLLinkElement>("#safi-manifest");
+      if (manifestLink !== null) {
+        manifestLink.href =
+          newLocale === "ar-EG" ? "/manifest.ar.webmanifest" : "/manifest.webmanifest";
+      }
     }
     if (typeof window !== "undefined") {
       try {
@@ -75,6 +80,10 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
       document.documentElement.lang = locale;
       document.documentElement.dir = locale === "ar-EG" ? "rtl" : "ltr";
       document.documentElement.dataset.safiLocale = locale === "ar-EG" ? "ar" : "en";
+      const manifestLink = document.querySelector<HTMLLinkElement>("#safi-manifest");
+      if (manifestLink !== null) {
+        manifestLink.href = locale === "ar-EG" ? "/manifest.ar.webmanifest" : "/manifest.webmanifest";
+      }
     }
   }, [locale]);
 

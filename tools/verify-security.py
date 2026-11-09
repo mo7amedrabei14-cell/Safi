@@ -184,15 +184,30 @@ def check_deferred_and_overscope_paths() -> list[str]:
 def check_tasks_generated() -> list[str]:
     errors: list[str] = []
     tasks_dir = ROOT / "docs/tasks"
+    handoff_path = ROOT / "docs/spec/19-handoff.md"
     if not tasks_dir.exists():
         return ["Missing docs/tasks directory (T0.01)."]
-    task_files = sorted(tasks_dir.glob("T*.md"))
-    if len(task_files) != 110:
+    if not handoff_path.exists():
+        return ["Missing docs/spec/19-handoff.md; cannot verify generated task coverage."]
+
+    # Validate the canonical generated set from Section 19, while permitting
+    # separately numbered owner tasks (for example T0.00 and T0.05).
+    handoff = handoff_path.read_text(encoding="utf-8")
+    canonical_ids = {"T0.01"}
+    canonical_ids.update(re.findall(r"^\\|\\s*(T[1-6]\\.\\d{2})\\s*\\|", handoff, re.MULTILINE))
+
+    expected_count = 110
+    if len(canonical_ids) != expected_count:
         errors.append(
-            f"Expected 110 task files in docs/tasks/ (T0.01 + 109 tasks across S1..S6), found {len(task_files)}."
+            f"Section 19 must define {expected_count} canonical task IDs (T0.01 + S1..S6); found {len(canonical_ids)}."
         )
-    if not (tasks_dir / "T0.01.md").exists():
-        errors.append("Missing docs/tasks/T0.01.md.")
+
+    missing = sorted(task_id for task_id in canonical_ids if not (tasks_dir / f"{task_id}.md").exists())
+    if missing:
+        errors.append(
+            "Missing canonical generated task files in docs/tasks/: " + ", ".join(missing)
+        )
+
     if not (tasks_dir / "T1.00.md").exists():
         errors.append("Missing docs/tasks/T1.00.md.")
     return errors
@@ -298,7 +313,7 @@ def main() -> int:
         return 1
 
     print(
-        "[verify-security] OK: T0.01 (110 tasks), T1.00 scope discipline, canonical docs, 23-tool status manifest, exact version pinning, and Section 19.4 deferral rules verified."
+        "[verify-security] OK: T0.01 (110 canonical tasks from Section 19; supplementary owner tasks are allowed), T1.00 scope discipline, canonical docs, 23-tool status manifest, exact version pinning, and Section 19.4 deferral rules verified."
     )
     return 0
 

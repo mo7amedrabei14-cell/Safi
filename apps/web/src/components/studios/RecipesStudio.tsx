@@ -198,9 +198,9 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
           padding: "8px 4px"
         }}
       >
-        <span className="safi-eyebrow">محرك الوصفات الحتمية</span>
+        <span className="safi-eyebrow">{isAr ? "محرك الوصفات الحتمية" : "Deterministic Recipe Engine"}</span>
         <h1 id="safi-recipes-title" className="safi-studio-title safi-rb-shiny-text">
-          الوصفات
+          {isAr ? "الوصفات" : "Recipes"}
         </h1>
         <p className="safi-studio-lead">
           {isAr
@@ -240,7 +240,7 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
                 key={tpl.id}
                 type="button"
                 onClick={() => {
-                  setName(tpl.nameAr);
+                  setName(isAr ? tpl.nameAr : tpl.nameEn);
                   setToggles(tpl.toggles);
                   setSimRunCount((c) => c + 1);
                 }}
@@ -252,12 +252,12 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
                   fontWeight: 700,
                   cursor: "pointer",
                   border:
-                    name === tpl.nameAr ? "1px solid #60A5FA" : "1px solid rgba(255,255,255,0.16)",
-                  background: name === tpl.nameAr ? "#2563EB" : "rgba(255,255,255,0.06)",
+                    name === (isAr ? tpl.nameAr : tpl.nameEn) ? "1px solid #60A5FA" : "1px solid rgba(255,255,255,0.16)",
+                  background: name === (isAr ? tpl.nameAr : tpl.nameEn) ? "#2563EB" : "rgba(255,255,255,0.06)",
                   color: "#F8FAFC"
                 }}
               >
-                {tpl.nameAr}
+                {isAr ? tpl.nameAr : tpl.nameEn}
               </button>
             ))}
           </div>
@@ -334,7 +334,7 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
       <div className="safi-grid-2">
         <SpotlightCard padding={24}>
           <label className="safi-field-label" htmlFor="safi-recipe-name">
-            اسم الوصفة
+            {isAr ? "اسم الوصفة" : "Recipe name"}
           </label>
           <input
             id="safi-recipe-name"
@@ -346,7 +346,7 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
 
           <fieldset className="safi-fieldset">
             <legend className="safi-field-label">
-              خطوات التنظيف (مع أزرار نقل لأعلى/لأسفل كبديل للسحب 2.5.7)
+              {isAr ? "خطوات التنظيف (مع أزرار نقل لأعلى/لأسفل كبديل للسحب 2.5.7)" : "Cleaning steps (with Up/Down controls as a drag alternative)"}
             </legend>
             {orderedSteps.map((step, idx) => (
               <div
@@ -371,8 +371,8 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
                     onChange={() => toggleStep(step.id)}
                   />
                   <span>
-                    <span className="safi-toggle-label">{step.labelAr}</span>
-                    <span className="safi-toggle-detail">{step.detailAr}</span>
+                    <span className="safi-toggle-label">{isAr ? step.labelAr : step.labelEn}</span>
+                    <span className="safi-toggle-detail">{isAr ? step.detailAr : step.detailEn}</span>
                   </span>
                 </label>
 
@@ -381,7 +381,7 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
                     type="button"
                     onClick={() => moveStep(idx, -1)}
                     disabled={idx === 0}
-                    aria-label={`انقل ${step.labelAr} لأعلى`}
+                    aria-label={isAr ? `انقل ${step.labelAr} لأعلى` : `Move ${step.labelEn} up`}
                     style={{ minHeight: "34px", minWidth: "34px", padding: "4px" }}
                   >
                     <ArrowUp size={13} aria-hidden="true" />
@@ -390,7 +390,7 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
                     type="button"
                     onClick={() => moveStep(idx, 1)}
                     disabled={idx === orderedSteps.length - 1}
-                    aria-label={`انقل ${step.labelAr} لأسفل`}
+                    aria-label={isAr ? `انقل ${step.labelAr} لأسفل` : `Move ${step.labelEn} down`}
                     style={{ minHeight: "34px", minWidth: "34px", padding: "4px" }}
                   >
                     <ArrowDown size={13} aria-hidden="true" />
@@ -403,22 +403,22 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
 
         <SpotlightCard padding={24}>
           <h2 className="safi-card-title">
-            <FileCode2 size={16} aria-hidden="true" /> الوصفة القانونية
+            <FileCode2 size={16} aria-hidden="true" /> {isAr ? "الوصفة القانونية" : "Canonical recipe"}
           </h2>
           <p className="safi-hint" data-testid="safi-recipe-stats">
-            خطوات مفعّلة: {enabled} من {RECIPE_STEPS.length}
+            {isAr ? "خطوات مفعّلة" : "Enabled steps"}: {enabled} / {RECIPE_STEPS.length}
           </p>
           <pre className="safi-pre safi-pre--json" dir="ltr" data-testid="safi-recipe-json">
             {canonicalJson}
           </pre>
 
-          <span className="safi-mini-label">بصمة BLAKE3 للوصفة</span>
+          <span className="safi-mini-label">{isAr ? "بصمة BLAKE3 للوصفة" : "Recipe BLAKE3 digest"}</span>
           <p className="safi-digest-line">
             <DecryptedMonoText value={digest} />
           </p>
 
           <label className="safi-field-label" htmlFor="safi-watch-folder">
-            مجلد F1 المراقَب (مخرجات الوصفة)
+            {isAr ? "مجلد F1 المراقَب (مخرجات الوصفة)" : "F1 watched folder (recipe output)"}
           </label>
           <input
             id="safi-watch-folder"
@@ -437,13 +437,13 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
           >
             {folderCheck.ok ? (
               <>
-                <CheckCircle2 size={14} aria-hidden="true" /> مسار مطلق صالح:{" "}
+                <CheckCircle2 size={14} aria-hidden="true" /> {isAr ? "مسار مطلق صالح:" : "Valid absolute path:"}{" "}
                 <span className="safi-mono">{folderCheck.normalized}</span>
               </>
             ) : (
               <>
                 <XCircle size={14} aria-hidden="true" /> {folderCheck.code} ·{" "}
-                {folderCheck.messageAr}
+                {isAr ? folderCheck.messageAr : folderCheck.messageEn}
               </>
             )}
           </p>
@@ -452,24 +452,24 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
             <MagneticButton
               onClick={exportRecipe}
               disabled={!folderCheck.ok}
-              ariaLabel="تنزيل ملف الوصفة"
+              ariaLabel={isAr ? "تنزيل ملف الوصفة" : "Download recipe file"}
             >
               <Download size={16} aria-hidden="true" />
-              تنزيل الوصفة
+              {isAr ? "تنزيل الوصفة" : "Download recipe"}
             </MagneticButton>
             <MagneticButton
               variant="glass"
               onClick={exportReport}
-              ariaLabel="تصدير تقرير جودة الوصفة"
+              ariaLabel={isAr ? "تصدير تقرير جودة الوصفة" : "Export recipe quality report"}
             >
               <FileCode2 size={16} aria-hidden="true" />
-              تصدير تقرير الجودة
+              {isAr ? "تصدير تقرير الجودة" : "Export quality report"}
             </MagneticButton>
           </div>
 
           {exported !== null && (
             <p className="safi-hint" role="status">
-              تم إنشاء ملف جديد: <span className="safi-mono">{exported}</span>
+              {isAr ? "تم إنشاء ملف جديد:" : "New file created:"} <span className="safi-mono">{exported}</span>
             </p>
           )}
 
@@ -481,7 +481,7 @@ export function RecipesStudio({ lang = "en", onSelectTab }: RecipesStudioProps =
         </SpotlightCard>
       </div>
 
-      <GraphifyLineageCanvas titleAr="مخطط Graphify التفاعلي لمسار تنفيذ الوصفة الحتمية (DAG)" />
+      <GraphifyLineageCanvas titleAr="مخطط Graphify التفاعلي لمسار تنفيذ الوصفة الحتمية (DAG)" titleEn="Interactive Graphify deterministic recipe pipeline (DAG)" lang={lang} />
     </section>
   );
 }

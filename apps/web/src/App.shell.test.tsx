@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
@@ -38,6 +39,27 @@ describe("SafiData startup and application shell", () => {
     expect(html).toContain("⌘K");
     expect(html).not.toContain('role="dialog"');
     expect(html).toContain('role="status"');
+  });
+
+  it("keeps the PWA name and public share card aligned with the English default", () => {
+    const englishManifest = JSON.parse(
+      readFileSync(new URL("../public/manifest.webmanifest", import.meta.url), "utf8")
+    );
+    const arabicManifest = JSON.parse(
+      readFileSync(new URL("../public/manifest.ar.webmanifest", import.meta.url), "utf8")
+    );
+    const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    const bootLocale = readFileSync(new URL("../public/boot-locale.js", import.meta.url), "utf8");
+    const shareCard = readFileSync(new URL("../public/og-preview.svg", import.meta.url), "utf8");
+
+    expect(englishManifest.name).toBe("SafiData");
+    expect(englishManifest.short_name).toBe("SafiData");
+    expect(arabicManifest.name).toBe("صافي البيانات");
+    expect(arabicManifest.short_name).toBe("صافي");
+    expect(html).toContain('id="safi-manifest"');
+    expect(bootLocale).toContain('/manifest.ar.webmanifest');
+    expect(shareCard).toContain("SafiData");
+    expect(shareCard).not.toMatch(/[\\u0600-\\u06FF]/);
   });
 
   it("uses English as the first-run locale for the default studio", () => {

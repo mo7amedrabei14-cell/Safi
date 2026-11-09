@@ -18,7 +18,10 @@ const ApplicationShell = lazy(loadApplicationShell);
 
 function readVerificationToken(): string | null {
   if (typeof window === "undefined") return null;
-  return new URL(window.location.href).searchParams.get("verify_email");
+
+  const url = new URL(window.location.href);
+  const fragmentToken = new URLSearchParams(url.hash.slice(1)).get("verify_email");
+  return fragmentToken ?? url.searchParams.get("verify_email");
 }
 
 export function App(): ReactNode {
@@ -32,6 +35,11 @@ export function App(): ReactNode {
     if (verificationToken !== null) {
       const url = new URL(window.location.href);
       url.searchParams.delete("verify_email");
+      const fragment = new URLSearchParams(url.hash.slice(1));
+      if (fragment.has("verify_email")) {
+        fragment.delete("verify_email");
+        url.hash = fragment.toString() ? `#${fragment.toString()}` : "";
+      }
       window.history.replaceState(
         window.history.state,
         "",

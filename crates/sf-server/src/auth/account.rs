@@ -276,7 +276,7 @@ impl AccountAuthService {
     }
 
     async fn dispatch_verification(&self, email: &str, token: &str) {
-        let url = format!("{}/?verify_email={token}", self.public_base_url);
+        let url = format!("{}/#verify_email={token}", self.public_base_url);
         if self
             .email_sender
             .send_verification(email, &url)

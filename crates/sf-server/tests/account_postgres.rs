@@ -202,7 +202,7 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
     assert_eq!(first_messages[0].0, email);
     assert!(first_messages[0]
         .1
-        .starts_with("https://safidata.example/?verify_email="));
+        .starts_with("https://safidata.example/#verify_email="));
     let first_token = verification_token(&first_messages[0]);
 
     let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = lower($1)")

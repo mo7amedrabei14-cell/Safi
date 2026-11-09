@@ -17,6 +17,7 @@ export interface SafiPrismLogoProps {
   readonly showTagline?: boolean;
   readonly hideText?: boolean;
   readonly lang?: "ar" | "en";
+}
 
 interface SizeScale {
   readonly svg: number;

@@ -140,15 +140,19 @@ try {
       const track = root?.querySelector(".safi-intro-progress-track");
       if (!fill || !track) return false;
 
-      const trackWidth = track.getBoundingClientRect().width;
-      const fillWidth = fill.getBoundingClientRect().width;
-      const ratio = trackWidth > 0 ? fillWidth / trackWidth : 0;
-      if (ratio < 0.995) return false;
+      const trackRect = track.getBoundingClientRect();
+      const fillRect = fill.getBoundingClientRect();
+      const ratio = trackRect.width > 0 ? fillRect.width / trackRect.width : 0;
+      const scaleX = new DOMMatrixReadOnly(getComputedStyle(fill).transform).a;
+      const rightEdgeGapPx = Math.max(0, trackRect.right - fillRect.right);
+      if (scaleX < 0.99999 || rightEdgeGapPx > 0.1) return false;
 
       const trace = window.__safiIntroTrace;
       if (trace && trace.progressFullAt === null) {
         trace.progressFullAt = performance.now();
         trace.progressWidthRatio = ratio;
+        trace.progressScaleX = scaleX;
+        trace.progressRightEdgeGapPx = rightEdgeGapPx;
       }
       return true;
     }, undefined, { timeout: 10_000 });
@@ -166,6 +170,10 @@ try {
         progressWidth: fillWidth,
         trackWidth,
         progressWidthRatio: trackWidth > 0 ? fillWidth / trackWidth : null,
+        progressScaleX: fill ? new DOMMatrixReadOnly(getComputedStyle(fill).transform).a : null,
+        progressRightEdgeGapPx: fill && track
+          ? Math.max(0, track.getBoundingClientRect().right - fill.getBoundingClientRect().right)
+          : null,
         trace: window.__safiIntroTrace
       };
     });
@@ -175,11 +183,21 @@ try {
   }
 
   const completedFrame = await page.evaluate(() => ({
-    progressWidthRatio: window.__safiIntroTrace?.progressWidthRatio ?? 0
+    progressWidthRatio: window.__safiIntroTrace?.progressWidthRatio ?? 0,
+    progressScaleX: window.__safiIntroTrace?.progressScaleX ?? 0,
+    progressRightEdgeGapPx: window.__safiIntroTrace?.progressRightEdgeGapPx ?? Number.POSITIVE_INFINITY
   }));
   assert.ok(
-    completedFrame.progressWidthRatio >= 0.995,
-    `Expected the progress fill to cover the full track; ratio was ${completedFrame.progressWidthRatio}.`
+    completedFrame.progressScaleX >= 0.99999,
+    `Expected a 100% transform scale; measured ${completedFrame.progressScaleX}.`
+  );
+  assert.ok(
+    completedFrame.progressRightEdgeGapPx <= 0.1,
+    `Expected the fill to reach the track's right edge; gap was ${completedFrame.progressRightEdgeGapPx}px.`
+  );
+  assert.ok(
+    completedFrame.progressWidthRatio >= 0.9999,
+    `Expected the progress fill to cover 100% of the track; ratio was ${completedFrame.progressWidthRatio}.`
   );
   await page.screenshot({ path: resolve(artifactDir, "intro-progress-100-percent.png"), fullPage: true });
 
@@ -204,6 +222,8 @@ try {
     cpuThrottleRate: 4,
     fontsReadyToMotionMs: timing.fontsReadyToMotionMs,
     progressWidthRatio: completedFrame.progressWidthRatio,
+    progressScaleX: completedFrame.progressScaleX,
+    progressRightEdgeGapPx: completedFrame.progressRightEdgeGapPx,
     fullProgressHoldMs,
     pageErrors
   };

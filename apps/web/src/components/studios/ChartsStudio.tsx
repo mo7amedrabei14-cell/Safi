@@ -54,6 +54,7 @@ export const SAMPLE_CHART_SPEC: ChartSpec = {
   version: "1.0",
   type: "bar",
   titleAr: "نسبة اكتمال البيانات حسب المحافظة (بيانات تجريبية)",
+  titleEn: "Data completeness by governorate (sample data)",
   data: SAMPLE_CHART_DATA.map((row) => ({ region: row.region, completion: row.completion })),
   xAxisKey: "region",
   yAxisKey: "completion",
@@ -72,15 +73,15 @@ const CHART_TYPES: readonly ChartType[] = [
   "kpi"
 ];
 
-const CHART_TYPE_LABELS: Readonly<Record<ChartType, string>> = {
-  bar: "أعمدة",
-  line: "خطي",
-  area: "مساحي",
-  pie: "دائري",
-  donut: "حلقي",
-  scatter: "انتشار",
-  histogram: "تكرار",
-  kpi: "بطاقة مؤشر"
+const CHART_TYPE_LABELS: Readonly<Record<ChartType, { ar: string; en: string }>> = {
+  bar: { ar: "أعمدة", en: "Bar" },
+  line: { ar: "خطي", en: "Line" },
+  area: { ar: "مساحي", en: "Area" },
+  pie: { ar: "دائري", en: "Pie" },
+  donut: { ar: "حلقي", en: "Donut" },
+  scatter: { ar: "انتشار", en: "Scatter" },
+  histogram: { ar: "تكرار", en: "Histogram" },
+  kpi: { ar: "بطاقة مؤشر", en: "KPI" }
 };
 
 const WHITE_CANVAS = "#ffffff";
@@ -101,6 +102,7 @@ const CHART_PRESETS: ReadonlyArray<{
   readonly labelAr: string;
   readonly labelEn: string;
   readonly titleAr: string;
+  readonly titleEn: string;
   readonly rows: ReadonlyArray<{ readonly region: string; readonly completion: number }>;
 }> = [
   {
@@ -108,6 +110,7 @@ const CHART_PRESETS: ReadonlyArray<{
     labelAr: "اكتمال بيانات المحافظات",
     labelEn: "Regional Completion",
     titleAr: "نسبة اكتمال البيانات حسب المحافظة (بيانات تجريبية)",
+    titleEn: "Data completeness by governorate (sample data)",
     rows: SAMPLE_CHART_DATA
   },
   {
@@ -115,6 +118,7 @@ const CHART_PRESETS: ReadonlyArray<{
     labelAr: "نمو الإيرادات الفصلية",
     labelEn: "Quarterly Revenue Growth",
     titleAr: "معدل نمو الإيرادات التشغيلية عبر الفروع (%)",
+    titleEn: "Quarterly operational revenue growth by branch (%)",
     rows: [
       { region: "الربع الأول", completion: 72 },
       { region: "الربع الثاني", completion: 84 },
@@ -127,6 +131,7 @@ const CHART_PRESETS: ReadonlyArray<{
     labelAr: "جودة القطاعات المؤسسية",
     labelEn: "Enterprise Sector Quality",
     titleAr: "درجة نقاء البيانات حسب القطاع المؤسسي (%)",
+    titleEn: "Data quality score by business sector (%)",
     rows: [
       { region: "القطاع المالي", completion: 99 },
       { region: "الرعاية الصحية", completion: 94 },
@@ -146,10 +151,13 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
   const isAr = lang === "ar";
   const [activePresetId, setActivePresetId] = useState<string>("governorates");
   const [chartType, setChartType] = useState<ChartType>("bar");
-  const [titleAr, setTitleAr] = useState<string>(SAMPLE_CHART_SPEC.titleAr);
+  const [customTitles, setCustomTitles] = useState<{ ar: string; en: string } | null>(null);
   const [rows, setRows] = useState<Array<{ region: string; completion: number }>>(
     SAMPLE_CHART_DATA.map((r) => ({ ...r }))
   );
+
+  const activePreset = CHART_PRESETS.find((preset) => preset.id === activePresetId) ?? CHART_PRESETS[0]!;
+  const chartTitle = customTitles?.[isAr ? "ar" : "en"] ?? (isAr ? activePreset.titleAr : activePreset.titleEn);
 
   const effectiveRenderType: ChartType =
     chartType === "area" || chartType === "scatter"
@@ -162,16 +170,17 @@ export function ChartsStudio({ lang = "en", onSelectTab }: ChartsStudioProps = {
     () => ({
       ...SAMPLE_CHART_SPEC,
       type: effectiveRenderType,
-      titleAr,
+      titleAr: customTitles?.ar ?? activePreset.titleAr,
+      titleEn: customTitles?.en ?? activePreset.titleEn,
       data: rows
     }),
-    [effectiveRenderType, titleAr, rows]
+    [effectiveRenderType, customTitles, activePreset, rows]
   );
 
   const validation = useMemo(() => validateChartSpec(spec), [spec]);
   const svg = useMemo(
-    () => (validation.valid ? generateDeterministicSvg(spec) : ""),
-    [spec, validation.valid]
+    () => (validation.valid ? generateDeterministicSvg(spec, lang) : ""),
+    [spec, validation.valid, lang]
   );
   const imageUri = useMemo(
     () => (svg.length === 0 ? "" : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`),

@@ -2,9 +2,10 @@
 //! read-through cache, then issue, validate, and revoke sessions.
 //!
 //! Security invariants:
-//! - only BLAKE3 hashes of secrets are stored or cached;
-//! - cache failures degrade latency, never correctness (PostgreSQL is authoritative);
-//! - revocation evicts the cache entry and fails closed if eviction fails.
+//! - only BLAKE3 hashes of secrets are stored;
+//! - API-key cache failures degrade latency, never correctness;
+//! - session validation always reads PostgreSQL so device replacement and revocation
+//!   cannot be bypassed by a stale session-cache entry.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -122,8 +123,7 @@ impl AuthService {
             revoked: false,
         };
 
-        self.sessions.insert(&record).await?;
-        self.cache_session(&record, self.session_ttl).await;
+        self.sessions.replace_active(&record).await?;
 
         Ok(IssuedSession {
             token: issued.plaintext().to_owned(),
@@ -140,19 +140,11 @@ impl AuthService {
         let hash = token_hash(raw);
         let cache_key = session_cache_key(&hash);
 
-        let (mut record, from_cache) = match self.cached_session(&cache_key).await? {
-            Some(record) => (record, true),
-            None => {
-                let Some(record) = self.sessions.find_by_hash(&hash).await? else {
-                    return Err(AuthError::InvalidCredentials);
-                };
-                let remaining = self.remaining_ttl(&record);
-                if remaining > Duration::ZERO {
-                    self.cache_session(&record, remaining).await;
-                }
-                (record, false)
-            }
-        };
+        let mut record = self
+            .sessions
+            .find_by_hash(&hash)
+            .await?
+            .ok_or(AuthError::InvalidCredentials)?;
 
         if record.revoked {
             let _ = self.cache.delete(&cache_key).await;
@@ -164,10 +156,9 @@ impl AuthService {
             return Err(AuthError::Expired);
         }
 
-        if !from_cache || now - record.last_seen_at >= self.touch_interval_secs {
+        if now - record.last_seen_at >= self.touch_interval_secs {
             record.last_seen_at = now;
             self.sessions.touch(record.id, now).await?;
-            self.cache_session(&record, self.session_ttl).await;
         }
 
         Ok(AuthenticatedSession {
@@ -193,9 +184,8 @@ impl AuthService {
         session_token_hash: &str,
     ) -> Result<(), AuthError> {
         self.sessions.revoke(session_id, unix_now()).await?;
-        self.cache
-            .delete(&session_cache_key(session_token_hash))
-            .await?;
+        // PostgreSQL is authoritative; a stale legacy cache entry is never read.
+        let _ = self.cache.delete(&session_cache_key(session_token_hash)).await;
         Ok(())
     }
 
@@ -217,27 +207,6 @@ impl AuthService {
         Ok(record)
     }
 
-    async fn cached_session(&self, cache_key: &str) -> Result<Option<SessionRecord>, AuthError> {
-        let Some(raw) = self.cache.get(cache_key).await? else {
-            return Ok(None);
-        };
-        match serde_json::from_str::<SessionRecord>(&raw) {
-            Ok(record) => Ok(Some(record)),
-            Err(_) => {
-                let _ = self.cache.delete(cache_key).await;
-                Ok(None)
-            }
-        }
-    }
-
-    async fn cache_session(&self, record: &SessionRecord, ttl: Duration) {
-        if ttl.is_zero() {
-            return;
-        }
-        self.cache_record(&session_cache_key(&record.token_hash), record, ttl)
-            .await;
-    }
-
     async fn cache_record<T: serde::Serialize>(&self, key: &str, value: &T, ttl: Duration) {
         if let Ok(serialized) = serde_json::to_string(value) {
             // Cache outages must not turn into authentication outages.
@@ -245,14 +214,6 @@ impl AuthService {
         }
     }
 
-    fn remaining_ttl(&self, record: &SessionRecord) -> Duration {
-        let remaining = record.expires_at - unix_now();
-        if remaining <= 0 {
-            Duration::ZERO
-        } else {
-            Duration::from_secs(remaining as u64)
-        }
-    }
 }
 
 fn session_view(record: &SessionRecord) -> SessionView {

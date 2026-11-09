@@ -105,8 +105,8 @@ pub trait ApiKeyRepository: Send + Sync {
 /// Session persistence used by the authentication service.
 #[async_trait]
 pub trait SessionRepository: Send + Sync {
-    /// Insert a new session row.
-    async fn insert(&self, record: &SessionRecord) -> Result<(), AuthError>;
+    /// Atomically revoke every other active session for this user and insert the new one.
+    async fn replace_active(&self, record: &SessionRecord) -> Result<(), AuthError>;
     /// Find a session by its token hash.
     async fn find_by_hash(&self, token_hash: &str) -> Result<Option<SessionRecord>, AuthError>;
     /// Update the sliding `last_seen_at`.
@@ -174,8 +174,15 @@ impl InMemorySessionRepository {
 
 #[async_trait]
 impl SessionRepository for InMemorySessionRepository {
-    async fn insert(&self, record: &SessionRecord) -> Result<(), AuthError> {
-        self.records.write().await.push(record.clone());
+    async fn replace_active(&self, record: &SessionRecord) -> Result<(), AuthError> {
+        let mut records = self.records.write().await;
+        for existing in records.iter_mut() {
+            if existing.user_id == record.user_id && !existing.revoked {
+                existing.revoked = true;
+                existing.last_seen_at = record.created_at;
+            }
+        }
+        records.push(record.clone());
         Ok(())
     }
 
@@ -289,7 +296,25 @@ impl SqlxSessionRepository {
 
 #[async_trait]
 impl SessionRepository for SqlxSessionRepository {
-    async fn insert(&self, record: &SessionRecord) -> Result<(), AuthError> {
+    async fn replace_active(&self, record: &SessionRecord) -> Result<(), AuthError> {
+        let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
+
+        sqlx::query(
+            r"
+            UPDATE sessions
+            SET revoked_at = to_timestamp($2)
+            WHERE user_id = $1
+              AND id <> $3
+              AND revoked_at IS NULL
+            ",
+        )
+        .bind(record.user_id)
+        .bind(record.created_at)
+        .bind(record.id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| backend_error())?;
+
         sqlx::query(
             r"
             INSERT INTO sessions (
@@ -312,9 +337,11 @@ impl SessionRepository for SqlxSessionRepository {
         .bind(record.created_at)
         .bind(record.last_seen_at)
         .bind(record.expires_at)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|_| backend_error())?;
+
+        transaction.commit().await.map_err(|_| backend_error())?;
         Ok(())
     }
 

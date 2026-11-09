@@ -355,3 +355,81 @@ async fn api_key_route_rejects_a_session_token() {
     .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn a_new_device_session_revokes_the_previous_session_on_its_next_request() {
+    let fixture = fixture().await;
+
+    let first = send(
+        &fixture.router,
+        request(
+            "POST",
+            "/v1/auth/sessions",
+            Some(&fixture.full_key),
+            Some(serde_json::json!({ "device_name": "الجهاز الأول" })),
+        ),
+    )
+    .await;
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first_token = json_body(first).await["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let first_before_replacement = send(
+        &fixture.router,
+        request(
+            "GET",
+            "/v1/auth/sessions/current",
+            Some(&first_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(first_before_replacement.status(), StatusCode::OK);
+
+    let second = send(
+        &fixture.router,
+        request(
+            "POST",
+            "/v1/auth/sessions",
+            Some(&fixture.full_key),
+            Some(serde_json::json!({ "device_name": "الجهاز الثاني" })),
+        ),
+    )
+    .await;
+    assert_eq!(second.status(), StatusCode::CREATED);
+    let second_token = json_body(second).await["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let first_after_replacement = send(
+        &fixture.router,
+        request(
+            "GET",
+            "/v1/auth/sessions/current",
+            Some(&first_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(first_after_replacement.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(json_body(first_after_replacement).await["code"], "SF-AUTH-003");
+
+    let second_after_replacement = send(
+        &fixture.router,
+        request(
+            "GET",
+            "/v1/auth/sessions/current",
+            Some(&second_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(second_after_replacement.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(second_after_replacement).await["device_name"],
+        "الجهاز الثاني"
+    );
+}

@@ -2357,8 +2357,8 @@ export function BentoCommandCenter({
         <span>{isAr ? "خزنة SQLCipher مع مفاتيح Argon2id" : "SQLCipher vault with Argon2id keys"}</span>
         <span>Anti-Rollback</span>
         <span>{isAr ? "حارس Zero Trust" : "Zero Trust Guard"}</span>
-        <LivePipelineVisualizer />
-        <SmartDropzone onOpenCleaning={onStart} />
+        <LivePipelineVisualizer lang={lang} />
+        <SmartDropzone onOpenCleaning={onStart} lang={lang} />
       </div>
     </div>
   );

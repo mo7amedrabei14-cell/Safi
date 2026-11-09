@@ -272,7 +272,7 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
     ]
   ]);
   const [historyIndex, setHistoryIndex] = useState<number>(0);
-  const currentSteps = stepsHistory[historyIndex] ?? stepsHistory[0]!;
+  const currentSteps = stepsHistory[historyIndex] ?? [];
 
   const pushSteps = (next: readonly WorkspaceStep[], msg: string): void => {
     const sliced = stepsHistory.slice(0, historyIndex + 1);

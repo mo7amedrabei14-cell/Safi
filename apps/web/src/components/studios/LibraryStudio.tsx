@@ -51,13 +51,15 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
     () =>
       RECIPE_TEMPLATES.map((template) => ({
         ...template,
-        enabledSteps: RECIPE_STEPS.filter((step) => template.toggles[step.id]).map(
-          (step) => step.labelAr
+        displayName: isAr ? template.nameAr : template.nameEn,
+        displayDescription: isAr ? template.descriptionAr : template.descriptionEn,
+        enabledSteps: RECIPE_STEPS.filter((step) => template.toggles[step.id]).map((step) =>
+          (isAr ? step.labelAr : step.labelEn)
         ),
         digest: recipeDigest(template.nameAr, template.toggles),
         canonicalJson: canonicalRecipeJson(template.nameAr, template.toggles)
       })),
-    []
+    [isAr]
   );
 
   const activePreview = templates.find((item) => item.id === previewTemplateId) ?? templates[0];
@@ -163,7 +165,7 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
 
       {exported !== null && (
         <p className="safi-status safi-status--ok" role="status">
-          ✓ تم إنشاء ملف جديد بنجاح: <span className="safi-mono">{exported}</span>
+          {isAr ? "✓ تم إنشاء ملف جديد بنجاح:" : "✓ File created successfully:"} <span className="safi-mono">{exported}</span>
         </p>
       )}
 
@@ -183,13 +185,13 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                   }}
                 >
                   <h2 className="safi-card-title" style={{ marginBottom: 0 }}>
-                    <Library size={16} aria-hidden="true" /> {template.nameAr}
+                    <Library size={16} aria-hidden="true" /> {template.displayName}
                   </h2>
                   {isPreviewed && (
-                    <span className="safi-badge safi-badge--accent">قيد المعاينة</span>
+                    <span className="safi-badge safi-badge--accent">{isAr ? "قيد المعاينة" : "Previewing"}</span>
                   )}
                 </div>
-                <p className="safi-hint">{template.descriptionAr}</p>
+                <p className="safi-hint">{template.displayDescription}</p>
 
                 <div className="safi-chip-row">
                   {template.enabledSteps.map((label) => (
@@ -212,10 +214,10 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                         setExported(fileName);
                       }
                     }}
-                    ariaLabel={`تنزيل وصفة ${template.nameAr}`}
+                    ariaLabel={isAr ? `تنزيل وصفة ${template.nameAr}` : `Download ${template.nameEn} recipe`}
                   >
                     <Download size={16} aria-hidden="true" />
-                    تنزيل الوصفة
+                    {isAr ? "تنزيل الوصفة" : "Download recipe"}
                   </MagneticButton>
                   <MagneticButton
                     variant="glass"
@@ -230,10 +232,10 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                         setExported(fileName);
                       }
                     }}
-                    ariaLabel={`تصدير تقرير جودة ${template.nameAr}`}
+                    ariaLabel={isAr ? `تصدير تقرير جودة ${template.nameAr}` : `Export ${template.nameEn} quality report`}
                   >
                     <FileText size={16} aria-hidden="true" />
-                    تقرير الجودة
+                    {isAr ? "تقرير الجودة" : "Quality report"}
                   </MagneticButton>
                   <button
                     type="button"
@@ -242,7 +244,7 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
                     onClick={() => setPreviewTemplateId(template.id)}
                   >
                     <Eye size={14} aria-hidden="true" />
-                    معاينة حية
+                    {isAr ? "معاينة حية" : "Live preview"}
                   </button>
                 </div>
               </article>
@@ -265,11 +267,12 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
           >
             <div>
               <h2 className="safi-card-title" style={{ marginBottom: "4px" }}>
-                <Eye size={16} aria-hidden="true" /> معاينة القالب الحي: {activePreview.nameAr}
+                <Eye size={16} aria-hidden="true" /> {isAr ? "معاينة القالب الحي:" : "Live template preview:"} {activePreview.displayName}
               </h2>
               <p className="safi-hint" style={{ margin: 0 }}>
-                تمثيل JCS القانوني وبصمة BLAKE3 الكاملة ({activePreview.enabledSteps.length} خطوات
-                مفعّلة)
+                {isAr
+                  ? `تمثيل JCS القانوني وبصمة BLAKE3 الكاملة (${activePreview.enabledSteps.length} خطوات مفعّلة)`
+                  : `Canonical JCS representation and full BLAKE3 digest (${activePreview.enabledSteps.length} enabled steps)`}
               </p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -359,12 +362,12 @@ export function LibraryStudio({ lang = "en", onSelectTab }: LibraryStudioProps =
 
       <SpotlightCard padding={24}>
         <h2 className="safi-card-title">
-          <ShieldCheck size={16} aria-hidden="true" /> عن التوقيع الرقمي
+          <ShieldCheck size={16} aria-hidden="true" /> {isAr ? "عن التوقيع الرقمي" : "About digital signatures"}
         </h2>
         <p className="safi-hint">
-          التقرير المصدَّر يحمل بصمة تحقق BLAKE3 يطابقها أي طرف دون مفاتيح. أما التوقيع الرقمي
-          Ed25519 فيُنتَج داخل نواة سطح المكتب بمفتاح الترخيص المحلي عند التصدير النهائي من التطبيق،
-          ولا تدّعي هذه الصفحة أنها وقّعت شيئًا.
+          {isAr
+            ? "التقرير المصدَّر يحمل بصمة تحقق BLAKE3 يطابقها أي طرف دون مفاتيح. أما التوقيع الرقمي Ed25519 فيُنتَج داخل نواة سطح المكتب بمفتاح الترخيص المحلي عند التصدير النهائي من التطبيق، ولا تدّعي هذه الصفحة أنها وقّعت شيئًا."
+            : "The exported report contains a BLAKE3 verification digest that anyone can check without keys. The Ed25519 digital signature is produced by the desktop engine using the local licence key during final export; this page does not claim to sign anything."}
         </p>
       </SpotlightCard>
     </section>

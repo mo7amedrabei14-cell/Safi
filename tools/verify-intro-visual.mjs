@@ -179,14 +179,15 @@ try {
     const root = document.querySelector("#root .safi-intro-splash");
     const title = root?.querySelector(".safi-intro-title");
     const copy = root?.querySelector(".safi-intro-copy");
+    const brand = title?.querySelector("bdi");
     return {
-      arabicTitle: title?.querySelector('bdi[dir="rtl"]')?.textContent ?? "",
-      englishTitle: title?.querySelector('bdi[dir="ltr"]')?.textContent ?? "",
+      brandTitle: brand?.textContent?.trim() ?? "",
+      brandDirection: brand?.getAttribute("dir") ?? "",
       copyVisibility: copy ? getComputedStyle(copy).visibility : null
     };
   });
-  assert.equal(openingFrame.arabicTitle, "صافي البيانات");
-  assert.equal(openingFrame.englishTitle, "SafiData");
+  assert.equal(openingFrame.brandTitle, "SafiData");
+  assert.equal(openingFrame.brandDirection, "ltr");
   assert.equal(openingFrame.copyVisibility, "visible");
   await page.screenshot({ path: resolve(artifactDir, "intro-opening-motion.png"), fullPage: true });
 

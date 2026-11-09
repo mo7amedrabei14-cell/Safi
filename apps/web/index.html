@@ -1,13 +1,16 @@
 <!doctype html>
-<html lang="ar" dir="rtl" data-theme="apple-light">
+<html lang="en" dir="ltr" data-safi-locale="en" data-theme="apple-light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="/boot.css" />
-    <title>صافي البيانات | SafiData — بياناتك... صافية</title>
+    <script src="/boot-locale.js"></script>
+    <title data-locale-en="SafiData — Local Data Cleaning &amp; Analysis" data-locale-ar="صافي البيانات — منصة تنظيف وتحليل البيانات">SafiData — Local Data Cleaning &amp; Analysis</title>
     <meta
       name="description"
-      content="منصة صافي البيانات (SafiData): تنظيف وتوحيد وإخفاء البيانات العربية والرقم القومي محليًا 100% على جهازك، بوصفات حتمية وتقارير PDF ورسوم بيانية."
+      data-locale-content-en="SafiData: clean, standardize, and protect your data locally with deterministic recipes, PDF reports, and interactive charts."
+      data-locale-content-ar="صافي البيانات: نظّف ووحّد واحمِ بياناتك محليًا بوصفات حتمية وتقارير PDF ورسوم بيانية."
+      content="SafiData: clean, standardize, and protect your data locally with deterministic recipes, PDF reports, and interactive charts."
     />
     <meta name="theme-color" content="#112D4E" />
 
@@ -19,25 +22,29 @@
 
     <!-- Open Graph / Social Link Preview for WhatsApp, Telegram, Discord, Slack, iMessage (Section 7.4) -->
     <meta property="og:type" content="website" />
-    <meta property="og:locale" content="ar_EG" />
-    <meta property="og:site_name" content="صافي البيانات | SafiData" />
-    <meta property="og:title" content="صافي البيانات | SafiData — بياناتك... صافية" />
+    <meta property="og:locale" data-locale-content-en="en_US" data-locale-content-ar="ar_EG" content="en_US" />
+    <meta property="og:site_name" data-locale-content-en="SafiData" data-locale-content-ar="صافي البيانات" content="SafiData" />
+    <meta property="og:title" data-locale-content-en="SafiData — Local Data Cleaning & Analysis" data-locale-content-ar="صافي البيانات — منصة تنظيف وتحليل البيانات" content="SafiData — Local Data Cleaning & Analysis" />
     <meta
       property="og:description"
-      content="نظّف ووحّد وأخفِ بياناتك العربية بالكامل على جهازك بدون سحابة — مع محرك الرقم القومي المصري، وصفات BLAKE3 الحتمية، ورسوم WCAG 2.2 AA."
+      data-locale-content-en="Clean, standardize, and protect your data locally — with deterministic recipes, secure reports, and accessible charts."
+      data-locale-content-ar="نظّف ووحّد واحمِ بياناتك بالكامل على جهازك دون سحابة، مع وصفات حتمية وتقارير آمنة ورسوم سهلة الوصول."
+      content="Clean, standardize, and protect your data locally — with deterministic recipes, secure reports, and accessible charts."
     />
     <meta property="og:image" content="/og-preview.svg" />
     <meta property="og:image:type" content="image/svg+xml" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="شعار ومنصة صافي البيانات — بياناتك... صافية" />
+    <meta property="og:image:alt" data-locale-content-en="SafiData product mark" data-locale-content-ar="شعار منصة صافي البيانات" content="SafiData product mark" />
 
     <!-- Twitter / X Large Card Preview -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="صافي البيانات | SafiData — بياناتك... صافية" />
+    <meta name="twitter:title" data-locale-content-en="SafiData — Local Data Cleaning & Analysis" data-locale-content-ar="صافي البيانات — منصة تنظيف وتحليل البيانات" content="SafiData — Local Data Cleaning & Analysis" />
     <meta
       name="twitter:description"
-      content="تنظيف وتوحيد وإخفاء البيانات العربية محليًا 100% على جهازك بوصفات حتمية وتقارير قابلة للتدقيق."
+      data-locale-content-en="Clean and protect your data on-device with deterministic recipes and auditable reports."
+      data-locale-content-ar="نظّف واحمِ بياناتك محليًا بوصفات حتمية وتقارير قابلة للتدقيق."
+      content="Clean and protect your data on-device with deterministic recipes and auditable reports."
     />
     <meta name="twitter:image" content="/og-preview.svg" />
   </head>
@@ -49,8 +56,10 @@
       data-fonts-ready="false"
       role="status"
       aria-live="polite"
-      aria-label="جارٍ تجهيز التطبيق"
-      dir="rtl"
+      data-locale-aria-en="Preparing SafiData"
+      data-locale-aria-ar="جارٍ تجهيز التطبيق"
+      aria-label="Preparing SafiData"
+      dir="ltr"
     >
       <div class="safi-intro-stage">
         <div class="safi-intro-orb">
@@ -108,13 +117,11 @@
           </svg>
         </div>
         <div class="safi-intro-copy">
-          <h2 class="safi-intro-title" aria-label="صافي البيانات • SafiData">
-            <bdi dir="rtl">صافي البيانات</bdi>
-            <span aria-hidden="true">•</span>
-            <bdi dir="ltr">SafiData</bdi>
+          <h2 class="safi-intro-title" data-locale-aria-en="SafiData" data-locale-aria-ar="صافي البيانات" aria-label="SafiData">
+            <bdi data-locale-en="SafiData" data-locale-ar="صافي البيانات" dir="ltr">SafiData</bdi>
           </h2>
-          <p class="safi-intro-tagline">
-            بياناتك الفوضوية تصبح واضحة في ثوانٍ • خصوصية مطلقة على جهازك
+          <p class="safi-intro-tagline" data-locale-en="Turn messy data into clear, reliable data in seconds • Your files stay on your device" data-locale-ar="حوّل بياناتك الفوضوية إلى بيانات واضحة في ثوانٍ • خصوصيتك تبقى على جهازك">
+            Turn messy data into clear, reliable data in seconds • Your files stay on your device
           </p>
         </div>
         <div class="safi-intro-progress-track" aria-hidden="true">
@@ -126,12 +133,14 @@
           disabled
           tabindex="-1"
           aria-hidden="true"
-          aria-label="الدخول إلى الموقع"
+          data-locale-aria-en="Enter SafiData"
+          data-locale-aria-ar="الدخول إلى الموقع"
+          aria-label="Enter SafiData"
         >
-          الدخول إلى الموقع ←
+          <span data-locale-en="Enter SafiData →" data-locale-ar="الدخول إلى الموقع ←">Enter SafiData →</span>
         </button>
       </div>
-      <noscript>يلزم تفعيل JavaScript لتشغيل منصة صافي البيانات.</noscript>
+      <noscript>JavaScript is required to run SafiData.</noscript>
     </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

@@ -23,13 +23,14 @@ import { ChartsStudio } from "./components/studios/ChartsStudio";
 import { LibraryStudio } from "./components/studios/LibraryStudio";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { canAnimate } from "./components/ui/motion-preference";
+import { applySafiLang, getInitialSafiLang } from "./lib/locale";
 
 export const SHELL_TABS: readonly SafiDockTabId[] = DOCK_TABS.map((tab) => tab.id);
 
 export function renderStudio(
   tab: SafiDockTabId,
   onSelectTab: (tab: SafiDockTabId) => void,
-  lang: SafiLang = "ar"
+  lang: SafiLang = "en"
 ): ReactNode {
   switch (tab) {
     case "home":
@@ -68,7 +69,7 @@ export interface ApplicationShellProps {
 export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode {
   const [activeTab, setActiveTab] = useState<SafiDockTabId>("home");
   const [theme, setTheme] = useState<SafiThemeId>("apple-light");
-  const [lang, setLang] = useState<SafiLang>("ar");
+  const [lang, setLang] = useState<SafiLang>(getInitialSafiLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -88,7 +89,11 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
   }, []);
 
   const toggleLang = useCallback((): void => {
-    setLang((prev) => (prev === "ar" ? "en" : "ar"));
+    setLang((prev) => {
+      const next = prev === "ar" ? "en" : "ar";
+      applySafiLang(next);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -98,10 +103,7 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
   }, [theme]);
 
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.lang = lang;
-      document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
-    }
+    applySafiLang(lang);
   }, [lang]);
 
   useEffect(() => {
@@ -140,7 +142,8 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
     };
   }, [activeTab, lang]);
 
-  const activeLabel = DOCK_TABS.find((tab) => tab.id === activeTab)?.label ?? "الرئيسية";
+  const activeTabConfig = DOCK_TABS.find((tab) => tab.id === activeTab);
+  const activeLabel = lang === "ar" ? activeTabConfig?.label ?? "الرئيسية" : activeTabConfig?.labelEn ?? "Website";
 
   return (
     <>
@@ -160,7 +163,7 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
 
           <main id="safi-main" className="safi-container safi-stage">
             <p className="safi-visually-hidden" role="status">
-              {`الآن في ${activeLabel}`}
+              {lang === "ar" ? `الآن في ${activeLabel}` : `You are viewing ${activeLabel}`}
             </p>
             <div ref={stageRef} key={`${activeTab}-${lang}`} data-active-tab={activeTab}>
               {renderStudio(activeTab, selectTab, lang)}
@@ -171,9 +174,10 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
             open={paletteOpen}
             onClose={() => setPaletteOpen(false)}
             onSelectTab={selectTab}
+            lang={lang}
           />
 
-          <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+          <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} lang={lang} />
         </div>
       </SmoothScrollProvider>
     </>

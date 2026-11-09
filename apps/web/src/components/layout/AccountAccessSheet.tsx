@@ -40,14 +40,10 @@ function getRequestError(error: unknown, isAr: boolean, isVerification = false):
         : "We could not sign in with those details. Check your email and password, or resend the verification link.";
     }
 
-    if (error.status === 400 || error.status === 422) {
-      return isVerification
-        ? isAr
-          ? "رابط التحقق غير صالح أو انتهت صلاحيته. اطلب رابطًا جديدًا."
-          : "This verification link is invalid or has expired. Request a new link."
-        : isAr
-          ? "راجع البيانات. يجب ألا تقل كلمة المرور الجديدة عن 12 حرفًا."
-          : "Check your details. New passwords must contain at least 12 characters.";
+    if (error.code === "SF-AUTH-006" || error.status === 400 || error.status === 422) {
+      return isAr
+        ? "راجع البريد الإلكتروني والاسم الظاهر وكلمة المرور. يجب ألا تقل كلمة المرور عن 12 حرفًا."
+        : "Check the email address, display name, and password. Passwords must contain at least 12 characters.";
     }
   }
 

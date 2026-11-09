@@ -27,10 +27,7 @@ export function App(): ReactNode {
 
   return (
     <>
-      <SafiIntroSplash
-        open={!applicationReady}
-        onAnimationComplete={requestApplication}
-      />
+      <SafiIntroSplash open={!applicationReady} onAnimationComplete={requestApplication} />
       {applicationRequested ? (
         <Suspense fallback={null}>
           <ApplicationShell onReady={markApplicationReady} />

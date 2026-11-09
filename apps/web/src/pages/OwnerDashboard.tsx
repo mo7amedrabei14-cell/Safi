@@ -176,7 +176,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "ar", onS
         [
           React.createElement(
             "div",
-            { key: "status-text", style: { display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" } },
+            {
+              key: "status-text",
+              style: { display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }
+            },
             [
               React.createElement("span", {
                 key: "dot",
@@ -254,22 +257,29 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "ar", onS
       ),
 
       // Header (Open & Unboxed over the interactive background)
-      React.createElement("header", { key: "header", style: { marginBottom: "20px", paddingInline: "4px" } }, [
-        React.createElement(
-          "h1",
-          {
-            key: "h1",
-            className: "safi-rb-shiny-text",
-            style: { fontSize: "clamp(26px, 2.8vw, 36px)", fontWeight: 800, margin: 0 }
-          },
-          "لوحة تحكم المالك (Owner Console v1)"
-        ),
-        React.createElement(
-          "p",
-          { key: "p", style: { color: "var(--text-secondary)", margin: "6px 0 0 0", fontSize: "15px" } },
-          "الوضع البسيط بست بطاقات (I-Have-ADHD) — حارس Zero Trust + YubiKey ومركز السجلات BLAKE3"
-        )
-      ]),
+      React.createElement(
+        "header",
+        { key: "header", style: { marginBottom: "20px", paddingInline: "4px" } },
+        [
+          React.createElement(
+            "h1",
+            {
+              key: "h1",
+              className: "safi-rb-shiny-text",
+              style: { fontSize: "clamp(26px, 2.8vw, 36px)", fontWeight: 800, margin: 0 }
+            },
+            "لوحة تحكم المالك (Owner Console v1)"
+          ),
+          React.createElement(
+            "p",
+            {
+              key: "p",
+              style: { color: "var(--text-secondary)", margin: "6px 0 0 0", fontSize: "15px" }
+            },
+            "الوضع البسيط بست بطاقات (I-Have-ADHD) — حارس Zero Trust + YubiKey ومركز السجلات BLAKE3"
+          )
+        ]
+      ),
 
       // Live Action Feedback Bar (No browser alert popups!)
       React.createElement(
@@ -335,7 +345,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "ar", onS
             activeCardIdx === 2,
             () => {
               setActiveCardIdx(2);
-              setActiveActionLog("تم فتح سجل الاشتراكات النشطة (Paymob مصر + Lemon Squeezy عالميًا).");
+              setActiveActionLog(
+                "تم فتح سجل الاشتراكات النشطة (Paymob مصر + Lemon Squeezy عالميًا)."
+              );
             }
           ),
           renderCard(
@@ -405,22 +417,18 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "ar", onS
               }
             },
             [
-              React.createElement(
-                "div",
-                { key: "ff-t" },
-                [
-                  React.createElement(
-                    "h2",
-                    { key: "h2", style: { fontSize: "17px", fontWeight: 800, margin: "0 0 4px" } },
-                    "مركز أعلام الميزات الفوري (Valkey 8 + PostgreSQL 18 Live Flags)"
-                  ),
-                  React.createElement(
-                    "p",
-                    { key: "sub", style: { margin: 0, fontSize: "13px", color: "#94A3B8" } },
-                    "بدّل أي ميزة فورًا مع توثيق تلقائي في سلسلة بصمات BLAKE3"
-                  )
-                ]
-              ),
+              React.createElement("div", { key: "ff-t" }, [
+                React.createElement(
+                  "h2",
+                  { key: "h2", style: { fontSize: "17px", fontWeight: 800, margin: "0 0 4px" } },
+                  "مركز أعلام الميزات الفوري (Valkey 8 + PostgreSQL 18 Live Flags)"
+                ),
+                React.createElement(
+                  "p",
+                  { key: "sub", style: { margin: 0, fontSize: "13px", color: "#94A3B8" } },
+                  "بدّل أي ميزة فورًا مع توثيق تلقائي في سلسلة بصمات BLAKE3"
+                )
+              ]),
               React.createElement(
                 "span",
                 {
@@ -468,9 +476,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "ar", onS
                     setActiveActionLog(
                       `تم ${nextVal ? "تفعيل" : "إيقاف"} ميزة «${flag.label}» ومزامنتها لحظيًا.`
                     );
-                    appendAuditEvent(
-                      `${nextVal ? "تفعيل" : "إيقاف"} علم الميزة: ${flag.label}`
-                    );
+                    appendAuditEvent(`${nextVal ? "تفعيل" : "إيقاف"} علم الميزة: ${flag.label}`);
                   },
                   style: {
                     padding: "12px 14px",
@@ -478,9 +484,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "ar", onS
                     border: enabled
                       ? "1px solid rgba(52, 211, 153, 0.45)"
                       : "1px solid rgba(255, 255, 255, 0.14)",
-                    background: enabled
-                      ? "rgba(16, 185, 129, 0.12)"
-                      : "rgba(255, 255, 255, 0.04)",
+                    background: enabled ? "rgba(16, 185, 129, 0.12)" : "rgba(255, 255, 255, 0.04)",
                     color: "#F8FAFC",
                     display: "flex",
                     alignItems: "center",

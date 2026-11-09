@@ -202,7 +202,14 @@ export function LivePipelineVisualizer(): ReactNode {
               >
                 {index + 1}
               </span>
-              <h3 style={{ fontSize: "13px", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}>
+              <h3
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  margin: 0,
+                  color: "var(--text-primary)"
+                }}
+              >
                 {stage.title}
               </h3>
             </div>

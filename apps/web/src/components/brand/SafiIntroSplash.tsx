@@ -43,10 +43,7 @@ async function waitForIntroFonts(): Promise<void> {
   await document.fonts.ready;
 }
 
-export function SafiIntroSplash({
-  open,
-  onAnimationComplete
-}: SafiIntroSplashProps): ReactNode {
+export function SafiIntroSplash({ open, onAnimationComplete }: SafiIntroSplashProps): ReactNode {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
@@ -307,33 +304,9 @@ export function SafiIntroSplash({
             </g>
 
             <g>
-              <rect
-                data-intro-bar="1"
-                x="26"
-                y="68"
-                width="18"
-                height="30"
-                rx="4"
-                fill="#64748B"
-              />
-              <rect
-                data-intro-bar="2"
-                x="55"
-                y="50"
-                width="18"
-                height="48"
-                rx="4"
-                fill="#94A3B8"
-              />
-              <rect
-                data-intro-bar="3"
-                x="84"
-                y="34"
-                width="18"
-                height="64"
-                rx="4"
-                fill="#F8FAFC"
-              />
+              <rect data-intro-bar="1" x="26" y="68" width="18" height="30" rx="4" fill="#64748B" />
+              <rect data-intro-bar="2" x="55" y="50" width="18" height="48" rx="4" fill="#94A3B8" />
+              <rect data-intro-bar="3" x="84" y="34" width="18" height="64" rx="4" fill="#F8FAFC" />
               <path
                 data-intro-trend="true"
                 d="M32 56L62 38L93 22"
@@ -347,11 +320,7 @@ export function SafiIntroSplash({
         </div>
 
         <div className="safi-intro-copy">
-          <h2
-            ref={titleRef}
-            className="safi-intro-title"
-            aria-label="صافي البيانات • SafiData"
-          >
+          <h2 ref={titleRef} className="safi-intro-title" aria-label="صافي البيانات • SafiData">
             <bdi dir="rtl">صافي البيانات</bdi>
             <span aria-hidden="true">•</span>
             <bdi dir="ltr">SafiData</bdi>

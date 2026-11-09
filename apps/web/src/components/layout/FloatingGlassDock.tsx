@@ -203,13 +203,7 @@ export function FloatingGlassDock({
           >
             {isDark ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
             <span>
-              {lang === "ar"
-                ? isDark
-                  ? "نهاري"
-                  : "ليلي"
-                : isDark
-                  ? "Daylight"
-                  : "Midnight"}
+              {lang === "ar" ? (isDark ? "نهاري" : "ليلي") : isDark ? "Daylight" : "Midnight"}
             </span>
           </button>
 

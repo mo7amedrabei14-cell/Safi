@@ -167,7 +167,6 @@ export function ApplicationShell({ onReady }: ApplicationShellProps): ReactNode 
             </div>
           </main>
 
-
           <CommandPalette
             open={paletteOpen}
             onClose={() => setPaletteOpen(false)}

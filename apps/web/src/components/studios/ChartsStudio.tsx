@@ -251,11 +251,7 @@ export function ChartsStudio({ lang = "ar", onSelectTab }: ChartsStudioProps = {
   };
 
   return (
-    <section
-      className="safi-studio"
-      aria-labelledby="safi-charts-title"
-      dir={isAr ? "rtl" : "ltr"}
-    >
+    <section className="safi-studio" aria-labelledby="safi-charts-title" dir={isAr ? "rtl" : "ltr"}>
       {/* Apple Dynamic Island Contrast & App Switcher Bar */}
       <div
         style={{
@@ -269,9 +265,15 @@ export function ChartsStudio({ lang = "ar", onSelectTab }: ChartsStudioProps = {
         <div className="safi-dynamic-island" style={{ cursor: "default" }}>
           <span className="safi-island-dot" />
           <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#F8FAFC" }}>
-            {isAr ? "محرك الرسوم المتجهة • Vega-Lite RTL + WCAG 2.2 AA" : "Vector Chart Engine • Vega-Lite RTL + WCAG 2.2 AA"}
+            {isAr
+              ? "محرك الرسوم المتجهة • Vega-Lite RTL + WCAG 2.2 AA"
+              : "Vector Chart Engine • Vega-Lite RTL + WCAG 2.2 AA"}
           </span>
-          <span className="safi-mono" dir="ltr" style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}>
+          <span
+            className="safi-mono"
+            dir="ltr"
+            style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}
+          >
             Avg <CountUpMetric value={avgCompletion} suffix="%" /> • Peak {maxCompletion}%
           </span>
         </div>
@@ -416,8 +418,21 @@ export function ChartsStudio({ lang = "ar", onSelectTab }: ChartsStudioProps = {
 
       <div className="safi-grid-2">
         <SpotlightCard padding={24}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
-            <label className="safi-field-label" htmlFor="safi-chart-title-input" style={{ margin: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "8px",
+              marginBottom: "8px",
+              flexWrap: "wrap"
+            }}
+          >
+            <label
+              className="safi-field-label"
+              htmlFor="safi-chart-title-input"
+              style={{ margin: 0 }}
+            >
               عنوان المخطط
             </label>
             <button
@@ -465,22 +480,41 @@ export function ChartsStudio({ lang = "ar", onSelectTab }: ChartsStudioProps = {
         </SpotlightCard>
 
         <SpotlightCard padding={24}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "8px"
+            }}
+          >
             <h2 className="safi-card-title" style={{ margin: 0 }}>
               تحرير بيانات المخطط مباشرةً
             </h2>
             <button
               type="button"
-              onClick={() => setRows([...rows, { region: `محافظة ${rows.length + 1}`, completion: 80 }])}
+              onClick={() =>
+                setRows([...rows, { region: `محافظة ${rows.length + 1}`, completion: 80 }])
+              }
               style={{ minHeight: "32px", padding: "4px 10px", fontSize: "11px" }}
             >
               <Plus size={12} aria-hidden="true" /> إضافة صف
             </button>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "18px" }}>
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "18px" }}
+          >
             {rows.map((r, idx) => (
-              <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: "8px", alignItems: "center" }}>
+              <div
+                key={idx}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 110px",
+                  gap: "8px",
+                  alignItems: "center"
+                }}
+              >
                 <input
                   value={r.region}
                   onChange={(e) => {
@@ -578,9 +612,7 @@ export function ChartsStudio({ lang = "ar", onSelectTab }: ChartsStudioProps = {
                     />
                     <strong>{row.nameAr}</strong>
                   </td>
-                  <td>
-                    {row.bgNameAr}
-                  </td>
+                  <td>{row.bgNameAr}</td>
                   <td className="safi-mono" dir="ltr">
                     {row.ratio.toFixed(2)}:1
                   </td>

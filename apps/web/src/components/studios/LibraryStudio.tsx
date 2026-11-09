@@ -60,8 +60,7 @@ export function LibraryStudio({ lang = "ar", onSelectTab }: LibraryStudioProps =
     []
   );
 
-  const activePreview =
-    templates.find((item) => item.id === previewTemplateId) ?? templates[0];
+  const activePreview = templates.find((item) => item.id === previewTemplateId) ?? templates[0];
 
   return (
     <section
@@ -82,9 +81,15 @@ export function LibraryStudio({ lang = "ar", onSelectTab }: LibraryStudioProps =
         <div className="safi-dynamic-island" style={{ cursor: "default" }}>
           <span className="safi-island-dot" />
           <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#F8FAFC" }}>
-            {isAr ? "خزنة القوالب الموثّقة • BLAKE3 + JCS" : "Verified Template Vault • BLAKE3 + JCS"}
+            {isAr
+              ? "خزنة القوالب الموثّقة • BLAKE3 + JCS"
+              : "Verified Template Vault • BLAKE3 + JCS"}
           </span>
-          <span className="safi-mono" dir="ltr" style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}>
+          <span
+            className="safi-mono"
+            dir="ltr"
+            style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}
+          >
             {templates.length} Verified Templates • 100% Auditable
           </span>
         </div>
@@ -203,13 +208,7 @@ export function LibraryStudio({ lang = "ar", onSelectTab }: LibraryStudioProps =
                   <MagneticButton
                     onClick={() => {
                       const fileName = `recipe-${template.id}.safirecipe.json`;
-                      if (
-                        downloadTextFile(
-                          fileName,
-                          template.canonicalJson,
-                          "application/json"
-                        )
-                      ) {
+                      if (downloadTextFile(fileName, template.canonicalJson, "application/json")) {
                         setExported(fileName);
                       }
                     }}
@@ -269,7 +268,8 @@ export function LibraryStudio({ lang = "ar", onSelectTab }: LibraryStudioProps =
                 <Eye size={16} aria-hidden="true" /> معاينة القالب الحي: {activePreview.nameAr}
               </h2>
               <p className="safi-hint" style={{ margin: 0 }}>
-                تمثيل JCS القانوني وبصمة BLAKE3 الكاملة ({activePreview.enabledSteps.length} خطوات مفعّلة)
+                تمثيل JCS القانوني وبصمة BLAKE3 الكاملة ({activePreview.enabledSteps.length} خطوات
+                مفعّلة)
               </p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -305,10 +305,23 @@ export function LibraryStudio({ lang = "ar", onSelectTab }: LibraryStudioProps =
                 border: "1px solid var(--border-subtle)"
               }}
             >
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "var(--text-muted)",
+                  display: "block",
+                  marginBottom: "4px"
+                }}
+              >
                 {isAr ? "عينة البيانات الخام قبل القالب" : "Sample Raw Input"}
               </span>
-              <span style={{ fontSize: "13px", color: "var(--text-secondary)", textDecoration: "line-through" }}>
+              <span
+                style={{
+                  fontSize: "13px",
+                  color: "var(--text-secondary)",
+                  textDecoration: "line-through"
+                }}
+              >
                 أَحْمَدُ السيّد ـــ ١٥٠٠.٥٠ ج.م • ٠١٠١٢٣٤٥٦٧٨
               </span>
             </div>
@@ -321,7 +334,15 @@ export function LibraryStudio({ lang = "ar", onSelectTab }: LibraryStudioProps =
                 border: "1px solid var(--border-strong)"
               }}
             >
-              <span style={{ fontSize: "11px", color: "var(--accent-primary)", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "var(--accent-primary)",
+                  fontWeight: 700,
+                  display: "block",
+                  marginBottom: "4px"
+                }}
+              >
                 {isAr ? "المخرج المنقّى بعد تطبيق القالب" : "Purified Output After Template"}
               </span>
               <span style={{ fontSize: "13.5px", fontWeight: 800, color: "var(--text-primary)" }}>

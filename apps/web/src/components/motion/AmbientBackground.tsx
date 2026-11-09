@@ -170,9 +170,7 @@ export function AmbientBackground(): ReactNode {
               ctx.beginPath();
               ctx.moveTo(p.x, p.y);
               ctx.lineTo(pointerX, pointerY);
-              ctx.strokeStyle = isDark
-                ? "rgba(96, 165, 250, 0.28)"
-                : "rgba(37, 99, 235, 0.22)";
+              ctx.strokeStyle = isDark ? "rgba(96, 165, 250, 0.28)" : "rgba(37, 99, 235, 0.22)";
               ctx.lineWidth = 1.2;
               ctx.stroke();
             }

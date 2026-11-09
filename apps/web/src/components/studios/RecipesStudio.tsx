@@ -129,9 +129,15 @@ export function RecipesStudio({ lang = "ar", onSelectTab }: RecipesStudioProps =
         <div className="safi-dynamic-island" style={{ cursor: "default" }}>
           <span className="safi-island-dot" />
           <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#F8FAFC" }}>
-            {isAr ? "محرك الوصفات الحتمية • JCS + BLAKE3" : "Deterministic Recipe Engine • JCS + BLAKE3"}
+            {isAr
+              ? "محرك الوصفات الحتمية • JCS + BLAKE3"
+              : "Deterministic Recipe Engine • JCS + BLAKE3"}
           </span>
-          <span className="safi-mono" dir="ltr" style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}>
+          <span
+            className="safi-mono"
+            dir="ltr"
+            style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}
+          >
             {enabled}/{RECIPE_STEPS.length} Steps • #{digest.slice(0, 8)}
           </span>
         </div>
@@ -216,7 +222,15 @@ export function RecipesStudio({ lang = "ar", onSelectTab }: RecipesStudioProps =
           gap: "12px"
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            flexWrap: "wrap"
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#93C5FD" }}>
               {isAr ? "تحميل قالب وصفة جاهز فورًا:" : "Load Official Template:"}
@@ -237,7 +251,8 @@ export function RecipesStudio({ lang = "ar", onSelectTab }: RecipesStudioProps =
                   fontSize: "12px",
                   fontWeight: 700,
                   cursor: "pointer",
-                  border: name === tpl.nameAr ? "1px solid #60A5FA" : "1px solid rgba(255,255,255,0.16)",
+                  border:
+                    name === tpl.nameAr ? "1px solid #60A5FA" : "1px solid rgba(255,255,255,0.16)",
                   background: name === tpl.nameAr ? "#2563EB" : "rgba(255,255,255,0.06)",
                   color: "#F8FAFC"
                 }}
@@ -292,13 +307,25 @@ export function RecipesStudio({ lang = "ar", onSelectTab }: RecipesStudioProps =
             fontSize: "12.5px"
           }}
         >
-          <span style={{ color: "#E2E8F0", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "6px" }}>
+          <span
+            style={{
+              color: "#E2E8F0",
+              fontWeight: 700,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px"
+            }}
+          >
             <Zap size={14} style={{ color: "#34D399" }} />
             {isAr
               ? `تم اختبار الوصفة «${name}» عبر ${enabled} مراحل — النتيجة متطابقة بايت ببايت (100% Byte-Identical)`
               : `Verified recipe "${name}" across ${enabled} stages — 100% Byte-Identical output`}
           </span>
-          <span className="safi-mono" dir="ltr" style={{ color: "#34D399", fontWeight: 800, fontSize: "11.5px" }}>
+          <span
+            className="safi-mono"
+            dir="ltr"
+            style={{ color: "#34D399", fontWeight: 800, fontSize: "11.5px" }}
+          >
             BLAKE3: {digest.slice(0, 16)}… ✓
           </span>
         </div>
@@ -329,7 +356,13 @@ export function RecipesStudio({ lang = "ar", onSelectTab }: RecipesStudioProps =
               >
                 <label
                   htmlFor={`safi-step-${step.id}`}
-                  style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer", flex: 1 }}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px",
+                    cursor: "pointer",
+                    flex: 1
+                  }}
                 >
                   <input
                     id={`safi-step-${step.id}`}

@@ -208,19 +208,47 @@ export function SafiPrismLogo({
         }}
       >
         <defs>
-          <linearGradient id="safi-slate-tile" x1="10" y1="8" x2="118" y2="120" gradientUnits="userSpaceOnUse">
+          <linearGradient
+            id="safi-slate-tile"
+            x1="10"
+            y1="8"
+            x2="118"
+            y2="120"
+            gradientUnits="userSpaceOnUse"
+          >
             <stop offset="0%" stopColor="#1E293B" />
             <stop offset="100%" stopColor="#0F172A" />
           </linearGradient>
-          <linearGradient id="safi-bar-a" x1="34" y1="68" x2="34" y2="100" gradientUnits="userSpaceOnUse">
+          <linearGradient
+            id="safi-bar-a"
+            x1="34"
+            y1="68"
+            x2="34"
+            y2="100"
+            gradientUnits="userSpaceOnUse"
+          >
             <stop offset="0%" stopColor="#94A3B8" />
             <stop offset="100%" stopColor="#64748B" />
           </linearGradient>
-          <linearGradient id="safi-bar-b" x1="64" y1="50" x2="64" y2="100" gradientUnits="userSpaceOnUse">
+          <linearGradient
+            id="safi-bar-b"
+            x1="64"
+            y1="50"
+            x2="64"
+            y2="100"
+            gradientUnits="userSpaceOnUse"
+          >
             <stop offset="0%" stopColor="#CBD5E1" />
             <stop offset="100%" stopColor="#94A3B8" />
           </linearGradient>
-          <linearGradient id="safi-bar-c" x1="94" y1="32" x2="94" y2="100" gradientUnits="userSpaceOnUse">
+          <linearGradient
+            id="safi-bar-c"
+            x1="94"
+            y1="32"
+            x2="94"
+            y2="100"
+            gradientUnits="userSpaceOnUse"
+          >
             <stop offset="0%" stopColor="#F8FAFC" />
             <stop offset="100%" stopColor="#CBD5E1" />
           </linearGradient>
@@ -251,7 +279,16 @@ export function SafiPrismLogo({
           {/* Bottom Satellite (#4ED6A0) */}
           <rect x="60" y="119" width="8" height="8" rx="2.5" fill="#4ED6A0" />
           {/* Left Satellite (#F8FAFC) */}
-          <rect x="1" y="60" width="8" height="8" rx="2.5" fill="#F8FAFC" stroke="#3B82F6" strokeWidth="1" />
+          <rect
+            x="1"
+            y="60"
+            width="8"
+            height="8"
+            rx="2.5"
+            fill="#F8FAFC"
+            stroke="#3B82F6"
+            strokeWidth="1"
+          />
         </g>
 
         {/* Apple Squircle Tile */}

@@ -167,7 +167,14 @@ export function SmartDropzone({ onOpenCleaning }: SmartDropzoneProps): ReactNode
 
   return (
     <div dir="rtl" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px"
+        }}
+      >
         <h2 style={{ fontSize: "16px", fontWeight: 600 }}>استيراد ذكي وفحص فوري</h2>
         <span style={{ fontSize: "11px", color: "var(--accent-primary)", fontWeight: 600 }}>
           DQNamo WASM Ready
@@ -191,7 +198,14 @@ export function SmartDropzone({ onOpenCleaning }: SmartDropzoneProps): ReactNode
         }}
       >
         <Upload size={22} aria-hidden="true" style={{ color: "var(--accent-primary)" }} />
-        <p style={{ margin: "6px 0 10px", fontSize: "13px", color: "var(--text-primary)", fontWeight: 500 }}>
+        <p
+          style={{
+            margin: "6px 0 10px",
+            fontSize: "13px",
+            color: "var(--text-primary)",
+            fontWeight: 500
+          }}
+        >
           اسحب ملف CSV أو XLSX هنا
         </p>
         <div style={{ display: "flex", justifyContent: "center", gap: "8px", flexWrap: "wrap" }}>
@@ -265,10 +279,18 @@ export function SmartDropzone({ onOpenCleaning }: SmartDropzoneProps): ReactNode
           </div>
 
           {inspection.ok && summary !== null ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                flexWrap: "wrap"
+              }}
+            >
               <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
-                تم استخراج <strong>{summary.rows}</strong> صفوف و<strong>{summary.cols}</strong> أعمدة •{" "}
-                <strong>{summary.piiCount}</strong> حقول شخصية PII
+                تم استخراج <strong>{summary.rows}</strong> صفوف و<strong>{summary.cols}</strong>{" "}
+                أعمدة • <strong>{summary.piiCount}</strong> حقول شخصية PII
               </span>
               {onOpenCleaning !== undefined ? (
                 <button

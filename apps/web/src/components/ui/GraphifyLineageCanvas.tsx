@@ -138,7 +138,9 @@ export function GraphifyLineageCanvas({
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <GitBranch size={16} aria-hidden="true" style={{ color: "var(--accent-primary)" }} />
-          <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}>
+          <h3
+            style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}
+          >
             {titleAr}
           </h3>
         </div>
@@ -229,13 +231,7 @@ export function GraphifyLineageCanvas({
                 >
                   {node.titleAr}
                 </text>
-                <text
-                  x="158"
-                  y="42"
-                  textAnchor="end"
-                  fill="var(--text-secondary)"
-                  fontSize="10"
-                >
+                <text x="158" y="42" textAnchor="end" fill="var(--text-secondary)" fontSize="10">
                   {node.subtitleAr}
                 </text>
               </g>

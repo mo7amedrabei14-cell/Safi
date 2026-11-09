@@ -119,8 +119,10 @@ const VISUAL_EDITORS_TOOLS = [
     badgeEn: "Tool 01 • Text Studio",
     titleAr: "مُحرّر توحيد النصوص متعددة اللغات",
     titleEn: "Universal Multilingual Text Normalizer",
-    descAr: "يعالج اختلافات الحروف والألقاب والأسماء المركبة بجميع اللغات مع معاينة فورية قبل وبعد.",
-    descEn: "Visually unifies spelling variations, titles, and compound names across all languages.",
+    descAr:
+      "يعالج اختلافات الحروف والألقاب والأسماء المركبة بجميع اللغات مع معاينة فورية قبل وبعد.",
+    descEn:
+      "Visually unifies spelling variations, titles, and compound names across all languages.",
     sampleBefore: "Prof.  María-José   Carreño  |  أ.د / فاطمه عبد الرحمن",
     sampleAfter: "Maria-Jose Carreno  |  فاطمة عبدالرحمن",
     metric: "99.94% Match"
@@ -181,8 +183,10 @@ const WELL_ORGANIZED_CATEGORIES = [
     code: "01",
     titleAr: "الاستيراد والفحص الذكي للملفات",
     titleEn: "Smart File Ingest & Auto-Detection",
-    subtitleAr: "يتعرف تلقائيًا على رأس الجدول، ترميز اللغات (Unicode/UTF-8)، ونوع كل عمود فور فتح الملف.",
-    subtitleEn: "Automatically detects table headers, global character encodings, and column types on open.",
+    subtitleAr:
+      "يتعرف تلقائيًا على رأس الجدول، ترميز اللغات (Unicode/UTF-8)، ونوع كل عمود فور فتح الملف.",
+    subtitleEn:
+      "Automatically detects table headers, global character encodings, and column types on open.",
     tagAr: "CSV • XLSX • Parquet",
     tagEn: "CSV • XLSX • Parquet"
   },
@@ -191,8 +195,10 @@ const WELL_ORGANIZED_CATEGORIES = [
     code: "02",
     titleAr: "تنقية وتوحيد النصوص بجميع اللغات",
     titleEn: "Universal Multilingual Text Standardization",
-    subtitleAr: "توحيد الحروف والرموز والمسافات والأسماء المركبة في كافة اللغات لمنع التكرار الخفي.",
-    subtitleEn: "Unifies characters, symbols, whitespace, and compound names across every language.",
+    subtitleAr:
+      "توحيد الحروف والرموز والمسافات والأسماء المركبة في كافة اللغات لمنع التكرار الخفي.",
+    subtitleEn:
+      "Unifies characters, symbols, whitespace, and compound names across every language.",
     tagAr: "دعم جميع اللغات",
     tagEn: "Universal NLP"
   },
@@ -748,11 +754,36 @@ export function BentoCommandCenter({
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
-                <span style={{ width: "11px", height: "11px", borderRadius: "999px", background: "#EF4444" }} />
-                <span style={{ width: "11px", height: "11px", borderRadius: "999px", background: "#F59E0B" }} />
-                <span style={{ width: "11px", height: "11px", borderRadius: "999px", background: "#10B981" }} />
+                <span
+                  style={{
+                    width: "11px",
+                    height: "11px",
+                    borderRadius: "999px",
+                    background: "#EF4444"
+                  }}
+                />
+                <span
+                  style={{
+                    width: "11px",
+                    height: "11px",
+                    borderRadius: "999px",
+                    background: "#F59E0B"
+                  }}
+                />
+                <span
+                  style={{
+                    width: "11px",
+                    height: "11px",
+                    borderRadius: "999px",
+                    background: "#10B981"
+                  }}
+                />
               </div>
-              <span className="safi-mono" style={{ fontSize: "11.5px", color: "#94A3B8" }} dir="ltr">
+              <span
+                className="safi-mono"
+                style={{ fontSize: "11.5px", color: "#94A3B8" }}
+                dir="ltr"
+              >
                 SafiData Studio • Live Engine
               </span>
               <span
@@ -783,10 +814,30 @@ export function BentoCommandCenter({
                   gap: "6px"
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#60A5FA", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px"
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: "#60A5FA",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px"
+                    }}
+                  >
                     <Sparkles size={13} />
-                    <span>{isAr ? "أوامر التنقية الذكية التلقائية (Smart Prompt UI)" : "Autonomous Smart Cleaning Prompt"}</span>
+                    <span>
+                      {isAr
+                        ? "أوامر التنقية الذكية التلقائية (Smart Prompt UI)"
+                        : "Autonomous Smart Cleaning Prompt"}
+                    </span>
                   </span>
                   <span
                     key={`toast-${activeRowIdx}`}
@@ -800,11 +851,17 @@ export function BentoCommandCenter({
                       color: "#34D399"
                     }}
                   >
-                    {isAr ? LIVE_DEMO_ROWS[activeRowIdx]?.toastAr : LIVE_DEMO_ROWS[activeRowIdx]?.toastEn}
+                    {isAr
+                      ? LIVE_DEMO_ROWS[activeRowIdx]?.toastAr
+                      : LIVE_DEMO_ROWS[activeRowIdx]?.toastEn}
                   </span>
                 </div>
                 <div style={{ fontSize: "12.5px", color: "#E2E8F0", fontWeight: 600 }}>
-                  <span>{isAr ? LIVE_DEMO_ROWS[activeRowIdx]?.promptAr : LIVE_DEMO_ROWS[activeRowIdx]?.promptEn}</span>
+                  <span>
+                    {isAr
+                      ? LIVE_DEMO_ROWS[activeRowIdx]?.promptAr
+                      : LIVE_DEMO_ROWS[activeRowIdx]?.promptEn}
+                  </span>
                   <span className="safi-pm-caret" aria-hidden="true" />
                 </div>
               </div>
@@ -838,8 +895,22 @@ export function BentoCommandCenter({
                         <span style={{ fontSize: "11px", color: "#94A3B8", display: "block" }}>
                           {isAr ? row.labelAr : row.labelEn}
                         </span>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "2px" }}>
-                          <span style={{ fontSize: "12px", color: "#94A3B8", textDecoration: "line-through" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                            marginTop: "2px"
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: "#94A3B8",
+                              textDecoration: "line-through"
+                            }}
+                          >
                             {row.before}
                           </span>
                           <span style={{ color: "#60A5FA", fontWeight: 700 }}>→</span>
@@ -855,7 +926,9 @@ export function BentoCommandCenter({
                           borderRadius: "999px",
                           fontSize: "11px",
                           fontWeight: 700,
-                          background: isCurrent ? "rgba(16, 185, 129, 0.22)" : "rgba(255, 255, 255, 0.07)",
+                          background: isCurrent
+                            ? "rgba(16, 185, 129, 0.22)"
+                            : "rgba(255, 255, 255, 0.07)",
                           color: isCurrent ? "#34D399" : "#CBD5E1",
                           whiteSpace: "nowrap"
                         }}
@@ -884,16 +957,55 @@ export function BentoCommandCenter({
                   <span style={{ fontSize: "11px", color: "#94A3B8", display: "block" }}>
                     {isAr ? "بصمة التحقق الفورية (Decrypted Hash)" : "Live Verification Digest"}
                   </span>
-                  <div style={{ color: "#60A5FA", fontWeight: 700, fontSize: "13px", marginTop: "2px" }}>
+                  <div
+                    style={{
+                      color: "#60A5FA",
+                      fontWeight: 700,
+                      fontSize: "13px",
+                      marginTop: "2px"
+                    }}
+                  >
                     <DecryptedMonoText value={`safi:verified:0${activeRowIdx + 1}:9f4a8e2c`} />
                   </div>
                 </div>
 
                 <svg width="120" height="46" viewBox="0 0 120 46" aria-hidden="true">
-                  <rect className="safi-bar-anim-1" x="8" y="18" width="18" height="26" rx="4" fill="#64748B" />
-                  <rect className="safi-bar-anim-2" x="36" y="10" width="18" height="34" rx="4" fill="#94A3B8" />
-                  <rect className="safi-bar-anim-3" x="64" y="4" width="18" height="40" rx="4" fill="#60A5FA" />
-                  <rect className="safi-bar-anim-1" x="92" y="8" width="18" height="36" rx="4" fill="#34D399" />
+                  <rect
+                    className="safi-bar-anim-1"
+                    x="8"
+                    y="18"
+                    width="18"
+                    height="26"
+                    rx="4"
+                    fill="#64748B"
+                  />
+                  <rect
+                    className="safi-bar-anim-2"
+                    x="36"
+                    y="10"
+                    width="18"
+                    height="34"
+                    rx="4"
+                    fill="#94A3B8"
+                  />
+                  <rect
+                    className="safi-bar-anim-3"
+                    x="64"
+                    y="4"
+                    width="18"
+                    height="40"
+                    rx="4"
+                    fill="#60A5FA"
+                  />
+                  <rect
+                    className="safi-bar-anim-1"
+                    x="92"
+                    y="8"
+                    width="18"
+                    height="36"
+                    rx="4"
+                    fill="#34D399"
+                  />
                 </svg>
               </div>
             </div>
@@ -960,7 +1072,9 @@ export function BentoCommandCenter({
           }}
         >
           <div>
-            <h2 style={{ fontSize: "clamp(24px, 2.6vw, 34px)", fontWeight: 800, margin: "0 0 6px" }}>
+            <h2
+              style={{ fontSize: "clamp(24px, 2.6vw, 34px)", fontWeight: 800, margin: "0 0 6px" }}
+            >
               {isAr
                 ? "استوديو الموشن التفاعلي: تجربة هندسية بمعايير عالمية"
                 : "Interactive Motion Studio: Visual Editors, Blazing Speed & Clear Organization"}
@@ -1009,7 +1123,9 @@ export function BentoCommandCenter({
             }}
           >
             <div style={{ color: "#60A5FA", fontWeight: 800, marginBottom: "6px" }}>
-              {"<direction> Prompt-Motion Product-UI Showreel Blueprint (124 BPM • 4 Continuous Scenes) </direction>"}
+              {
+                "<direction> Prompt-Motion Product-UI Showreel Blueprint (124 BPM • 4 Continuous Scenes) </direction>"
+              }
             </div>
             <div>
               {
@@ -1052,8 +1168,22 @@ export function BentoCommandCenter({
               aria-hidden="true"
               style={{
                 position: "absolute",
-                top: activeRowIdx === 0 ? "26%" : activeRowIdx === 1 ? "48%" : activeRowIdx === 2 ? "66%" : "36%",
-                left: activeRowIdx === 0 ? "22%" : activeRowIdx === 1 ? "48%" : activeRowIdx === 2 ? "74%" : "58%",
+                top:
+                  activeRowIdx === 0
+                    ? "26%"
+                    : activeRowIdx === 1
+                      ? "48%"
+                      : activeRowIdx === 2
+                        ? "66%"
+                        : "36%",
+                left:
+                  activeRowIdx === 0
+                    ? "22%"
+                    : activeRowIdx === 1
+                      ? "48%"
+                      : activeRowIdx === 2
+                        ? "74%"
+                        : "58%",
                 zIndex: 40,
                 pointerEvents: "none",
                 transition: "all 0.85s cubic-bezier(0.22, 1, 0.36, 1)",
@@ -1098,7 +1228,15 @@ export function BentoCommandCenter({
                 >
                   <svg width="62" height="62" viewBox="0 0 128 128" fill="none" aria-hidden="true">
                     <g className="safi-pm-logo-orbit" style={{ transformOrigin: "64px 64px" }}>
-                      <circle cx="64" cy="64" r="56" stroke="#60A5FA" strokeOpacity="0.45" strokeWidth="2" strokeDasharray="6 6" />
+                      <circle
+                        cx="64"
+                        cy="64"
+                        r="56"
+                        stroke="#60A5FA"
+                        strokeOpacity="0.45"
+                        strokeWidth="2"
+                        strokeDasharray="6 6"
+                      />
                       <rect x="59" y="2" width="10" height="10" rx="3" fill="#2F6BFF" />
                       <rect x="116" y="59" width="10" height="10" rx="3" fill="#3CC8F0" />
                       <rect x="59" y="116" width="10" height="10" rx="3" fill="#4ED6A0" />
@@ -1107,19 +1245,32 @@ export function BentoCommandCenter({
                     <rect x="28" y="66" width="16" height="32" rx="4" fill="#64748B" />
                     <rect x="56" y="48" width="16" height="50" rx="4" fill="#94A3B8" />
                     <rect x="84" y="30" width="16" height="68" rx="4" fill="#F8FAFC" />
-                    <path d="M32 54L62 36L92 20" stroke="#34D399" strokeWidth="5" strokeLinecap="round" />
+                    <path
+                      d="M32 54L62 36L92 20"
+                      stroke="#34D399"
+                      strokeWidth="5"
+                      strokeLinecap="round"
+                    />
                   </svg>
                 </div>
 
                 <div>
-                  <span className="safi-mono" dir="ltr" style={{ fontSize: "11px", color: "#3CC8F0", fontWeight: 800 }}>
+                  <span
+                    className="safi-mono"
+                    dir="ltr"
+                    style={{ fontSize: "11px", color: "#3CC8F0", fontWeight: 800 }}
+                  >
                     SCENE 0{activeRowIdx + 1} / 04 • 124 BPM
                   </span>
                   <div style={{ fontSize: "18px", fontWeight: 800, marginTop: "2px" }}>
-                    {isAr ? LIVE_DEMO_ROWS[activeRowIdx]?.labelAr : LIVE_DEMO_ROWS[activeRowIdx]?.labelEn}
+                    {isAr
+                      ? LIVE_DEMO_ROWS[activeRowIdx]?.labelAr
+                      : LIVE_DEMO_ROWS[activeRowIdx]?.labelEn}
                   </div>
                   <div style={{ fontSize: "12.5px", color: "#94A3B8", marginTop: "3px" }}>
-                    {isAr ? LIVE_DEMO_ROWS[activeRowIdx]?.toastAr : LIVE_DEMO_ROWS[activeRowIdx]?.toastEn}
+                    {isAr
+                      ? LIVE_DEMO_ROWS[activeRowIdx]?.toastAr
+                      : LIVE_DEMO_ROWS[activeRowIdx]?.toastEn}
                   </div>
                 </div>
               </div>
@@ -1139,11 +1290,20 @@ export function BentoCommandCenter({
                 }}
               >
                 <div>
-                  <span style={{ fontSize: "11px", color: "#94A3B8", display: "block", marginBottom: "3px" }}>
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: "#94A3B8",
+                      display: "block",
+                      marginBottom: "3px"
+                    }}
+                  >
                     {isAr ? "أمر المعالجة التلقائي (Prompt-Motion S3)" : "Prompt-Motion S3 Command"}
                   </span>
                   <span style={{ fontSize: "13.5px", fontWeight: 700, color: "#F8FAFC" }}>
-                    {isAr ? LIVE_DEMO_ROWS[activeRowIdx]?.promptAr : LIVE_DEMO_ROWS[activeRowIdx]?.promptEn}
+                    {isAr
+                      ? LIVE_DEMO_ROWS[activeRowIdx]?.promptAr
+                      : LIVE_DEMO_ROWS[activeRowIdx]?.promptEn}
                   </span>
                   <span className="safi-pm-caret" aria-hidden="true" />
                 </div>
@@ -1178,8 +1338,18 @@ export function BentoCommandCenter({
           {/* CARD 1: VISUAL EDITORS (Span 7) */}
           <div className="safi-rb-col-7">
             <SpotlightCard tilt={true} padding={28}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "18px", height: "100%" }}>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: "18px", height: "100%" }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                    flexWrap: "wrap"
+                  }}
+                >
                   <div>
                     <span
                       style={{
@@ -1196,14 +1366,25 @@ export function BentoCommandCenter({
                       }}
                     >
                       <Sparkles size={13} />
-                      <span>{isAr ? "Visual Editors • محررات بصرية تفاعلية" : "Visual Editors • 5 Interactive Studios"}</span>
+                      <span>
+                        {isAr
+                          ? "Visual Editors • محررات بصرية تفاعلية"
+                          : "Visual Editors • 5 Interactive Studios"}
+                      </span>
                     </span>
                     <h3 style={{ fontSize: "23px", fontWeight: 800, margin: "0 0 6px" }}>
                       {isAr
                         ? "خمس أدوات بصرية متكاملة للتعامل مع بياناتك وإنتاج تقارير مبهرة"
                         : "Five Built-In Visual Tools to Clean, Inspect & Create Stunning Data Assets"}
                     </h3>
-                    <p style={{ margin: 0, fontSize: "14.5px", color: "var(--text-secondary)", lineHeight: 1.65 }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: "14.5px",
+                        color: "var(--text-secondary)",
+                        lineHeight: 1.65
+                      }}
+                    >
                       {isAr
                         ? "تنقّل بين الأدوات الخمس لترى كيف يمنحك التطبيق تحكمًا بصريًا فوريًا في كل تفصيلة بدون كتابة معادلة واحدة."
                         : "Five specialized visual tools to play with your spreadsheets and create clean, publication-ready assets for your work."}
@@ -1226,7 +1407,9 @@ export function BentoCommandCenter({
                           fontSize: "12.5px",
                           fontWeight: 700,
                           cursor: "pointer",
-                          border: active ? "1px solid var(--accent-soft)" : "1px solid var(--border-subtle)",
+                          border: active
+                            ? "1px solid var(--accent-soft)"
+                            : "1px solid var(--border-subtle)",
                           background: active ? "var(--accent-primary)" : "var(--bg-elevated)",
                           color: active ? "#FFFFFF" : "var(--text-primary)",
                           transition: "all 0.25s ease"
@@ -1253,7 +1436,15 @@ export function BentoCommandCenter({
                     gap: "14px"
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "10px"
+                    }}
+                  >
                     <div>
                       <div style={{ fontSize: "17px", fontWeight: 800, color: "#F8FAFC" }}>
                         {isAr
@@ -1297,10 +1488,23 @@ export function BentoCommandCenter({
                         border: "1px solid rgba(255, 255, 255, 0.08)"
                       }}
                     >
-                      <span style={{ fontSize: "11px", color: "#94A3B8", display: "block", marginBottom: "4px" }}>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          color: "#94A3B8",
+                          display: "block",
+                          marginBottom: "4px"
+                        }}
+                      >
                         {isAr ? "المدخل الخام قبل الأداة" : "Raw Input"}
                       </span>
-                      <span style={{ fontSize: "13.5px", color: "#CBD5E1", textDecoration: "line-through" }}>
+                      <span
+                        style={{
+                          fontSize: "13.5px",
+                          color: "#CBD5E1",
+                          textDecoration: "line-through"
+                        }}
+                      >
                         {VISUAL_EDITORS_TOOLS[activeEditorIdx]?.sampleBefore}
                       </span>
                     </div>
@@ -1313,7 +1517,15 @@ export function BentoCommandCenter({
                         border: "1px solid rgba(52, 211, 153, 0.4)"
                       }}
                     >
-                      <span style={{ fontSize: "11px", color: "#34D399", fontWeight: 700, display: "block", marginBottom: "4px" }}>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          color: "#34D399",
+                          fontWeight: 700,
+                          display: "block",
+                          marginBottom: "4px"
+                        }}
+                      >
                         {isAr ? "النتيجة الفورية بعد المعالجة" : "Instant Visual Output"}
                       </span>
                       <span style={{ fontSize: "14px", fontWeight: 800, color: "#F8FAFC" }}>
@@ -1329,7 +1541,15 @@ export function BentoCommandCenter({
           {/* CARD 2: GROWING FAST (Span 5) */}
           <div className="safi-rb-col-5">
             <SpotlightCard tilt={true} padding={28}>
-              <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "16px", height: "100%" }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                  height: "100%"
+                }}
+              >
                 <div>
                   <span
                     style={{
@@ -1346,14 +1566,25 @@ export function BentoCommandCenter({
                     }}
                   >
                     <Zap size={13} />
-                    <span>{isAr ? "Growing Fast • سرعة وأداء بلا منافس" : "Growing Fast • Blazing Engine"}</span>
+                    <span>
+                      {isAr
+                        ? "Growing Fast • سرعة وأداء بلا منافس"
+                        : "Growing Fast • Blazing Engine"}
+                    </span>
                   </span>
                   <h3 style={{ fontSize: "23px", fontWeight: 800, margin: "0 0 6px" }}>
                     {isAr
                       ? "الأسرع في معالجة الجداول الضخمة بجميع اللغات — بفارق لا يُقارن"
                       : "Fastest Universal Local Data Engine. Not Even Close."}
                   </h3>
-                  <p style={{ margin: 0, fontSize: "14.5px", color: "var(--text-secondary)", lineHeight: 1.65 }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: "14.5px",
+                      color: "var(--text-secondary)",
+                      lineHeight: 1.65
+                    }}
+                  >
                     {isAr
                       ? "يعالج 125,000 صف في الثانية الواحدة محليًا بفضل نواة Rust وApache Arrow دون أي تجمّد."
                       : "Processes 125,000 rows/sec locally with native Rust & Apache Arrow — leaving traditional spreadsheets far behind."}
@@ -1369,11 +1600,22 @@ export function BentoCommandCenter({
                     border: "1px solid rgba(255, 255, 255, 0.12)"
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "8px"
+                    }}
+                  >
                     <span style={{ fontSize: "12px", color: "#94A3B8", fontWeight: 700 }}>
                       {isAr ? "منحنى سرعة المعالجة القياسي" : "Throughput Velocity Curve"}
                     </span>
-                    <span className="safi-mono" dir="ltr" style={{ fontSize: "13px", fontWeight: 800, color: "#34D399" }}>
+                    <span
+                      className="safi-mono"
+                      dir="ltr"
+                      style={{ fontSize: "13px", fontWeight: 800, color: "#34D399" }}
+                    >
                       125,000 rows/s ▲
                     </span>
                   </div>
@@ -1387,8 +1629,22 @@ export function BentoCommandCenter({
                     </defs>
 
                     {/* Subtle Grid Lines */}
-                    <line x1="20" y1="35" x2="340" y2="35" stroke="rgba(255,255,255,0.07)" strokeDasharray="4 4" />
-                    <line x1="20" y1="80" x2="340" y2="80" stroke="rgba(255,255,255,0.07)" strokeDasharray="4 4" />
+                    <line
+                      x1="20"
+                      y1="35"
+                      x2="340"
+                      y2="35"
+                      stroke="rgba(255,255,255,0.07)"
+                      strokeDasharray="4 4"
+                    />
+                    <line
+                      x1="20"
+                      y1="80"
+                      x2="340"
+                      y2="80"
+                      stroke="rgba(255,255,255,0.07)"
+                      strokeDasharray="4 4"
+                    />
                     <line x1="20" y1="125" x2="340" y2="125" stroke="rgba(255,255,255,0.12)" />
 
                     {/* Traditional Spreadsheets Flat Grey Line */}
@@ -1422,12 +1678,35 @@ export function BentoCommandCenter({
                     />
 
                     {/* Peak Radar Beacon */}
-                    <circle className="safi-rb-beacon-ring" cx="335" cy="18" r="9" fill="rgba(52, 211, 153, 0.45)" />
-                    <circle cx="335" cy="18" r="5.5" fill="#34D399" stroke="#0F172A" strokeWidth="2" />
+                    <circle
+                      className="safi-rb-beacon-ring"
+                      cx="335"
+                      cy="18"
+                      r="9"
+                      fill="rgba(52, 211, 153, 0.45)"
+                    />
+                    <circle
+                      cx="335"
+                      cy="18"
+                      r="5.5"
+                      fill="#34D399"
+                      stroke="#0F172A"
+                      strokeWidth="2"
+                    />
                   </svg>
 
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", color: "#94A3B8", marginTop: "4px" }}>
-                    <span>{isAr ? "● صافي البيانات (الأسرع 40×)" : "● SafiData Engine (40x Faster)"}</span>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: "11.5px",
+                      color: "#94A3B8",
+                      marginTop: "4px"
+                    }}
+                  >
+                    <span>
+                      {isAr ? "● صافي البيانات (الأسرع 40×)" : "● SafiData Engine (40x Faster)"}
+                    </span>
                     <span>{isAr ? "○ الطرق التقليدية" : "○ Traditional Tools"}</span>
                   </div>
                 </div>
@@ -1464,14 +1743,24 @@ export function BentoCommandCenter({
                       }}
                     >
                       <CheckCircle2 size={13} />
-                      <span>{isAr ? "Well Organized • منظّم ببراعة" : "Well Organized • Five Clear Categories"}</span>
+                      <span>
+                        {isAr
+                          ? "Well Organized • منظّم ببراعة"
+                          : "Well Organized • Five Clear Categories"}
+                      </span>
                     </span>
                     <h3 style={{ fontSize: "23px", fontWeight: 800, margin: "0 0 6px" }}>
                       {isAr
                         ? "خمس فئات واضحة ومنظمة حتى لا تغرق في فوضى القوائم المعقدة"
                         : "Five Clear Categories So You're Never Scrolling Through a Wall of Unrelated Stuff"}
                     </h3>
-                    <p style={{ margin: "0 0 8px", fontSize: "14.5px", color: "var(--text-secondary)" }}>
+                    <p
+                      style={{
+                        margin: "0 0 8px",
+                        fontSize: "14.5px",
+                        color: "var(--text-secondary)"
+                      }}
+                    >
                       {isAr
                         ? "كل مرحلة في صافي مصممة بترتيب منطقي واضح يأخذ ملفك من الفوضى إلى التقرير النهائي بسلاسة."
                         : "Every workflow stage is cleanly organized into five logical categories with instant visual feedback."}
@@ -1496,7 +1785,9 @@ export function BentoCommandCenter({
                             gap: "12px",
                             background: active ? "var(--accent-primary)" : "var(--bg-elevated)",
                             color: active ? "#FFFFFF" : "var(--text-primary)",
-                            border: active ? "1px solid var(--accent-soft)" : "1px solid var(--border-subtle)",
+                            border: active
+                              ? "1px solid var(--accent-soft)"
+                              : "1px solid var(--border-subtle)",
                             transform: active ? "translateX(-4px)" : "none",
                             transition: "all 0.28s cubic-bezier(0.22, 1, 0.36, 1)"
                           }}
@@ -1546,7 +1837,9 @@ export function BentoCommandCenter({
                   }}
                 >
                   {WELL_ORGANIZED_CATEGORIES.map((cat, idx) => {
-                    const offset = (idx - activeCategoryIdx + WELL_ORGANIZED_CATEGORIES.length) % WELL_ORGANIZED_CATEGORIES.length;
+                    const offset =
+                      (idx - activeCategoryIdx + WELL_ORGANIZED_CATEGORIES.length) %
+                      WELL_ORGANIZED_CATEGORIES.length;
                     const isFront = offset === 0;
                     const isSecond = offset === 1;
                     const isThird = offset === 2;
@@ -1561,7 +1854,11 @@ export function BentoCommandCenter({
                     return (
                       <div
                         key={`stack-${cat.id}`}
-                        onClick={() => setActiveCategoryIdx((prev) => (prev + 1) % WELL_ORGANIZED_CATEGORIES.length)}
+                        onClick={() =>
+                          setActiveCategoryIdx(
+                            (prev) => (prev + 1) % WELL_ORGANIZED_CATEGORIES.length
+                          )
+                        }
                         style={{
                           position: "absolute",
                           width: "100%",
@@ -1581,7 +1878,14 @@ export function BentoCommandCenter({
                           transition: "all 0.45s cubic-bezier(0.22, 1, 0.36, 1)"
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: "14px"
+                          }}
+                        >
                           <span
                             className="safi-mono"
                             dir="ltr"
@@ -1601,10 +1905,24 @@ export function BentoCommandCenter({
                           </span>
                         </div>
 
-                        <h4 style={{ fontSize: "20px", fontWeight: 800, margin: "0 0 10px", color: "#F8FAFC" }}>
+                        <h4
+                          style={{
+                            fontSize: "20px",
+                            fontWeight: 800,
+                            margin: "0 0 10px",
+                            color: "#F8FAFC"
+                          }}
+                        >
                           {isAr ? cat.titleAr : cat.titleEn}
                         </h4>
-                        <p style={{ margin: "0 0 16px", fontSize: "14px", color: "#CBD5E1", lineHeight: 1.7 }}>
+                        <p
+                          style={{
+                            margin: "0 0 16px",
+                            fontSize: "14px",
+                            color: "#CBD5E1",
+                            lineHeight: 1.7
+                          }}
+                        >
                           {isAr ? cat.subtitleAr : cat.subtitleEn}
                         </p>
 
@@ -1619,7 +1937,11 @@ export function BentoCommandCenter({
                             color: "#94A3B8"
                           }}
                         >
-                          <span>{isAr ? "اضغط للتبديل بين الفئات الخمس" : "Click to cycle through all 5 categories"}</span>
+                          <span>
+                            {isAr
+                              ? "اضغط للتبديل بين الفئات الخمس"
+                              : "Click to cycle through all 5 categories"}
+                          </span>
                           <span style={{ color: "#60A5FA", fontWeight: 700 }}>→</span>
                         </div>
                       </div>
@@ -1648,7 +1970,9 @@ export function BentoCommandCenter({
           }}
         >
           <div>
-            <h2 style={{ fontSize: "clamp(22px, 2.4vw, 30px)", fontWeight: 800, margin: "0 0 6px" }}>
+            <h2
+              style={{ fontSize: "clamp(22px, 2.4vw, 30px)", fontWeight: 800, margin: "0 0 6px" }}
+            >
               {isAr
                 ? "جرّب بنفسك: عدسة المقارنة قبل وبعد التنظيف"
                 : "Try It Live: Before & After Data Cleaning Lens"}
@@ -1749,7 +2073,11 @@ export function BentoCommandCenter({
       {/* ====================================================================
        * 4. APPLE BENTO FEATURES GRID (`#features` — Open Header + 8 Powerhouse Cards)
        * ==================================================================== */}
-      <section id="features" aria-label="المميزات الرئيسية" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+      <section
+        id="features"
+        aria-label="المميزات الرئيسية"
+        style={{ display: "flex", flexDirection: "column", gap: "18px" }}
+      >
         <div style={{ paddingInline: "8px" }}>
           <h2 style={{ fontSize: "clamp(22px, 2.4vw, 30px)", fontWeight: 800, margin: "0 0 6px" }}>
             {isAr
@@ -1779,8 +2107,21 @@ export function BentoCommandCenter({
             return (
               <div key={feat.id} className={spanClass} {...cardAttr}>
                 <SpotlightCard tilt={true} padding={28}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "14px", height: "100%" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "14px",
+                      height: "100%"
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between"
+                      }}
+                    >
                       <span
                         style={{
                           width: "44px",
@@ -1795,7 +2136,11 @@ export function BentoCommandCenter({
                         <Icon size={22} style={{ color: "var(--accent-soft)" }} />
                       </span>
                       <div style={{ textAlign: "end" }}>
-                        <div className="safi-mono" style={{ fontSize: "24px", fontWeight: 800 }} dir="ltr">
+                        <div
+                          className="safi-mono"
+                          style={{ fontSize: "24px", fontWeight: 800 }}
+                          dir="ltr"
+                        >
                           {feat.metric}
                         </div>
                         <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
@@ -1807,7 +2152,14 @@ export function BentoCommandCenter({
                     <h3 style={{ fontSize: "21px", fontWeight: 800, margin: 0 }}>
                       {isAr ? feat.titleAr : feat.titleEn}
                     </h3>
-                    <p style={{ margin: 0, fontSize: "15px", color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: "15px",
+                        color: "var(--text-secondary)",
+                        lineHeight: 1.7
+                      }}
+                    >
                       {isAr ? feat.descAr : feat.descEn}
                     </p>
                   </div>
@@ -1824,7 +2176,9 @@ export function BentoCommandCenter({
       <section id="compare" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
         <div style={{ paddingInline: "8px" }}>
           <h2 style={{ fontSize: "clamp(22px, 2.4vw, 30px)", fontWeight: 800, margin: "0 0 6px" }}>
-            {isAr ? "لماذا صافي البيانات بدلًا من الطرق التقليدية؟ (12 فرقًا جوهريًا)" : "Why SafiData Instead of Traditional Tools? (12 Key Advantages)"}
+            {isAr
+              ? "لماذا صافي البيانات بدلًا من الطرق التقليدية؟ (12 فرقًا جوهريًا)"
+              : "Why SafiData Instead of Traditional Tools? (12 Key Advantages)"}
           </h2>
           <p style={{ margin: 0, fontSize: "15px", color: "var(--text-secondary)" }}>
             {isAr
@@ -1847,9 +2201,7 @@ export function BentoCommandCenter({
               <tbody>
                 {COMPARISON_ROWS.map((item, idx) => (
                   <tr key={`cmp-${idx}`}>
-                    <td style={{ fontWeight: 700 }}>
-                      {isAr ? item.featureAr : item.featureEn}
-                    </td>
+                    <td style={{ fontWeight: 700 }}>{isAr ? item.featureAr : item.featureEn}</td>
                     <td style={{ fontWeight: 700, color: "var(--status-ok)" }}>
                       {isAr ? item.safiAr : item.safiEn}
                     </td>
@@ -1900,20 +2252,30 @@ export function BentoCommandCenter({
         </span>
 
         <h2 style={{ fontSize: "clamp(26px, 3vw, 40px)", fontWeight: 800, margin: 0 }}>
-          {isAr
-            ? "حمّل تطبيق صافي البيانات لسطح المكتب"
-            : "Download SafiData for Your Desktop"}
+          {isAr ? "حمّل تطبيق صافي البيانات لسطح المكتب" : "Download SafiData for Your Desktop"}
         </h2>
-        <p style={{ margin: 0, maxWidth: "720px", fontSize: "16px", color: "var(--text-secondary)" }}>
+        <p
+          style={{ margin: 0, maxWidth: "720px", fontSize: "16px", color: "var(--text-secondary)" }}
+        >
           {isAr
             ? "اختر نظام التشغيل الخاص بك وابدأ تنظيف وتحليل ملفاتك بسرعة فائقة وخصوصية تامة على جهازك."
             : "Choose your operating system and start cleaning and analyzing your spreadsheets locally with total privacy."}
         </p>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap", marginBlock: "8px" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: "10px",
+            flexWrap: "wrap",
+            marginBlock: "8px"
+          }}
+        >
           <button
             type="button"
-            className={selectedOs === "windows" ? "safi-btn safi-btn-primary" : "safi-btn safi-btn-secondary"}
+            className={
+              selectedOs === "windows" ? "safi-btn safi-btn-primary" : "safi-btn safi-btn-secondary"
+            }
             onClick={() => setSelectedOs("windows")}
           >
             <Monitor size={16} aria-hidden="true" />
@@ -1921,7 +2283,9 @@ export function BentoCommandCenter({
           </button>
           <button
             type="button"
-            className={selectedOs === "mac" ? "safi-btn safi-btn-primary" : "safi-btn safi-btn-secondary"}
+            className={
+              selectedOs === "mac" ? "safi-btn safi-btn-primary" : "safi-btn safi-btn-secondary"
+            }
             onClick={() => setSelectedOs("mac")}
           >
             <Monitor size={16} aria-hidden="true" />
@@ -1929,7 +2293,9 @@ export function BentoCommandCenter({
           </button>
           <button
             type="button"
-            className={selectedOs === "linux" ? "safi-btn safi-btn-primary" : "safi-btn safi-btn-secondary"}
+            className={
+              selectedOs === "linux" ? "safi-btn safi-btn-primary" : "safi-btn safi-btn-secondary"
+            }
             onClick={() => setSelectedOs("linux")}
           >
             <FileSpreadsheet size={16} aria-hidden="true" />
@@ -1978,9 +2344,7 @@ export function BentoCommandCenter({
 
           <button type="button" className="safi-btn safi-btn-primary" onClick={onStart}>
             <Download size={16} aria-hidden="true" />
-            <span>
-              {isAr ? "تحميل النسخة المباشرة" : "Download Installer"}
-            </span>
+            <span>{isAr ? "تحميل النسخة المباشرة" : "Download Installer"}</span>
           </button>
         </div>
       </section>

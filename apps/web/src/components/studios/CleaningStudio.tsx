@@ -110,11 +110,41 @@ interface WorkspaceStep {
 }
 
 const INITIAL_COLUMNS: readonly WorkspaceColumn[] = [
-  { name: "الاسم الكامل", type: "نص عربي (Text)", confidence: 0.98, alternatives: ["اسم مركب"], quality: 96 },
-  { name: "الرقم القومي", type: "رقم قومي مصري (14 رقمًا)", confidence: 0.99, alternatives: ["معرّف نصي"], quality: 94 },
-  { name: "تاريخ الصرف", type: "تاريخ (ISO Date)", confidence: 0.89, alternatives: ["تاريخ هجري", "نص"], quality: 88 },
-  { name: "المبلغ (ج.م)", type: "مبلغ مالي (Decimal)", confidence: 0.94, alternatives: ["رقم صحيح"], quality: 92 },
-  { name: "رقم الهاتف", type: "هاتف محمول (Phone)", confidence: 0.91, alternatives: ["نص"], quality: 90 }
+  {
+    name: "الاسم الكامل",
+    type: "نص عربي (Text)",
+    confidence: 0.98,
+    alternatives: ["اسم مركب"],
+    quality: 96
+  },
+  {
+    name: "الرقم القومي",
+    type: "رقم قومي مصري (14 رقمًا)",
+    confidence: 0.99,
+    alternatives: ["معرّف نصي"],
+    quality: 94
+  },
+  {
+    name: "تاريخ الصرف",
+    type: "تاريخ (ISO Date)",
+    confidence: 0.89,
+    alternatives: ["تاريخ هجري", "نص"],
+    quality: 88
+  },
+  {
+    name: "المبلغ (ج.م)",
+    type: "مبلغ مالي (Decimal)",
+    confidence: 0.94,
+    alternatives: ["رقم صحيح"],
+    quality: 92
+  },
+  {
+    name: "رقم الهاتف",
+    type: "هاتف محمول (Phone)",
+    confidence: 0.91,
+    alternatives: ["نص"],
+    quality: 90
+  }
 ];
 
 const RAW_WORKSPACE_ROWS: readonly (readonly string[])[] = [
@@ -122,14 +152,15 @@ const RAW_WORKSPACE_ROWS: readonly (readonly string[])[] = [
   ["فاطمة حسن إبراهيم", "29505122101248", "15-01-2026", "٢٣٠٠", "٠١٢٣٤٥٦٧٨٩٠"],
   ["محمود السيّدـــعلي", "30109200201351", "2026.01.16", "0", "٠١١٢٣٤٥٦٧٨٩"],
   ["أَحْمَدُ محمد عبد الله", "29801010123455", "2026/01/15", "١٥٠٠", "٠١٠١٢٣٤٥٦٧٨"],
-  ["=HYPERLINK(\"http://evil\")", "28811041201432", "2026/01/18", "٣٢٠٠", "٠١٥٥٥٤٤٣٣٢٢"]
+  ['=HYPERLINK("http://evil")', "28811041201432", "2026/01/18", "٣٢٠٠", "٠١٥٥٥٤٤٣٣٢٢"]
 ];
 
 const INITIAL_ISSUES: readonly DataIssueItem[] = [
   {
     id: "q1",
     category: "ambiguity",
-    titleAr: "القيمة (0) في عمود «المبلغ (ج.م)» بالصف 3: هل تعني صفرًا فعليًا أم «لم يستلم / فارغ»؟",
+    titleAr:
+      "القيمة (0) في عمود «المبلغ (ج.م)» بالصف 3: هل تعني صفرًا فعليًا أم «لم يستلم / فارغ»؟",
     impactScore: 95,
     deferred: false
   },
@@ -143,7 +174,8 @@ const INITIAL_ISSUES: readonly DataIssueItem[] = [
   {
     id: "q3",
     category: "outlier",
-    titleAr: "الخلية الأولى في الصف 5 تبدأ بعلامة صيغة (=HYPERLINK): سيتم تحييدها تلقائيًا لحمايتك (A11).",
+    titleAr:
+      "الخلية الأولى في الصف 5 تبدأ بعلامة صيغة (=HYPERLINK): سيتم تحييدها تلقائيًا لحمايتك (A11).",
     impactScore: 82,
     deferred: false
   }
@@ -213,10 +245,30 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
 
   const [stepsHistory, setStepsHistory] = useState<readonly (readonly WorkspaceStep[])[]>([
     [
-      { id: "norm-ar", title: "تطبيع الحروف والأرقام العربية", detail: "توحيد أ/إ/آ، التاء المربوطة، والأرقام ٠-٩", enabled: true },
-      { id: "norm-date", title: "توحيد التواريخ القياسي", detail: "تحويل جميع الصيغ إلى YYYY-MM-DD", enabled: true },
-      { id: "dedup", title: "إزالة الصفوف المكررة", detail: "حذف الصفوف المتطابقة 100%", enabled: true },
-      { id: "mask-pii", title: "إخفاء الهاتف والرقم القومي", detail: "قناع جزئي مع الحفاظ على المحافظة", enabled: false }
+      {
+        id: "norm-ar",
+        title: "تطبيع الحروف والأرقام العربية",
+        detail: "توحيد أ/إ/آ، التاء المربوطة، والأرقام ٠-٩",
+        enabled: true
+      },
+      {
+        id: "norm-date",
+        title: "توحيد التواريخ القياسي",
+        detail: "تحويل جميع الصيغ إلى YYYY-MM-DD",
+        enabled: true
+      },
+      {
+        id: "dedup",
+        title: "إزالة الصفوف المكررة",
+        detail: "حذف الصفوف المتطابقة 100%",
+        enabled: true
+      },
+      {
+        id: "mask-pii",
+        title: "إخفاء الهاتف والرقم القومي",
+        detail: "قناع جزئي مع الحفاظ على المحافظة",
+        enabled: false
+      }
     ]
   ]);
   const [historyIndex, setHistoryIndex] = useState<number>(0);
@@ -295,9 +347,7 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
           nextVal = normalizeText(nextVal);
         }
         if (normDate && cIdx === 2) {
-          nextVal = nextVal
-            .replace(/^(\d{2})-(\d{2})-(\d{4})$/, "$3-$2-$1")
-            .replace(/[/.]/g, "-");
+          nextVal = nextVal.replace(/^(\d{2})-(\d{2})-(\d{4})$/, "$3-$2-$1").replace(/[/.]/g, "-");
         }
         if (zeroMeansNull && cIdx === 3 && nextVal.trim() === "0") {
           nextVal = "غير متاح (Null)";
@@ -388,9 +438,15 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
         <div className="safi-dynamic-island" style={{ cursor: "default" }}>
           <span className="safi-island-dot" />
           <span style={{ fontSize: "12.5px", fontWeight: 800, color: "#F8FAFC" }}>
-            {isAr ? "محرك التنقية وPII المباشر • Rust + Arrow" : "Live Cleaning & PII Engine • Rust + Arrow"}
+            {isAr
+              ? "محرك التنقية وPII المباشر • Rust + Arrow"
+              : "Live Cleaning & PII Engine • Rust + Arrow"}
           </span>
-          <span className="safi-mono" dir="ltr" style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}>
+          <span
+            className="safi-mono"
+            dir="ltr"
+            style={{ fontSize: "11.5px", color: "#34D399", fontWeight: 800 }}
+          >
             125,000 rows/s • <CountUpMetric value={qualityScore} suffix="% Quality" />
           </span>
         </div>
@@ -583,7 +639,15 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 600, fontSize: "14px" }}>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                fontWeight: 600,
+                fontSize: "14px"
+              }}
+            >
               <Table2 size={16} aria-hidden="true" style={{ color: "var(--accent-primary)" }} />
               مساحة التنضيف التفاعلية (Section 6.5.4)
             </span>
@@ -721,13 +785,27 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
                           cursor: "pointer"
                         }}
                       >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center"
+                          }}
+                        >
                           <strong style={{ fontSize: "13px" }}>{col.name}</strong>
-                          <span style={{ fontSize: "11px", color: "var(--status-ok)", fontWeight: 600 }}>
+                          <span
+                            style={{ fontSize: "11px", color: "var(--status-ok)", fontWeight: 600 }}
+                          >
                             {Math.round(col.confidence * 100)}% ثقة
                           </span>
                         </div>
-                        <div style={{ fontSize: "11px", color: "var(--text-secondary)", margin: "4px 0" }}>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--text-secondary)",
+                            margin: "4px 0"
+                          }}
+                        >
                           النوع: {col.type}
                         </div>
                         {/* Thin column quality bar (Spec 6.5.4) */}
@@ -753,7 +831,9 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setStatusBanner(`تم تأكيد نوع العمود «${col.name}» وحفظه في ذاكرة التعلم.`);
+                              setStatusBanner(
+                                `تم تأكيد نوع العمود «${col.name}» وحفظه في ذاكرة التعلم.`
+                              );
                             }}
                             style={{ minHeight: "28px", padding: "2px 8px", fontSize: "11px" }}
                           >
@@ -797,7 +877,9 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
                     onChange={(e) => setNlRuleText(e.target.value)}
                     style={{ minHeight: "36px", fontSize: "12px", marginBottom: "6px" }}
                   />
-                  <p style={{ margin: "0 0 6px", fontSize: "11px", color: "var(--text-secondary)" }}>
+                  <p
+                    style={{ margin: "0 0 6px", fontSize: "11px", color: "var(--text-secondary)" }}
+                  >
                     {parsedRule.descriptionAr}
                   </p>
                   <button
@@ -807,7 +889,12 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
                       setZeroMeansNull((z) => !z);
                       setStatusBanner("تم تطبيق قاعدة الفهم الطبيعية على الجدول.");
                     }}
-                    style={{ width: "100%", minHeight: "34px", padding: "4px 10px", fontSize: "12px" }}
+                    style={{
+                      width: "100%",
+                      minHeight: "34px",
+                      padding: "4px 10px",
+                      fontSize: "12px"
+                    }}
                   >
                     {zeroMeansNull ? "إلغاء القاعدة المطبّقة" : "تطبيق القاعدة على العمود"}
                   </button>
@@ -817,7 +904,15 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
           </aside>
 
           {/* Center Pane: Interactive Data Grid + Bottom Status Bar */}
-          <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "16px", overflowX: "auto" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              padding: "16px",
+              overflowX: "auto"
+            }}
+          >
             <div className="safi-table-wrap">
               <table className="safi-table">
                 <thead>
@@ -826,7 +921,13 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
                     {columns.map((col) => (
                       <th key={col.name} scope="col">
                         <div>{col.name}</div>
-                        <span style={{ fontSize: "10px", fontWeight: 400, color: "var(--accent-primary)" }}>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: 400,
+                            color: "var(--accent-primary)"
+                          }}
+                        >
                           {col.type}
                         </span>
                       </th>
@@ -910,13 +1011,12 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
               }}
             >
               <span>
-                📊 عدد الصفوف النشطة: <strong>{processedGrid.length}</strong> (من أصل {RAW_WORKSPACE_ROWS.length}) | الأعمدة:{" "}
-                <strong>{columns.length}</strong> | درجة الجودة الشاملة:{" "}
+                📊 عدد الصفوف النشطة: <strong>{processedGrid.length}</strong> (من أصل{" "}
+                {RAW_WORKSPACE_ROWS.length}) | الأعمدة: <strong>{columns.length}</strong> | درجة
+                الجودة الشاملة:{" "}
                 <strong style={{ color: "var(--status-ok)" }}>{qualityScore}%</strong>
               </span>
-              <span>
-                الفروق مميّزة بالرمز (⚡ منقّى) واللون معًا التزامًا بمعيار WCAG 2.2 AA
-              </span>
+              <span>الفروق مميّزة بالرمز (⚡ منقّى) واللون معًا التزامًا بمعيار WCAG 2.2 AA</span>
             </div>
           </div>
 
@@ -949,7 +1049,11 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
               <>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {currentSteps.map((step) => (
-                    <label key={step.id} className="safi-toggle-row" style={{ padding: "8px 10px" }}>
+                    <label
+                      key={step.id}
+                      className="safi-toggle-row"
+                      style={{ padding: "8px 10px" }}
+                    >
                       <input
                         type="checkbox"
                         checked={step.enabled}
@@ -979,8 +1083,23 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
                     gap: "8px"
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--accent-primary)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between"
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: "var(--accent-primary)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px"
+                      }}
+                    >
                       <HelpCircle size={13} aria-hidden="true" />
                       بطاقة الأسئلة المجمّعة (U6)
                     </span>
@@ -1020,7 +1139,9 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
                         onClick={() => {
                           setZeroMeansNull(true);
                           setIssues((prev) => prev.map((i) => ({ ...i, deferred: true })));
-                          setStatusBanner("تم اعتماد توصيات بطاقة الأسئلة المجمّعة (U6) دفعة واحدة.");
+                          setStatusBanner(
+                            "تم اعتماد توصيات بطاقة الأسئلة المجمّعة (U6) دفعة واحدة."
+                          );
                         }}
                         style={{ flex: 1, minHeight: "32px", padding: "4px 8px", fontSize: "11px" }}
                       >
@@ -1128,9 +1249,17 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
       <SpotlightCard padding={24}>
         <h2 className="safi-card-title">
           <CheckCircle2 size={16} aria-hidden="true" style={{ color: "var(--accent-primary)" }} />
-          فاحص الرقم القومي المصري الرسمي (القسم 20.3 — 14 رقمًا + المحافظة + تاريخ الميلاد + معادلة التحقق)
+          فاحص الرقم القومي المصري الرسمي (القسم 20.3 — 14 رقمًا + المحافظة + تاريخ الميلاد + معادلة
+          التحقق)
         </h2>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 340px) 1fr", gap: "16px", alignItems: "center" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(240px, 340px) 1fr",
+            gap: "16px",
+            alignItems: "center"
+          }}
+        >
           <div>
             <label className="safi-field-label" htmlFor="safi-national-id-input">
               أدخل رقمًا قوميًا مصريًا (يقبل الأرقام العربية ٠-٩ أو اللاتينية)
@@ -1161,7 +1290,8 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
                     fontSize: "11px",
                     borderRadius: "999px",
                     border: "1px solid var(--border-subtle)",
-                    background: nationalIdInput === sample.val ? "var(--accent-tint)" : "var(--bg-elevated)",
+                    background:
+                      nationalIdInput === sample.val ? "var(--accent-tint)" : "var(--bg-elevated)",
                     color: "var(--text-primary)",
                     cursor: "pointer"
                   }}
@@ -1184,15 +1314,28 @@ export function CleaningStudio({ lang = "ar", onSelectTab }: CleaningStudioProps
             {nationalIdCheck.ok ? (
               <div style={{ display: "flex", gap: "20px", flexWrap: "wrap", fontSize: "13px" }}>
                 <span>
-                  المحافظة: <strong style={{ color: "var(--accent-primary)" }}>{nationalIdCheck.info.governorateNameAr}</strong> ({nationalIdCheck.info.governorateCode})
+                  المحافظة:{" "}
+                  <strong style={{ color: "var(--accent-primary)" }}>
+                    {nationalIdCheck.info.governorateNameAr}
+                  </strong>{" "}
+                  ({nationalIdCheck.info.governorateCode})
                 </span>
                 <span>
-                  تاريخ الميلاد: <strong className="safi-mono" dir="ltr">{nationalIdCheck.info.birthDate}</strong>
+                  تاريخ الميلاد:{" "}
+                  <strong className="safi-mono" dir="ltr">
+                    {nationalIdCheck.info.birthDate}
+                  </strong>
                 </span>
                 <span>
                   النوع: <strong>{nationalIdCheck.info.genderAr}</strong>
                 </span>
-                <span style={{ color: nationalIdCheck.info.checksumMatches ? "var(--status-ok)" : "var(--status-warn)" }}>
+                <span
+                  style={{
+                    color: nationalIdCheck.info.checksumMatches
+                      ? "var(--status-ok)"
+                      : "var(--status-warn)"
+                  }}
+                >
                   {nationalIdCheck.info.checksumMatches
                     ? "✓ خانة التحقق (Modulo-11) صحيحة"
                     : `⚠ خانة التحقق المتوقعة: ${nationalIdCheck.info.expectedCheckDigit}`}

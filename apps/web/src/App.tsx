@@ -24,11 +24,7 @@ function consumeVerificationToken(): string | null {
   if (token === null) return null;
 
   url.searchParams.delete("verify_email");
-  window.history.replaceState(
-    window.history.state,
-    "",
-    `${url.pathname}${url.search}${url.hash}`
-  );
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
   return token;
 }
 

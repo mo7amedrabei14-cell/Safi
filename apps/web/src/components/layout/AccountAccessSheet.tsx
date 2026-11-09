@@ -1,14 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import {
-  LogIn,
-  LogOut,
-  MailCheck,
-  Send,
-  ShieldCheck,
-  UserPlus,
-  X
-} from "lucide-react";
+import { LogIn, LogOut, MailCheck, Send, ShieldCheck, UserPlus, X } from "lucide-react";
 import {
   deleteSafiAuth,
   postSafiAuth,
@@ -53,9 +45,7 @@ function getRequestError(error: unknown, isAr: boolean, isVerification = false):
     }
   }
 
-  return isAr
-    ? "حدث خطأ غير متوقع. حاول مرة أخرى."
-    : "Something went wrong. Please try again.";
+  return isAr ? "حدث خطأ غير متوقع. حاول مرة أخرى." : "Something went wrong. Please try again.";
 }
 
 export function AccountAccessSheet({
@@ -96,11 +86,7 @@ export function AccountAccessSheet({
   }, [open, busy, onClose]);
 
   useEffect(() => {
-    if (
-      !open ||
-      !verificationToken ||
-      verificationAttempted.current === verificationToken
-    ) {
+    if (!open || !verificationToken || verificationAttempted.current === verificationToken) {
       return;
     }
 
@@ -288,13 +274,7 @@ export function AccountAccessSheet({
               disabled={busy}
             >
               <LogOut size={16} aria-hidden="true" />
-              {busy
-                ? isAr
-                  ? "جارٍ..."
-                  : "Working…"
-                : isAr
-                  ? "تسجيل الخروج"
-                  : "Sign out"}
+              {busy ? (isAr ? "جارٍ..." : "Working…") : isAr ? "تسجيل الخروج" : "Sign out"}
             </button>
           </div>
         ) : (
@@ -388,9 +368,7 @@ export function AccountAccessSheet({
                     disabled={busy}
                   />
                   {mode === "register" ? (
-                    <small>
-                      {isAr ? "12 حرفًا على الأقل." : "At least 12 characters."}
-                    </small>
+                    <small>{isAr ? "12 حرفًا على الأقل." : "At least 12 characters."}</small>
                   ) : null}
                 </label>
               ) : null}

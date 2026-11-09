@@ -420,9 +420,7 @@ mod tests {
             revoked: false,
         };
 
-        let sessions = Arc::new(
-            super::super::repository::InMemorySessionRepository::new(),
-        );
+        let sessions = Arc::new(super::super::repository::InMemorySessionRepository::new());
         sessions.replace_active(&expired).await.unwrap();
 
         let cache = Arc::new(super::super::cache::InMemoryAuthCache::new());
@@ -448,4 +446,5 @@ mod tests {
                 .unwrap_err(),
             AuthError::Expired
         );
-    }}
+    }
+}

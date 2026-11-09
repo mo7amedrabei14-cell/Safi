@@ -33,6 +33,100 @@ const INITIAL_AUDIT_CHAIN_LOGS: readonly AuditLogEntry[] = [
   }
 ];
 
+
+const OWNER_ENGLISH: Readonly<Record<string, string>> = {
+  "التحقق من توقيع إصدار الديسكتوب (Ed25519 + Anti-Rollback)": "Desktop release signature verification (Ed25519 + Anti-Rollback)",
+  "فحص سلامة خزنة SQLCipher ومفاتيح Argon2id المحلية": "SQLCipher vault and local Argon2id key integrity check",
+  "تأكيد فلترة حزم التشخيص بصفر بيانات عملاء (Zero-PII Gate)": "Verified diagnostic bundles contain zero customer data (Zero-PII Gate)",
+  "كل شيء سليم — النظام يعمل بكفاءة تامة": "All systems operational — everything is running normally",
+  "جاهز — حارس Zero Trust + YubiKey FIPS نشط. انقر على أي بطاقة لتنفيذ الإجراء.": "Ready — Zero Trust guard and YubiKey FIPS are active. Select a card to run an action.",
+  "مركز قيادة المالك • Zero Trust + YubiKey FIPS": "Owner Command Console • Zero Trust + YubiKey FIPS",
+  "🛡️ حارس Zero Trust + YubiKey FIPS موثّق": "🛡️ Zero Trust + YubiKey FIPS verified",
+  "⚠️ بانتظار لمس مفتاح YubiKey": "⚠️ Waiting for YubiKey touch",
+  "تم تجديد جلسة مصادقة الأجهزة (WebAuthn FIDO2 / YubiKey FIPS + PASETO v4).": "Device authentication session renewed (WebAuthn FIDO2 / YubiKey FIPS + PASETO v4).",
+  "تجديد جلسة مصادقة YubiKey FIPS + PASETO v4 بنجاح": "Successfully renewed the YubiKey FIPS + PASETO v4 authentication session",
+  "فحص مفتاح YubiKey FIPS": "Verify YubiKey FIPS",
+  "وضع الصيانة مفعل حاليًا": "Maintenance mode is currently enabled",
+  "تفعيل وضع الصيانة الطارئ عبر حارس المالك": "Emergency maintenance mode enabled by the owner guard",
+  "إلغاء وضع الصيانة واستئناف التشغيل القياسي": "Maintenance mode disabled; normal operations resumed",
+  "إيقاف وضع الصيانة": "Disable maintenance mode",
+  "تفعيل وضع الصيانة الطارئ": "Enable emergency maintenance",
+  "لوحة تحكم المالك (Owner Console v1)": "Owner Console v1",
+  "الوضع البسيط بست بطاقات (I-Have-ADHD) — حارس Zero Trust + YubiKey ومركز السجلات BLAKE3": "A focused six-card workspace — Zero Trust guard, YubiKey, and BLAKE3 audit center",
+  "الإصدار الذهبي المعتمد": "Certified Gold Edition",
+  "1. انشر تحديثًا": "1. Publish an update",
+  "معالج بثلاث خطوات: اختر الإصدار، حدد القناة والشرائح، واعتمد بمفتاح الأمان (YubiKey FIPS).": "Three-step workflow: choose a release, select its channel and rollout groups, then approve with the YubiKey FIPS security key.",
+  "نشر تحديث جديد": "Publish update",
+  "معالج نشر التحديث (v1.0.0-s5-gold): تم التحقق من توقيع Ed25519 ومصادقة YubiKey FIPS بنجاح.": "Release workflow (v1.0.0-s5-gold): Ed25519 signature and YubiKey FIPS authentication verified.",
+  "اعتماد ونشر التحديث الموقّع v1.0.0-s5-gold (Ed25519)": "Approved and published signed release v1.0.0-s5-gold (Ed25519)",
+  "2. أرسل رسالة للمستخدمين": "2. Message users",
+  "إرسال رسائل داخل التطبيق أو بريد إلكتروني موّجه ومجدول حسب الشريحة أو اللغة.": "Send targeted, scheduled in-app messages or email by audience segment or language.",
+  "إرسال رسالة": "Send message",
+  "تم جدولة وإرسال إشعار داخل التطبيق لشريحة المستخدمين النشطين.": "An in-app notification was scheduled and sent to the active-user segment.",
+  "إرسال إشعار تشغيلي لشريحة المستخدمين النشطين": "Sent an operational notification to the active-user segment",
+  "3. المستخدمون والاشتراكات": "3. Users & subscriptions",
+  "البحث، حالة الحساب، تعليق وتفعيل، وإدارة الحقوق والخطط بوصفية تامة.": "Search accounts, review status, suspend or reactivate access, and manage plans and entitlements.",
+  "إدارة المستخدمين": "Manage users",
+  "تم فتح سجل الاشتراكات النشطة (Paymob مصر + Lemon Squeezy عالميًا).": "Active subscription records opened (Paymob for Egypt and Lemon Squeezy globally).",
+  "4. أعلام الميزات والإعدادات": "4. Feature flags & settings",
+  "تشغيل أو إيقاف ميزة فورًا لشريحة محددة، أو تعديل الإعدادات عن بُعد بدون نشر كود جديد.": "Enable or disable a feature for a selected segment, or update settings without deploying new code.",
+  "إدارة الميزات": "Manage features",
+  "تم تحديث أعلام الميزات (Feature Flags) ومزامنتها عبر Valkey 8.": "Feature flags were updated and synchronized through Valkey 8.",
+  "تحديث أعلام الميزات (Feature Flags) ومزامنتها عبر Valkey 8": "Updated feature flags and synchronized them through Valkey 8",
+  "5. الدعم والتشخيص": "5. Support & diagnostics",
+  "صندوق التذاكر، فحص حزم التشخيص الآمنة الخالية من بيانات العملاء، والردود الجاهزة.": "Review support tickets, inspect safe diagnostics with no customer data, and use prepared replies.",
+  "فتح الدعم": "Open support",
+  "صندوق التذاكر نشط — جميع حزم التشخيص مفلترة بصفر بيانات عملاء (Zero-PII).": "Support inbox is active — all diagnostic bundles are filtered to contain zero customer data (Zero-PII).",
+  "6. الأمان وسجل التدقيق": "6. Security & audit trail",
+  "عارض سجل التدقيق الموثق ببصمات الـ Hash، مراقبة الشذوذ، وأزرار الطوارئ المنفصلة.": "Inspect the hash-verified audit trail, monitor anomalies, and use isolated emergency controls.",
+  "عرض سجل التدقيق": "View audit trail",
+  "سجل التدقيق (PostgreSQL 18 + BLAKE3 Hash Chain) سليم 100% بلا أي تلاعب.": "Audit trail (PostgreSQL 18 + BLAKE3 hash chain) integrity check completed successfully.",
+  "فحص شامل لسلسلة بصمات BLAKE3 في PostgreSQL 18": "Completed an integrity check of the PostgreSQL 18 BLAKE3 hash chain",
+  "مركز أعلام الميزات الفوري (Valkey 8 + PostgreSQL 18 Live Flags)": "Live feature flag center (Valkey 8 + PostgreSQL 18)",
+  "بدّل أي ميزة فورًا مع توثيق تلقائي في سلسلة بصمات BLAKE3": "Toggle any feature and automatically record the change in the BLAKE3 hash chain",
+  "محرك Typst Vector PDF الفوري": "Typst vector PDF engine",
+  "درع تحييد الصيغ الخبيثة (A11)": "Formula injection guard (A11)",
+  "مخطط السلالة البصري Graphify DAG": "Graphify DAG lineage graph",
+  "شبكة العرض السريع 120 FPS Canvas": "120 FPS Canvas data grid",
+  "التوقيت": "Timestamp",
+  "الحدث الأمني / التشغيلي": "Security / operational event",
+  "الجهة المنفّذة": "Actor",
+  "بصمة السلسلة (BLAKE3)": "Chain hash (BLAKE3)"
+};
+
+function translateOwnerText(value: string): string {
+  const exact = OWNER_ENGLISH[value];
+  if (exact !== undefined) return exact;
+  if (value.startsWith("⚡ حالة التنفيذ الفوري: ")) {
+    return "⚡ Live action status: " + translateOwnerText(value.slice("⚡ حالة التنفيذ الفوري: ".length));
+  }
+  if (value.startsWith("تم ") && value.includes("ميزة «") && value.includes("» ومزامنتها لحظيًا.")) {
+    const match = value.match(/^تم (تفعيل|إيقاف) ميزة «(.+)» ومزامنتها لحظيًا\.$/);
+    if (match) return match[2] + " was " + (match[1] === "تفعيل" ? "enabled" : "disabled") + " and synchronized.";
+  }
+  if (value.startsWith("تم ") && value.includes("علم الميزة: ")) {
+    const label = value.slice(value.indexOf("علم الميزة: ") + "علم الميزة: ".length);
+    return "Updated feature flag: " + (OWNER_ENGLISH[label] ?? label);
+  }
+  return value;
+}
+
+function localizeOwnerNode(node: React.ReactNode): React.ReactNode {
+  if (typeof node === "string") return translateOwnerText(node);
+  if (Array.isArray(node)) return node.map(localizeOwnerNode);
+  if (React.isValidElement(node)) {
+    const props = node.props as { children?: React.ReactNode; [key: string]: unknown };
+    const nextProps: Record<string, unknown> = {};
+    for (const key of ["aria-label", "title", "placeholder"]) {
+      const value = props[key];
+      if (typeof value === "string") nextProps[key] = translateOwnerText(value);
+    }
+    const children = localizeOwnerNode(props.children);
+    return React.cloneElement(node, nextProps, children);
+  }
+  return node;
+}
+
 export interface OwnerDashboardProps {
   readonly lang?: SafiLang;
   readonly onSelectTab?: (tab: SafiDockTabId) => void;
@@ -70,7 +164,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "en", onS
     setAuditLogs((prev) => [newEntry, ...prev]);
   };
 
-  return React.createElement(
+  const rendered = React.createElement(
     "div",
     {
       style: {
@@ -617,6 +711,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ lang = "en", onS
       )
     ]
   );
+  return isAr ? rendered : localizeOwnerNode(rendered);
 };
 
 function renderCard(

@@ -12,9 +12,9 @@ describe("SafiData startup and application shell", () => {
     const html = renderToString(createElement(App, null));
 
     expect(html).toContain('class="safi-intro-splash"');
-    expect(html).toContain("عرض إقلاع صافي البيانات السينمائي");
-    expect(html).toContain('<bdi dir="rtl">صافي البيانات</bdi>');
+    expect(html).toContain("SafiData cinematic startup");
     expect(html).toContain('<bdi dir="ltr">SafiData</bdi>');
+    expect(html).not.toContain("صافي البيانات");
     expect(html).not.toContain('class="safi-shell"');
     expect(html).not.toContain("data-safi-ambient");
     expect(html).not.toContain('data-active-tab="home"');
@@ -26,16 +26,22 @@ describe("SafiData startup and application shell", () => {
 
     expect(SHELL_TABS).toEqual(["home", "cleaning", "recipes", "charts", "library", "owner"]);
     expect(html).toContain('data-active-tab="home"');
-    expect(html).toContain("مرحبًا بك في منصة صافي البيانات");
-    expect(html).toContain("الإصدار الذهبي المعتمد v1.0.0-s5-gold");
+    expect(html).toContain("Welcome to SafiData — Intelligent Universal Data Engineering, Cleaning & Privacy");
+    expect(html).toContain("Certified Gold Edition v1.0.0-s5-gold");
 
-    for (const label of ["الرئيسية", "المكتبة", "الإعدادات"]) {
+    for (const label of ["Website", "Library", "Settings"]) {
       expect(html).toContain(label);
     }
     expect(html.split("data-tab-id=").length - 1).toBe(DOCK_TABS.length);
     expect(html).toContain("⌘K");
     expect(html).not.toContain('role="dialog"');
     expect(html).toContain('role="status"');
+  });
+
+  it("uses English as the first-run locale for the default studio", () => {
+    const html = renderToString(renderStudio("home", noop));
+    expect(html).toContain("Welcome to SafiData");
+    expect(html).not.toContain("مرحبًا بك في منصة صافي البيانات");
   });
 
   it("renders a distinct studio for every tab", () => {
@@ -49,13 +55,13 @@ describe("SafiData startup and application shell", () => {
     ];
 
     for (const tab of SHELL_TABS) {
-      const html = renderToString(renderStudio(tab, noop));
+      const html = renderToString(renderStudio(tab, noop, "ar"));
       const match = expectations.find(([id]) => id === tab);
       expect(match).toBeDefined();
       expect(html).toContain(match?.[1] ?? "");
     }
 
-    const owner = renderToString(renderStudio("owner", noop));
+    const owner = renderToString(renderStudio("owner", noop, "ar"));
     expect(owner.split("انشر تحديثًا").length - 1).toBe(1);
     expect(owner).toContain("6. الأمان وسجل التدقيق");
     expect(owner).toContain("safi-owner-frame");

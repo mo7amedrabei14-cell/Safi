@@ -10,28 +10,37 @@ import { CountUpMetric } from "../ui/CountUpMetric";
 import { DecryptedMonoText } from "../ui/DecryptedMonoText";
 import { MagneticButton } from "../ui/MagneticButton";
 import { canAnimate } from "../ui/motion-preference";
+import type { SafiLang } from "../layout/FloatingGlassDock";
 
 export interface PipelineStage {
   readonly id: "raw" | "core" | "clean";
   readonly title: string;
+  readonly titleEn: string;
   readonly detail: string;
+  readonly detailEn: string;
 }
 
 export const PIPELINE_STAGES: readonly PipelineStage[] = [
   {
     id: "raw",
     title: "المدخلات الخام",
-    detail: "CSV / XLSX • نصوص عربية غير مطبّعة • بيانات PII مكشوفة"
+    titleEn: "Raw input",
+    detail: "CSV / XLSX • نصوص عربية غير مطبّعة • بيانات PII مكشوفة",
+    detailEn: "CSV / XLSX • unnormalized Arabic text • exposed PII"
   },
   {
     id: "core",
     title: "نواة صافي الكريستالية",
-    detail: "تطبيع عربي قياسي + إخفاء/ترميز BLAKE3 + كتابة ذرية fsync"
+    titleEn: "SafiData core engine",
+    detail: "تطبيع عربي قياسي + إخفاء/ترميز BLAKE3 + كتابة ذرية fsync",
+    detailEn: "Arabic normalization + BLAKE3 masking/tokenization + atomic fsync writes"
   },
   {
     id: "clean",
     title: "المخرجات الموثقة",
-    detail: "بيانات نقية 100% + تقرير PDF موقّع + سجل تدقيق غير قابل للتلاعب"
+    titleEn: "Verified outputs",
+    detail: "بيانات نقية 100% + تقرير PDF موقّع + سجل تدقيق غير قابل للتلاعب",
+    detailEn: "100% clean data + signed PDF report + tamper-evident audit trail"
   }
 ];
 
@@ -50,7 +59,8 @@ export function simulatedDigest(run: number): string {
   return `${first}${second}`;
 }
 
-export function LivePipelineVisualizer(): ReactNode {
+export function LivePipelineVisualizer({ lang = "en" }: { readonly lang?: SafiLang }): ReactNode {
+  const isAr = lang === "ar";
   const [runs, setRuns] = useState(0);
   const packetsRef = useRef<Array<SVGCircleElement | null>>([]);
   const tweensRef = useRef<gsap.core.Tween[]>([]);
@@ -105,7 +115,7 @@ export function LivePipelineVisualizer(): ReactNode {
   const digest = runs === 0 ? "0000000000000000" : simulatedDigest(runs);
 
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+    <div dir={isAr ? "rtl" : "ltr"} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
       <header
         style={{
           display: "flex",
@@ -116,14 +126,14 @@ export function LivePipelineVisualizer(): ReactNode {
         }}
       >
         <h2 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)" }}>
-          محاكاة خط الأنابيب الحي
+          {isAr ? "محاكاة خط الأنابيب الحي" : "Live pipeline simulation"}
         </h2>
         <span
           className="safi-mono"
           style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 700 }}
           role="status"
         >
-          عدد مرات التشغيل: {runs}
+          {isAr ? "عدد مرات التشغيل" : "Runs"}: {runs}
         </span>
       </header>
 
@@ -210,7 +220,7 @@ export function LivePipelineVisualizer(): ReactNode {
                   color: "var(--text-primary)"
                 }}
               >
-                {stage.title}
+                {isAr ? stage.title : stage.titleEn}
               </h3>
             </div>
             <p
@@ -221,7 +231,7 @@ export function LivePipelineVisualizer(): ReactNode {
                 lineHeight: 1.6
               }}
             >
-              {stage.detail}
+              {isAr ? stage.detail : stage.detailEn}
             </p>
           </li>
         ))}
@@ -238,17 +248,17 @@ export function LivePipelineVisualizer(): ReactNode {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
-          <CountUpMetric value={processedRows} suffix="صف" label="الصفوف المعالجة" />
+          <CountUpMetric value={processedRows} suffix={isAr ? "صف" : " rows"} label={isAr ? "الصفوف المعالجة" : "Rows processed"} />
           <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
             <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700 }}>
-              بصمة BLAKE3
+              {isAr ? "بصمة BLAKE3" : "BLAKE3 digest"}
             </span>
             <DecryptedMonoText key={runs} value={digest} />
           </div>
         </div>
 
-        <MagneticButton variant="primary" onClick={handleRun} ariaLabel="تشغيل محاكاة فورية">
-          تشغيل محاكاة فورية
+        <MagneticButton variant="primary" onClick={handleRun} ariaLabel={isAr ? "تشغيل محاكاة فورية" : "Run simulation now"}>
+          {isAr ? "تشغيل محاكاة فورية" : "Run simulation now"}
         </MagneticButton>
       </div>
     </div>

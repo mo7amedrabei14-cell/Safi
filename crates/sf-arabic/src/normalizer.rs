@@ -138,28 +138,10 @@ pub fn normalize_text(input: &str, opts: NormOptions) -> String {
         i += 1;
     }
 
-    // Step 4: Join compound names ("عبد", "أبو", "أم" + space + next word)
     let s: String = normalized_chars.into_iter().collect();
     let mut final_s = s;
-    if opts.join_compound_names {
-        let compounds = ["عبد ", "أبو ", "ابو ", "أم ", "ام "];
-        for comp in &compounds {
-            let mut updated = String::new();
-            let mut search_from = 0;
-            while let Some(idx) = final_s[search_from..].find(comp) {
-                let absolute_idx = search_from + idx;
-                updated.push_str(&final_s[search_from..absolute_idx]);
-                // Remove the space after compound word
-                let trimmed_comp = comp.trim_end();
-                updated.push_str(trimmed_comp);
-                search_from = absolute_idx + comp.len();
-            }
-            updated.push_str(&final_s[search_from..]);
-            final_s = updated;
-        }
-    }
 
-    // Step 5: Clean whitespace and invisible characters (ZWJ, ZWNJ, RLM, LRM, NBSP)
+    // Whitespace must be canonical before joining compounds to keep normalization idempotent.
     if opts.clean_whitespace {
         let mut cleaned = String::with_capacity(final_s.len());
         let mut last_was_space = true; // trim leading
@@ -194,6 +176,23 @@ pub fn normalize_text(input: &str, opts: NormOptions) -> String {
             cleaned.pop();
         }
         final_s = cleaned;
+    }
+
+    if opts.join_compound_names {
+        let compounds = ["عبد ", "أبو ", "ابو ", "أم ", "ام "];
+        for comp in &compounds {
+            let mut updated = String::new();
+            let mut search_from = 0;
+            while let Some(idx) = final_s[search_from..].find(comp) {
+                let absolute_idx = search_from + idx;
+                updated.push_str(&final_s[search_from..absolute_idx]);
+                let trimmed_comp = comp.trim_end();
+                updated.push_str(trimmed_comp);
+                search_from = absolute_idx + comp.len();
+            }
+            updated.push_str(&final_s[search_from..]);
+            final_s = updated;
+        }
     }
 
     final_s

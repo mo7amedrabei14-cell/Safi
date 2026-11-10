@@ -8,7 +8,7 @@ use sf_arabic::{ArabicNormalizer, NormOptions};
 use sf_core::column::{Column, ColumnType};
 use sf_core::error::{ErrorCode, ErrorSeverity, SafiError};
 use sf_core::table::Table;
-use sf_core::value::CellValue;
+use sf_core::value::{CellDisplayMode, CellValue};
 
 use crate::delta::{CellDelta, CleanDelta};
 
@@ -85,24 +85,23 @@ impl CleanEngine {
             let schema = col.schema();
             let mut new_cells = Vec::with_capacity(col.len());
             for (row_idx, cell) in col.cells().iter().enumerate() {
-                let raw = cell.raw_text();
-                let normalized = normalizer.normalize(raw);
-                if raw != normalized {
-                    let new_cell = if self.options.update_display_text {
-                        CellValue::from_raw(&normalized).with_normalized(&normalized)
-                    } else {
-                        cell.clone().with_normalized(&normalized)
-                    };
+                let normalized = normalizer.normalize(cell.matching_text());
+                let mut new_cell = cell.clone();
+                if normalized != cell.matching_text() {
+                    new_cell = new_cell.with_normalized(normalized);
+                }
+                if self.options.update_display_text && new_cell.normalized_text().is_some() {
+                    new_cell = new_cell.with_display_mode(CellDisplayMode::Normalized);
+                }
+                if new_cell != *cell {
                     cell_deltas.push(CellDelta {
                         row: row_idx,
                         col: col_idx,
                         old_value: cell.clone(),
                         new_value: new_cell.clone(),
                     });
-                    new_cells.push(new_cell);
-                } else {
-                    new_cells.push(cell.clone());
                 }
+                new_cells.push(new_cell);
             }
             new_columns.push(Column::new(schema.clone(), new_cells));
         }
@@ -135,13 +134,10 @@ impl CleanEngine {
         let mut cell_deltas = Vec::new();
 
         for r in 0..row_count {
-            let mut row_key = String::new();
-            for col in cols {
-                if let Some(cell) = col.cell_at(r) {
-                    row_key.push_str(cell.matching_text());
-                    row_key.push('|');
-                }
-            }
+            let row_key: Vec<&str> = cols
+                .iter()
+                .map(|col| col.cells()[r].matching_text())
+                .collect();
 
             if seen.insert(row_key) {
                 keep_rows.push(r);
@@ -261,14 +257,12 @@ impl CleanEngine {
 
             let mut new_cells = Vec::with_capacity(col.len());
             for (row_idx, cell) in col.cells().iter().enumerate() {
-                let raw = cell.raw_text().trim();
-                if raw.is_empty() {
-                    new_cells.push(cell.clone());
-                    continue;
-                }
+                let raw = cell.matching_text().trim();
 
                 // Basic ISO or date parsing check
-                let normalized = if raw.len() == 10 && raw.chars().nth(4) == Some('-') {
+                let normalized = if raw.is_empty() {
+                    cell.matching_text().to_string()
+                } else if raw.len() == 10 && raw.chars().nth(4) == Some('-') {
                     raw.to_string()
                 } else if raw.contains('/') {
                     let parts: Vec<&str> = raw.split('/').collect();
@@ -306,7 +300,13 @@ impl CleanEngine {
                     raw.to_string()
                 };
 
-                let new_cell = CellValue::from_raw(&normalized);
+                let mut new_cell = cell.clone();
+                if normalized != cell.matching_text() {
+                    new_cell = new_cell.with_normalized(normalized);
+                }
+                if self.options.update_display_text && new_cell.normalized_text().is_some() {
+                    new_cell = new_cell.with_display_mode(CellDisplayMode::Normalized);
+                }
                 if new_cell != *cell {
                     cell_deltas.push(CellDelta {
                         row: row_idx,
@@ -351,14 +351,12 @@ impl CleanEngine {
             let schema = col.schema();
             let mut new_cells = Vec::with_capacity(col.len());
             for (row_idx, cell) in col.cells().iter().enumerate() {
-                let raw = cell.raw_text().trim();
-                if raw.is_empty() {
-                    new_cells.push(cell.clone());
-                    continue;
-                }
+                let raw = cell.matching_text().trim();
 
                 // If column preserves leading zeros (Phones, IDs), do not strip leading zeros
-                let normalized = if schema.column_type.preserves_leading_zeros() {
+                let normalized = if raw.is_empty() {
+                    cell.matching_text().to_string()
+                } else if schema.column_type.preserves_leading_zeros() {
                     raw.to_string()
                 } else if raw.starts_with("01") && raw.len() == 11 {
                     format!("+20{}", &raw[1..])
@@ -366,7 +364,13 @@ impl CleanEngine {
                     raw.to_string()
                 };
 
-                let new_cell = CellValue::from_raw(&normalized);
+                let mut new_cell = cell.clone();
+                if normalized != cell.matching_text() {
+                    new_cell = new_cell.with_normalized(normalized);
+                }
+                if self.options.update_display_text && new_cell.normalized_text().is_some() {
+                    new_cell = new_cell.with_display_mode(CellDisplayMode::Normalized);
+                }
                 if new_cell != *cell {
                     cell_deltas.push(CellDelta {
                         row: row_idx,

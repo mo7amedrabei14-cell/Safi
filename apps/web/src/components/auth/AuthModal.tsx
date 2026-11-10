@@ -64,6 +64,7 @@ export interface AuthPortalSession {
 
 export interface AuthModalProps {
   readonly open: boolean;
+  readonly mandatory?: boolean;
   readonly lang?: SafiLang;
   readonly theme?: SafiThemeId;
   readonly initialMode?: AuthMode;
@@ -146,6 +147,7 @@ function ProviderMark({ provider }: { readonly provider: string }): ReactNode {
 
 export function AuthModal({
   open,
+  mandatory = false,
   lang = "en",
   initialMode = "signin",
   onClose,
@@ -171,18 +173,23 @@ export function AuthModal({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const fieldsRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
 
   const passwordReady = meetsMinPasswordLength(password);
 
   useEffect(() => {
     if (!open) return;
-    closeRef.current?.focus();
+    if (mandatory) {
+      emailInputRef.current?.focus();
+    } else {
+      closeRef.current?.focus();
+    }
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape" && !busy && !mandatory) onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, busy, onClose]);
+  }, [open, busy, mandatory, onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -409,7 +416,7 @@ export function AuthModal({
     <div
       className="safi-auth-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
+        if (event.target === event.currentTarget && !busy && !mandatory) onClose();
       }}
     >
       <div
@@ -420,15 +427,17 @@ export function AuthModal({
         aria-labelledby="safi-auth-title"
         dir={isAr ? "rtl" : "ltr"}
       >
-        <button
-          ref={closeRef}
-          type="button"
-          className="safi-auth-close"
-          onClick={onClose}
-          aria-label={isAr ? "إغلاق بوابة الحساب" : "Close account portal"}
-        >
-          <X size={18} aria-hidden="true" />
-        </button>
+        {!mandatory ? (
+          <button
+            ref={closeRef}
+            type="button"
+            className="safi-auth-close"
+            onClick={onClose}
+            aria-label={isAr ? "إغلاق بوابة الحساب" : "Close account portal"}
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        ) : null}
 
         <header className="safi-auth-header">
           <span className="safi-auth-eyebrow">
@@ -559,6 +568,7 @@ export function AuthModal({
                 <span className="safi-auth-input-wrap">
                   <Mail size={15} aria-hidden="true" />
                   <input
+                    ref={emailInputRef}
                     type="email"
                     name="email"
                     autoComplete="email"

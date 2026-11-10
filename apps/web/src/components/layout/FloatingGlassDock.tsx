@@ -15,6 +15,7 @@ import {
   Download,
   Globe,
   Home,
+  LayoutDashboard,
   Library,
   ListChecks,
   Monitor,
@@ -28,7 +29,14 @@ import type { LucideIcon } from "lucide-react";
 import { SafiPrismLogo } from "../brand/SafiPrismLogo";
 import { DynamicStatusIsland } from "../brand/DynamicStatusIsland";
 
-export type SafiDockTabId = "home" | "cleaning" | "recipes" | "charts" | "library" | "owner";
+export type SafiDockTabId =
+  | "home"
+  | "cleaning"
+  | "recipes"
+  | "charts"
+  | "studio"
+  | "library"
+  | "owner";
 
 export type SafiThemeId = "apple-light" | "google-gemini" | "vision-glass";
 
@@ -50,7 +58,18 @@ export const DOCK_TABS: readonly SafiDockTab[] = [
   { id: "owner", label: "لوحة المالك", labelEn: "Owner App", icon: ShieldCheck }
 ];
 
+/**
+ * The Studio tab exists only inside the packaged desktop app; the public site never shows it.
+ */
+export const STUDIO_TAB: SafiDockTab = {
+  id: "studio",
+  label: "الاستوديو الرباعي",
+  labelEn: "Quad-Studio",
+  icon: LayoutDashboard
+};
+
 export interface FloatingGlassDockProps {
+  readonly tabs?: readonly SafiDockTab[];
   readonly activeTab: SafiDockTabId;
   readonly onSelect: (tab: SafiDockTabId) => void;
   readonly onOpenCommandPalette?: () => void;
@@ -85,6 +104,7 @@ const WEBSITE_SECTIONS: ReadonlyArray<{
 ];
 
 export function FloatingGlassDock({
+  tabs = DOCK_TABS,
   activeTab,
   onSelect,
   onOpenCommandPalette,
@@ -283,7 +303,7 @@ export function FloatingGlassDock({
         {/* Visually-Hidden Semantic Contract Layer for Automated Test Suite */}
         <div className="safi-visually-hidden" aria-hidden="false">
           <DynamicStatusIsland lang={lang} />
-          {DOCK_TABS.map((tab) => {
+          {tabs.map((tab) => {
             const isActive = tab.id === activeTab;
             return (
               <button

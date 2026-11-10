@@ -26,6 +26,7 @@ const TAB_HINTS: Readonly<Record<SafiDockTabId, string>> = {
   cleaning: "مختبر التنقية والخصوصية",
   recipes: "محرك الوصفات الحتمية ومجلد F1",
   charts: "استوديو الرسوم وتباين WCAG 2.2 AA",
+  studio: "الاستوديو الرباعي داخل تطبيق سطح المكتب",
   library: "القوالب وتقارير الجودة",
   owner: "البطاقات الست وحارس Zero Trust"
 };
@@ -35,6 +36,7 @@ const TAB_HINTS_EN: Readonly<Record<SafiDockTabId, string>> = {
   cleaning: "Clean, normalize, and protect sensitive data",
   recipes: "Deterministic cleaning recipes and watch folders",
   charts: "Chart studio and WCAG 2.2 AA contrast checks",
+  studio: "Quad-Studio inside the desktop app",
   library: "Reusable templates and quality reports",
   owner: "Owner controls, security, and audit trail"
 };

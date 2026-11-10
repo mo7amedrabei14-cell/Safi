@@ -1,0 +1,367 @@
+/* Desktop Quad-Studio styles. Colours follow the active theme through `currentColor`. */
+
+.safi-desktop-studio {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px clamp(16px, 4vw, 48px);
+  min-width: 0;
+}
+
+.safi-desktop-studio--locked {
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 64px 24px;
+  opacity: 0.9;
+}
+
+.safi-desktop-studio--locked h1 {
+  font-size: 22px;
+  margin: 0;
+}
+
+.safi-desktop-studio--locked p {
+  margin: 0;
+  max-width: 52ch;
+  opacity: 0.75;
+}
+
+.safi-desktop-studio__head h1 {
+  font-size: clamp(22px, 3vw, 32px);
+  font-weight: 650;
+  margin: 0 0 4px;
+}
+
+.safi-desktop-studio__head p {
+  margin: 0;
+  opacity: 0.72;
+  max-width: 62ch;
+}
+
+.safi-desktop-studio__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.safi-desktop-studio__toolbar > button,
+.safi-desktop-studio__form button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.safi-desktop-studio__toolbar > button:hover,
+.safi-desktop-studio__form button:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.safi-desktop-studio__toolbar > button:disabled,
+.safi-desktop-studio__form button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.safi-desktop-studio button:focus-visible,
+.safi-desktop-studio input:focus-visible,
+.safi-desktop-studio select:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.safi-desktop-studio__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #d33 45%, transparent);
+  background: color-mix(in srgb, #d33 12%, transparent);
+}
+
+.safi-desktop-studio__empty,
+.safi-desktop-studio__note {
+  opacity: 0.72;
+  margin: 0;
+}
+
+.safi-desktop-studio__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin: 0;
+}
+
+.safi-desktop-studio__meta dt {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.safi-desktop-studio__meta dd {
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.safi-desktop-studio h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 8px 0 -4px;
+}
+
+.safi-desktop-studio__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.safi-desktop-chip {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas: "name state" "value value";
+  gap: 2px 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.safi-desktop-chip__name {
+  grid-area: name;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.safi-desktop-chip__value {
+  grid-area: value;
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.safi-desktop-chip__state {
+  grid-area: state;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.safi-desktop-chip--verified {
+  border-color: color-mix(in srgb, #16794a 45%, transparent);
+}
+
+.safi-desktop-chip--stale,
+.safi-desktop-chip--unverified {
+  border-color: color-mix(in srgb, #b58900 55%, transparent);
+}
+
+.safi-desktop-studio__anomalies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.safi-desktop-studio__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.safi-desktop-studio__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.safi-desktop-studio__form input,
+.safi-desktop-studio__form select {
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  min-width: 140px;
+}
+
+.safi-desktop-studio__table-wrap {
+  max-height: 55vh;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 12px;
+}
+
+.safi-desktop-studio__table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.safi-desktop-studio__table th,
+.safi-desktop-studio__table td {
+  border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  padding: 0;
+  text-align: start;
+  white-space: nowrap;
+}
+
+.safi-desktop-studio__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, Canvas 88%, currentColor);
+  padding: 8px 10px;
+  font-weight: 600;
+}
+
+.safi-desktop-studio__table td input,
+.safi-desktop-studio__table td span {
+  display: block;
+  width: 100%;
+  min-width: 110px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.safi-desktop-studio__table td input:hover {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.safi-desktop-studio__calc {
+  font-weight: 400;
+  opacity: 0.55;
+  font-size: 11px;
+}
+
+.safi-desktop-studio__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.safi-desktop-studio__bar {
+  display: grid;
+  grid-template-columns: minmax(90px, 22%) 1fr auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.safi-desktop-studio__bar strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.safi-desktop-studio__track {
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  overflow: hidden;
+}
+
+.safi-desktop-studio__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.75;
+  transition: width 180ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .safi-desktop-studio__fill {
+    transition: none;
+  }
+}
+
+.safi-desktop-studio__audit {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 45%, transparent);
+  z-index: 40;
+}
+
+.safi-desktop-studio__audit-card {
+  width: min(560px, 100%);
+  max-height: 82vh;
+  overflow: auto;
+  padding: 20px;
+  border-radius: 16px;
+  background: color-mix(in srgb, Canvas 94%, currentColor);
+  color: CanvasText;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.safi-desktop-studio__audit-card h3 {
+  margin: 0 0 4px;
+}
+
+.safi-desktop-studio__audit-value {
+  margin: 0 0 16px;
+  font-size: 26px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.safi-desktop-studio__audit-card dl {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.safi-desktop-studio__audit-card dt {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.safi-desktop-studio__audit-card dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.safi-desktop-studio__fingerprint {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.safi-desktop-studio__audit-card button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}

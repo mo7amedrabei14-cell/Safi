@@ -215,5 +215,7 @@
   source file is never modified.
 - Two desktop codes were added: `SF-SYS-015` (project not open) and `SF-SYS-016` (capsule write
   failed). No new domain was introduced.
-- Remaining: the Studio *window* inside the desktop app is not built yet; the command layer and
-  its tests exist so that UI can be written without touching the engine.
+- The Studio screen lives in `apps/web/src/desktop/` but mounts only when the Tauri IPC bridge is
+  present (`isDesktopRuntime()`); the dock gains the seventh tab from `STUDIO_TAB`, and the public
+  site keeps exactly six tabs. The bridge itself throws `SF-SYS-010` outside the app, so a browser
+  tab cannot reach the engine even if the component is forced to render.

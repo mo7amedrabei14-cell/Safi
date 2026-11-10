@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { AmbientBackground } from "./components/motion/AmbientBackground";
 import { SmoothScrollProvider } from "./components/motion/SmoothScrollProvider";
-import { DOCK_TABS, FloatingGlassDock } from "./components/layout/FloatingGlassDock";
+import { DOCK_TABS, FloatingGlassDock, STUDIO_TAB } from "./components/layout/FloatingGlassDock";
 import type { SafiDockTabId, SafiLang, SafiThemeId } from "./components/layout/FloatingGlassDock";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { SettingsSheet } from "./components/layout/SettingsSheet";
@@ -24,6 +24,8 @@ import { CleaningStudio } from "./components/studios/CleaningStudio";
 import { RecipesStudio } from "./components/studios/RecipesStudio";
 import { ChartsStudio } from "./components/studios/ChartsStudio";
 import { LibraryStudio } from "./components/studios/LibraryStudio";
+import { DesktopStudio } from "./desktop/DesktopStudio";
+import { isDesktopRuntime } from "./desktop/studio-bridge";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { canAnimate } from "./components/ui/motion-preference";
 import { applySafiLang, getInitialSafiLang } from "./lib/locale";
@@ -51,6 +53,8 @@ export function renderStudio(
       return <RecipesStudio lang={lang} onSelectTab={onSelectTab} />;
     case "charts":
       return <ChartsStudio lang={lang} onSelectTab={onSelectTab} />;
+    case "studio":
+      return <DesktopStudio lang={lang} />;
     case "library":
       return <LibraryStudio lang={lang} onSelectTab={onSelectTab} />;
     case "owner":
@@ -78,6 +82,7 @@ export function ApplicationShell({
   initialResetToken = null
 }: ApplicationShellProps): ReactNode {
   const [activeTab, setActiveTab] = useState<SafiDockTabId>("home");
+  const [desktopRuntime, setDesktopRuntime] = useState(false);
   const [theme, setTheme] = useState<SafiThemeId>("apple-light");
   const [lang, setLang] = useState<SafiLang>(getInitialSafiLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -94,6 +99,12 @@ export function ApplicationShell({
   useEffect(() => {
     onReady?.();
   }, [onReady]);
+
+  useEffect(() => {
+    setDesktopRuntime(isDesktopRuntime());
+  }, []);
+
+  const dockTabs = desktopRuntime ? [...DOCK_TABS, STUDIO_TAB] : DOCK_TABS;
 
   const selectTab = useCallback((tab: SafiDockTabId): void => {
     setActiveTab(tab);
@@ -242,6 +253,7 @@ export function ApplicationShell({
       <SmoothScrollProvider>
         <div className="safi-shell" dir={lang === "ar" ? "rtl" : "ltr"}>
           <FloatingGlassDock
+            tabs={dockTabs}
             activeTab={activeTab}
             onSelect={selectTab}
             onOpenCommandPalette={() => setPaletteOpen(true)}

@@ -17,7 +17,7 @@ export interface AccountAccessSheetProps {
   readonly lang?: "ar" | "en";
   readonly verificationToken?: string | null;
   readonly sessionToken?: string | null;
-  readonly onAuthenticated: (token: string) => void;
+  readonly onAuthenticated: (token: string, email: string) => void;
   readonly onLoggedOut: () => void;
 }
 
@@ -174,7 +174,7 @@ export function AccountAccessSheet({
           installation_id: device.installationId,
           platform: device.platform
         });
-        onAuthenticated(result.token);
+        onAuthenticated(result.token, normalizedEmail);
         setPassword("");
         setFeedback({
           kind: "success",

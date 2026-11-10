@@ -22,7 +22,7 @@ describe("application authentication gate", () => {
       })
     );
 
-    expect(html).toContain('class="safi-account-modal"');
+    expect(html).toContain("safi-modal safi-account-modal");
     expect(html).not.toContain('class="safi-topbar"');
     expect(html).not.toContain('id="safi-main"');
   });

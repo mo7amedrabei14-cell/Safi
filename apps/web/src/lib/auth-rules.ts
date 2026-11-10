@@ -23,7 +23,9 @@ export type SignUpViolation =
   | { readonly kind: "duplicate_phone" }
   | { readonly kind: "password_too_short"; readonly minLength: number };
 
-export type SignUpValidation = { readonly ok: true } | { readonly ok: false; readonly violation: SignUpViolation };
+export type SignUpValidation =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly violation: SignUpViolation };
 
 export const PASSWORD_TOO_SHORT_MESSAGE_AR = `كلمة المرور يجب ألا تقل عن ${MIN_PASSWORD_LENGTH} خانات`;
 export const PASSWORD_TOO_SHORT_MESSAGE_EN = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
@@ -52,7 +54,11 @@ export function meetsMinPasswordLength(password: string): boolean {
 
 export function isValidEmail(email: string): boolean {
   const normalized = normalizeEmail(email);
-  return normalized.length > 3 && normalized.length <= 254 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized);
+  return (
+    normalized.length > 3 &&
+    normalized.length <= 254 &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized)
+  );
 }
 
 /** Duplicate detection across the two constitution unique keys. */

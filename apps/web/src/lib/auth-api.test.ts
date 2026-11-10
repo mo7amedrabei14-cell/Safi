@@ -9,9 +9,7 @@ import {
 
 describe("auth API origin", () => {
   it("accepts and normalizes strict HTTPS origins", () => {
-    expect(normalizeAuthApiOrigin("https://API.SafiData.app")).toBe(
-      "https://api.safidata.app"
-    );
+    expect(normalizeAuthApiOrigin("https://API.SafiData.app")).toBe("https://api.safidata.app");
     expect(normalizeAuthApiOrigin("  HTTPS://api.safidata.app:443  ")).toBe(
       "https://api.safidata.app"
     );

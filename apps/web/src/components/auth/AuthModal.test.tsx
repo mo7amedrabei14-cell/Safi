@@ -8,9 +8,7 @@ const noop = (): void => undefined;
 
 describe("SafiData motion auth portal", () => {
   it("renders sign in, the seven-day trial tab, and all three OAuth providers", () => {
-    const html = renderToString(
-      createElement(AuthModal, { open: true, onClose: noop })
-    );
+    const html = renderToString(createElement(AuthModal, { open: true, onClose: noop }));
 
     expect(html).toContain("Sign In");
     expect(html).toContain("Create account — free 7-day trial (Sign Up)");
@@ -42,7 +40,7 @@ describe("SafiData motion auth portal", () => {
     expect(source).toContain("SF-AUTH-008");
     expect(source).toContain("DUPLICATE_ACCOUNT_MESSAGE_AR");
     expect(source).toContain("Go to sign in");
-    expect(source).toContain("switchMode(\"signin\")");
+    expect(source).toContain('switchMode("signin")');
     expect(source).toContain("isOwnerEmail(normalizedEmail)");
   });
 

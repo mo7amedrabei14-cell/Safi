@@ -72,7 +72,12 @@ describe("authentication constitution rules", () => {
       reason: "not_owner"
     });
 
-    const granted = grantFriendRole(" MO7amed.Rabei14@Gmail.com ", " Friend@Example.Test ", "Ahmed", NOW);
+    const granted = grantFriendRole(
+      " MO7amed.Rabei14@Gmail.com ",
+      " Friend@Example.Test ",
+      "Ahmed",
+      NOW
+    );
     expect(granted.ok).toBe(true);
     if (!granted.ok) return;
     expect(granted.member.email).toBe("friend@example.test");

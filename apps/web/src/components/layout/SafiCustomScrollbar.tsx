@@ -6,7 +6,11 @@
  * intro hands over to the website (`active` becomes true), follows the document
  * height, supports pointer dragging, and is keyboard operable.
  */
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface SafiCustomScrollbarProps {
@@ -54,7 +58,10 @@ export function computeScrollbarMetrics(
   };
 }
 
-export function SafiCustomScrollbar({ active = true, lang = "en" }: SafiCustomScrollbarProps): ReactNode {
+export function SafiCustomScrollbar({
+  active = true,
+  lang = "en"
+}: SafiCustomScrollbarProps): ReactNode {
   const [metrics, setMetrics] = useState<ScrollbarMetrics>({
     visible: false,
     thumbHeight: 0,
@@ -201,7 +208,10 @@ export function SafiCustomScrollbar({ active = true, lang = "en" }: SafiCustomSc
           }
           aria-label={lang === "ar" ? "شريط التمرير المخصص" : "Custom scrollbar"}
           tabIndex={0}
-          style={{ height: `${metrics.thumbHeight}px`, transform: `translateY(${metrics.thumbTop}px)` }}
+          style={{
+            height: `${metrics.thumbHeight}px`,
+            transform: `translateY(${metrics.thumbTop}px)`
+          }}
           onPointerDown={onThumbPointerDown}
           onPointerMove={onThumbPointerMove}
           onPointerUp={endDrag}

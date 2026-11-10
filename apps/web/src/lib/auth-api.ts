@@ -21,8 +21,7 @@ export class SafiAuthConfigurationError extends Error {
   }
 }
 
-const BUILD_API_ORIGIN =
-  typeof __SAFI_API_BASE_URL__ === "string" ? __SAFI_API_BASE_URL__ : "";
+const BUILD_API_ORIGIN = typeof __SAFI_API_BASE_URL__ === "string" ? __SAFI_API_BASE_URL__ : "";
 
 /**
  * Normalize a strict HTTPS origin. Returns null for anything that is not a
@@ -79,10 +78,7 @@ export function normalizeAuthApiOrigin(raw: string): string | null {
  * provide a valid HTTPS origin; a missing value is a configuration error rather
  * than a silent request to the Tauri asset origin.
  */
-export function resolveAuthApiBaseUrl(
-  raw: string,
-  requireConfiguredOrigin: boolean
-): string {
+export function resolveAuthApiBaseUrl(raw: string, requireConfiguredOrigin: boolean): string {
   const value = raw.trim();
   if (value.length === 0) {
     if (requireConfiguredOrigin) throw new SafiAuthConfigurationError();
@@ -94,11 +90,7 @@ export function resolveAuthApiBaseUrl(
 }
 
 function isInstalledDesktopBuild(): boolean {
-  return (
-    import.meta.env.PROD &&
-    typeof window !== "undefined" &&
-    "__TAURI_INTERNALS__" in window
-  );
+  return import.meta.env.PROD && typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 let resolvedBase: string | undefined;

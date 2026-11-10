@@ -3,11 +3,7 @@ import type { SafiDockTabId, SafiLang } from "../components/layout/FloatingGlass
 import { CountUpMetric } from "../components/ui/CountUpMetric";
 import { OWNER_EMAIL, FRIEND_ROLE } from "../lib/business-config";
 import { isOwnerEmail } from "../lib/auth-rules";
-import {
-  grantFriendRole,
-  revokeFriendRole,
-  type FriendMember
-} from "../lib/owner-access";
+import { grantFriendRole, revokeFriendRole, type FriendMember } from "../lib/owner-access";
 
 interface AuditLogEntry {
   readonly id: string;
@@ -278,7 +274,13 @@ function ExecutiveBarChart({
     <div className="safi-chart-card">
       <h3>{title}</h3>
       <p>{subtitle}</p>
-      <svg viewBox={`0 0 ${width} ${height + 26}`} width="100%" height="180" role="img" aria-label={title}>
+      <svg
+        viewBox={`0 0 ${width} ${height + 26}`}
+        width="100%"
+        height="180"
+        role="img"
+        aria-label={title}
+      >
         {values.map((value, index) => {
           const barHeight = Math.max(Math.round((value / max) * (height - 12)), 3);
           return (
@@ -369,7 +371,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           🔒
         </p>
         <h1 style={{ fontSize: "22px", margin: "10px 0 6px" }}>
-          {isAr ? "هذه اللوحة للمالك الحصري فقط" : "This console is reserved for the exclusive owner"}
+          {isAr
+            ? "هذه اللوحة للمالك الحصري فقط"
+            : "This console is reserved for the exclusive owner"}
         </h1>
         <p style={{ color: "var(--text-secondary)", fontSize: "13.5px" }}>
           {isAr
@@ -428,10 +432,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       return;
     }
     setFriendMembers((prev) => prev.filter((member) => member.email !== result.email));
-    announce(
-      `تم سحب صلاحية Friend VIP من ${email}.`,
-      `Revoked Friend VIP access from ${email}.`
-    );
+    announce(`تم سحب صلاحية Friend VIP من ${email}.`, `Revoked Friend VIP access from ${email}.`);
   };
 
   const handlePromote = (email: string): void => {
@@ -446,10 +447,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const handleExtendTrial = (email: string): void => {
     const extended = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     setExtendedTrials((prev) => ({ ...prev, [email]: extended }));
-    announce(
-      `تم تمديد تجربة ${email} سبعة أيام.`,
-      `Extended the ${email} trial by seven days.`
-    );
+    announce(`تم تمديد تجربة ${email} سبعة أيام.`, `Extended the ${email} trial by seven days.`);
   };
 
   const handleSuspend = (email: string): void => {
@@ -483,7 +481,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const friendCount = friendMembers.length + analytics.friendVipUsers;
   const totalUsers = 1 + friendMembers.length + analytics.totalUsers;
 
-  const horizonOptions: ReadonlyArray<{ readonly id: OwnerTimeHorizon; readonly ar: string; readonly en: string }> = [
+  const horizonOptions: ReadonlyArray<{
+    readonly id: OwnerTimeHorizon;
+    readonly ar: string;
+    readonly en: string;
+  }> = [
     { id: "monthly", ar: "شهرياً (Monthly)", en: "Monthly" },
     { id: "quarterly", ar: "ربع سنوي (Q1–Q4)", en: "Quarterly (Q1–Q4)" },
     { id: "annual", ar: "سنوياً (Annual)", en: "Annual" }
@@ -499,24 +501,186 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     readonly noteAr: string;
     readonly noteEn: string;
   }> = [
-    { id: "total_users", ar: "إجمالي المستخدمين", en: "Total users", value: totalUsers, suffix: "", decimals: 0, noteAr: "+ نمو كلي", noteEn: "+ total growth" },
-    { id: "active_trials", ar: "تجارب مجانية نشطة (7 أيام)", en: "Active 7-day trials", value: analytics.activeTrials, suffix: "", decimals: 0, noteAr: "", noteEn: "" },
-    { id: "free_users", ar: "مستخدمو الباقة المجانية", en: "Free plan users", value: analytics.freeUsers, suffix: "", decimals: 0, noteAr: "", noteEn: "" },
-    { id: "monthly_subscribers", ar: "اشتراكات الأفراد الشهرية", en: "Individual monthly subscribers", value: analytics.monthlySubscribers, suffix: "", decimals: 0, noteAr: "1,000 EGP / $20", noteEn: "1,000 EGP / $20" },
-    { id: "annual_subscribers", ar: "اشتراكات الأفراد السنوية", en: "Individual annual subscribers", value: analytics.annualSubscribers, suffix: "", decimals: 0, noteAr: "8,400 EGP / $168", noteEn: "8,400 EGP / $168" },
-    { id: "organization_seats", ar: "الشركات والمقاعد النشطة", en: "Organization seats", value: analytics.organizationSeats, suffix: "", decimals: 0, noteAr: "850 EGP / $17", noteEn: "850 EGP / $17" },
-    { id: "friend_vip", ar: "أصحاب رتبة صديق المالك", en: "Friend VIP members", value: friendCount, suffix: "", decimals: 0, noteAr: "0 EGP / $0", noteEn: "0 EGP / $0" },
-    { id: "credit_pack_buyers", ar: "مشترو باقات الرصيد (25 عملية)", en: "Credit pack buyers (25 ops)", value: analytics.creditPackBuyers, suffix: "", decimals: 0, noteAr: "250 EGP / $5", noteEn: "250 EGP / $5" },
-    { id: "pay_per_file_buyers", ar: "مشترو فتح الملف الواحد", en: "Pay-per-file buyers", value: analytics.payPerFileBuyers, suffix: "", decimals: 0, noteAr: "50 EGP / $2", noteEn: "50 EGP / $2" },
-    { id: "mrr_usd", ar: "الإيراد الشهري المتكرر (دولار)", en: "Monthly recurring revenue (USD)", value: analytics.mrrUsd, suffix: " USD", decimals: 0, noteAr: "Paddle", noteEn: "Paddle" },
-    { id: "mrr_egp", ar: "الإيراد الشهري المتكرر (جنيه)", en: "Monthly recurring revenue (EGP)", value: analytics.mrrEgp, suffix: " EGP", decimals: 0, noteAr: "Paymob", noteEn: "Paymob" },
-    { id: "arr_usd", ar: "الإيراد السنوي المتكرر (دولار)", en: "Annual recurring revenue (USD)", value: analytics.arrUsd, suffix: " USD", decimals: 0, noteAr: "Paddle", noteEn: "Paddle" },
-    { id: "arr_egp", ar: "الإيراد السنوي المتكرر (جنيه)", en: "Annual recurring revenue (EGP)", value: analytics.arrEgp, suffix: " EGP", decimals: 0, noteAr: "Paymob", noteEn: "Paymob" },
-    { id: "conversion", ar: "التحويل من التجربة إلى الدفع", en: "Trial-to-paid conversion", value: analytics.conversionRate, suffix: "%", decimals: 1, noteAr: "", noteEn: "" },
-    { id: "churn", ar: "معدل إلغاء الاشتراك", en: "Churn rate", value: analytics.churnRate, suffix: "%", decimals: 1, noteAr: "", noteEn: "" },
-    { id: "rows_cleaned", ar: "الصفوف المنظفة", en: "Rows cleaned", value: analytics.rowsCleaned, suffix: "", decimals: 0, noteAr: "", noteEn: "" },
-    { id: "pii_masked", ar: "حقول PII المخفية", en: "PII fields masked", value: analytics.piiMasked, suffix: "", decimals: 0, noteAr: "", noteEn: "" },
-    { id: "ai_calls", ar: "نداءات الذكاء الاصطناعي", en: "AI calls used", value: analytics.aiCallsUsed, suffix: ` / ${FRIEND_ROLE.ai_calls_per_month}`, decimals: 0, noteAr: "الحد الشهري", noteEn: "Monthly cap" }
+    {
+      id: "total_users",
+      ar: "إجمالي المستخدمين",
+      en: "Total users",
+      value: totalUsers,
+      suffix: "",
+      decimals: 0,
+      noteAr: "+ نمو كلي",
+      noteEn: "+ total growth"
+    },
+    {
+      id: "active_trials",
+      ar: "تجارب مجانية نشطة (7 أيام)",
+      en: "Active 7-day trials",
+      value: analytics.activeTrials,
+      suffix: "",
+      decimals: 0,
+      noteAr: "",
+      noteEn: ""
+    },
+    {
+      id: "free_users",
+      ar: "مستخدمو الباقة المجانية",
+      en: "Free plan users",
+      value: analytics.freeUsers,
+      suffix: "",
+      decimals: 0,
+      noteAr: "",
+      noteEn: ""
+    },
+    {
+      id: "monthly_subscribers",
+      ar: "اشتراكات الأفراد الشهرية",
+      en: "Individual monthly subscribers",
+      value: analytics.monthlySubscribers,
+      suffix: "",
+      decimals: 0,
+      noteAr: "1,000 EGP / $20",
+      noteEn: "1,000 EGP / $20"
+    },
+    {
+      id: "annual_subscribers",
+      ar: "اشتراكات الأفراد السنوية",
+      en: "Individual annual subscribers",
+      value: analytics.annualSubscribers,
+      suffix: "",
+      decimals: 0,
+      noteAr: "8,400 EGP / $168",
+      noteEn: "8,400 EGP / $168"
+    },
+    {
+      id: "organization_seats",
+      ar: "الشركات والمقاعد النشطة",
+      en: "Organization seats",
+      value: analytics.organizationSeats,
+      suffix: "",
+      decimals: 0,
+      noteAr: "850 EGP / $17",
+      noteEn: "850 EGP / $17"
+    },
+    {
+      id: "friend_vip",
+      ar: "أصحاب رتبة صديق المالك",
+      en: "Friend VIP members",
+      value: friendCount,
+      suffix: "",
+      decimals: 0,
+      noteAr: "0 EGP / $0",
+      noteEn: "0 EGP / $0"
+    },
+    {
+      id: "credit_pack_buyers",
+      ar: "مشترو باقات الرصيد (25 عملية)",
+      en: "Credit pack buyers (25 ops)",
+      value: analytics.creditPackBuyers,
+      suffix: "",
+      decimals: 0,
+      noteAr: "250 EGP / $5",
+      noteEn: "250 EGP / $5"
+    },
+    {
+      id: "pay_per_file_buyers",
+      ar: "مشترو فتح الملف الواحد",
+      en: "Pay-per-file buyers",
+      value: analytics.payPerFileBuyers,
+      suffix: "",
+      decimals: 0,
+      noteAr: "50 EGP / $2",
+      noteEn: "50 EGP / $2"
+    },
+    {
+      id: "mrr_usd",
+      ar: "الإيراد الشهري المتكرر (دولار)",
+      en: "Monthly recurring revenue (USD)",
+      value: analytics.mrrUsd,
+      suffix: " USD",
+      decimals: 0,
+      noteAr: "Paddle",
+      noteEn: "Paddle"
+    },
+    {
+      id: "mrr_egp",
+      ar: "الإيراد الشهري المتكرر (جنيه)",
+      en: "Monthly recurring revenue (EGP)",
+      value: analytics.mrrEgp,
+      suffix: " EGP",
+      decimals: 0,
+      noteAr: "Paymob",
+      noteEn: "Paymob"
+    },
+    {
+      id: "arr_usd",
+      ar: "الإيراد السنوي المتكرر (دولار)",
+      en: "Annual recurring revenue (USD)",
+      value: analytics.arrUsd,
+      suffix: " USD",
+      decimals: 0,
+      noteAr: "Paddle",
+      noteEn: "Paddle"
+    },
+    {
+      id: "arr_egp",
+      ar: "الإيراد السنوي المتكرر (جنيه)",
+      en: "Annual recurring revenue (EGP)",
+      value: analytics.arrEgp,
+      suffix: " EGP",
+      decimals: 0,
+      noteAr: "Paymob",
+      noteEn: "Paymob"
+    },
+    {
+      id: "conversion",
+      ar: "التحويل من التجربة إلى الدفع",
+      en: "Trial-to-paid conversion",
+      value: analytics.conversionRate,
+      suffix: "%",
+      decimals: 1,
+      noteAr: "",
+      noteEn: ""
+    },
+    {
+      id: "churn",
+      ar: "معدل إلغاء الاشتراك",
+      en: "Churn rate",
+      value: analytics.churnRate,
+      suffix: "%",
+      decimals: 1,
+      noteAr: "",
+      noteEn: ""
+    },
+    {
+      id: "rows_cleaned",
+      ar: "الصفوف المنظفة",
+      en: "Rows cleaned",
+      value: analytics.rowsCleaned,
+      suffix: "",
+      decimals: 0,
+      noteAr: "",
+      noteEn: ""
+    },
+    {
+      id: "pii_masked",
+      ar: "حقول PII المخفية",
+      en: "PII fields masked",
+      value: analytics.piiMasked,
+      suffix: "",
+      decimals: 0,
+      noteAr: "",
+      noteEn: ""
+    },
+    {
+      id: "ai_calls",
+      ar: "نداءات الذكاء الاصطناعي",
+      en: "AI calls used",
+      value: analytics.aiCallsUsed,
+      suffix: ` / ${FRIEND_ROLE.ai_calls_per_month}`,
+      decimals: 0,
+      noteAr: "الحد الشهري",
+      noteEn: "Monthly cap"
+    }
   ];
 
   const baseSubscriberRows: readonly OwnerSubscriberRow[] = [
@@ -639,10 +803,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           ) : null}
           {horizon === "monthly" ? (
             <p className="safi-kpi-note">
-              {describe(
-                "مقارنة بالشهر السابق (MoM%)",
-                "Month-over-month comparison (MoM%)"
-              )}
+              {describe("مقارنة بالشهر السابق (MoM%)", "Month-over-month comparison (MoM%)")}
             </p>
           ) : null}
           {horizon === "annual" ? (
@@ -670,7 +831,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
       <div className="safi-chart-grid">
         <ExecutiveBarChart
-          title={describe("نمو المستخدمين خلال الأشهر الاثني عشر", "User growth across twelve months")}
+          title={describe(
+            "نمو المستخدمين خلال الأشهر الاثني عشر",
+            "User growth across twelve months"
+          )}
           subtitle={describe(
             "شهرياً — يتحدث فوراً مع الفترة المختارة",
             "Monthly — refreshes with the selected horizon"
@@ -680,7 +844,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           accent="var(--accent-soft)"
         />
         <ExecutiveBarChart
-          title={describe("الإيراد الشهري والأرباع (Q1–Q4)", "Monthly revenue and quarters (Q1–Q4)")}
+          title={describe(
+            "الإيراد الشهري والأرباع (Q1–Q4)",
+            "Monthly revenue and quarters (Q1–Q4)"
+          )}
           subtitle={describe(
             "بالدولار الأمريكي (Paddle) والجنيه المصري (Paymob)",
             "In USD (Paddle) and EGP (Paymob)"
@@ -693,7 +860,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
       <section className="safi-friend-manager" aria-labelledby="safi-friend-title">
         <h2 id="safi-friend-title" style={{ margin: 0, fontSize: "18px" }}>
-          🎁 {describe("إدارة صلاحية أصدقاء المالك (Friend VIP Access)", "Owner Friend VIP access manager")}
+          🎁{" "}
+          {describe(
+            "إدارة صلاحية أصدقاء المالك (Friend VIP Access)",
+            "Owner Friend VIP access manager"
+          )}
         </h2>
         <p className="safi-kpi-note">
           {describe(
@@ -723,7 +894,15 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           </button>
         </form>
         {friendError === null ? null : (
-          <p role="alert" style={{ margin: "0 0 12px", color: "var(--status-danger)", fontSize: "12.5px", fontWeight: 700 }}>
+          <p
+            role="alert"
+            style={{
+              margin: "0 0 12px",
+              color: "var(--status-danger)",
+              fontSize: "12.5px",
+              fontWeight: 700
+            }}
+          >
             {friendError}
           </p>
         )}
@@ -784,7 +963,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         </div>
       </section>
 
-      <section className="safi-glass" style={{ padding: "22px" }} aria-labelledby="safi-subscribers-title">
+      <section
+        className="safi-glass"
+        style={{ padding: "22px" }}
+        aria-labelledby="safi-subscribers-title"
+      >
         <h2 id="safi-subscribers-title" style={{ margin: "0 0 6px", fontSize: "18px" }}>
           👥 {describe("إدارة المشتركين والعمليات", "Subscriber and operations management")}
         </h2>
@@ -820,11 +1003,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   <td dir="ltr">{row.email}</td>
                   <td>{row.plan}</td>
                   <td>
-                    {row.verifiedEmail ? "✓" : "—"} {describe("بريد", "Email")} · {
-                      row.verifiedPhone ? "✓" : "—"
-                    } {describe("هاتف", "Phone")} · {
-                      row.verifiedDevice ? "✓" : "—"
-                    } {describe("جهاز", "Device")}
+                    {row.verifiedEmail ? "✓" : "—"} {describe("بريد", "Email")} ·{" "}
+                    {row.verifiedPhone ? "✓" : "—"} {describe("هاتف", "Phone")} ·{" "}
+                    {row.verifiedDevice ? "✓" : "—"} {describe("جهاز", "Device")}
                   </td>
                   <td dir="ltr">{row.expiresAt}</td>
                   <td>
@@ -834,19 +1015,42 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   </td>
                   <td>
                     <div className="safi-exec-actions">
-                      <button type="button" disabled={row.id === "owner"} onClick={() => handlePromote(row.email)}>
+                      <button
+                        type="button"
+                        disabled={row.id === "owner"}
+                        onClick={() => handlePromote(row.email)}
+                      >
                         {describe("ترقية إلى Friend VIP", "Promote to Friend VIP")}
                       </button>
-                      <button type="button" disabled={row.id === "owner"} onClick={() => handleExtendTrial(row.email)}>
+                      <button
+                        type="button"
+                        disabled={row.id === "owner"}
+                        onClick={() => handleExtendTrial(row.email)}
+                      >
                         {describe("تمديد التجربة", "Extend trial")}
                       </button>
-                      <button type="button" data-danger="true" disabled={row.id === "owner"} onClick={() => handleCancelSubscription(row.email)}>
+                      <button
+                        type="button"
+                        data-danger="true"
+                        disabled={row.id === "owner"}
+                        onClick={() => handleCancelSubscription(row.email)}
+                      >
                         {describe("إلغاء الاشتراك", "Cancel subscription")}
                       </button>
-                      <button type="button" data-danger="true" disabled={row.id === "owner"} onClick={() => handleRefund(row.email)}>
+                      <button
+                        type="button"
+                        data-danger="true"
+                        disabled={row.id === "owner"}
+                        onClick={() => handleRefund(row.email)}
+                      >
                         {describe("إصدار استرداد (ضمن 3 أيام)", "Issue refund (within 3 days)")}
                       </button>
-                      <button type="button" data-danger="true" disabled={row.id === "owner"} onClick={() => handleSuspend(row.email)}>
+                      <button
+                        type="button"
+                        data-danger="true"
+                        disabled={row.id === "owner"}
+                        onClick={() => handleSuspend(row.email)}
+                      >
                         {describe("إيقاف الحساب", "Suspend account")}
                       </button>
                     </div>

@@ -157,7 +157,7 @@ try {
       reactMountedAt: trace?.reactMountedAt ?? null,
       motionStartedAt: trace?.motionStartedAt ?? null,
       motionCompletedAt: trace?.motionCompletedAt ?? null,
-      applicationMountedAt: trace?.applicationMountedAt ?? null
+      applicationEntryMountedAt: trace?.applicationEntryMountedAt ?? null
     };
   });
   assert.ok(handoff.bootFrame, "The static opening frame was not captured.");
@@ -282,7 +282,7 @@ try {
   assert.ok(siteHandoff.arrowPath);
   assert.ok(siteHandoff.arrowDasharray > 0);
   assert.ok(siteHandoff.arrowDashoffset < siteHandoff.arrowDasharray);
-  await page.screenshot({ path: resolve(artifactDir, "intro-site-handoff.png"), fullPage: true });
+  await page.screenshot({ path: resolve(artifactDir, "intro-auth-gate-handoff.png"), fullPage: true });
 
   await page.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 30_000 });
   await page.evaluate(() => {
@@ -318,7 +318,7 @@ try {
   });
   const reducedPage = await reducedContext.newPage();
   await reducedPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
-  await reducedPage.waitForSelector(".safi-shell", { state: "visible", timeout: 30_000 });
+  await reducedPage.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 30_000 });
   await reducedPage.waitForSelector("#root .safi-intro-splash", {
     state: "detached",
     timeout: 5_000
@@ -333,7 +333,7 @@ try {
     handoff,
     motionStartDelayMs: handoff.motionStartedAt - handoff.reactMountedAt,
     entranceMotionDurationMs,
-    applicationMountedAt: finalTrace.applicationMountedAt,
+    applicationEntryMountedAt: finalTrace.applicationEntryMountedAt,
     siteHandoff,
     exitDurationMs,
     reducedMotionPassed: true,

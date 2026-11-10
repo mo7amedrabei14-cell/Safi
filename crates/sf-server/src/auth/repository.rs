@@ -283,7 +283,7 @@ impl SessionRepository for InMemorySessionRepository {
                     .devices
                     .iter()
                     .find(|device| device.id == device_id)
-                    .map_or(true, |device| device.revoked);
+                    .is_none_or(|device| device.revoked);
             }
         }
         Ok(found)

@@ -255,12 +255,39 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
         .await
         .expect("connect as the restricted application role");
 
-    // Activate the monthly plan only for this test; the catalog constraint still
-    // requires a defined price, which migration 0005 supplies.
-    sqlx::query("UPDATE plans SET status = 'active' WHERE code = 'individual_monthly'")
-        .execute(&admin)
-        .await
-        .expect("activate the monthly plan for the lifecycle proof");
+    // Activate the monthly plan only for this test. Read its USD base price
+    // from the canonical multi-currency plan_prices table rather than hardcoding
+    // a price or relying on the draft plan's nullable legacy scalar fields.
+    let activation = sqlx::query(
+        r"
+        UPDATE plans
+        SET status = 'active',
+            price_minor = (
+                SELECT amount_minor
+                FROM plan_prices
+                WHERE plan_code = 'individual_monthly'
+                  AND currency = 'USD'
+                  AND billing_interval = 'monthly'
+            ),
+            currency = 'USD'
+        WHERE code = 'individual_monthly'
+          AND EXISTS (
+              SELECT 1
+              FROM plan_prices
+              WHERE plan_code = 'individual_monthly'
+                AND currency = 'USD'
+                AND billing_interval = 'monthly'
+          )
+        ",
+    )
+    .execute(&admin)
+    .await
+    .expect("activate the monthly plan for the lifecycle proof");
+    assert_eq!(
+        activation.rows_affected(),
+        1,
+        "the lifecycle fixture requires the canonical monthly USD price row"
+    );
 
     let unique = Uuid::now_v7().simple().to_string();
     let user_id = Uuid::now_v7();
@@ -465,8 +492,10 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
         .execute(&admin)
         .await
         .expect("remove test user");
-    sqlx::query("UPDATE plans SET status = 'draft' WHERE code = 'individual_monthly'")
-        .execute(&admin)
-        .await
-        .expect("restore the monthly plan draft status");
+    sqlx::query(
+        "UPDATE plans SET status = 'draft', price_minor = NULL, currency = NULL WHERE code = 'individual_monthly'",
+    )
+    .execute(&admin)
+    .await
+    .expect("restore the monthly plan draft status and nullable legacy price fields");
 }

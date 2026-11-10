@@ -537,3 +537,67 @@ action_ar = "استخدم إصدارًا بشهادة توقيع صالحة وم
 title_en = "Executable signing certificate is not trusted"
 action_en = "Use a release with a valid and trusted signing certificate."
 owner_note = "The executable signing certificate is expired or cannot be trusted."
+
+[SF-CAL-001]
+severity = "error"
+title_ar = "العمود المطلوب غير موجود في البيانات"
+action_ar = "اختر عمودًا موجودًا أو أعد تسمية المرجع داخل المعادلة."
+title_en = "The referenced column does not exist in the data"
+action_en = "Pick an existing column or fix the reference inside the formula."
+owner_note = "DataGraph formula referenced an unknown column name."
+
+[SF-CAL-002]
+severity = "error"
+title_ar = "صيغة المعادلة غير صحيحة"
+action_ar = "راجع الأقواس والدوال المسموحة ثم أعد المحاولة."
+title_en = "The formula syntax is invalid"
+action_en = "Check the parentheses and allowed functions, then try again."
+owner_note = "Studio formula parser rejected the expression before execution."
+
+[SF-CAL-003]
+severity = "error"
+title_ar = "لا يمكن القسمة على صفر"
+action_ar = "راجع المقام في المعادلة وتأكد أن قيمته ليست صفرًا."
+title_en = "Cannot divide by zero"
+action_en = "Review the divisor in the formula and make sure it is not zero."
+owner_note = "Division by zero encountered during metric or column evaluation."
+
+[SF-CAL-004]
+severity = "error"
+title_ar = "نوع البيانات لا يسمح بهذه العملية"
+action_ar = "استخدم عمودًا رقميًا أو غيّر نوع العملية."
+title_en = "The data type does not support this operation"
+action_en = "Use a numeric column or change the operation."
+owner_note = "Arithmetic or aggregation applied to a non-numeric value."
+
+[SF-CAL-005]
+severity = "error"
+title_ar = "معامل السيناريو غير معرّف"
+action_ar = "عرّف قيمة افتراضية للمعامل أو اختر سيناريو يحتويه."
+title_en = "The scenario parameter is not defined"
+action_en = "Define a default value for the parameter or pick a scenario that includes it."
+owner_note = "What-If formula referenced a parameter with no default and no active scenario value."
+
+[SF-CAL-006]
+severity = "error"
+title_ar = "المؤشر المطلوب غير موجود"
+action_ar = "أعد إنشاء المؤشر أو صحّح مرجعه في المستند أو الشريحة."
+title_en = "The requested metric does not exist"
+action_en = "Recreate the metric or fix its reference in the document or slide."
+owner_note = "Metric reference resolved against an unknown metric identifier."
+
+[SF-CAL-007]
+severity = "warn"
+title_ar = "تم تجاهل أمر قديم على نسخة بيانات أحدث"
+action_ar = "أعد تنفيذ التعديل على الحالة الحالية."
+title_en = "An outdated command was ignored on a newer data revision"
+action_en = "Re-apply the change to the current state."
+owner_note = "Studio command carried an expectedRevision older than the published revision."
+
+[SF-CAL-008]
+severity = "error"
+title_ar = "الرقم المعروض لا يطابق نتيجة الحساب"
+action_ar = "أعد حساب المؤشر قبل الاعتماد على الرقم أو تصديره."
+title_en = "The displayed number does not match the computed result"
+action_en = "Recompute the metric before relying on or exporting the number."
+owner_note = "Verified metric fingerprint mismatch during click-to-verify."

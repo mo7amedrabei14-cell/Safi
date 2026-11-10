@@ -4,6 +4,7 @@
 //! Zero network dependencies (`AGENTS.md` Rule #7).
 
 pub mod column;
+pub mod datagraph;
 pub mod error;
 pub mod generated_errors;
 pub mod limits;
@@ -16,6 +17,10 @@ pub use rust_decimal::Decimal;
 pub use crate::column::{
     AUTO_APPLY_CONFIDENCE_THRESHOLD, Column, ColumnSchema, ColumnType, ConfidenceDecision,
     ConfidenceScore, MAX_COLUMN_SAMPLE_VALUES, USER_CONFIRM_CONFIDENCE_THRESHOLD,
+};
+pub use crate::datagraph::{
+    DatasetVersion, MetricId, MetricTokenParts, Revision, STUDIO_ENGINE_VERSION, ScenarioId,
+    SourceId, VerificationOutcome, VerificationStatus, VerifiedMetricToken, canonical_value,
 };
 pub use crate::error::{
     DiagnosticToken, ErrorCode, ErrorCodeParseError, ErrorDomain, ErrorSeverity,

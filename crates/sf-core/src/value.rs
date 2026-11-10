@@ -11,6 +11,7 @@
 use std::fmt;
 
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 
 /// Recognized empty/missing value sentinels from Specification Section 4.7:
 /// «تُعامل "-" و"N/A" و"لا يوجد" و"غير متوفر" كفراغ».
@@ -30,7 +31,8 @@ pub fn is_recognized_empty_token(raw: &str) -> bool {
 /// String wrapper that guarantees leading zeros are never stripped (Sections 4.3 & 4.5).
 ///
 /// Used for Identifiers (`معرّف`), Egyptian National IDs (`رقم قومي مصري`), and Phone numbers (`هاتف مصري`).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ZeroPreservedText(String);
 
 impl ZeroPreservedText {
@@ -87,7 +89,7 @@ impl From<String> for ZeroPreservedText {
 }
 
 /// Exact monetary value representation using [`rust_decimal::Decimal`] (never floating-point — Sections 4.5 & 20.5).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MoneyValue {
     /// Exact decimal monetary amount.
     pub amount: Decimal,
@@ -113,7 +115,7 @@ impl fmt::Display for MoneyValue {
 }
 
 /// Structured, type-safe value stored inside a [`CellValue`] alongside the original raw text.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Value {
     /// Empty / missing value (including recognized sentinels `-`, `N/A`, `لا يوجد`, `غير متوفر` — Section 4.7).
     Empty,

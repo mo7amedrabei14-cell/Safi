@@ -3,8 +3,13 @@
 //!
 //! Zero network dependencies (`AGENTS.md` Rule #7).
 
+pub mod datagraph;
 pub mod recipe;
 
+pub use datagraph::{
+    AggFunc, BinaryOp, ChangeOutcome, DataGraph, Formula, Scenario, ScenarioComparison,
+    Transformation, parse_formula, tables_equal,
+};
 pub use recipe::{RecipeOperation, RecipeStep, SafiRecipe};
 
 /// Canonical Cargo crate identifier within the `safi` workspace.

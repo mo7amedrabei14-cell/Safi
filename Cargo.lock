@@ -2086,6 +2086,7 @@ dependencies = [
  "chardetng",
  "csv",
  "encoding_rs",
+ "quick-xml",
  "sf-core",
  "zip",
 ]
@@ -2105,6 +2106,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "proptest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sf-arabic",

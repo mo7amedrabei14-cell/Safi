@@ -10,6 +10,14 @@ export type SafiErrorCode =
   | "SF-AUTH-006"
   | "SF-AUTH-007"
   | "SF-AUTH-008"
+  | "SF-CAL-001"
+  | "SF-CAL-002"
+  | "SF-CAL-003"
+  | "SF-CAL-004"
+  | "SF-CAL-005"
+  | "SF-CAL-006"
+  | "SF-CAL-007"
+  | "SF-CAL-008"
   | "SF-CHT-001"
   | "SF-CHT-002"
   | "SF-CHT-003"
@@ -87,6 +95,22 @@ export type SafiErrorTranslationKey =
   | "error.SF-AUTH-007.action"
   | "error.SF-AUTH-008.title"
   | "error.SF-AUTH-008.action"
+  | "error.SF-CAL-001.title"
+  | "error.SF-CAL-001.action"
+  | "error.SF-CAL-002.title"
+  | "error.SF-CAL-002.action"
+  | "error.SF-CAL-003.title"
+  | "error.SF-CAL-003.action"
+  | "error.SF-CAL-004.title"
+  | "error.SF-CAL-004.action"
+  | "error.SF-CAL-005.title"
+  | "error.SF-CAL-005.action"
+  | "error.SF-CAL-006.title"
+  | "error.SF-CAL-006.action"
+  | "error.SF-CAL-007.title"
+  | "error.SF-CAL-007.action"
+  | "error.SF-CAL-008.title"
+  | "error.SF-CAL-008.action"
   | "error.SF-CHT-001.title"
   | "error.SF-CHT-001.action"
   | "error.SF-CHT-002.title"
@@ -225,6 +249,14 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-AUTH-006",
   "SF-AUTH-007",
   "SF-AUTH-008",
+  "SF-CAL-001",
+  "SF-CAL-002",
+  "SF-CAL-003",
+  "SF-CAL-004",
+  "SF-CAL-005",
+  "SF-CAL-006",
+  "SF-CAL-007",
+  "SF-CAL-008",
   "SF-CHT-001",
   "SF-CHT-002",
   "SF-CHT-003",
@@ -362,6 +394,79 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Sign in to the existing account instead of creating a duplicate.",
     ownerNote:
       "Normalized email or verified phone already exists; never log the submitted identity values."
+  },
+  "SF-CAL-001": {
+    code: "SF-CAL-001",
+    severity: "error",
+    titleAr: "العمود المطلوب غير موجود في البيانات",
+    actionAr: "اختر عمودًا موجودًا أو أعد تسمية المرجع داخل المعادلة.",
+    titleEn: "The referenced column does not exist in the data",
+    actionEn: "Pick an existing column or fix the reference inside the formula.",
+    ownerNote: "DataGraph formula referenced an unknown column name."
+  },
+  "SF-CAL-002": {
+    code: "SF-CAL-002",
+    severity: "error",
+    titleAr: "صيغة المعادلة غير صحيحة",
+    actionAr: "راجع الأقواس والدوال المسموحة ثم أعد المحاولة.",
+    titleEn: "The formula syntax is invalid",
+    actionEn: "Check the parentheses and allowed functions, then try again.",
+    ownerNote: "Studio formula parser rejected the expression before execution."
+  },
+  "SF-CAL-003": {
+    code: "SF-CAL-003",
+    severity: "error",
+    titleAr: "لا يمكن القسمة على صفر",
+    actionAr: "راجع المقام في المعادلة وتأكد أن قيمته ليست صفرًا.",
+    titleEn: "Cannot divide by zero",
+    actionEn: "Review the divisor in the formula and make sure it is not zero.",
+    ownerNote: "Division by zero encountered during metric or column evaluation."
+  },
+  "SF-CAL-004": {
+    code: "SF-CAL-004",
+    severity: "error",
+    titleAr: "نوع البيانات لا يسمح بهذه العملية",
+    actionAr: "استخدم عمودًا رقميًا أو غيّر نوع العملية.",
+    titleEn: "The data type does not support this operation",
+    actionEn: "Use a numeric column or change the operation.",
+    ownerNote: "Arithmetic or aggregation applied to a non-numeric value."
+  },
+  "SF-CAL-005": {
+    code: "SF-CAL-005",
+    severity: "error",
+    titleAr: "معامل السيناريو غير معرّف",
+    actionAr: "عرّف قيمة افتراضية للمعامل أو اختر سيناريو يحتويه.",
+    titleEn: "The scenario parameter is not defined",
+    actionEn: "Define a default value for the parameter or pick a scenario that includes it.",
+    ownerNote:
+      "What-If formula referenced a parameter with no default and no active scenario value."
+  },
+  "SF-CAL-006": {
+    code: "SF-CAL-006",
+    severity: "error",
+    titleAr: "المؤشر المطلوب غير موجود",
+    actionAr: "أعد إنشاء المؤشر أو صحّح مرجعه في المستند أو الشريحة.",
+    titleEn: "The requested metric does not exist",
+    actionEn: "Recreate the metric or fix its reference in the document or slide.",
+    ownerNote: "Metric reference resolved against an unknown metric identifier."
+  },
+  "SF-CAL-007": {
+    code: "SF-CAL-007",
+    severity: "warn",
+    titleAr: "تم تجاهل أمر قديم على نسخة بيانات أحدث",
+    actionAr: "أعد تنفيذ التعديل على الحالة الحالية.",
+    titleEn: "An outdated command was ignored on a newer data revision",
+    actionEn: "Re-apply the change to the current state.",
+    ownerNote: "Studio command carried an expectedRevision older than the published revision."
+  },
+  "SF-CAL-008": {
+    code: "SF-CAL-008",
+    severity: "error",
+    titleAr: "الرقم المعروض لا يطابق نتيجة الحساب",
+    actionAr: "أعد حساب المؤشر قبل الاعتماد على الرقم أو تصديره.",
+    titleEn: "The displayed number does not match the computed result",
+    actionEn: "Recompute the metric before relying on or exporting the number.",
+    ownerNote: "Verified metric fingerprint mismatch during click-to-verify."
   },
   "SF-CHT-001": {
     code: "SF-CHT-001",
@@ -926,6 +1031,22 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
     "اطلب رابط تحقق جديدًا من صفحة تسجيل الدخول ثم افتح أحدث رسالة وصلتك.",
   "error.SF-AUTH-008.title": "هذا الحساب مسجل بالفعل",
   "error.SF-AUTH-008.action": "سجّل الدخول إلى الحساب الحالي بدلًا من إنشاء حساب مكرر.",
+  "error.SF-CAL-001.title": "العمود المطلوب غير موجود في البيانات",
+  "error.SF-CAL-001.action": "اختر عمودًا موجودًا أو أعد تسمية المرجع داخل المعادلة.",
+  "error.SF-CAL-002.title": "صيغة المعادلة غير صحيحة",
+  "error.SF-CAL-002.action": "راجع الأقواس والدوال المسموحة ثم أعد المحاولة.",
+  "error.SF-CAL-003.title": "لا يمكن القسمة على صفر",
+  "error.SF-CAL-003.action": "راجع المقام في المعادلة وتأكد أن قيمته ليست صفرًا.",
+  "error.SF-CAL-004.title": "نوع البيانات لا يسمح بهذه العملية",
+  "error.SF-CAL-004.action": "استخدم عمودًا رقميًا أو غيّر نوع العملية.",
+  "error.SF-CAL-005.title": "معامل السيناريو غير معرّف",
+  "error.SF-CAL-005.action": "عرّف قيمة افتراضية للمعامل أو اختر سيناريو يحتويه.",
+  "error.SF-CAL-006.title": "المؤشر المطلوب غير موجود",
+  "error.SF-CAL-006.action": "أعد إنشاء المؤشر أو صحّح مرجعه في المستند أو الشريحة.",
+  "error.SF-CAL-007.title": "تم تجاهل أمر قديم على نسخة بيانات أحدث",
+  "error.SF-CAL-007.action": "أعد تنفيذ التعديل على الحالة الحالية.",
+  "error.SF-CAL-008.title": "الرقم المعروض لا يطابق نتيجة الحساب",
+  "error.SF-CAL-008.action": "أعد حساب المؤشر قبل الاعتماد على الرقم أو تصديره.",
   "error.SF-CHT-001.title": "إصدار مواصفة المخطط مفقود",
   "error.SF-CHT-001.action": "أضف إصدارًا صحيحًا لمواصفة المخطط ثم أعد المحاولة.",
   "error.SF-CHT-002.title": "نوع المخطط مفقود",
@@ -1071,6 +1192,23 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
     "Request a new verification link from sign-in, then open the latest email.",
   "error.SF-AUTH-008.title": "Account already registered",
   "error.SF-AUTH-008.action": "Sign in to the existing account instead of creating a duplicate.",
+  "error.SF-CAL-001.title": "The referenced column does not exist in the data",
+  "error.SF-CAL-001.action": "Pick an existing column or fix the reference inside the formula.",
+  "error.SF-CAL-002.title": "The formula syntax is invalid",
+  "error.SF-CAL-002.action": "Check the parentheses and allowed functions, then try again.",
+  "error.SF-CAL-003.title": "Cannot divide by zero",
+  "error.SF-CAL-003.action": "Review the divisor in the formula and make sure it is not zero.",
+  "error.SF-CAL-004.title": "The data type does not support this operation",
+  "error.SF-CAL-004.action": "Use a numeric column or change the operation.",
+  "error.SF-CAL-005.title": "The scenario parameter is not defined",
+  "error.SF-CAL-005.action":
+    "Define a default value for the parameter or pick a scenario that includes it.",
+  "error.SF-CAL-006.title": "The requested metric does not exist",
+  "error.SF-CAL-006.action": "Recreate the metric or fix its reference in the document or slide.",
+  "error.SF-CAL-007.title": "An outdated command was ignored on a newer data revision",
+  "error.SF-CAL-007.action": "Re-apply the change to the current state.",
+  "error.SF-CAL-008.title": "The displayed number does not match the computed result",
+  "error.SF-CAL-008.action": "Recompute the metric before relying on or exporting the number.",
   "error.SF-CHT-001.title": "Chart specification version is missing",
   "error.SF-CHT-001.action": "Add a valid chart specification version, then try again.",
   "error.SF-CHT-002.title": "Chart type is missing",

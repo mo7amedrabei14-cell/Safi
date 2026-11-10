@@ -57,6 +57,46 @@ impl ErrorCode {
         domain: ErrorDomain::Auth,
         number: 8,
     };
+    /// Registered error code `SF-CAL-001`.
+    pub const SF_CAL_001: Self = Self {
+        domain: ErrorDomain::Cal,
+        number: 1,
+    };
+    /// Registered error code `SF-CAL-002`.
+    pub const SF_CAL_002: Self = Self {
+        domain: ErrorDomain::Cal,
+        number: 2,
+    };
+    /// Registered error code `SF-CAL-003`.
+    pub const SF_CAL_003: Self = Self {
+        domain: ErrorDomain::Cal,
+        number: 3,
+    };
+    /// Registered error code `SF-CAL-004`.
+    pub const SF_CAL_004: Self = Self {
+        domain: ErrorDomain::Cal,
+        number: 4,
+    };
+    /// Registered error code `SF-CAL-005`.
+    pub const SF_CAL_005: Self = Self {
+        domain: ErrorDomain::Cal,
+        number: 5,
+    };
+    /// Registered error code `SF-CAL-006`.
+    pub const SF_CAL_006: Self = Self {
+        domain: ErrorDomain::Cal,
+        number: 6,
+    };
+    /// Registered error code `SF-CAL-007`.
+    pub const SF_CAL_007: Self = Self {
+        domain: ErrorDomain::Cal,
+        number: 7,
+    };
+    /// Registered error code `SF-CAL-008`.
+    pub const SF_CAL_008: Self = Self {
+        domain: ErrorDomain::Cal,
+        number: 8,
+    };
     /// Registered error code `SF-CHT-001`.
     pub const SF_CHT_001: Self = Self {
         domain: ErrorDomain::Cht,
@@ -363,6 +403,14 @@ impl ErrorCode {
         Self::SF_AUTH_006,
         Self::SF_AUTH_007,
         Self::SF_AUTH_008,
+        Self::SF_CAL_001,
+        Self::SF_CAL_002,
+        Self::SF_CAL_003,
+        Self::SF_CAL_004,
+        Self::SF_CAL_005,
+        Self::SF_CAL_006,
+        Self::SF_CAL_007,
+        Self::SF_CAL_008,
         Self::SF_CHT_001,
         Self::SF_CHT_002,
         Self::SF_CHT_003,
@@ -526,6 +574,86 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Account already registered",
         action_en: "Sign in to the existing account instead of creating a duplicate.",
         owner_note: "Normalized email or verified phone already exists; never log the submitted identity values.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_CAL_001,
+        code_str: "SF-CAL-001",
+        severity: ErrorSeverity::Error,
+        title_ar: "العمود المطلوب غير موجود في البيانات",
+        action_ar: "اختر عمودًا موجودًا أو أعد تسمية المرجع داخل المعادلة.",
+        title_en: "The referenced column does not exist in the data",
+        action_en: "Pick an existing column or fix the reference inside the formula.",
+        owner_note: "DataGraph formula referenced an unknown column name.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_CAL_002,
+        code_str: "SF-CAL-002",
+        severity: ErrorSeverity::Error,
+        title_ar: "صيغة المعادلة غير صحيحة",
+        action_ar: "راجع الأقواس والدوال المسموحة ثم أعد المحاولة.",
+        title_en: "The formula syntax is invalid",
+        action_en: "Check the parentheses and allowed functions, then try again.",
+        owner_note: "Studio formula parser rejected the expression before execution.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_CAL_003,
+        code_str: "SF-CAL-003",
+        severity: ErrorSeverity::Error,
+        title_ar: "لا يمكن القسمة على صفر",
+        action_ar: "راجع المقام في المعادلة وتأكد أن قيمته ليست صفرًا.",
+        title_en: "Cannot divide by zero",
+        action_en: "Review the divisor in the formula and make sure it is not zero.",
+        owner_note: "Division by zero encountered during metric or column evaluation.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_CAL_004,
+        code_str: "SF-CAL-004",
+        severity: ErrorSeverity::Error,
+        title_ar: "نوع البيانات لا يسمح بهذه العملية",
+        action_ar: "استخدم عمودًا رقميًا أو غيّر نوع العملية.",
+        title_en: "The data type does not support this operation",
+        action_en: "Use a numeric column or change the operation.",
+        owner_note: "Arithmetic or aggregation applied to a non-numeric value.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_CAL_005,
+        code_str: "SF-CAL-005",
+        severity: ErrorSeverity::Error,
+        title_ar: "معامل السيناريو غير معرّف",
+        action_ar: "عرّف قيمة افتراضية للمعامل أو اختر سيناريو يحتويه.",
+        title_en: "The scenario parameter is not defined",
+        action_en: "Define a default value for the parameter or pick a scenario that includes it.",
+        owner_note: "What-If formula referenced a parameter with no default and no active scenario value.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_CAL_006,
+        code_str: "SF-CAL-006",
+        severity: ErrorSeverity::Error,
+        title_ar: "المؤشر المطلوب غير موجود",
+        action_ar: "أعد إنشاء المؤشر أو صحّح مرجعه في المستند أو الشريحة.",
+        title_en: "The requested metric does not exist",
+        action_en: "Recreate the metric or fix its reference in the document or slide.",
+        owner_note: "Metric reference resolved against an unknown metric identifier.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_CAL_007,
+        code_str: "SF-CAL-007",
+        severity: ErrorSeverity::Warn,
+        title_ar: "تم تجاهل أمر قديم على نسخة بيانات أحدث",
+        action_ar: "أعد تنفيذ التعديل على الحالة الحالية.",
+        title_en: "An outdated command was ignored on a newer data revision",
+        action_en: "Re-apply the change to the current state.",
+        owner_note: "Studio command carried an expectedRevision older than the published revision.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_CAL_008,
+        code_str: "SF-CAL-008",
+        severity: ErrorSeverity::Error,
+        title_ar: "الرقم المعروض لا يطابق نتيجة الحساب",
+        action_ar: "أعد حساب المؤشر قبل الاعتماد على الرقم أو تصديره.",
+        title_en: "The displayed number does not match the computed result",
+        action_en: "Recompute the metric before relying on or exporting the number.",
+        owner_note: "Verified metric fingerprint mismatch during click-to-verify.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_CHT_001,

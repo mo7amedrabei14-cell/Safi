@@ -23,7 +23,7 @@ authors = ["SafiData Engineering"]
 publish = false
 
 [workspace.dependencies]
-rust_decimal = { version = "=1.36.0", default-features = false, features = ["std"] }
+rust_decimal = { version = "=1.36.0", default-features = false, features = ["std", "serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

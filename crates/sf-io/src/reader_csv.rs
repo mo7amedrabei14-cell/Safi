@@ -15,7 +15,7 @@ use crate::encoding::detect_and_decode;
 /// Imports a CSV stream into a validated [`Sheet`] containing a [`Table`],
 /// enforcing `PlatformLimits` (`SF-IMP-003`) and encoding detection (`SF-IMP-002`).
 pub fn read_csv_stream<R: Read>(
-    mut reader: R,
+    reader: R,
     limits: PlatformLimits,
     sheet_name: impl Into<String>,
     table_id: impl Into<String>,
@@ -23,6 +23,7 @@ pub fn read_csv_stream<R: Read>(
 ) -> Result<Sheet, SafiError> {
     let mut bytes = Vec::new();
     reader
+        .take(limits.max_file_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|_| {
             SafiError::new(

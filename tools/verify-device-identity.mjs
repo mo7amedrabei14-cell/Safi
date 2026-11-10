@@ -49,6 +49,30 @@ try {
   const page = await context.newPage();
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
 
+  await page.locator(".safi-auth-modal").waitFor({ state: "visible" });
+  assert.equal(
+    await page.locator(".safi-auth-close").count(),
+    0,
+    "The initial authentication gate must not expose a close button."
+  );
+  assert.equal(
+    await page.locator(".safi-topbar").count(),
+    0,
+    "Product navigation must not mount before authentication."
+  );
+  assert.equal(
+    await page.locator("#safi-main").count(),
+    0,
+    "The product workspace must not mount before authentication."
+  );
+
+  await page.keyboard.press("Escape");
+  assert.equal(
+    await page.locator(".safi-auth-modal").count(),
+    1,
+    "Escape must not dismiss the mandatory authentication gate."
+  );
+
   const first = await page.evaluate(async () => {
     const request = indexedDB.deleteDatabase("safidata-installation");
     await new Promise((resolve, reject) => {

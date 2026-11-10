@@ -25,13 +25,14 @@ describe("UI-Phase-5 command palette", () => {
     expect(html).toContain('aria-controls="safi-palette-list"');
     expect(html).toContain("Search tools and commands…");
     expect(html.split('role="option"').length - 1).toBe(PALETTE_ITEMS.length);
-    expect(PALETTE_ITEMS).toHaveLength(7);
+    expect(PALETTE_ITEMS).toHaveLength(8);
 
     for (const label of [
       "Website",
       "Cleaning App",
       "Recipes App",
       "Charts App",
+      "Quad-Studio",
       "Library App",
       "Owner App",
       "Quick security audit"

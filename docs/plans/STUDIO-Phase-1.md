@@ -1,4 +1,4 @@
-> **تحديث 2026-11-11:** 1B و1C (محرك Rust: DataGraph + VerifiedMetricToken) منفذان ومختبران (17+14 اختبارًا، Clippy/fmt نظيفان). 1A/1D/1E معلّقة على تثبيت أدوات WASM وتصريح المالك، ولا واجهة بعد.
+> **تحديث 2026-11-11 (ثانٍ):** 1A و1D منفذان: الجسر WASM (`crates/sf-wasm/src/studio.rs`) مبني على `wasm32-unknown-unknown` ومولّد بـ`wasm-bindgen`، وواجهة الاستوديو الحية في `apps/web/src/components/studios/DataStudio.tsx` مع تبويب سابع. 12 اختبار جسر، Vitest 153/153، Clippy/fmt نظيفان. المتبقي: نقل الجلسة إلى Worker (1D)، شريط أوامر DSL في الواجهة، ومحررات Phase 3 (1E).
 
 # خطة STUDIO-Phase-1
 

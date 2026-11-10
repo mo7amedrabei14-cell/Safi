@@ -11,6 +11,8 @@ describe("Security & CSP _headers validation tests (Section 8.2 & 8.5)", () => {
     expect(content).toContain("X-Content-Type-Options: nosniff");
     expect(content).toContain("Cross-Origin-Opener-Policy: same-origin");
     expect(content).toContain("Cross-Origin-Embedder-Policy: require-corp");
-    expect(content).not.toContain("unsafe-eval");
+    // `wasm-unsafe-eval` only allows WebAssembly compilation; JavaScript `eval` stays blocked.
+    expect(content).not.toMatch(/'unsafe-eval'/);
+    expect(content).toContain("'wasm-unsafe-eval'");
   });
 });

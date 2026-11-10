@@ -23,6 +23,7 @@ import { BentoCommandCenter } from "./components/home/BentoCommandCenter";
 import { CleaningStudio } from "./components/studios/CleaningStudio";
 import { RecipesStudio } from "./components/studios/RecipesStudio";
 import { ChartsStudio } from "./components/studios/ChartsStudio";
+import { DataStudio } from "./components/studios/DataStudio";
 import { LibraryStudio } from "./components/studios/LibraryStudio";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { canAnimate } from "./components/ui/motion-preference";
@@ -51,6 +52,8 @@ export function renderStudio(
       return <RecipesStudio lang={lang} onSelectTab={onSelectTab} />;
     case "charts":
       return <ChartsStudio lang={lang} onSelectTab={onSelectTab} />;
+    case "studio":
+      return <DataStudio lang={lang} onSelectTab={onSelectTab} />;
     case "library":
       return <LibraryStudio lang={lang} onSelectTab={onSelectTab} />;
     case "owner":

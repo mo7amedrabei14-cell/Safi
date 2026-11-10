@@ -25,8 +25,8 @@ describe("SafiData startup and application shell", () => {
   it("keeps the mandatory account gate in place after the intro handoff", () => {
     const html = renderToString(createElement(ApplicationShell, { onReady: noop }));
 
-    expect(SHELL_TABS).toEqual(["home", "cleaning", "recipes", "charts", "studio", "library", "owner"]);
-    expect(DOCK_TABS).toHaveLength(7);
+    expect(SHELL_TABS).toEqual(["home", "cleaning", "recipes", "charts", "library", "owner"]);
+    expect(DOCK_TABS).toHaveLength(6);
     expect(html).toContain("SAFIDATA IDENTITY");
     expect(html).toContain("Sign In");
     expect(html).toContain('class="safi-auth-modal"');
@@ -77,7 +77,6 @@ describe("SafiData startup and application shell", () => {
       ["cleaning", "مختبر التنقية والخصوصية"],
       ["recipes", "محرك الوصفات الحتمية"],
       ["charts", "التحقق من تباين WCAG 2.2 AA"],
-      ["studio", "الاستوديو الرباعي"],
       ["library", "مكتبة القوالب وتقارير الجودة"],
       ["owner", "لوحة تحكم المالك"]
     ];

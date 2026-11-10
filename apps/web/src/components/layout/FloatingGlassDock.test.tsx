@@ -4,12 +4,12 @@ import { renderToString } from "react-dom/server";
 import { DOCK_TABS, FloatingGlassDock } from "./FloatingGlassDock";
 
 describe("UI-Phase-4 floating glass dock", () => {
-  it("renders the seven navigation tabs with the semantic labels", () => {
+  it("renders the six navigation tabs with the semantic labels", () => {
     const html = renderToString(
       createElement(FloatingGlassDock, { activeTab: "home", onSelect: () => undefined })
     );
 
-    expect(DOCK_TABS).toHaveLength(7);
+    expect(DOCK_TABS).toHaveLength(6);
     for (const label of [
       "Website",
       "Cleaning App",
@@ -35,7 +35,6 @@ describe("UI-Phase-4 floating glass dock", () => {
 
     expect(html.split('aria-current="page"').length - 1).toBe(1);
     expect(html).toContain('data-tab-id="charts"');
-    expect(html).toContain('data-tab-id="studio"');
     expect(html).toContain('aria-label="SafiData logo"');
     expect(html).toContain('aria-label="Command palette"');
     expect(html).toContain("⌘K");

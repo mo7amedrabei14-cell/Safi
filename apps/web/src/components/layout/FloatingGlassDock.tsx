@@ -22,21 +22,13 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
-  LayoutDashboard,
   UserRound
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SafiPrismLogo } from "../brand/SafiPrismLogo";
 import { DynamicStatusIsland } from "../brand/DynamicStatusIsland";
 
-export type SafiDockTabId =
-  | "home"
-  | "cleaning"
-  | "recipes"
-  | "charts"
-  | "studio"
-  | "library"
-  | "owner";
+export type SafiDockTabId = "home" | "cleaning" | "recipes" | "charts" | "library" | "owner";
 
 export type SafiThemeId = "apple-light" | "google-gemini" | "vision-glass";
 
@@ -54,7 +46,6 @@ export const DOCK_TABS: readonly SafiDockTab[] = [
   { id: "cleaning", label: "التنظيف وPII", labelEn: "Cleaning App", icon: Sparkles },
   { id: "recipes", label: "الوصفات", labelEn: "Recipes App", icon: ListChecks },
   { id: "charts", label: "الرسوم البيانية", labelEn: "Charts App", icon: BarChart3 },
-  { id: "studio", label: "الاستوديو الرباعي", labelEn: "Quad-Studio", icon: LayoutDashboard },
   { id: "library", label: "المكتبة", labelEn: "Library App", icon: Library },
   { id: "owner", label: "لوحة المالك", labelEn: "Owner App", icon: ShieldCheck }
 ];

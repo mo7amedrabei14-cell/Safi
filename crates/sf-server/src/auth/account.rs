@@ -30,6 +30,7 @@ use crate::auth::{AuthMethod, Principal, Scope};
 use crate::error::AuthError;
 
 const DEFAULT_VERIFICATION_TTL_SECS: i64 = 24 * 60 * 60;
+const DEFAULT_PASSWORD_RESET_TTL_SECS: i64 = 60 * 60;
 const ARGON2_MEMORY_KIB: u32 = 65_536;
 const ARGON2_ITERATIONS: u32 = 3;
 const ARGON2_LANES: u32 = 1;
@@ -83,6 +84,23 @@ pub trait AccountRepository: Send + Sync {
         token_expires_at: i64,
         now: i64,
     ) -> Result<bool, AuthError>;
+
+    /// Replaces the pending password-reset token for an existing account.
+    async fn replace_password_reset_token(
+        &self,
+        email: &str,
+        token_hash: &[u8; 32],
+        token_expires_at: i64,
+        now: i64,
+    ) -> Result<bool, AuthError>;
+
+    /// Consumes a valid reset token, rotates the password, and revokes sessions.
+    async fn reset_password(
+        &self,
+        token_hash: &[u8; 32],
+        password_hash: &str,
+        now: i64,
+    ) -> Result<bool, AuthError>;
 }
 
 pub type SharedAccountRepository = Arc<dyn AccountRepository>;
@@ -94,6 +112,8 @@ pub trait VerificationEmailSender: Send + Sync {
         recipient: &str,
         verification_url: &str,
     ) -> Result<(), AuthError>;
+
+    async fn send_password_reset(&self, recipient: &str, reset_url: &str) -> Result<(), AuthError>;
 }
 
 pub type SharedVerificationEmailSender = Arc<dyn VerificationEmailSender>;
@@ -122,6 +142,17 @@ pub struct ResendVerificationRequest {
     pub email: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RequestPasswordResetRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfirmPasswordResetRequest {
+    pub token: String,
+    pub password: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AccountMessage {
     pub message: &'static str,
@@ -140,6 +171,7 @@ pub struct AccountAuthService {
     sessions: Arc<AuthService>,
     public_base_url: String,
     verification_ttl_secs: i64,
+    password_reset_ttl_secs: i64,
 }
 
 impl std::fmt::Debug for AccountAuthService {
@@ -166,7 +198,15 @@ impl AccountAuthService {
             sessions,
             public_base_url: public_base_url.into().trim_end_matches('/').to_owned(),
             verification_ttl_secs: DEFAULT_VERIFICATION_TTL_SECS,
+            password_reset_ttl_secs: DEFAULT_PASSWORD_RESET_TTL_SECS,
         }
+    }
+
+    /// Override the reset-token lifetime for controlled tests.
+    #[must_use]
+    pub fn with_password_reset_ttl(mut self, ttl: Duration) -> Self {
+        self.password_reset_ttl_secs = i64::try_from(ttl.as_secs()).unwrap_or(i64::MAX);
+        self
     }
 
     /// Override the token lifetime for controlled tests and operational policy.
@@ -243,6 +283,49 @@ impl AccountAuthService {
             self.dispatch_verification(&email, &token).await;
         }
         Ok(())
+    }
+
+    /// Request a password reset without revealing whether the address exists.
+    pub async fn request_password_reset(&self, raw_email: &str) -> Result<(), AuthError> {
+        let email = normalize_email(raw_email)?;
+        let (token, token_hash) = generate_verification_token();
+        let now = unix_now();
+        let expires_at = now.saturating_add(self.password_reset_ttl_secs);
+        let replaced = self
+            .repository
+            .replace_password_reset_token(&email, &token_hash, expires_at, now)
+            .await?;
+
+        if replaced {
+            let url = format!("{}/#reset_password={token}", self.public_base_url);
+            if self
+                .email_sender
+                .send_password_reset(&email, &url)
+                .await
+                .is_err()
+            {
+                tracing::warn!(code = "SF-AUTH-005", "password reset email delivery failed");
+            }
+        }
+        Ok(())
+    }
+
+    /// Consume a one-time reset token and rotate the password atomically.
+    /// Every active session is revoked so a stolen session cannot survive.
+    pub async fn reset_password(&self, token: &str, new_password: &str) -> Result<(), AuthError> {
+        validate_new_password(new_password)?;
+        let token_hash = hash_presented_verification_token(token)
+            .map_err(|_| AuthError::InvalidVerificationToken)?;
+        let password_hash = hash_password(new_password.to_owned()).await?;
+        let accepted = self
+            .repository
+            .reset_password(&token_hash, &password_hash, unix_now())
+            .await?;
+        if accepted {
+            Ok(())
+        } else {
+            Err(AuthError::InvalidVerificationToken)
+        }
     }
 
     /// Verifies both the password and email status before issuing the existing
@@ -463,6 +546,26 @@ impl VerificationEmailSender for SmtpVerificationEmailSender {
             .header(ContentType::TEXT_PLAIN)
             .body(format!(
                 "Welcome to SafiData.\n\nVerify your email address by opening this link:\n{verification_url}\n\nThis link expires in 24 hours and can only be used once.\nIf you did not create this account, you can ignore this message."
+            ))
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        self.transport
+            .send(message)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(())
+    }
+
+    async fn send_password_reset(&self, recipient: &str, reset_url: &str) -> Result<(), AuthError> {
+        let to = recipient
+            .parse::<Mailbox>()
+            .map_err(|_| AuthError::InvalidRequest)?;
+        let message = Message::builder()
+            .from(self.from.clone())
+            .to(to)
+            .subject("Reset your SafiData password")
+            .header(ContentType::TEXT_PLAIN)
+            .body(format!(
+                "A password reset was requested for your SafiData account.\n\nOpen this link to choose a new password:\n{reset_url}\n\nThis link expires in 1 hour and can only be used once. All other devices will be signed out.\nIf you did not request this, ignore this message; your password stays unchanged."
             ))
             .map_err(|_| AuthError::BackendUnavailable)?;
         self.transport
@@ -742,6 +845,151 @@ impl AccountRepository for SqlxAccountRepository {
             .map_err(|_| AuthError::BackendUnavailable)?;
         Ok(true)
     }
+
+    async fn replace_password_reset_token(
+        &self,
+        email: &str,
+        token_hash: &[u8; 32],
+        token_expires_at: i64,
+        now: i64,
+    ) -> Result<bool, AuthError> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        let user_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM users WHERE lower(email) = $1 AND deleted_at IS NULL FOR UPDATE",
+        )
+        .bind(email)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+
+        let Some(user_id) = user_id else {
+            transaction
+                .commit()
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+            return Ok(false);
+        };
+
+        sqlx::query(
+            "UPDATE password_reset_tokens SET consumed_at = to_timestamp($2) WHERE user_id = $1 AND consumed_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+
+        sqlx::query(
+            "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, to_timestamp($3))",
+        )
+        .bind(user_id)
+        .bind(token_hash.as_slice())
+        .bind(token_expires_at)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(true)
+    }
+
+    async fn reset_password(
+        &self,
+        token_hash: &[u8; 32],
+        password_hash: &str,
+        now: i64,
+    ) -> Result<bool, AuthError> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+
+        let user_id = sqlx::query_scalar::<_, Uuid>(
+            r"
+            UPDATE password_reset_tokens
+            SET consumed_at = to_timestamp($2)
+            WHERE token_hash = $1
+              AND consumed_at IS NULL
+              AND expires_at > to_timestamp($2)
+            RETURNING user_id
+            ",
+        )
+        .bind(token_hash.as_slice())
+        .bind(now)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+
+        let Some(user_id) = user_id else {
+            transaction
+                .commit()
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+            return Ok(false);
+        };
+
+        sqlx::query("SELECT set_config('app.user_id', $1, true)")
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+
+        if let Some(workspace_id) = sqlx::query_scalar::<_, Uuid>(
+            "SELECT workspace_id FROM memberships WHERE user_id = $1 ORDER BY (role = 'owner') DESC, created_at ASC LIMIT 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?
+        {
+            sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+                .bind(workspace_id.to_string())
+                .execute(&mut *transaction)
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+        }
+
+        sqlx::query(
+            "UPDATE user_credentials SET password_hash = $2, password_changed_at = to_timestamp($3) WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .bind(password_hash)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+
+        sqlx::query(
+            "UPDATE sessions SET revoked_at = to_timestamp($2) WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -756,6 +1004,7 @@ mod tests {
     struct MemoryState {
         accounts: HashMap<String, LoginAccount>,
         pending_tokens: HashMap<[u8; 32], (String, i64)>,
+        reset_tokens: HashMap<[u8; 32], (String, i64)>,
     }
 
     #[derive(Default)]
@@ -837,6 +1086,44 @@ mod tests {
                 .insert(*token_hash, (email.to_owned(), token_expires_at));
             Ok(true)
         }
+
+        async fn replace_password_reset_token(
+            &self,
+            email: &str,
+            token_hash: &[u8; 32],
+            token_expires_at: i64,
+            _now: i64,
+        ) -> Result<bool, AuthError> {
+            let mut state = self.state.write().await;
+            if !state.accounts.contains_key(email) {
+                return Ok(false);
+            }
+            state.reset_tokens.retain(|_, (owner, _)| owner != email);
+            state
+                .reset_tokens
+                .insert(*token_hash, (email.to_owned(), token_expires_at));
+            Ok(true)
+        }
+
+        async fn reset_password(
+            &self,
+            token_hash: &[u8; 32],
+            password_hash: &str,
+            now: i64,
+        ) -> Result<bool, AuthError> {
+            let mut state = self.state.write().await;
+            let Some((email, expires_at)) = state.reset_tokens.remove(token_hash) else {
+                return Ok(false);
+            };
+            if expires_at <= now {
+                return Ok(false);
+            }
+            let Some(account) = state.accounts.get_mut(&email) else {
+                return Ok(false);
+            };
+            account.password_hash = password_hash.to_owned();
+            Ok(true)
+        }
     }
 
     #[derive(Default, Clone)]
@@ -869,6 +1156,21 @@ mod tests {
                 .write()
                 .await
                 .push((recipient.to_owned(), verification_url.to_owned()));
+            Ok(())
+        }
+
+        async fn send_password_reset(
+            &self,
+            recipient: &str,
+            reset_url: &str,
+        ) -> Result<(), AuthError> {
+            if self.fail.load(Ordering::Relaxed) {
+                return Err(AuthError::BackendUnavailable);
+            }
+            self.messages
+                .write()
+                .await
+                .push((recipient.to_owned(), reset_url.to_owned()));
             Ok(())
         }
     }
@@ -1057,6 +1359,113 @@ mod tests {
             .verify_email(&token_from_message(&second[1]))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn password_reset_rotates_the_password_and_rejects_replay() {
+        let fixture = fixture();
+        fixture
+            .service
+            .register(request("reset@example.test"))
+            .await
+            .unwrap();
+        let verification = fixture.mailer.messages().await;
+        fixture
+            .service
+            .verify_email(&token_from_message(&verification[0]))
+            .await
+            .unwrap();
+
+        fixture
+            .service
+            .request_password_reset(" RESET@example.test ")
+            .await
+            .unwrap();
+        let messages = fixture.mailer.messages().await;
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].0, "reset@example.test");
+        let reset_token = messages[1]
+            .1
+            .split("reset_password=")
+            .nth(1)
+            .unwrap_or_default()
+            .to_owned();
+        assert!(!reset_token.is_empty());
+
+        fixture
+            .service
+            .reset_password(&reset_token, "A brand new phrase 2026!")
+            .await
+            .unwrap();
+
+        let old_password = fixture
+            .service
+            .login(LoginAccountRequest {
+                email: "reset@example.test".to_owned(),
+                password: "A secure phrase 2026!".to_owned(),
+                device_name: "Browser".to_owned(),
+            })
+            .await;
+        assert_eq!(old_password.unwrap_err(), AuthError::InvalidCredentials);
+
+        fixture
+            .service
+            .login(LoginAccountRequest {
+                email: "reset@example.test".to_owned(),
+                password: "A brand new phrase 2026!".to_owned(),
+                device_name: "Browser".to_owned(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            fixture
+                .service
+                .reset_password(&reset_token, "Another phrase 2026!")
+                .await
+                .unwrap_err(),
+            AuthError::InvalidVerificationToken
+        );
+    }
+
+    #[tokio::test]
+    async fn password_reset_request_is_silent_for_unknown_or_invalid_email() {
+        let fixture = fixture();
+        fixture
+            .service
+            .request_password_reset("unknown@example.test")
+            .await
+            .unwrap();
+        assert!(fixture.mailer.messages().await.is_empty());
+        assert_eq!(
+            fixture
+                .service
+                .request_password_reset("not-an-email")
+                .await
+                .unwrap_err(),
+            AuthError::InvalidRequest
+        );
+    }
+
+    #[tokio::test]
+    async fn password_reset_enforces_the_eight_character_floor() {
+        let fixture = fixture();
+        assert_eq!(
+            fixture
+                .service
+                .reset_password(&"00".repeat(32), "short")
+                .await
+                .unwrap_err(),
+            AuthError::InvalidRequest
+        );
+        assert_eq!(
+            fixture
+                .service
+                .reset_password("not-hex", "A secure phrase 2026!")
+                .await
+                .unwrap_err(),
+            AuthError::InvalidVerificationToken
+        );
     }
 
     #[tokio::test]

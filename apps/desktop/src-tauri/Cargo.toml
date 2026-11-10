@@ -8,6 +8,8 @@ description = "SafiData desktop shell (Tauri 2.2) with a strict command and perm
 publish = false
 
 [build-dependencies]
+serde_json = "=1.0.135"
+sf-desktop = { path = "../../../crates/sf-desktop" }
 tauri-build = { version = "=2.2.0", features = [] }
 
 [dependencies]

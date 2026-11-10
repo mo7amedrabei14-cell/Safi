@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::auth::account::{
-    AccountAuthService, AccountMessage, LoginAccountRequest, LoginResponse, RegisterAccountRequest,
-    ResendVerificationRequest, VerifyEmailRequest,
+    AccountAuthService, AccountMessage, ConfirmPasswordResetRequest, LoginAccountRequest,
+    LoginResponse, RegisterAccountRequest, RequestPasswordResetRequest, ResendVerificationRequest,
+    VerifyEmailRequest,
 };
 use crate::auth::middleware::{
     require_any_credential, require_api_key, require_session, AnyCredentialGuard, ApiKeyGuard,
@@ -165,6 +166,39 @@ pub async fn resend_verification(
     ))
 }
 
+/// Request a one-time password reset link without revealing account existence.
+pub async fn request_password_reset(
+    State(state): State<AppState>,
+    Json(body): Json<RequestPasswordResetRequest>,
+) -> Result<(StatusCode, Json<AccountMessage>), AuthError> {
+    let service: &AccountAuthService = state
+        .account_auth
+        .as_deref()
+        .ok_or(AuthError::BackendUnavailable)?;
+    service.request_password_reset(&body.email).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(AccountMessage {
+            message: "If this address has an account, a reset email will be sent.",
+        }),
+    ))
+}
+
+/// Consume a reset token, rotate the password, and revoke every session.
+pub async fn confirm_password_reset(
+    State(state): State<AppState>,
+    Json(body): Json<ConfirmPasswordResetRequest>,
+) -> Result<Json<AccountMessage>, AuthError> {
+    let service: &AccountAuthService = state
+        .account_auth
+        .as_deref()
+        .ok_or(AuthError::BackendUnavailable)?;
+    service.reset_password(&body.token, &body.password).await?;
+    Ok(Json(AccountMessage {
+        message: "Your password has been changed. Sign in with the new password.",
+    }))
+}
+
 /// Verify credentials and issue the existing sfs_* session token.
 pub async fn login_account(
     State(state): State<AppState>,
@@ -287,7 +321,15 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/auth/email/verification/resend",
             post(resend_verification),
         )
-        .route("/v1/auth/login", post(login_account));
+        .route("/v1/auth/login", post(login_account))
+        .route(
+            "/v1/auth/password/reset/request",
+            post(request_password_reset),
+        )
+        .route(
+            "/v1/auth/password/reset/confirm",
+            post(confirm_password_reset),
+        );
 
     let updates_route = Router::new().route("/v1/updates/latest", get(get_latest_update));
 

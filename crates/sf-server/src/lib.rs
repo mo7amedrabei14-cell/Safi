@@ -3,7 +3,9 @@
 //! Every response carries `X-Request-ID`; authentication failures are rendered
 //! as `problem+json` with canonical `errors.toml` codes.
 
+pub mod accounts;
 pub mod auth;
+pub mod cors;
 pub mod error;
 pub mod log_center;
 pub mod routes;
@@ -90,7 +92,9 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
 
 /// Build the full application with the request-id middleware applied outermost.
 pub fn app(state: AppState) -> Router {
-    routes::build_router(state).layer(middleware::from_fn(request_id_middleware))
+    routes::build_router(state)
+        .layer(middleware::from_fn(cors::cors_middleware))
+        .layer(middleware::from_fn(request_id_middleware))
 }
 
 #[cfg(test)]

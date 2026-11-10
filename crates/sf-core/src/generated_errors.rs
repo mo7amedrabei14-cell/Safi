@@ -302,6 +302,11 @@ impl ErrorCode {
         domain: ErrorDomain::Sys,
         number: 30,
     };
+    /// Registered error code `SF-SYS-031`.
+    pub const SF_SYS_031: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 31,
+    };
     /// Registered error code `SF-UNK-001`.
     pub const SF_UNK_001: Self = Self {
         domain: ErrorDomain::Unk,
@@ -407,6 +412,7 @@ impl ErrorCode {
         Self::SF_SYS_025,
         Self::SF_SYS_026,
         Self::SF_SYS_030,
+        Self::SF_SYS_031,
         Self::SF_UNK_001,
         Self::SF_UPD_001,
         Self::SF_UPD_002,
@@ -1010,6 +1016,16 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "CLI command or arguments are invalid",
         action_en: "Check the command syntax and required arguments, then retry.",
         owner_note: "The CLI received an unknown command or missing or invalid required arguments.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_031,
+        code_str: "SF-SYS-031",
+        severity: ErrorSeverity::Error,
+        title_ar: "عنوان خدمة الحساب غير مهيأ",
+        action_ar: "أعد تثبيت التطبيق بحزمة تتضمن SAFI_API_BASE_URL صالحًا، أو تواصل مع الدعم.",
+        title_en: "Account service address is not configured",
+        action_en: "Reinstall a build that includes a valid SAFI_API_BASE_URL, or contact support.",
+        owner_note: "The installed desktop build has no valid HTTPS API origin; it must fail closed instead of calling a local address.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_UNK_001,

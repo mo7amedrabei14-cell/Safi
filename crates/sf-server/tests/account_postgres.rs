@@ -45,6 +45,14 @@ impl VerificationEmailSender for CaptureMailer {
             .push((recipient.to_owned(), verification_url.to_owned()));
         Ok(())
     }
+
+    async fn send_password_reset(&self, recipient: &str, reset_url: &str) -> Result<(), AuthError> {
+        self.messages
+            .lock()
+            .await
+            .push((recipient.to_owned(), reset_url.to_owned()));
+        Ok(())
+    }
 }
 
 fn verification_token(message: &(String, String)) -> String {
@@ -277,15 +285,19 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
         "an unverified account must not receive a session"
     );
 
-    // Duplicate registration remains enumeration-safe and sends no second email.
-    service
-        .register(RegisterAccountRequest {
-            email: email.clone(),
-            display_name: display_name.clone(),
-            password: password.to_owned(),
-        })
-        .await
-        .expect("duplicate registration uses the generic accepted service result");
+    // Duplicate registration is rejected by the constitution and sends no
+    // second email.
+    assert_eq!(
+        service
+            .register(RegisterAccountRequest {
+                email: email.clone(),
+                display_name: display_name.clone(),
+                password: password.to_owned(),
+            })
+            .await
+            .unwrap_err(),
+        AuthError::DuplicateAccount
+    );
     assert_eq!(mailer.messages().await.len(), 1);
 
     // Resend atomically consumes the first link and replaces it with a new one.

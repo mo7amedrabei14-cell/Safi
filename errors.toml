@@ -466,6 +466,14 @@ title_en = "CLI command or arguments are invalid"
 action_en = "Check the command syntax and required arguments, then retry."
 owner_note = "The CLI received an unknown command or missing or invalid required arguments."
 
+[SF-SYS-031]
+severity = "error"
+title_ar = "عنوان خدمة الحساب غير مهيأ"
+action_ar = "أعد تثبيت التطبيق بحزمة تتضمن SAFI_API_BASE_URL صالحًا، أو تواصل مع الدعم."
+title_en = "Account service address is not configured"
+action_en = "Reinstall a build that includes a valid SAFI_API_BASE_URL, or contact support."
+owner_note = "The installed desktop build has no valid HTTPS API origin; it must fail closed instead of calling a local address."
+
 [SF-UPD-001]
 severity = "error"
 title_ar = "محاولة تثبيت إصدار أقدم مرفوضة"

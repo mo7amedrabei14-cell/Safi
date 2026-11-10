@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live PostgreSQL 18 migration proof for P0.01 and the S4 core schema.
+# Live PostgreSQL 18 migration proof for P0.01, P0.3, and the S4 core schema.
 # This script MUST target a disposable database. It applies all migrations,
 # verifies account constraints and real RLS behavior under a non-owner,
 # NOBYPASSRLS role, then rolls every migration back.
@@ -58,6 +58,8 @@ echo "[test-migrations] applying 0002 and P0.01 migration 0003"
     -f "$MIGRATIONS/0003_accounts_subscriptions_devices.up.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0004_auth_lookup_rls.up.sql" >/dev/null
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0005_customer_accounts_owner_ops.up.sql" >/dev/null
 
 echo "[test-migrations] verifying account, token, device, plan, subscription, and webhook constraints"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
@@ -241,6 +243,62 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Webhook table stores a raw payload or customer file field';
     END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+          AND column_name = 'suspended_at'
+    ) THEN
+        RAISE EXCEPTION 'Phase 0.1 did not add users.suspended_at';
+    END IF;
+
+    IF (
+        SELECT count(*) FROM plans
+        WHERE code IN ('individual_monthly', 'individual_annual', 'organization_seat')
+    ) <> 3 THEN
+        RAISE EXCEPTION 'Phase 0.1 plan catalog is incomplete';
+    END IF;
+
+    IF (SELECT count(*) FROM plan_prices) <> 8 THEN
+        RAISE EXCEPTION 'Phase 0.1 plan prices are incomplete';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM plan_prices
+        WHERE plan_code = 'individual_monthly'
+          AND currency = 'EGP'
+          AND amount_minor = 100000
+    ) OR NOT EXISTS (
+        SELECT 1 FROM plan_prices
+        WHERE plan_code = 'individual_annual'
+          AND currency = 'USD'
+          AND amount_minor = 16800
+    ) THEN
+        RAISE EXCEPTION 'Phase 0.1 plan pricing does not match the business constitution';
+    END IF;
+
+    INSERT INTO subscription_events (
+        workspace_id, subscription_id, event_type, actor_role, to_status
+    )
+    SELECT workspace_id, id, 'created', 'system', 'active'
+    FROM subscriptions
+    WHERE workspace_id IN (
+        '20000000-0000-7000-8000-000000000001',
+        '20000000-0000-7000-8000-000000000002'
+    );
+
+    BEGIN
+        INSERT INTO subscription_events (workspace_id, event_type, actor_role)
+        VALUES (
+            '20000000-0000-7000-8000-000000000001',
+            'not_a_real_event',
+            'owner'
+        );
+        RAISE EXCEPTION 'An unknown subscription event type was accepted';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
 END
 $$;
 SQL
@@ -249,7 +307,8 @@ echo "[test-migrations] verifying real RLS isolation as a non-owner, NOBYPASSRLS
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE ROLE safi_p0_01_app NOLOGIN NOBYPASSRLS;
 GRANT USAGE ON SCHEMA public TO safi_p0_01_app;
-GRANT SELECT, INSERT, UPDATE ON users, workspaces, memberships, sessions, devices, subscriptions, user_credentials, email_verification_tokens TO safi_p0_01_app;
+GRANT SELECT, INSERT, UPDATE ON users, workspaces, memberships, sessions, devices, subscriptions, user_credentials, email_verification_tokens, subscription_events TO safi_p0_01_app;
+GRANT SELECT ON plan_prices, plans TO safi_p0_01_app;
 
 BEGIN;
 SET LOCAL ROLE safi_p0_01_app;
@@ -313,6 +372,31 @@ BEGIN
     IF row_count <> 1 THEN
         RAISE EXCEPTION 'Workspace RLS failed when switching subscription workspace';
     END IF;
+
+    SELECT count(*) INTO row_count FROM subscription_events;
+    IF row_count <> 1 THEN
+        RAISE EXCEPTION 'Workspace RLS failed for subscription_events: saw % rows', row_count;
+    END IF;
+
+    PERFORM set_config('app.owner_admin', 'true', true);
+    SELECT count(*) INTO row_count FROM subscriptions;
+    IF row_count <> 3 THEN
+        RAISE EXCEPTION 'Owner RLS read saw % subscriptions instead of 3', row_count;
+    END IF;
+    SELECT count(*) INTO row_count FROM subscription_events;
+    IF row_count <> 2 THEN
+        RAISE EXCEPTION 'Owner RLS read saw % subscription events instead of 2', row_count;
+    END IF;
+    SELECT count(*) INTO row_count FROM memberships;
+    IF row_count <> 4 THEN
+        RAISE EXCEPTION 'Owner RLS read saw % memberships instead of 4', row_count;
+    END IF;
+
+    PERFORM set_config('app.owner_admin', 'false', true);
+    SELECT count(*) INTO row_count FROM subscriptions;
+    IF row_count <> 1 THEN
+        RAISE EXCEPTION 'Disabling owner RLS did not restore workspace isolation';
+    END IF;
 END
 $$;
 COMMIT;
@@ -321,7 +405,12 @@ SQL
 echo "[test-migrations] exercising SQLx account registration, verification, and login under the restricted app role"
 SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test account_postgres -- --ignored --test-threads=1
 
-echo "[test-migrations] rolling back 0004, 0003, 0002, and 0001 in reverse order"
+echo "[test-migrations] exercising owner account administration and P0.3 subscription lifecycle under the restricted app role"
+SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test accounts_postgres -- --ignored --test-threads=1
+
+echo "[test-migrations] rolling back 0005, 0004, 0003, 0002, and 0001 in reverse order"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0005_customer_accounts_owner_ops.down.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0004_auth_lookup_rls.down.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
@@ -332,16 +421,16 @@ echo "[test-migrations] rolling back 0004, 0003, 0002, and 0001 in reverse order
     -f "$MIGRATIONS/0001_s4_core.down.sql" >/dev/null
 
 REMAINING="$("$PSQL_BIN" "$SF_TEST_DATABASE_URL" -tAc \
-    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('users','workspaces','memberships','api_keys','sessions','audit_log','user_credentials','email_verification_tokens','password_reset_tokens','devices','plans','subscriptions','billing_webhook_events','session_enforcement_legacy_backup');")"
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('users','workspaces','memberships','api_keys','sessions','audit_log','user_credentials','email_verification_tokens','password_reset_tokens','devices','plans','subscriptions','billing_webhook_events','session_enforcement_legacy_backup','subscription_events','plan_prices');")"
 if [[ "$REMAINING" != "0" ]]; then
     echo "ERROR: rollback left $REMAINING migration table(s) behind." >&2
     exit 1
 fi
 
 COLUMN_REMAINING="$("$PSQL_BIN" "$SF_TEST_DATABASE_URL" -tAc \
-    "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'email_verified_at';")"
+    "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name IN ('email_verified_at','suspended_at');")"
 if [[ "$COLUMN_REMAINING" != "0" ]]; then
-    echo "ERROR: rollback left users.email_verified_at behind." >&2
+    echo "ERROR: rollback left an account column behind." >&2
     exit 1
 fi
 

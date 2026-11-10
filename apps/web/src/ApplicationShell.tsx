@@ -17,6 +17,7 @@ import { CommandPalette } from "./components/layout/CommandPalette";
 import { SettingsSheet } from "./components/layout/SettingsSheet";
 import { AccountAccessSheet } from "./components/layout/AccountAccessSheet";
 import { AuthModal } from "./components/auth/AuthModal";
+import { PasswordResetModal } from "./components/auth/PasswordResetModal";
 import { useAnimatedFavicon } from "./components/brand/useAnimatedFavicon";
 import { BentoCommandCenter } from "./components/home/BentoCommandCenter";
 import { CleaningStudio } from "./components/studios/CleaningStudio";
@@ -67,11 +68,13 @@ export function renderStudio(
 export interface ApplicationShellProps {
   readonly onReady?: (() => void) | undefined;
   readonly initialVerificationToken?: string | null;
+  readonly initialResetToken?: string | null;
 }
 
 export function ApplicationShell({
   onReady,
-  initialVerificationToken = null
+  initialVerificationToken = null,
+  initialResetToken = null
 }: ApplicationShellProps): ReactNode {
   const [activeTab, setActiveTab] = useState<SafiDockTabId>("home");
   const [theme, setTheme] = useState<SafiThemeId>("apple-light");
@@ -79,6 +82,7 @@ export function ApplicationShell({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(initialVerificationToken !== null);
+  const [resetOpen, setResetOpen] = useState(initialResetToken !== null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [ownerAccount, setOwnerAccount] = useState(false);
@@ -227,8 +231,18 @@ export function ApplicationShell({
                 setSessionEmail(null);
                 setOwnerAccount(false);
               }}
+              onForgotPassword={() => {
+                setAccountOpen(false);
+                setResetOpen(true);
+              }}
             />
           )}
+          <PasswordResetModal
+            open={resetOpen}
+            lang={lang}
+            initialToken={initialResetToken}
+            onClose={() => setResetOpen(false)}
+          />
         </div>
       </SmoothScrollProvider>
     </>

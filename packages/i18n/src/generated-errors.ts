@@ -59,6 +59,7 @@ export type SafiErrorCode =
   | "SF-SYS-025"
   | "SF-SYS-026"
   | "SF-SYS-030"
+  | "SF-SYS-031"
   | "SF-UNK-001"
   | "SF-UPD-001"
   | "SF-UPD-002"
@@ -184,6 +185,8 @@ export type SafiErrorTranslationKey =
   | "error.SF-SYS-026.action"
   | "error.SF-SYS-030.title"
   | "error.SF-SYS-030.action"
+  | "error.SF-SYS-031.title"
+  | "error.SF-SYS-031.action"
   | "error.SF-UNK-001.title"
   | "error.SF-UNK-001.action"
   | "error.SF-UPD-001.title"
@@ -271,6 +274,7 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-SYS-025",
   "SF-SYS-026",
   "SF-SYS-030",
+  "SF-SYS-031",
   "SF-UNK-001",
   "SF-UPD-001",
   "SF-UPD-002",
@@ -810,6 +814,16 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Check the command syntax and required arguments, then retry.",
     ownerNote: "The CLI received an unknown command or missing or invalid required arguments."
   },
+  "SF-SYS-031": {
+    code: "SF-SYS-031",
+    severity: "error",
+    titleAr: "عنوان خدمة الحساب غير مهيأ",
+    actionAr: "أعد تثبيت التطبيق بحزمة تتضمن SAFI_API_BASE_URL صالحًا، أو تواصل مع الدعم.",
+    titleEn: "Account service address is not configured",
+    actionEn: "Reinstall a build that includes a valid SAFI_API_BASE_URL, or contact support.",
+    ownerNote:
+      "The installed desktop build has no valid HTTPS API origin; it must fail closed instead of calling a local address."
+  },
   "SF-UNK-001": {
     code: "SF-UNK-001",
     severity: "fatal",
@@ -1015,6 +1029,9 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-SYS-026.action": "استخدم مسارًا يقع بالكامل داخل المجلد المراقَب.",
   "error.SF-SYS-030.title": "أمر سطر الأوامر أو معاملاته غير صالحة",
   "error.SF-SYS-030.action": "راجع صيغة الأمر والمعاملات المطلوبة ثم أعد المحاولة.",
+  "error.SF-SYS-031.title": "عنوان خدمة الحساب غير مهيأ",
+  "error.SF-SYS-031.action":
+    "أعد تثبيت التطبيق بحزمة تتضمن SAFI_API_BASE_URL صالحًا، أو تواصل مع الدعم.",
   "error.SF-UNK-001.title": "حدث خطأ غير متوقع",
   "error.SF-UNK-001.action": "أعد تشغيل التطبيق. إن تكرر الخطأ فأرسل رمز التشخيص للدعم.",
   "error.SF-UPD-001.title": "محاولة تثبيت إصدار أقدم مرفوضة",
@@ -1166,6 +1183,9 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-SYS-026.action": "Use a path that remains entirely inside the watched folder.",
   "error.SF-SYS-030.title": "CLI command or arguments are invalid",
   "error.SF-SYS-030.action": "Check the command syntax and required arguments, then retry.",
+  "error.SF-SYS-031.title": "Account service address is not configured",
+  "error.SF-SYS-031.action":
+    "Reinstall a build that includes a valid SAFI_API_BASE_URL, or contact support.",
   "error.SF-UNK-001.title": "An unexpected error occurred",
   "error.SF-UNK-001.action":
     "Restart the app. If the error repeats, send the diagnostic code to support.",

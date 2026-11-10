@@ -16,12 +16,20 @@ const loadApplicationShell = async () => {
 
 const ApplicationShell = lazy(loadApplicationShell);
 
-function readVerificationToken(): string | null {
+function readFragmentToken(key: string): string | null {
   if (typeof window === "undefined") return null;
 
   const url = new URL(window.location.href);
-  const fragmentToken = new URLSearchParams(url.hash.slice(1)).get("verify_email");
-  return fragmentToken ?? url.searchParams.get("verify_email");
+  const fragmentToken = new URLSearchParams(url.hash.slice(1)).get(key);
+  return fragmentToken ?? url.searchParams.get(key);
+}
+
+function readVerificationToken(): string | null {
+  return readFragmentToken("verify_email");
+}
+
+function readResetToken(): string | null {
+  return readFragmentToken("reset_password");
 }
 
 export function App(): ReactNode {
@@ -30,23 +38,23 @@ export function App(): ReactNode {
   const [introMounted, setIntroMounted] = useState(true);
   const [initialLang] = useState(getInitialSafiLang);
   const [verificationToken] = useState(readVerificationToken);
+  const [resetToken] = useState(readResetToken);
 
   useEffect(() => {
-    if (verificationToken !== null) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("verify_email");
-      const fragment = new URLSearchParams(url.hash.slice(1));
-      if (fragment.has("verify_email")) {
-        fragment.delete("verify_email");
-        url.hash = fragment.toString() ? `#${fragment.toString()}` : "";
-      }
-      window.history.replaceState(
-        window.history.state,
-        "",
-        `${url.pathname}${url.search}${url.hash}`
-      );
-    }
-  }, [verificationToken]);
+    if (verificationToken === null && resetToken === null) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("verify_email");
+    url.searchParams.delete("reset_password");
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    fragment.delete("verify_email");
+    fragment.delete("reset_password");
+    url.hash = fragment.toString() ? `#${fragment.toString()}` : "";
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`
+    );
+  }, [verificationToken, resetToken]);
 
   const markIntroAnimationComplete = useCallback((): void => {
     setIntroAnimationComplete(true);
@@ -73,6 +81,7 @@ export function App(): ReactNode {
         <ApplicationShell
           onReady={markApplicationReady}
           initialVerificationToken={verificationToken}
+          initialResetToken={resetToken}
         />
       </Suspense>
       {/* The custom scrollbar only mounts after the intro hands over to the website. */}

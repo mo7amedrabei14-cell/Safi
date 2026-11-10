@@ -30,6 +30,7 @@ import {
   deleteSafiAuth,
   postSafiAuth,
   SafiAuthApiError,
+  SafiAuthConfigurationError,
   type SafiLoginResponse
 } from "../../lib/auth-api";
 import type { SafiLang, SafiThemeId } from "../layout/FloatingGlassDock";
@@ -44,7 +45,12 @@ import {
   validateSignUp,
   type ExistingAccountIdentity
 } from "../../lib/auth-rules";
-import { MIN_PASSWORD_LENGTH, OAUTH_PROVIDERS, OWNER_EMAIL, TRIAL_DAYS } from "../../lib/business-config";
+import {
+  MIN_PASSWORD_LENGTH,
+  OAUTH_PROVIDERS,
+  OWNER_EMAIL,
+  TRIAL_DAYS
+} from "../../lib/business-config";
 import { canAnimate } from "../ui/motion-preference";
 
 export type AuthMode = "signin" | "signup";
@@ -68,6 +74,7 @@ export interface AuthModalProps {
   readonly sessionToken?: string | null;
   readonly sessionEmail?: string | null;
   readonly onSignedOut?: () => void;
+  readonly onForgotPassword?: () => void;
 }
 
 type Feedback =
@@ -147,7 +154,8 @@ export function AuthModal({
   existingAccounts = [],
   sessionToken = null,
   sessionEmail = null,
-  onSignedOut
+  onSignedOut,
+  onForgotPassword
 }: AuthModalProps): ReactNode {
   const isAr = lang === "ar";
   const [mode, setMode] = useState<AuthMode>(initialMode);
@@ -182,7 +190,14 @@ export function AuthModal({
     const tween = gsap.fromTo(
       panel,
       { opacity: 0, y: 18, scale: 0.985 },
-      { opacity: 1, y: 0, scale: 1, duration: 0.42, ease: "power3.out", clearProps: "transform,opacity" }
+      {
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        duration: 0.42,
+        ease: "power3.out",
+        clearProps: "transform,opacity"
+      }
     );
     return () => {
       tween.kill();
@@ -236,7 +251,14 @@ export function AuthModal({
       gsap.fromTo(
         panel,
         { opacity: 0.55, x: next === "signup" ? 22 : -22, filter: "blur(5px)" },
-        { opacity: 1, x: 0, filter: "blur(0px)", duration: 0.4, ease: "power3.out", clearProps: "x,opacity,filter" }
+        {
+          opacity: 1,
+          x: 0,
+          filter: "blur(0px)",
+          duration: 0.4,
+          ease: "power3.out",
+          clearProps: "x,opacity,filter"
+        }
       );
     }
   };
@@ -256,10 +278,7 @@ export function AuthModal({
     setFeedback(null);
 
     if (mode === "signup") {
-      const validation = validateSignUp(
-        { email, phone, password },
-        existingAccounts
-      );
+      const validation = validateSignUp({ email, phone, password }, existingAccounts);
       if (!validation.ok) {
         if (validation.violation.kind === "password_too_short") {
           setFeedback({
@@ -321,9 +340,19 @@ export function AuthModal({
         });
       }
     } catch (error) {
-      if (error instanceof SafiAuthApiError && error.code === "SF-AUTH-008") {
+      if (error instanceof SafiAuthConfigurationError) {
+        setFeedback({
+          kind: "error",
+          message: isAr
+            ? "عنوان خدمة الحساب غير مهيأ في هذا الإصدار. أعد تثبيت التطبيق بإعداد صالح أو تواصل مع الدعم."
+            : "The account service address is not configured in this build. Reinstall with a valid setup or contact support."
+        });
+      } else if (error instanceof SafiAuthApiError && error.code === "SF-AUTH-008") {
         showDuplicate();
-      } else if (error instanceof SafiAuthApiError && (error.status === 400 || error.status === 422)) {
+      } else if (
+        error instanceof SafiAuthApiError &&
+        (error.status === 400 || error.status === 422)
+      ) {
         setFeedback({
           kind: "error",
           message: isAr ? PASSWORD_TOO_SHORT_MESSAGE_AR : PASSWORD_TOO_SHORT_MESSAGE_EN
@@ -451,7 +480,11 @@ export function AuthModal({
           </div>
         ) : (
           <>
-            <div className="safi-auth-tabs" role="tablist" aria-label={isAr ? "نوع الحساب" : "Account action"}>
+            <div
+              className="safi-auth-tabs"
+              role="tablist"
+              aria-label={isAr ? "نوع الحساب" : "Account action"}
+            >
               <button
                 type="button"
                 role="tab"
@@ -554,7 +587,9 @@ export function AuthModal({
                     />
                   </label>
                   <label className="safi-auth-field" data-auth-stagger="field">
-                    <span>{isAr ? "رقم الهاتف (اختياري للتحقق)" : "Phone (optional verification)"}</span>
+                    <span>
+                      {isAr ? "رقم الهاتف (اختياري للتحقق)" : "Phone (optional verification)"}
+                    </span>
                     <input
                       type="tel"
                       name="phone"
@@ -610,10 +645,25 @@ export function AuthModal({
                           : "Show password"
                     }
                   >
-                    {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+                    {showPassword ? (
+                      <EyeOff size={17} aria-hidden="true" />
+                    ) : (
+                      <Eye size={17} aria-hidden="true" />
+                    )}
                   </button>
                 </span>
               </label>
+
+              {mode === "signin" && onForgotPassword !== undefined ? (
+                <button
+                  type="button"
+                  className="safi-auth-forgot"
+                  onClick={onForgotPassword}
+                  disabled={busy}
+                >
+                  {isAr ? "نسيت كلمة المرور؟" : "Forgot password?"}
+                </button>
+              ) : null}
 
               {mode === "signup" ? (
                 <div
@@ -643,7 +693,11 @@ export function AuthModal({
                 >
                   <span>{feedback.message}</span>
                   {feedback.kind === "duplicate" ? (
-                    <button type="button" className="safi-auth-switch" onClick={() => switchMode("signin")}>
+                    <button
+                      type="button"
+                      className="safi-auth-switch"
+                      onClick={() => switchMode("signin")}
+                    >
                       {isAr ? "الانتقال إلى تسجيل الدخول" : "Go to sign in"}
                       <ArrowRight size={14} aria-hidden="true" />
                     </button>

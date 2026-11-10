@@ -68,6 +68,24 @@ impl OwnerOnlyAction {
     }
 }
 
+/// Capability token proving the owner authorized an action. The private field
+/// makes it impossible to construct outside this module, so cross-workspace
+/// database access cannot be requested without passing the strict owner check.
+#[derive(Debug, Clone, Copy)]
+pub struct OwnerGrant {
+    _private: (),
+}
+
+/// Reject every non-owner before an owner-only action executes, and mint the
+/// capability required by owner-scoped repositories.
+pub fn authorize_owner_grant(
+    actor_email: &str,
+    action: OwnerOnlyAction,
+) -> Result<OwnerGrant, AuthError> {
+    authorize_owner(actor_email, action)?;
+    Ok(OwnerGrant { _private: () })
+}
+
 /// Reject every non-owner before an owner-only action executes.
 pub fn authorize_owner(actor_email: &str, action: OwnerOnlyAction) -> Result<(), AuthError> {
     if is_owner(actor_email) {
@@ -244,6 +262,15 @@ mod tests {
             );
             assert!(authorize_owner(OWNER_EMAIL, action).is_ok());
         }
+    }
+
+    #[test]
+    fn owner_grant_is_minted_only_for_the_owner() {
+        assert!(authorize_owner_grant(OWNER_EMAIL, OwnerOnlyAction::SuspendUser).is_ok());
+        assert_eq!(
+            authorize_owner_grant("friend@example.test", OwnerOnlyAction::SuspendUser).unwrap_err(),
+            AuthError::InsufficientScope
+        );
     }
 
     #[test]

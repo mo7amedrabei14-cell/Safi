@@ -27,8 +27,8 @@ VALUES
         'personal',
         'SafiData Individual Monthly',
         'draft',
-        2000,
-        'USD',
+        NULL,
+        NULL,
         'monthly',
         '{"ai_calls_per_month":400,"includes_premium_recipe_packs":true,"recipe_packs_duration":"active_subscription_only","watermark":false}'::JSONB
     ),
@@ -37,8 +37,8 @@ VALUES
         'personal',
         'SafiData Individual Annual',
         'draft',
-        16800,
-        'USD',
+        NULL,
+        NULL,
         'yearly',
         '{"ai_calls_per_month":400,"includes_premium_recipe_packs":true,"recipe_packs_duration":"active_subscription_only","watermark":false,"discount_percent":30}'::JSONB
     ),
@@ -47,8 +47,8 @@ VALUES
         'team',
         'SafiData Organization Seat',
         'draft',
-        1700,
-        'USD',
+        NULL,
+        NULL,
         'monthly',
         '{"ai_calls_per_seat_per_month":400,"min_seats":3,"includes_premium_recipe_packs":true,"recipe_packs_duration":"active_subscription_only","watermark":false}'::JSONB
     )
@@ -57,8 +57,8 @@ SET
     plan_tier = EXCLUDED.plan_tier,
     display_name = EXCLUDED.display_name,
     status = EXCLUDED.status,
-    price_minor = EXCLUDED.price_minor,
-    currency = EXCLUDED.currency,
+    price_minor = NULL,
+    currency = NULL,
     billing_interval = EXCLUDED.billing_interval,
     entitlements = EXCLUDED.entitlements;
 

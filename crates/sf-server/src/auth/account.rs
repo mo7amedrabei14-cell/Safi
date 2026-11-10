@@ -1693,7 +1693,9 @@ mod tests {
             serde_json::json!({
                 "email": "route@example.test",
                 "password": "A secure phrase 2026!",
-                "device_name": "Browser"
+                "device_name": "Browser",
+                "installation_id": "00000000-0000-4000-8000-000000000001",
+                "platform": "web"
             }),
         )
         .await;
@@ -1719,7 +1721,9 @@ mod tests {
             serde_json::json!({
                 "email": "route@example.test",
                 "password": "A secure phrase 2026!",
-                "device_name": "Browser"
+                "device_name": "Browser",
+                "installation_id": "00000000-0000-4000-8000-000000000001",
+                "platform": "web"
             }),
         )
         .await;

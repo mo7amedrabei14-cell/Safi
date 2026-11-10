@@ -11,6 +11,7 @@ describe("SafiData motion auth portal", () => {
     const html = renderToString(createElement(AuthModal, { open: true, onClose: noop }));
 
     expect(html).toContain("Sign In");
+    expect(html).toContain("safi-auth-close");
     expect(html).toContain("Create account — free 7-day trial (Sign Up)");
     expect(html).toContain("Continue with Google");
     expect(html).toContain("Continue with Apple");
@@ -57,4 +58,18 @@ describe("SafiData motion auth portal", () => {
     expect(html).toContain("Verified Owner — Mohamed Rabea");
     expect(html).not.toContain("sfs_owner_session");
   });
+  it("renders a mandatory sign-in gate without any close control", () => {
+    const html = renderToString(
+      createElement(AuthModal, {
+        open: true,
+        mandatory: true,
+        onClose: noop
+      })
+    );
+
+    expect(html).toContain("Sign In");
+    expect(html).toContain('class="safi-auth-modal"');
+    expect(html).not.toContain("safi-auth-close");
+  });
+
 });

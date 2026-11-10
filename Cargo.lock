@@ -2074,6 +2074,9 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
+ "sf-core",
+ "sf-io",
+ "sf-recipe",
  "tempfile",
  "zeroize",
 ]

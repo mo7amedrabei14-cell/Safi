@@ -302,6 +302,16 @@ impl ErrorCode {
         domain: ErrorDomain::Sys,
         number: 14,
     };
+    /// Registered error code `SF-SYS-015`.
+    pub const SF_SYS_015: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 15,
+    };
+    /// Registered error code `SF-SYS-016`.
+    pub const SF_SYS_016: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 16,
+    };
     /// Registered error code `SF-SYS-020`.
     pub const SF_SYS_020: Self = Self {
         domain: ErrorDomain::Sys,
@@ -452,6 +462,8 @@ impl ErrorCode {
         Self::SF_SYS_012,
         Self::SF_SYS_013,
         Self::SF_SYS_014,
+        Self::SF_SYS_015,
+        Self::SF_SYS_016,
         Self::SF_SYS_020,
         Self::SF_SYS_021,
         Self::SF_SYS_022,
@@ -1064,6 +1076,26 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Console-window suppression could not be enforced",
         action_en: "Restart the app or use an approved desktop release.",
         owner_note: "The desktop engine bridge failed to enforce the no-console process creation policy.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_015,
+        code_str: "SF-SYS-015",
+        severity: ErrorSeverity::Error,
+        title_ar: "المشروع المطلوب غير مفتوح في الاستوديو",
+        action_ar: "افتح الملف من جديد ثم أعد المحاولة.",
+        title_en: "The requested studio project is not open",
+        action_en: "Open the file again and retry.",
+        owner_note: "A studio IPC command referenced a project id that the desktop session does not hold.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_016,
+        code_str: "SF-SYS-016",
+        severity: ErrorSeverity::Error,
+        title_ar: "تعذّر حفظ ملف الكبسولة",
+        action_ar: "تحقق من صلاحية الكتابة في المجلد المختار ثم أعد المحاولة.",
+        title_en: "Could not write the capsule file",
+        action_en: "Check that the chosen folder is writable and try again.",
+        owner_note: "The atomic temp-file + fsync + rename write for a capsule export failed.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_SYS_020,

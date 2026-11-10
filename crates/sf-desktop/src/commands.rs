@@ -10,11 +10,24 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 4] = [
+pub const ALLOWED_COMMANDS: [&str; 17] = [
     "app_info",
     "take_pending_deep_link",
     "pick_input_file",
     "pick_output_file",
+    "studio_open_file",
+    "studio_state",
+    "studio_set_cell",
+    "studio_define_metric",
+    "studio_add_calculated_column",
+    "studio_apply_command",
+    "studio_undo",
+    "studio_redo",
+    "studio_grouped",
+    "studio_narrative",
+    "studio_snapshot",
+    "studio_restore",
+    "studio_export_capsule",
 ];
 
 /// Authorise an IPC command by exact name.

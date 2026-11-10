@@ -59,6 +59,8 @@ export type SafiErrorCode =
   | "SF-SYS-012"
   | "SF-SYS-013"
   | "SF-SYS-014"
+  | "SF-SYS-015"
+  | "SF-SYS-016"
   | "SF-SYS-020"
   | "SF-SYS-021"
   | "SF-SYS-022"
@@ -193,6 +195,10 @@ export type SafiErrorTranslationKey =
   | "error.SF-SYS-013.action"
   | "error.SF-SYS-014.title"
   | "error.SF-SYS-014.action"
+  | "error.SF-SYS-015.title"
+  | "error.SF-SYS-015.action"
+  | "error.SF-SYS-016.title"
+  | "error.SF-SYS-016.action"
   | "error.SF-SYS-020.title"
   | "error.SF-SYS-020.action"
   | "error.SF-SYS-021.title"
@@ -298,6 +304,8 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-SYS-012",
   "SF-SYS-013",
   "SF-SYS-014",
+  "SF-SYS-015",
+  "SF-SYS-016",
   "SF-SYS-020",
   "SF-SYS-021",
   "SF-SYS-022",
@@ -845,6 +853,25 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Restart the app or use an approved desktop release.",
     ownerNote: "The desktop engine bridge failed to enforce the no-console process creation policy."
   },
+  "SF-SYS-015": {
+    code: "SF-SYS-015",
+    severity: "error",
+    titleAr: "المشروع المطلوب غير مفتوح في الاستوديو",
+    actionAr: "افتح الملف من جديد ثم أعد المحاولة.",
+    titleEn: "The requested studio project is not open",
+    actionEn: "Open the file again and retry.",
+    ownerNote:
+      "A studio IPC command referenced a project id that the desktop session does not hold."
+  },
+  "SF-SYS-016": {
+    code: "SF-SYS-016",
+    severity: "error",
+    titleAr: "تعذّر حفظ ملف الكبسولة",
+    actionAr: "تحقق من صلاحية الكتابة في المجلد المختار ثم أعد المحاولة.",
+    titleEn: "Could not write the capsule file",
+    actionEn: "Check that the chosen folder is writable and try again.",
+    ownerNote: "The atomic temp-file + fsync + rename write for a capsule export failed."
+  },
   "SF-SYS-020": {
     code: "SF-SYS-020",
     severity: "error",
@@ -1134,6 +1161,10 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-SYS-013.action": "تأكد أن الملف غير فارغ ولا يتجاوز 250 MiB.",
   "error.SF-SYS-014.title": "تعذّر فرض منع نافذة الأوامر",
   "error.SF-SYS-014.action": "أعد تشغيل التطبيق أو استخدم إصدار سطح المكتب المعتمد.",
+  "error.SF-SYS-015.title": "المشروع المطلوب غير مفتوح في الاستوديو",
+  "error.SF-SYS-015.action": "افتح الملف من جديد ثم أعد المحاولة.",
+  "error.SF-SYS-016.title": "تعذّر حفظ ملف الكبسولة",
+  "error.SF-SYS-016.action": "تحقق من صلاحية الكتابة في المجلد المختار ثم أعد المحاولة.",
   "error.SF-SYS-020.title": "كلمة سر الخزنة قصيرة جدًا",
   "error.SF-SYS-020.action": "استخدم عبارة سر لا تقل عن 8 أحرف.",
   "error.SF-SYS-021.title": "ملح التشفير غير صالح",
@@ -1305,6 +1336,10 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-SYS-013.action": "Use a non-empty file no larger than 250 MiB.",
   "error.SF-SYS-014.title": "Console-window suppression could not be enforced",
   "error.SF-SYS-014.action": "Restart the app or use an approved desktop release.",
+  "error.SF-SYS-015.title": "The requested studio project is not open",
+  "error.SF-SYS-015.action": "Open the file again and retry.",
+  "error.SF-SYS-016.title": "Could not write the capsule file",
+  "error.SF-SYS-016.action": "Check that the chosen folder is writable and try again.",
   "error.SF-SYS-020.title": "Vault passphrase is too short",
   "error.SF-SYS-020.action": "Use a passphrase with at least 8 characters.",
   "error.SF-SYS-021.title": "Encryption salt is invalid",

@@ -8,6 +8,7 @@ pub mod error;
 pub mod installer;
 pub mod license;
 pub mod signing;
+pub mod studio;
 pub mod updater;
 pub mod vault;
 pub mod watcher;

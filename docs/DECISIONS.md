@@ -200,3 +200,20 @@
   - أداء المحرك الحالي مقاس على جداول اختبار اصطناعية صغيرة فقط؛ لا ادعاء 16ms ولا استيعاب 500 ألف صف قبل Benchmark معلن.
   - الوصول إلى Arrow/Polars يبقى ممكنًا لاحقًا كترقية موثقة إذا أثبت Benchmark حاجة فعلية.
   - اختيار WebLLM محليًا لمزوّد Phase 2 مسجل هنا أيضًا: لا تُرسل أسماء أعمدة أو قيم إلى خدمة خارجية.
+
+## ADR-0014 — The Studio engine executes in the desktop app, never in the webview
+
+**Status:** Accepted · 2026-11-11
+
+- The web build is a showcase site; it carries no engine, no WASM bundle and no file parsing.
+- Execution lives in `crates/sf-desktop/src/studio.rs` and reaches the UI only through 13
+  allowlisted Tauri commands (`studio_*`). `ALLOWED_COMMANDS` is the single place that decides
+  what the webview may call, and every command returns a JSON snapshot produced by Rust.
+- Imports read from disk with `PlatformLimits::DESKTOP_CLI`, refuse anything above 50 MiB, and
+  reject unsupported extensions before opening the file.
+- Capsule export writes a new file atomically (temp sibling → `fsync` → rename); the imported
+  source file is never modified.
+- Two desktop codes were added: `SF-SYS-015` (project not open) and `SF-SYS-016` (capsule write
+  failed). No new domain was introduced.
+- Remaining: the Studio *window* inside the desktop app is not built yet; the command layer and
+  its tests exist so that UI can be written without touching the engine.

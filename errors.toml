@@ -402,6 +402,22 @@ title_en = "Console-window suppression could not be enforced"
 action_en = "Restart the app or use an approved desktop release."
 owner_note = "The desktop engine bridge failed to enforce the no-console process creation policy."
 
+[SF-SYS-015]
+severity = "error"
+title_ar = "المشروع المطلوب غير مفتوح في الاستوديو"
+action_ar = "افتح الملف من جديد ثم أعد المحاولة."
+title_en = "The requested studio project is not open"
+action_en = "Open the file again and retry."
+owner_note = "A studio IPC command referenced a project id that the desktop session does not hold."
+
+[SF-SYS-016]
+severity = "error"
+title_ar = "تعذّر حفظ ملف الكبسولة"
+action_ar = "تحقق من صلاحية الكتابة في المجلد المختار ثم أعد المحاولة."
+title_en = "Could not write the capsule file"
+action_en = "Check that the chosen folder is writable and try again."
+owner_note = "The atomic temp-file + fsync + rename write for a capsule export failed."
+
 [SF-SYS-020]
 severity = "error"
 title_ar = "كلمة سر الخزنة قصيرة جدًا"

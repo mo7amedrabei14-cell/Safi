@@ -16,6 +16,11 @@ ed25519-dalek = { version = "=2.2.0", features = ["serde"] }
 hex = "=0.4.3"
 rand = "=0.8.8"
 
+# The desktop app is the only place the Studio engine executes (AGENTS: web is a showcase).
+sf-core = { path = "../sf-core" }
+sf-io = { path = "../sf-io" }
+sf-recipe = { path = "../sf-recipe" }
+
 [dev-dependencies]
 serde_json = "=1.0.135"
 tempfile = "=3.27.0"

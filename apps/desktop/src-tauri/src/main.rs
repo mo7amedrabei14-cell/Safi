@@ -14,6 +14,7 @@
 use std::sync::Mutex;
 
 use sf_desktop::deep_link::DeepLinkAction;
+use sf_desktop::studio::StudioStore;
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
@@ -68,6 +69,131 @@ async fn pick_output_file(app: tauri::AppHandle) -> Result<Option<String>, &'sta
     .map_err(|_| "SF-SYS-011")
 }
 
+/// Current wall clock in milliseconds; the engine takes time as an argument so it stays
+/// replayable in tests.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Every studio command below delegates to `sf_desktop::studio`, where the engine actually
+/// runs. The webview only ever receives JSON snapshots.
+
+#[tauri::command]
+fn studio_open_file(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    path: String,
+) -> Result<String, String> {
+    store.open_file(&project, std::path::Path::new(&path), now_ms())
+}
+
+#[tauri::command]
+fn studio_state(store: tauri::State<'_, StudioStore>, project: String) -> Result<String, String> {
+    store.state(&project)
+}
+
+#[tauri::command]
+fn studio_set_cell(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    row: usize,
+    column: String,
+    value: String,
+) -> Result<String, String> {
+    store.set_cell(&project, row, &column, &value, now_ms())
+}
+
+#[tauri::command]
+fn studio_define_metric(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    id: String,
+    name: String,
+    unit: Option<String>,
+    formula: String,
+) -> Result<String, String> {
+    store.define_metric(&project, &id, &name, unit.as_deref(), &formula, now_ms())
+}
+
+#[tauri::command]
+fn studio_add_calculated_column(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    name: String,
+    formula: String,
+) -> Result<String, String> {
+    store.add_calculated_column(&project, &name, &formula, now_ms())
+}
+
+#[tauri::command]
+fn studio_apply_command(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    command: String,
+) -> Result<String, String> {
+    store.apply_command(&project, &command, now_ms())
+}
+
+#[tauri::command]
+fn studio_undo(store: tauri::State<'_, StudioStore>, project: String) -> Result<String, String> {
+    store.undo(&project, now_ms())
+}
+
+#[tauri::command]
+fn studio_redo(store: tauri::State<'_, StudioStore>, project: String) -> Result<String, String> {
+    store.redo(&project, now_ms())
+}
+
+#[tauri::command]
+fn studio_grouped(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    function: String,
+    column: String,
+    group_by: String,
+) -> Result<String, String> {
+    store.grouped(&project, &function, &column, &group_by)
+}
+
+#[tauri::command]
+fn studio_narrative(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    template: String,
+) -> Result<String, String> {
+    store.narrative(&project, &template)
+}
+
+#[tauri::command]
+fn studio_snapshot(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+) -> Result<String, String> {
+    store.snapshot(&project)
+}
+
+#[tauri::command]
+fn studio_restore(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    snapshot: String,
+) -> Result<String, String> {
+    store.restore(&project, &snapshot, now_ms())
+}
+
+#[tauri::command]
+fn studio_export_capsule(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    target: String,
+    options: String,
+) -> Result<String, String> {
+    store.export_capsule(&project, std::path::Path::new(&target), &options)
+}
+
 fn main() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -82,10 +208,24 @@ fn main() {
             app_info,
             take_pending_deep_link,
             pick_input_file,
-            pick_output_file
+            pick_output_file,
+            studio_open_file,
+            studio_state,
+            studio_set_cell,
+            studio_define_metric,
+            studio_add_calculated_column,
+            studio_apply_command,
+            studio_undo,
+            studio_redo,
+            studio_grouped,
+            studio_narrative,
+            studio_snapshot,
+            studio_restore,
+            studio_export_capsule
         ])
         .setup(|app| {
             app.manage(PendingDeepLink::default());
+            app.manage(StudioStore::new());
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",

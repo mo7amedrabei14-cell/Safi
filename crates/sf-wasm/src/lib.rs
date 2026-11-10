@@ -13,6 +13,8 @@
 
 use wasm_bindgen::prelude::*;
 
+pub mod studio;
+
 use sf_clean::{CleanDelta, CleanEngine, CleanOptions};
 use sf_core::error::{ErrorCode, ErrorSeverity, SafiError};
 use sf_core::limits::PlatformLimits;

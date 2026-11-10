@@ -423,7 +423,7 @@ SELECT set_config('app.user_id', '10000000-0000-7000-8000-000000000001', true);
 SELECT set_config('app.auth_lookup', 'false', true);
 SELECT set_config('app.owner_admin', 'false', true);
 
-DO $
+DO $$
 DECLARE
     row_count INTEGER;
 BEGIN

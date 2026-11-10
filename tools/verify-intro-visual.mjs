@@ -78,7 +78,7 @@ try {
       motionStartedAt: null,
       motionCompletedAt: null,
       fontsReadyAt: null,
-      applicationMountedAt: null,
+      applicationEntryMountedAt: null,
       exitStartedAt: null,
       introRemovedAt: null,
       bootFrame: null,
@@ -125,8 +125,12 @@ try {
           trace.exitStartedAt = performance.now();
         }
       }
-      if (trace && trace.applicationMountedAt === null && document.querySelector(".safi-shell")) {
-        trace.applicationMountedAt = performance.now();
+      if (
+        trace &&
+        trace.applicationEntryMountedAt === null &&
+        document.querySelector(".safi-auth-modal, .safi-shell")
+      ) {
+        trace.applicationEntryMountedAt = performance.now();
       }
       if (
         (trace?.exitStartedAt !== null && !react) ||
@@ -244,7 +248,11 @@ try {
     const root = document.querySelector("#root .safi-intro-splash");
     const arrowPath = root?.querySelector(".safi-intro-transition-path");
     return {
-      applicationMounted: Boolean(document.querySelector(".safi-shell")),
+      authenticationGateMounted: Boolean(document.querySelector(".safi-auth-modal")),
+      workspaceMounted: Boolean(document.querySelector(".safi-shell")),
+      applicationEntryMounted: Boolean(
+        document.querySelector(".safi-auth-modal, .safi-shell")
+      ),
       motionCompletedAt: window.__safiIntroTrace?.motionCompletedAt ?? null,
       introOpacity: root ? Number(getComputedStyle(root).opacity) : null,
       introClipPath: root ? getComputedStyle(root).clipPath : null,
@@ -255,9 +263,19 @@ try {
     };
   });
   assert.equal(
-    siteHandoff.applicationMounted,
+    siteHandoff.applicationEntryMounted,
     true,
-    "The site must be mounted under the exiting intro."
+    "The application entry gate must be mounted under the exiting intro."
+  );
+  assert.equal(
+    siteHandoff.authenticationGateMounted,
+    true,
+    "The mandatory sign-in gate must be mounted under the exiting intro."
+  );
+  assert.equal(
+    siteHandoff.workspaceMounted,
+    false,
+    "The product workspace must remain unmounted until authentication."
   );
   assert.ok(siteHandoff.introOpacity > 0.95);
   assert.match(siteHandoff.introClipPath ?? "", /^circle\(/);
@@ -275,7 +293,10 @@ try {
   const finalTrace = await page.evaluate(() => ({ ...window.__safiIntroTrace }));
   const exitDurationMs = finalTrace.introRemovedAt - finalTrace.exitStartedAt;
   const entranceMotionDurationMs = finalTrace.motionCompletedAt - handoff.motionStartedAt;
-  assert.ok(finalTrace.applicationMountedAt !== null, "The application was not loaded under the intro.");
+  assert.ok(
+    finalTrace.applicationEntryMountedAt !== null,
+    "The application entry gate was not loaded under the intro."
+  );
   assert.ok(
     entranceMotionDurationMs <= 1_000,
     `The entrance motion felt delayed: ${entranceMotionDurationMs}ms.`

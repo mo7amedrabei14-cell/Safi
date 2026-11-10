@@ -165,8 +165,7 @@ export function ApplicationShell({
       : (activeTabConfig?.labelEn ?? "Website");
 
   const authenticationRequired = sessionToken === null;
-  const verificationSheetOpen =
-    initialVerificationToken !== null && accountOpen && !resetOpen;
+  const verificationSheetOpen = initialVerificationToken !== null && accountOpen && !resetOpen;
   const authModalOpen =
     !resetOpen && !verificationSheetOpen && (authenticationRequired || accountOpen);
 

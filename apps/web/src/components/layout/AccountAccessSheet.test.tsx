@@ -62,5 +62,4 @@ describe("account access sheet", () => {
 
     expect(source).toContain("onAuthenticated(result.token, normalizedEmail)");
   });
-
 });

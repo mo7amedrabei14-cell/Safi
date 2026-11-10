@@ -71,5 +71,4 @@ describe("SafiData motion auth portal", () => {
     expect(html).toContain('class="safi-auth-modal"');
     expect(html).not.toContain("safi-auth-close");
   });
-
 });

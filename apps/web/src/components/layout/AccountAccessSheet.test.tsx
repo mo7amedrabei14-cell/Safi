@@ -56,4 +56,11 @@ describe("account access sheet", () => {
     expect(html).not.toContain("sfs_test_secret_token");
     expect(html).toContain("Sign out");
   });
+  it("passes the normalized email with the successful sign-in token", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./AccountAccessSheet.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain("onAuthenticated(result.token, normalizedEmail)");
+  });
+
 });

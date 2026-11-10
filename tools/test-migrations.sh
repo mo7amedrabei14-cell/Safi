@@ -394,15 +394,30 @@ BEGIN
     )
     RETURNING id INTO post_migration_device_id;
 
+    -- The app session service stores created_at at whole-second precision.
+    -- Force the new session into the migration's own second to cover the
+    -- boundary where created_at is earlier than its fractional migration time.
     INSERT INTO sessions (
-        workspace_id, user_id, device_id, token_hash, device_name, expires_at
+        workspace_id, user_id, device_id, token_hash, device_name,
+        expires_at, created_at, last_seen_at
     ) VALUES (
         '20000000-0000-7000-8000-000000000001',
         '10000000-0000-7000-8000-000000000001',
         post_migration_device_id,
         decode(repeat('9', 64), 'hex'),
         'P0.04 Post-migration Session',
-        now() + INTERVAL '30 minutes'
+        now() + INTERVAL '30 minutes',
+        (
+            SELECT date_trunc('second', migration_revoked_at)
+            FROM sessions_p004_legacy_backup
+            WHERE session_id = (
+                SELECT id
+                FROM sessions
+                WHERE user_id = '10000000-0000-7000-8000-000000000001'
+                  AND device_name = 'P0.04 Legacy Session One'
+            )
+        ),
+        now()
     );
 END
 $do$;

@@ -6,6 +6,9 @@ BEGIN;
 
 -- Restore only the migration's own rows while the temporary auth-lookup
 -- UPDATE policies are still present, even for a non-BYPASSRLS migration role.
+-- Session timestamps are created from UNIX seconds in the app. Compare with
+-- the start of the migration second so a login in that same second is treated
+-- as newer activity rather than resurrecting a legacy session on rollback.
 SELECT set_config('app.auth_lookup', 'true', true);
 
 UPDATE sessions AS target
@@ -18,7 +21,7 @@ WHERE target.id = backup.session_id
       FROM sessions AS newer
       WHERE newer.user_id = target.user_id
         AND newer.id <> target.id
-        AND newer.created_at > backup.migration_revoked_at
+        AND newer.created_at >= date_trunc('second', backup.migration_revoked_at)
   );
 
 UPDATE devices AS target

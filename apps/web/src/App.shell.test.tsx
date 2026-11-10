@@ -22,24 +22,20 @@ describe("SafiData startup and application shell", () => {
     expect(html).not.toContain("data-safi-word");
   });
 
-  it("renders the home stage and six-tab dock after the intro handoff", () => {
+  it("keeps the mandatory account gate in place after the intro handoff", () => {
     const html = renderToString(createElement(ApplicationShell, { onReady: noop }));
 
     expect(SHELL_TABS).toEqual(["home", "cleaning", "recipes", "charts", "library", "owner"]);
-    expect(html).toContain('data-active-tab="home"');
-    expect(html).toContain("Welcome");
-    expect(html).toContain("SafiData");
-    expect(html).toContain("Intelligent Universal Data Engineering");
-    expect(html).toContain("Account");
-    expect(html).toContain("Certified Gold Edition v1.0.0-s5-gold");
-
-    for (const label of ["Website", "Library", "Settings"]) {
-      expect(html).toContain(label);
-    }
-    expect(html.split("data-tab-id=").length - 1).toBe(DOCK_TABS.length);
-    expect(html).toContain("⌘K");
-    expect(html).not.toContain('role="dialog"');
-    expect(html).toContain('role="status"');
+    expect(DOCK_TABS).toHaveLength(6);
+    expect(html).toContain("SAFIDATA IDENTITY");
+    expect(html).toContain("Sign In");
+    expect(html).toContain('class="safi-auth-modal"');
+    expect(html).not.toContain('class="safi-shell"');
+    expect(html).not.toContain('class="safi-topbar"');
+    expect(html).not.toContain('data-active-tab="home"');
+    expect(html).not.toContain("Intelligent Universal Data Engineering");
+    expect(html).not.toContain("⌘K");
+    expect(html).toContain('role="dialog"');
   });
 
   it("keeps the PWA name and public share card aligned with the English default", () => {

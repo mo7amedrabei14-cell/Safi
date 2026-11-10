@@ -88,7 +88,7 @@ impl AuthService {
         if !verify_secret(secret, &record.secret_hash) {
             return Err(AuthError::InvalidCredentials);
         }
-        if record.revoked || record.device_revoked || record.account_disabled {
+        if record.revoked {
             return Err(AuthError::Revoked);
         }
         if record.is_expired_at(unix_now()) {
@@ -184,7 +184,7 @@ impl AuthService {
             .await?
             .ok_or(AuthError::InvalidCredentials)?;
 
-        if record.revoked {
+        if record.revoked || record.device_revoked || record.account_disabled {
             let _ = self.cache.delete(&cache_key).await;
             return Err(AuthError::Revoked);
         }

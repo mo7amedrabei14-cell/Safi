@@ -1389,10 +1389,6 @@ impl DataGraph {
         })
     }
 
-    /// Rebuilds the derived table: source edits are replayed on the immutable original, then
-    /// every calculated column is re-derived in creation order. Calculated columns are derived
-    /// state, not point-in-time patches, which is what makes `replay() == working()` hold.
-
     /// Groups the working table by one column and aggregates another, all in Rust.
     ///
     /// Dashboards and the exported capsule render these values; they never aggregate by
@@ -1483,6 +1479,9 @@ impl DataGraph {
         Ok(groups)
     }
 
+    /// Rebuilds the derived table: source edits are replayed on the immutable original, then
+    /// every calculated column is re-derived in creation order. Calculated columns are derived
+    /// state, not point-in-time patches, which is what makes `replay() == working()` hold.
     fn rebuild_with(&self, origin: &Table) -> Result<Table, SafiError> {
         let mut table = origin.clone();
         for transformation in &self.transforms {

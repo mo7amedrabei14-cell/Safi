@@ -4,6 +4,7 @@
 use crate::column::Column;
 use crate::error::{ErrorCode, ErrorSeverity, SafeLogMetrics, SafiError};
 use crate::value::CellValue;
+use serde::{Deserialize, Serialize};
 
 /// Official data quality score dimension weights (0..=100 total) from Specification Section 4.11:
 /// «الاكتمال 25، الاتساق 25، الصلاحية 20، التفرّد 15، المنطقية 15».
@@ -27,7 +28,7 @@ impl DataQualityWeights {
 }
 
 /// Rectangular table of [`Column`]s where every column is guaranteed to have the same row count.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Table {
     id: String,
     name: String,
@@ -148,7 +149,7 @@ impl Table {
 
 /// Worksheet (`Sheet`) within a workbook or file, supporting one or multiple detected tables
 /// per sheet as required by Specification Section 4.2 («الأوراق المتعددة، وأكثر من جدول في الورقة الواحدة»).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Sheet {
     index: usize,
     name: String,

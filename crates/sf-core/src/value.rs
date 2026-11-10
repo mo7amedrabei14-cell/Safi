@@ -194,7 +194,7 @@ impl Value {
 /// Controls whether a cell displays the user's untouched original text or the normalized/cleaned text
 /// (Specification Section 4.4: «النص الأصلي يُحفظ دائمًا، وتُحسب نسخة موحَّدة تُستخدم في المطابقة فقط.
 /// استبدال النص الظاهر خيار يختاره المستخدم»).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CellDisplayMode {
     /// Display the original untouched text (`raw`) while using `normalized` for matching (Default).
     #[default]
@@ -205,7 +205,7 @@ pub enum CellDisplayMode {
 
 /// A table cell that ALWAYS preserves the original raw text alongside its normalized matching form
 /// and structured [`Value`] (Specification Section 4.4).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CellValue {
     raw: String,
     normalized: Option<String>,

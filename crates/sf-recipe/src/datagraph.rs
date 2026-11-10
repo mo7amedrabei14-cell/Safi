@@ -604,7 +604,7 @@ impl FormulaContext for CellContext<'_> {
 }
 
 /// A recorded, replayable change.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Transformation {
     /// Replace one cell of a source column.
     SetCell {
@@ -660,7 +660,7 @@ pub struct ChangeOutcome {
 }
 
 /// A named set of What-If parameter overrides.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Scenario {
     id: ScenarioId,
     name: String,
@@ -1392,6 +1392,97 @@ impl DataGraph {
     /// Rebuilds the derived table: source edits are replayed on the immutable original, then
     /// every calculated column is re-derived in creation order. Calculated columns are derived
     /// state, not point-in-time patches, which is what makes `replay() == working()` hold.
+
+    /// Groups the working table by one column and aggregates another, all in Rust.
+    ///
+    /// Dashboards and the exported capsule render these values; they never aggregate by
+    /// themselves. Groups appear in first-appearance order, which keeps output deterministic.
+    ///
+    /// # Errors
+    /// `SF-CAL-001` for an unknown column, `SF-CAL-004` for a non-numeric value in a numeric
+    /// aggregation.
+    pub fn grouped_aggregate(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<Vec<GroupedValue>, SafiError> {
+        let group_column = self
+            .working
+            .column_by_name(group_by)
+            .ok_or_else(unknown_column)?;
+        let value_column = self
+            .working
+            .column_by_name(column)
+            .ok_or_else(unknown_column)?;
+        let mut order: Vec<String> = Vec::new();
+        let mut buckets: BTreeMap<String, (Decimal, u64, Vec<u64>)> = BTreeMap::new();
+        for row in 0..self.working.row_count() {
+            let label = group_column
+                .cell_at(row)
+                .map(|cell| cell.visible_text().to_owned())
+                .unwrap_or_default();
+            let entry = match buckets.get(&label) {
+                Some(existing) => existing.clone(),
+                None => {
+                    order.push(label.clone());
+                    (Decimal::ZERO, 0, Vec::new())
+                }
+            };
+            let (mut sum, mut count, mut rows) = entry;
+            let cell = value_column.cell_at(row).ok_or_else(invalid_request)?;
+            if !cell.is_empty() {
+                if matches!(function, AggFunc::Count) {
+                    count += 1;
+                } else {
+                    let number = cell_number(cell).ok_or_else(type_mismatch)?;
+                    sum = sum.checked_add(number).ok_or_else(type_mismatch)?;
+                    count += 1;
+                }
+                rows.push(row as u64);
+            }
+            let _ = buckets.insert(label, (sum, count, rows));
+        }
+        let mut groups = Vec::with_capacity(order.len());
+        for label in order {
+            let (sum, count, rows) = buckets.remove(&label).ok_or_else(invalid_request)?;
+            let value = match function {
+                AggFunc::Count => Decimal::from(count),
+                AggFunc::Sum => sum,
+                AggFunc::Avg => {
+                    if count == 0 {
+                        Decimal::ZERO
+                    } else {
+                        sum.checked_div(Decimal::from(count))
+                            .ok_or_else(type_mismatch)?
+                            .round_dp(AVERAGE_SCALE)
+                    }
+                }
+                AggFunc::Min | AggFunc::Max => {
+                    let mut extreme: Option<Decimal> = None;
+                    for row in &rows {
+                        let cell = value_column
+                            .cell_at(*row as usize)
+                            .ok_or_else(invalid_request)?;
+                        let number = cell_number(cell).ok_or_else(type_mismatch)?;
+                        extreme = Some(match (function, extreme) {
+                            (AggFunc::Min, Some(current)) => current.min(number),
+                            (AggFunc::Max, Some(current)) => current.max(number),
+                            _ => number,
+                        });
+                    }
+                    extreme.ok_or_else(type_mismatch)?
+                }
+            };
+            groups.push(GroupedValue {
+                label,
+                value,
+                row_refs: rows,
+            });
+        }
+        Ok(groups)
+    }
+
     fn rebuild_with(&self, origin: &Table) -> Result<Table, SafiError> {
         let mut table = origin.clone();
         for transformation in &self.transforms {
@@ -1576,12 +1667,82 @@ impl DataGraph {
     }
 }
 
+/// Schema version of a persisted Studio project.
+pub const PROJECT_SCHEMA_VERSION: u32 = 1;
+
+/// Public, serializable description of a metric definition (used by project persistence).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MetricSpec {
+    /// Stable metric identifier.
+    pub id: MetricId,
+    /// Display name.
+    pub name: String,
+    /// Optional unit.
+    pub unit: Option<String>,
+    /// Formula source text.
+    pub formula: String,
+    /// Monotonic formula version.
+    pub formula_version: u32,
+}
+
+/// A complete, verifiable Studio project.
+///
+/// Restoring replays the recorded transformations on the stored origin and then re-derives every
+/// metric, so a tampered number in the file cannot be presented as verified: the token is
+/// recomputed from the data and the formula only.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ProjectSnapshot {
+    /// Snapshot schema version.
+    pub schema_version: u32,
+    /// Source identifier.
+    pub source_id: SourceId,
+    /// Immutable original dataset.
+    pub origin: Table,
+    /// Fingerprint of the original dataset at save time.
+    pub origin_fingerprint: String,
+    /// Published dataset version.
+    pub dataset_version: u64,
+    /// Published revision.
+    pub revision: u64,
+    /// Recorded transformations in order.
+    pub transformations: Vec<Transformation>,
+    /// Metric definitions.
+    pub metrics: Vec<MetricSpec>,
+    /// What-If parameter defaults.
+    pub parameters: BTreeMap<String, Decimal>,
+    /// Saved scenarios.
+    pub scenarios: Vec<Scenario>,
+}
+
 fn metric_decimal(token: &VerifiedMetricToken) -> Result<Decimal, SafiError> {
     match &token.value {
         Value::Decimal(value) | Value::Percentage(value) => Ok(*value),
         Value::Integer(integer) => Ok(Decimal::from(*integer)),
         _ => Err(type_mismatch()),
     }
+}
+
+/// Formats a metric value for display and narrative substitution without float conversion.
+#[must_use]
+pub fn datagraph_display(value: &Value) -> String {
+    match value {
+        Value::Decimal(decimal) | Value::Percentage(decimal) => decimal.normalize().to_string(),
+        Value::Integer(integer) => integer.to_string(),
+        Value::Money(money) => money.amount.normalize().to_string(),
+        Value::Empty => String::new(),
+        other => other.to_canonical_string(),
+    }
+}
+
+/// One row of a grouped aggregation computed by Rust (dashboards and the offline capsule).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupedValue {
+    /// Group label taken from the source cells.
+    pub label: String,
+    /// Exact aggregated value.
+    pub value: Decimal,
+    /// Rows that fed this group.
+    pub row_refs: Vec<u64>,
 }
 
 /// Returns `true` when two tables are byte-identical for Studio purposes.

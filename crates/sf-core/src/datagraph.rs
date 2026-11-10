@@ -104,6 +104,12 @@ impl DatasetVersion {
     pub const fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
+
+    /// Rebuilds a version from a persisted project file.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
 }
 
 /// Monotonic revision of the Studio state; used to reject stale worker replies.
@@ -127,6 +133,12 @@ impl Revision {
     #[must_use]
     pub const fn next(self) -> Self {
         Self(self.0.saturating_add(1))
+    }
+
+    /// Rebuilds a revision from a persisted project file.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
     }
 }
 

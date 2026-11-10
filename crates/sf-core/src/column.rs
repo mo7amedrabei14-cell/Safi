@@ -5,6 +5,7 @@ use std::fmt;
 
 use crate::error::{ErrorCode, ErrorSeverity, SafiError};
 use crate::value::CellValue;
+use serde::{Deserialize, Serialize};
 
 /// Maximum number of sample values inspected per column during type profiling (`10,000` — Section 4.3).
 pub const MAX_COLUMN_SAMPLE_VALUES: usize = 10_000;
@@ -17,7 +18,9 @@ pub const AUTO_APPLY_CONFIDENCE_THRESHOLD: f64 = 0.8;
 pub const USER_CONFIRM_CONFIDENCE_THRESHOLD: f64 = 0.5;
 
 /// The 12 standard column types in Specification Section 4.3 plus [`ColumnType::Unknown`] («غير معروف»).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub enum ColumnType {
     /// 1. «اسم شخص» — Person full or partial name (`Section 4.3`).
     PersonName,
@@ -175,7 +178,8 @@ pub enum ConfidenceDecision {
 }
 
 /// Validated confidence score in `[0.0, 1.0]` with standard threshold evaluation (Section 4.3).
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ConfidenceScore(f64);
 
 impl ConfidenceScore {
@@ -259,7 +263,7 @@ impl Default for ConfidenceScore {
 }
 
 /// Metadata and inferred type schema for a single column (`ColumnSchema`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ColumnSchema {
     /// Zero-based column position in the table.
     pub index: usize,
@@ -318,7 +322,7 @@ impl ColumnSchema {
 }
 
 /// A complete table column combining its [`ColumnSchema`] and ordered [`CellValue`] vector.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     schema: ColumnSchema,
     cells: Vec<CellValue>,

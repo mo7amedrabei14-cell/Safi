@@ -49,6 +49,8 @@ try {
   const page = await context.newPage();
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
 
+  await page.locator(".safi-intro-skip").click();
+  await page.locator(".safi-intro-splash").waitFor({ state: "detached" });
   await page.locator(".safi-auth-modal").waitFor({ state: "visible" });
   assert.equal(
     await page.locator(".safi-auth-close").count(),
@@ -71,6 +73,12 @@ try {
     await page.locator(".safi-auth-modal").count(),
     1,
     "Escape must not dismiss the mandatory authentication gate."
+  );
+  await page.locator(".safi-auth-backdrop").click({ position: { x: 4, y: 4 } });
+  assert.equal(
+    await page.locator(".safi-auth-modal").count(),
+    1,
+    "Clicking outside the login panel must not dismiss the mandatory gate."
   );
 
   const first = await page.evaluate(async () => {

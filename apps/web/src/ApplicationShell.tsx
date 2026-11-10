@@ -27,6 +27,7 @@ import { LibraryStudio } from "./components/studios/LibraryStudio";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { canAnimate } from "./components/ui/motion-preference";
 import { applySafiLang, getInitialSafiLang } from "./lib/locale";
+import { isOwnerEmail } from "./lib/auth-rules";
 
 export const SHELL_TABS: readonly SafiDockTabId[] = DOCK_TABS.map((tab) => tab.id);
 
@@ -121,6 +122,7 @@ export function ApplicationShell({
   }, [lang]);
 
   useEffect(() => {
+    if (sessionToken === null) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -132,7 +134,7 @@ export function ApplicationShell({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, []);
+  }, [sessionToken]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -162,6 +164,79 @@ export function ApplicationShell({
       ? (activeTabConfig?.label ?? "الرئيسية")
       : (activeTabConfig?.labelEn ?? "Website");
 
+  const authenticationRequired = sessionToken === null;
+  const verificationSheetOpen =
+    initialVerificationToken !== null && accountOpen && !resetOpen;
+  const authModalOpen =
+    !resetOpen && !verificationSheetOpen && (authenticationRequired || accountOpen);
+
+  const accountAccessPortal =
+    initialVerificationToken === null ? null : (
+      <AccountAccessSheet
+        open={verificationSheetOpen}
+        onClose={() => setAccountOpen(false)}
+        lang={lang}
+        verificationToken={initialVerificationToken}
+        sessionToken={sessionToken}
+        onAuthenticated={(token, email) => {
+          setSessionToken(token);
+          setSessionEmail(email);
+          setOwnerAccount(isOwnerEmail(email));
+        }}
+        onLoggedOut={() => {
+          setSessionToken(null);
+          setSessionEmail(null);
+          setOwnerAccount(false);
+        }}
+      />
+    );
+
+  const authPortal = (
+    <AuthModal
+      open={authModalOpen}
+      mandatory={authenticationRequired}
+      onClose={() => setAccountOpen(false)}
+      lang={lang}
+      theme={theme}
+      sessionToken={sessionToken}
+      sessionEmail={sessionEmail}
+      onAuthenticated={(session) => {
+        setSessionToken(session.token);
+        setSessionEmail(session.email);
+        setOwnerAccount(session.isOwner);
+      }}
+      onOwnerDetected={() => setOwnerAccount(true)}
+      onSignedOut={() => {
+        setSessionToken(null);
+        setSessionEmail(null);
+        setOwnerAccount(false);
+      }}
+      onForgotPassword={() => {
+        setAccountOpen(false);
+        setResetOpen(true);
+      }}
+    />
+  );
+
+  const passwordResetPortal = (
+    <PasswordResetModal
+      open={resetOpen}
+      lang={lang}
+      initialToken={initialResetToken}
+      onClose={() => setResetOpen(false)}
+    />
+  );
+
+  if (authenticationRequired) {
+    return (
+      <>
+        {accountAccessPortal}
+        {authPortal}
+        {passwordResetPortal}
+      </>
+    );
+  }
+
   return (
     <>
       <AmbientBackground />
@@ -177,7 +252,7 @@ export function ApplicationShell({
             lang={lang}
             onToggleLang={toggleLang}
             onOpenAccount={() => setAccountOpen(true)}
-            authenticated={sessionToken !== null}
+            authenticated={true}
             ownerAccount={ownerAccount}
           />
 
@@ -198,53 +273,11 @@ export function ApplicationShell({
           />
 
           <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} lang={lang} />
-          {initialVerificationToken !== null ? (
-            <AccountAccessSheet
-              open={accountOpen}
-              onClose={() => setAccountOpen(false)}
-              lang={lang}
-              verificationToken={initialVerificationToken}
-              sessionToken={sessionToken}
-              onAuthenticated={(token) => setSessionToken(token)}
-              onLoggedOut={() => {
-                setSessionToken(null);
-                setSessionEmail(null);
-                setOwnerAccount(false);
-              }}
-            />
-          ) : (
-            <AuthModal
-              open={accountOpen}
-              onClose={() => setAccountOpen(false)}
-              lang={lang}
-              theme={theme}
-              sessionToken={sessionToken}
-              sessionEmail={sessionEmail}
-              onAuthenticated={(session) => {
-                setSessionToken(session.token);
-                setSessionEmail(session.email);
-                setOwnerAccount(session.isOwner);
-              }}
-              onOwnerDetected={() => setOwnerAccount(true)}
-              onSignedOut={() => {
-                setSessionToken(null);
-                setSessionEmail(null);
-                setOwnerAccount(false);
-              }}
-              onForgotPassword={() => {
-                setAccountOpen(false);
-                setResetOpen(true);
-              }}
-            />
-          )}
-          <PasswordResetModal
-            open={resetOpen}
-            lang={lang}
-            initialToken={initialResetToken}
-            onClose={() => setResetOpen(false)}
-          />
+          {accountAccessPortal ?? authPortal}
+          {passwordResetPortal}
         </div>
       </SmoothScrollProvider>
     </>
   );
+}
 }

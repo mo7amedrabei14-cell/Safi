@@ -349,12 +349,11 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
         .expect("verified account should receive a device-bound session");
     assert!(issued.token.starts_with("sfs_"));
 
-    let first_device_id: Uuid =
-        sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
-            .bind(issued.session.id)
-            .fetch_one(&admin_pool)
-            .await
-            .expect("the session must reference its installation record");
+    let first_device_id: Uuid = sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
+        .bind(issued.session.id)
+        .fetch_one(&admin_pool)
+        .await
+        .expect("the session must reference its installation record");
 
     let (stored_installation_hash, stored_platform): (Vec<u8>, String) =
         sqlx::query_as("SELECT installation_key_hash, platform FROM devices WHERE id = $1")
@@ -362,17 +361,17 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
             .fetch_one(&admin_pool)
             .await
             .expect("the device stores a hash and allow-listed platform");
-    let expected_registration = DeviceRegistration::from_installation_id(
-        user_id,
-        first_installation,
-        DevicePlatform::Web,
-    )
-    .expect("the test installation identity is valid");
+    let expected_registration =
+        DeviceRegistration::from_installation_id(user_id, first_installation, DevicePlatform::Web)
+            .expect("the test installation identity is valid");
     assert_eq!(
         stored_installation_hash,
         expected_registration.installation_key_hash.to_vec()
     );
-    assert_ne!(stored_installation_hash.as_slice(), first_installation.as_bytes());
+    assert_ne!(
+        stored_installation_hash.as_slice(),
+        first_installation.as_bytes()
+    );
     assert_eq!(stored_platform, "web");
 
     assert_eq!(
@@ -410,12 +409,11 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
         })
         .await
         .expect("the same installation should be reused");
-    let same_device_id: Uuid =
-        sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
-            .bind(same_installation.session.id)
-            .fetch_one(&admin_pool)
-            .await
-            .expect("the second session must reference the existing device");
+    let same_device_id: Uuid = sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
+        .bind(same_installation.session.id)
+        .fetch_one(&admin_pool)
+        .await
+        .expect("the second session must reference the existing device");
     assert_eq!(same_device_id, first_device_id);
     assert_eq!(
         auth.authenticate_session(&issued.token).await.unwrap_err(),
@@ -509,12 +507,11 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
         })
         .await
         .expect("a different installation should replace the old device");
-    let second_device_id: Uuid =
-        sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
-            .bind(second_device_session.session.id)
-            .fetch_one(&admin_pool)
-            .await
-            .expect("the new session must reference the replacement device");
+    let second_device_id: Uuid = sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
+        .bind(second_device_session.session.id)
+        .fetch_one(&admin_pool)
+        .await
+        .expect("the new session must reference the replacement device");
     assert_ne!(second_device_id, first_device_id);
     assert_eq!(
         auth.authenticate_session(&same_installation.token)
@@ -593,7 +590,11 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
         .execute(&admin_pool)
         .await
         .expect("suspend account for P0.04 test");
-    let active_token = if left_is_active { &left.token } else { &right.token };
+    let active_token = if left_is_active {
+        &left.token
+    } else {
+        &right.token
+    };
     assert_eq!(
         auth.authenticate_session(active_token).await.unwrap_err(),
         AuthError::Revoked

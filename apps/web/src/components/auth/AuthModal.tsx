@@ -33,10 +33,7 @@ import {
   SafiAuthConfigurationError,
   type SafiLoginResponse
 } from "../../lib/auth-api";
-import {
-  getSafiDeviceIdentity,
-  SafiDeviceIdentityError
-} from "../../lib/device-identity";
+import { getSafiDeviceIdentity, SafiDeviceIdentityError } from "../../lib/device-identity";
 import type { SafiLang, SafiThemeId } from "../layout/FloatingGlassDock";
 import {
   DUPLICATE_ACCOUNT_MESSAGE_AR,

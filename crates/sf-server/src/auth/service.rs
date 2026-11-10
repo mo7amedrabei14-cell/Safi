@@ -13,8 +13,8 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use super::api_key::{generate_api_key, parse_api_key, verify_secret};
-use super::device::DeviceRegistration;
 use super::cache::{api_key_cache_key, session_cache_key, SharedCache};
+use super::device::DeviceRegistration;
 use super::repository::{
     ApiKeyRecord, SessionRecord, SharedApiKeyRepository, SharedSessionRepository,
 };
@@ -109,7 +109,8 @@ impl AuthService {
         principal: &Principal,
         device_name: &str,
     ) -> Result<IssuedSession, AuthError> {
-        self.create_session_internal(principal, device_name, None).await
+        self.create_session_internal(principal, device_name, None)
+            .await
     }
 
     /// Create an account session bound to a stable local installation.
@@ -119,7 +120,8 @@ impl AuthService {
         device_name: &str,
         device: DeviceRegistration,
     ) -> Result<IssuedSession, AuthError> {
-        self.create_session_internal(principal, device_name, Some(device)).await
+        self.create_session_internal(principal, device_name, Some(device))
+            .await
     }
 
     async fn create_session_internal(

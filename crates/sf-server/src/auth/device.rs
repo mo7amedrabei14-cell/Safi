@@ -62,8 +62,7 @@ impl DeviceRegistration {
             return Err(AuthError::InvalidRequest);
         }
 
-        let mut hasher =
-            blake3::Hasher::new_derive_key("com.safidata.installation-key.v1");
+        let mut hasher = blake3::Hasher::new_derive_key("com.safidata.installation-key.v1");
         hasher.update(user_id.as_bytes());
         hasher.update(installation_id.as_bytes());
 
@@ -82,12 +81,9 @@ mod tests {
     fn installation_digest_is_stable_for_the_same_user_and_installation() {
         let user_id = Uuid::now_v7();
         let installation_id = Uuid::now_v7();
-        let first = DeviceRegistration::from_installation_id(
-            user_id,
-            installation_id,
-            DevicePlatform::Web,
-        )
-        .unwrap();
+        let first =
+            DeviceRegistration::from_installation_id(user_id, installation_id, DevicePlatform::Web)
+                .unwrap();
         let second = DeviceRegistration::from_installation_id(
             user_id,
             installation_id,

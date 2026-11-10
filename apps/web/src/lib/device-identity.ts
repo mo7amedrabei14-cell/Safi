@@ -24,8 +24,7 @@ const DATABASE_NAME = "safidata-installation";
 const DATABASE_VERSION = 1;
 const OBJECT_STORE = "identity";
 const INSTALLATION_KEY = "installation_id";
-const UUID_V4 =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function createInstallationUuid(): string {
   if (typeof globalThis.crypto?.randomUUID !== "function") {

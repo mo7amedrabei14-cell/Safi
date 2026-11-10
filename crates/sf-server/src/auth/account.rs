@@ -23,12 +23,12 @@ use sqlx::postgres::PgPool;
 use sqlx::Row;
 use uuid::Uuid;
 
+use super::device::{DevicePlatform, DeviceRegistration};
 use crate::auth::identity::{MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT_MESSAGE_AR};
 use crate::auth::service::{AuthService, IssuedSession};
 use crate::auth::unix_now;
 use crate::auth::{AuthMethod, Principal, Scope};
 use crate::error::AuthError;
-use super::device::{DevicePlatform, DeviceRegistration};
 
 const DEFAULT_VERIFICATION_TTL_SECS: i64 = 24 * 60 * 60;
 const DEFAULT_PASSWORD_RESET_TTL_SECS: i64 = 60 * 60;

@@ -7,10 +7,7 @@ import {
   SafiAuthApiError,
   type SafiLoginResponse
 } from "../../lib/auth-api";
-import {
-  getSafiDeviceIdentity,
-  SafiDeviceIdentityError
-} from "../../lib/device-identity";
+import { getSafiDeviceIdentity, SafiDeviceIdentityError } from "../../lib/device-identity";
 
 type AccountMode = "login" | "register" | "resend";
 

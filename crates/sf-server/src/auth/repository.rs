@@ -12,8 +12,8 @@ use sqlx::Row;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use super::Scope;
 use super::device::DeviceRegistration;
+use super::Scope;
 use crate::error::AuthError;
 
 /// Durable API-key row. `secret_hash` is the only representation of the secret.
@@ -624,7 +624,9 @@ impl SessionRepository for SqlxSessionRepository {
                 api_key_id: row.try_get("api_key_id").map_err(|_| backend_error())?,
                 device_id: row.try_get("device_id").map_err(|_| backend_error())?,
                 device_revoked: row.try_get("device_revoked").map_err(|_| backend_error())?,
-                account_disabled: row.try_get("account_disabled").map_err(|_| backend_error())?,
+                account_disabled: row
+                    .try_get("account_disabled")
+                    .map_err(|_| backend_error())?,
                 token_hash: token_hash.to_owned(),
                 device_name: row.try_get("device_name").map_err(|_| backend_error())?,
                 scopes: super::parse_scopes(&scopes),

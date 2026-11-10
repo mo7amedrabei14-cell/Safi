@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::Scope;
+use super::device::DeviceRegistration;
 use crate::error::AuthError;
 
 /// Durable API-key row. `secret_hash` is the only representation of the secret.
@@ -67,6 +68,12 @@ pub struct SessionRecord {
     pub last_seen_at: i64,
     pub expires_at: i64,
     pub revoked: bool,
+    #[serde(default)]
+    pub device_id: Option<Uuid>,
+    #[serde(default)]
+    pub device_revoked: bool,
+    #[serde(default)]
+    pub account_disabled: bool,
 }
 
 impl std::fmt::Debug for SessionRecord {
@@ -81,6 +88,9 @@ impl std::fmt::Debug for SessionRecord {
             .field("scopes", &self.scopes)
             .field("expires_at", &self.expires_at)
             .field("revoked", &self.revoked)
+            .field("device_id", &self.device_id)
+            .field("device_revoked", &self.device_revoked)
+            .field("account_disabled", &self.account_disabled)
             .finish()
     }
 }
@@ -105,8 +115,12 @@ pub trait ApiKeyRepository: Send + Sync {
 /// Session persistence used by the authentication service.
 #[async_trait]
 pub trait SessionRepository: Send + Sync {
-    /// Atomically revoke every other active session for this user and insert the new one.
-    async fn replace_active(&self, record: &SessionRecord) -> Result<(), AuthError>;
+    /// Atomically replace the active device/session and return the linked device id.
+    async fn replace_active(
+        &self,
+        record: &SessionRecord,
+        device: Option<&DeviceRegistration>,
+    ) -> Result<Option<Uuid>, AuthError>;
     /// Find a session by its token hash.
     async fn find_by_hash(&self, token_hash: &str) -> Result<Option<SessionRecord>, AuthError>;
     /// Update the sliding `last_seen_at`.
@@ -158,10 +172,25 @@ impl ApiKeyRepository for InMemoryApiKeyRepository {
     }
 }
 
+/// Process-local device row used by the deterministic test repository.
+#[derive(Clone)]
+struct InMemoryDeviceRecord {
+    id: Uuid,
+    user_id: Uuid,
+    installation_key_hash: [u8; 32],
+    revoked: bool,
+}
+
+#[derive(Default)]
+struct InMemorySessionState {
+    records: Vec<SessionRecord>,
+    devices: Vec<InMemoryDeviceRecord>,
+}
+
 /// Process-local session repository for tests.
 #[derive(Default)]
 pub struct InMemorySessionRepository {
-    records: RwLock<Vec<SessionRecord>>,
+    state: RwLock<InMemorySessionState>,
 }
 
 impl InMemorySessionRepository {
@@ -174,37 +203,103 @@ impl InMemorySessionRepository {
 
 #[async_trait]
 impl SessionRepository for InMemorySessionRepository {
-    async fn replace_active(&self, record: &SessionRecord) -> Result<(), AuthError> {
-        let mut records = self.records.write().await;
-        for existing in records.iter_mut() {
+    async fn replace_active(
+        &self,
+        record: &SessionRecord,
+        device: Option<&DeviceRegistration>,
+    ) -> Result<Option<Uuid>, AuthError> {
+        // One lock deliberately protects devices and sessions together so this
+        // test implementation models the production transaction's atomicity.
+        let mut state = self.state.write().await;
+
+        let device_id = if let Some(registration) = device {
+            let existing_id = state
+                .devices
+                .iter()
+                .find(|existing| {
+                    existing.user_id == record.user_id
+                        && existing.installation_key_hash == registration.installation_key_hash
+                })
+                .map(|existing| existing.id);
+
+            for existing in state
+                .devices
+                .iter_mut()
+                .filter(|item| item.user_id == record.user_id)
+            {
+                existing.revoked = existing_id != Some(existing.id);
+            }
+
+            match existing_id {
+                Some(id) => Some(id),
+                None => {
+                    let id = Uuid::now_v7();
+                    state.devices.push(InMemoryDeviceRecord {
+                        id,
+                        user_id: record.user_id,
+                        installation_key_hash: registration.installation_key_hash,
+                        revoked: false,
+                    });
+                    Some(id)
+                }
+            }
+        } else {
+            for existing in state
+                .devices
+                .iter_mut()
+                .filter(|item| item.user_id == record.user_id)
+            {
+                existing.revoked = true;
+            }
+            None
+        };
+
+        for existing in &mut state.records {
             if existing.user_id == record.user_id && !existing.revoked {
                 existing.revoked = true;
                 existing.last_seen_at = record.created_at;
             }
         }
-        records.push(record.clone());
-        Ok(())
+
+        let mut next = record.clone();
+        next.device_id = device_id;
+        next.device_revoked = false;
+        next.account_disabled = false;
+        state.records.push(next);
+        Ok(device_id)
     }
 
     async fn find_by_hash(&self, token_hash: &str) -> Result<Option<SessionRecord>, AuthError> {
-        let records = self.records.read().await;
-        Ok(records
+        let state = self.state.read().await;
+        let mut found = state
+            .records
             .iter()
             .find(|record| record.token_hash == token_hash)
-            .cloned())
+            .cloned();
+
+        if let Some(record) = found.as_mut() {
+            if let Some(device_id) = record.device_id {
+                record.device_revoked = state
+                    .devices
+                    .iter()
+                    .find(|device| device.id == device_id)
+                    .map_or(true, |device| device.revoked);
+            }
+        }
+        Ok(found)
     }
 
     async fn touch(&self, id: Uuid, at: i64) -> Result<(), AuthError> {
-        let mut records = self.records.write().await;
-        if let Some(record) = records.iter_mut().find(|record| record.id == id) {
+        let mut state = self.state.write().await;
+        if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
             record.last_seen_at = at;
         }
         Ok(())
     }
 
     async fn revoke(&self, id: Uuid, at: i64) -> Result<(), AuthError> {
-        let mut records = self.records.write().await;
-        if let Some(record) = records.iter_mut().find(|record| record.id == id) {
+        let mut state = self.state.write().await;
+        if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
             record.revoked = true;
             record.last_seen_at = at;
         }
@@ -326,7 +421,11 @@ impl SqlxSessionRepository {
 
 #[async_trait]
 impl SessionRepository for SqlxSessionRepository {
-    async fn replace_active(&self, record: &SessionRecord) -> Result<(), AuthError> {
+    async fn replace_active(
+        &self,
+        record: &SessionRecord,
+        device: Option<&DeviceRegistration>,
+    ) -> Result<Option<Uuid>, AuthError> {
         let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
         sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
             .execute(&mut *transaction)
@@ -337,6 +436,101 @@ impl SessionRepository for SqlxSessionRepository {
             .execute(&mut *transaction)
             .await
             .map_err(|_| backend_error())?;
+
+        // Serialize all sign-ins for an account, including concurrent attempts
+        // from different installations and across different workspaces.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(record.user_id.to_string())
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+
+        let device_id = if let Some(registration) = device {
+            let installation_hash = hex::encode(registration.installation_key_hash);
+            let existing_id = sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM devices WHERE user_id = $1 AND installation_key_hash = decode($2, 'hex') FOR UPDATE",
+            )
+            .bind(record.user_id)
+            .bind(&installation_hash)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+
+            // Deactivate other installations before reactivating/inserting this
+            // one so the partial unique index is never transiently violated.
+            sqlx::query(
+                r"
+                UPDATE devices
+                SET revoked_at = to_timestamp($2)
+                WHERE user_id = $1
+                  AND revoked_at IS NULL
+                  AND ($3::uuid IS NULL OR id <> $3)
+                ",
+            )
+            .bind(record.user_id)
+            .bind(record.created_at)
+            .bind(existing_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+
+            if let Some(existing_id) = existing_id {
+                sqlx::query(
+                    r"
+                    UPDATE devices
+                    SET device_name = $2,
+                        platform = $3,
+                        last_seen_at = to_timestamp($4),
+                        revoked_at = NULL
+                    WHERE id = $1 AND user_id = $5
+                    ",
+                )
+                .bind(existing_id)
+                .bind(&record.device_name)
+                .bind(registration.platform.as_str())
+                .bind(record.last_seen_at)
+                .bind(record.user_id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(|_| backend_error())?;
+                Some(existing_id)
+            } else {
+                Some(
+                    sqlx::query_scalar::<_, Uuid>(
+                        r"
+                        INSERT INTO devices (
+                            workspace_id, user_id, device_name, platform,
+                            installation_key_hash, registered_at, last_seen_at
+                        )
+                        VALUES ($1, $2, $3, $4, decode($5, 'hex'), to_timestamp($6), to_timestamp($7))
+                        RETURNING id
+                        ",
+                    )
+                    .bind(record.workspace_id)
+                    .bind(record.user_id)
+                    .bind(&record.device_name)
+                    .bind(registration.platform.as_str())
+                    .bind(&installation_hash)
+                    .bind(record.created_at)
+                    .bind(record.last_seen_at)
+                    .fetch_one(&mut *transaction)
+                    .await
+                    .map_err(|_| backend_error())?,
+                )
+            }
+        } else {
+            // API-key sessions remain supported but have no account-installation
+            // identity. Deactivate any prior device record in this transaction.
+            sqlx::query(
+                "UPDATE devices SET revoked_at = to_timestamp($2) WHERE user_id = $1 AND revoked_at IS NULL",
+            )
+            .bind(record.user_id)
+            .bind(record.created_at)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+            None
+        };
 
         sqlx::query(
             r"
@@ -357,12 +551,12 @@ impl SessionRepository for SqlxSessionRepository {
         sqlx::query(
             r"
             INSERT INTO sessions (
-                id, workspace_id, user_id, api_key_id, token_hash, device_name,
-                scopes, created_at, last_seen_at, expires_at, revoked_at
+                id, workspace_id, user_id, api_key_id, device_id, token_hash,
+                device_name, scopes, created_at, last_seen_at, expires_at, revoked_at
             )
             VALUES (
-                $1, $2, $3, $4, decode($5, 'hex'), $6, $7,
-                to_timestamp($8), to_timestamp($9), to_timestamp($10), NULL
+                $1, $2, $3, $4, $5, decode($6, 'hex'), $7, $8,
+                to_timestamp($9), to_timestamp($10), to_timestamp($11), NULL
             )
             ",
         )
@@ -370,6 +564,7 @@ impl SessionRepository for SqlxSessionRepository {
         .bind(record.workspace_id)
         .bind(record.user_id)
         .bind(record.api_key_id)
+        .bind(device_id)
         .bind(&record.token_hash)
         .bind(&record.device_name)
         .bind(super::scopes_to_strings(&record.scopes))
@@ -381,7 +576,7 @@ impl SessionRepository for SqlxSessionRepository {
         .map_err(|_| backend_error())?;
 
         transaction.commit().await.map_err(|_| backend_error())?;
-        Ok(())
+        Ok(device_id)
     }
 
     async fn find_by_hash(&self, token_hash: &str) -> Result<Option<SessionRecord>, AuthError> {
@@ -393,18 +588,26 @@ impl SessionRepository for SqlxSessionRepository {
 
         let row = sqlx::query(
             r"
-            SELECT id,
-                   workspace_id,
-                   user_id,
-                   api_key_id,
-                   device_name,
-                   scopes,
-                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at,
-                   EXTRACT(EPOCH FROM last_seen_at)::bigint AS last_seen_at,
-                   EXTRACT(EPOCH FROM expires_at)::bigint AS expires_at,
-                   (revoked_at IS NOT NULL) AS revoked
+            SELECT sessions.id,
+                   sessions.workspace_id,
+                   sessions.user_id,
+                   sessions.api_key_id,
+                   sessions.device_id,
+                   (
+                       sessions.device_id IS NOT NULL
+                       AND (devices.id IS NULL OR devices.revoked_at IS NOT NULL)
+                   ) AS device_revoked,
+                   (users.suspended_at IS NOT NULL OR users.deleted_at IS NOT NULL) AS account_disabled,
+                   sessions.device_name,
+                   sessions.scopes,
+                   EXTRACT(EPOCH FROM sessions.created_at)::bigint AS created_at,
+                   EXTRACT(EPOCH FROM sessions.last_seen_at)::bigint AS last_seen_at,
+                   EXTRACT(EPOCH FROM sessions.expires_at)::bigint AS expires_at,
+                   (sessions.revoked_at IS NOT NULL) AS revoked
             FROM sessions
-            WHERE token_hash = decode($1, 'hex')
+            LEFT JOIN devices ON devices.id = sessions.device_id AND devices.user_id = sessions.user_id
+            INNER JOIN users ON users.id = sessions.user_id
+            WHERE sessions.token_hash = decode($1, 'hex')
             ",
         )
         .bind(token_hash)
@@ -419,6 +622,9 @@ impl SessionRepository for SqlxSessionRepository {
                 workspace_id: row.try_get("workspace_id").map_err(|_| backend_error())?,
                 user_id: row.try_get("user_id").map_err(|_| backend_error())?,
                 api_key_id: row.try_get("api_key_id").map_err(|_| backend_error())?,
+                device_id: row.try_get("device_id").map_err(|_| backend_error())?,
+                device_revoked: row.try_get("device_revoked").map_err(|_| backend_error())?,
+                account_disabled: row.try_get("account_disabled").map_err(|_| backend_error())?,
                 token_hash: token_hash.to_owned(),
                 device_name: row.try_get("device_name").map_err(|_| backend_error())?,
                 scopes: super::parse_scopes(&scopes),

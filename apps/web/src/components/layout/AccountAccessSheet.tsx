@@ -7,6 +7,10 @@ import {
   SafiAuthApiError,
   type SafiLoginResponse
 } from "../../lib/auth-api";
+import {
+  getSafiDeviceIdentity,
+  SafiDeviceIdentityError
+} from "../../lib/device-identity";
 
 type AccountMode = "login" | "register" | "resend";
 
@@ -21,6 +25,12 @@ export interface AccountAccessSheetProps {
 }
 
 function getRequestError(error: unknown, isAr: boolean): string {
+  if (error instanceof SafiDeviceIdentityError) {
+    return isAr
+      ? "تعذّر إنشاء هوية ثابتة لهذا التثبيت. اسمح باستخدام قاعدة بيانات المتصفح ثم أعد المحاولة."
+      : "This installation could not create a stable device identity. Allow browser database storage and try again.";
+  }
+
   if (error instanceof SafiAuthApiError) {
     if (error.code === "SF-AUTH-007") {
       return isAr
@@ -159,10 +169,13 @@ export function AccountAccessSheet({
             : "If this account needs verification, a new link will be sent."
         });
       } else {
+        const device = await getSafiDeviceIdentity();
         const result = await postSafiAuth<SafiLoginResponse>("/login", {
           email: normalizedEmail,
           password,
-          device_name: "Web browser"
+          device_name: "Web browser",
+          installation_id: device.installationId,
+          platform: device.platform
         });
         onAuthenticated(result.token);
         setPassword("");

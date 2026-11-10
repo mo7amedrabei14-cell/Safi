@@ -99,8 +99,11 @@ def check_tree(directory: pathlib.Path) -> list[str]:
             ):
                 errors.append(f"{up.name}: down migration does not drop function '{function}'.")
 
-        if "uuidv7()" not in up_sql:
-            errors.append(f"{up.name}: no native uuidv7() usage.")
+        # A migration that creates a table must keep native UUIDv7 primary
+        # keys. Alter-only migrations reuse existing identifiers and need not
+        # repeat the generator merely to pass this static check.
+        if CREATE_TABLE_RE.search(up_sql) and "uuidv7()" not in up_sql:
+            errors.append(f"{up.name}: no native uuidv7() usage for new tables.")
         if re.search(r"\b(?:BIG|SMALL)?SERIAL\b", up_sql, re.IGNORECASE):
             errors.append(f"{up.name}: SERIAL columns are forbidden; use uuidv7().")
         if re.search(r"supabase", up_sql, re.IGNORECASE):
@@ -126,12 +129,21 @@ def self_test() -> int:
         (directory / "0002_orphan.up.sql").write_text(
             "CREATE TABLE orphan (id UUID DEFAULT uuidv7());\n", encoding="utf-8"
         )
+        (directory / "0003_alter_only.up.sql").write_text(
+            "ALTER TABLE widgets ADD COLUMN device_id UUID;\n", encoding="utf-8"
+        )
+        (directory / "0003_alter_only.down.sql").write_text(
+            "ALTER TABLE widgets DROP COLUMN device_id;\n", encoding="utf-8"
+        )
         errors = check_tree(directory)
         required_fragments = ["does not drop table 'widgets'", "no RLS", "SERIAL", "no matching down"]
         if not all(any(fragment in error for error in errors) for fragment in required_fragments):
             print(f"[verify-migrations --self-test] FAILED: {errors}", file=sys.stderr)
             return 1
-    print("[verify-migrations] Self-test PASSED: broken pairs, missing RLS, and SERIAL were caught.")
+        if any("0003_alter_only.up.sql: no native uuidv7()" in error for error in errors):
+            print("[verify-migrations --self-test] FAILED: alter-only migration wrongly required uuidv7().", file=sys.stderr)
+            return 1
+    print("[verify-migrations] Self-test PASSED: broken pairs, missing RLS, SERIAL, and alter-only migrations were handled.")
     return 0
 
 

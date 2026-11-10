@@ -13,6 +13,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use super::api_key::{generate_api_key, parse_api_key, verify_secret};
+use super::device::DeviceRegistration;
 use super::cache::{api_key_cache_key, session_cache_key, SharedCache};
 use super::repository::{
     ApiKeyRecord, SessionRecord, SharedApiKeyRepository, SharedSessionRepository,
@@ -87,7 +88,7 @@ impl AuthService {
         if !verify_secret(secret, &record.secret_hash) {
             return Err(AuthError::InvalidCredentials);
         }
-        if record.revoked {
+        if record.revoked || record.device_revoked || record.account_disabled {
             return Err(AuthError::Revoked);
         }
         if record.is_expired_at(unix_now()) {
@@ -108,6 +109,25 @@ impl AuthService {
         principal: &Principal,
         device_name: &str,
     ) -> Result<IssuedSession, AuthError> {
+        self.create_session_internal(principal, device_name, None).await
+    }
+
+    /// Create an account session bound to a stable local installation.
+    pub async fn create_session_for_device(
+        &self,
+        principal: &Principal,
+        device_name: &str,
+        device: DeviceRegistration,
+    ) -> Result<IssuedSession, AuthError> {
+        self.create_session_internal(principal, device_name, Some(device)).await
+    }
+
+    async fn create_session_internal(
+        &self,
+        principal: &Principal,
+        device_name: &str,
+        device_registration: Option<DeviceRegistration>,
+    ) -> Result<IssuedSession, AuthError> {
         let device = device_name.trim();
         if device.is_empty() || device.chars().count() > 120 {
             return Err(AuthError::InvalidRequest);
@@ -119,7 +139,7 @@ impl AuthService {
             AuthMethod::ApiKey { key_id } => Some(key_id),
             AuthMethod::Session { .. } | AuthMethod::Password => None,
         };
-        let record = SessionRecord {
+        let mut record = SessionRecord {
             id: Uuid::now_v7(),
             workspace_id: principal.workspace_id,
             user_id: principal.user_id,
@@ -131,9 +151,15 @@ impl AuthService {
             last_seen_at: now,
             expires_at: now + self.session_ttl.as_secs() as i64,
             revoked: false,
+            device_id: None,
+            device_revoked: false,
+            account_disabled: false,
         };
 
-        self.sessions.replace_active(&record).await?;
+        record.device_id = self
+            .sessions
+            .replace_active(&record, device_registration.as_ref())
+            .await?;
 
         Ok(IssuedSession {
             token: issued.plaintext().to_owned(),
@@ -428,10 +454,13 @@ mod tests {
             last_seen_at: now - 100,
             expires_at: now - 1,
             revoked: false,
+            device_id: None,
+            device_revoked: false,
+            account_disabled: false,
         };
 
         let sessions = Arc::new(super::super::repository::InMemorySessionRepository::new());
-        sessions.replace_active(&expired).await.unwrap();
+        sessions.replace_active(&expired, None).await.unwrap();
 
         let cache = Arc::new(super::super::cache::InMemoryAuthCache::new());
         cache

@@ -11,6 +11,7 @@ use sf_server::auth::account::{
     VerificationEmailSender,
 };
 use sf_server::auth::cache::InMemoryAuthCache;
+use sf_server::auth::device::{DevicePlatform, DeviceRegistration};
 use sf_server::auth::repository::{InMemoryApiKeyRepository, SqlxSessionRepository};
 use sf_server::auth::service::AuthService;
 use sf_server::auth::AuthMethod;
@@ -70,6 +71,14 @@ async fn scalar_count(pool: &PgPool, query: &str, value: &str) -> i64 {
         .fetch_one(pool)
         .await
         .expect("count query should succeed")
+}
+
+async fn scalar_count_by_user(pool: &PgPool, query: &str, user_id: Uuid) -> i64 {
+    sqlx::query_scalar::<_, i64>(query)
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .expect("user count query should succeed")
 }
 
 #[tokio::test]
@@ -278,6 +287,8 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
                 email: email.clone(),
                 password: password.to_owned(),
                 device_name: "PostgreSQL integration test".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
             })
             .await
             .unwrap_err(),
@@ -325,15 +336,55 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
             .expect("verification timestamp should be readable");
     assert!(is_verified);
 
+    let first_installation = Uuid::now_v7();
     let issued = service
         .login(LoginAccountRequest {
             email: email.clone(),
             password: password.to_owned(),
             device_name: "PostgreSQL integration test".to_owned(),
+            installation_id: first_installation,
+            platform: DevicePlatform::Web,
         })
         .await
-        .expect("verified account should receive a database-backed session");
+        .expect("verified account should receive a device-bound session");
     assert!(issued.token.starts_with("sfs_"));
+
+    let first_device_id: Uuid =
+        sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
+            .bind(issued.session.id)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("the session must reference its installation record");
+
+    let (stored_installation_hash, stored_platform): (Vec<u8>, String) =
+        sqlx::query_as("SELECT installation_key_hash, platform FROM devices WHERE id = $1")
+            .bind(first_device_id)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("the device stores a hash and allow-listed platform");
+    let expected_registration = DeviceRegistration::from_installation_id(
+        user_id,
+        first_installation,
+        DevicePlatform::Web,
+    )
+    .expect("the test installation identity is valid");
+    assert_eq!(
+        stored_installation_hash,
+        expected_registration.installation_key_hash.to_vec()
+    );
+    assert_ne!(stored_installation_hash.as_slice(), first_installation.as_bytes());
+    assert_eq!(stored_platform, "web");
+
+    assert_eq!(
+        scalar_count_by_user(
+            &admin_pool,
+            "SELECT count(*) FROM devices WHERE user_id = $1 AND revoked_at IS NULL",
+            user_id
+        )
+        .await,
+        1
+    );
+
     let authenticated = auth
         .authenticate_session(&issued.token)
         .await
@@ -346,6 +397,220 @@ async fn postgres_account_registration_verification_and_login_are_atomic_and_rls
     ));
     assert!(authenticated.principal.scopes.contains(&Scope::Read));
     assert!(authenticated.principal.scopes.contains(&Scope::Write));
+
+    // The same installation reuses its device row, but the previous session
+    // token is immediately revoked.
+    let same_installation = service
+        .login(LoginAccountRequest {
+            email: email.clone(),
+            password: password.to_owned(),
+            device_name: "PostgreSQL integration test".to_owned(),
+            installation_id: first_installation,
+            platform: DevicePlatform::Web,
+        })
+        .await
+        .expect("the same installation should be reused");
+    let same_device_id: Uuid =
+        sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
+            .bind(same_installation.session.id)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("the second session must reference the existing device");
+    assert_eq!(same_device_id, first_device_id);
+    assert_eq!(
+        auth.authenticate_session(&issued.token).await.unwrap_err(),
+        AuthError::Revoked
+    );
+
+    // Fail the final session INSERT after the replacement transaction has
+    // already changed the device and revoked the prior session. All of those
+    // writes must roll back together.
+    let reject_function = format!(
+        r#"
+        CREATE OR REPLACE FUNCTION public.safi_p004_reject_session_insert()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $function$
+        BEGIN
+            IF NEW.user_id = '{}'::UUID THEN
+                RAISE EXCEPTION 'intentional P0.04 rollback test';
+            END IF;
+            RETURN NEW;
+        END
+        $function$
+        "#,
+        user_id
+    );
+    sqlx::query(&reject_function)
+        .execute(&admin_pool)
+        .await
+        .expect("create account-scoped failure trigger function");
+    sqlx::query(
+        "CREATE TRIGGER safi_p004_reject_session_insert BEFORE INSERT ON sessions FOR EACH ROW EXECUTE FUNCTION public.safi_p004_reject_session_insert()",
+    )
+    .execute(&admin_pool)
+    .await
+    .expect("install account-scoped failure trigger");
+
+    let failed_replacement = service
+        .login(LoginAccountRequest {
+            email: email.clone(),
+            password: password.to_owned(),
+            device_name: "Failed replacement".to_owned(),
+            installation_id: Uuid::now_v7(),
+            platform: DevicePlatform::Web,
+        })
+        .await;
+    sqlx::query("DROP TRIGGER safi_p004_reject_session_insert ON sessions")
+        .execute(&admin_pool)
+        .await
+        .expect("remove account-scoped failure trigger");
+    sqlx::query("DROP FUNCTION public.safi_p004_reject_session_insert()")
+        .execute(&admin_pool)
+        .await
+        .expect("remove account-scoped trigger function");
+
+    assert_eq!(
+        failed_replacement.unwrap_err(),
+        AuthError::BackendUnavailable
+    );
+    auth.authenticate_session(&same_installation.token)
+        .await
+        .expect("the previously active session must survive failed replacement");
+    assert_eq!(
+        scalar_count_by_user(
+            &admin_pool,
+            "SELECT count(*) FROM devices WHERE user_id = $1 AND revoked_at IS NULL",
+            user_id
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        scalar_count_by_user(
+            &admin_pool,
+            "SELECT count(*) FROM sessions WHERE user_id = $1 AND revoked_at IS NULL",
+            user_id
+        )
+        .await,
+        1
+    );
+
+    // Logging in from a different installation revokes the old device and its
+    // session, then creates exactly one new active registration.
+    let second_installation = Uuid::now_v7();
+    let second_device_session = service
+        .login(LoginAccountRequest {
+            email: email.clone(),
+            password: password.to_owned(),
+            device_name: "Second installation".to_owned(),
+            installation_id: second_installation,
+            platform: DevicePlatform::Web,
+        })
+        .await
+        .expect("a different installation should replace the old device");
+    let second_device_id: Uuid =
+        sqlx::query_scalar("SELECT device_id FROM sessions WHERE id = $1")
+            .bind(second_device_session.session.id)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("the new session must reference the replacement device");
+    assert_ne!(second_device_id, first_device_id);
+    assert_eq!(
+        auth.authenticate_session(&same_installation.token)
+            .await
+            .unwrap_err(),
+        AuthError::Revoked
+    );
+    assert_eq!(
+        scalar_count_by_user(
+            &admin_pool,
+            "SELECT count(*) FROM devices WHERE user_id = $1 AND revoked_at IS NULL",
+            user_id
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        scalar_count_by_user(
+            &admin_pool,
+            "SELECT count(*) FROM devices WHERE user_id = $1",
+            user_id
+        )
+        .await,
+        2,
+        "the previous device remains as a revoked history row"
+    );
+
+    // Two simultaneous sign-ins from different installations must still leave
+    // one active session/device. The losing token is rejected immediately.
+    let (left, right) = tokio::join!(
+        service.login(LoginAccountRequest {
+            email: email.clone(),
+            password: password.to_owned(),
+            device_name: "Concurrent installation A".to_owned(),
+            installation_id: Uuid::now_v7(),
+            platform: DevicePlatform::Web,
+        }),
+        service.login(LoginAccountRequest {
+            email: email.clone(),
+            password: password.to_owned(),
+            device_name: "Concurrent installation B".to_owned(),
+            installation_id: Uuid::now_v7(),
+            platform: DevicePlatform::Web,
+        })
+    );
+    let left = left.expect("first concurrent sign-in should issue a session");
+    let right = right.expect("second concurrent sign-in should issue a session");
+    assert_eq!(
+        scalar_count_by_user(
+            &admin_pool,
+            "SELECT count(*) FROM sessions WHERE user_id = $1 AND revoked_at IS NULL",
+            user_id
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        scalar_count_by_user(
+            &admin_pool,
+            "SELECT count(*) FROM devices WHERE user_id = $1 AND revoked_at IS NULL",
+            user_id
+        )
+        .await,
+        1
+    );
+    let left_is_active = auth.authenticate_session(&left.token).await.is_ok();
+    let right_is_active = auth.authenticate_session(&right.token).await.is_ok();
+    assert_ne!(
+        left_is_active, right_is_active,
+        "only the last committed installation session may remain valid"
+    );
+
+    // Account suspension blocks both new sign-ins and existing device sessions.
+    sqlx::query("UPDATE users SET suspended_at = now() WHERE id = $1")
+        .bind(user_id)
+        .execute(&admin_pool)
+        .await
+        .expect("suspend account for P0.04 test");
+    let active_token = if left_is_active { &left.token } else { &right.token };
+    assert_eq!(
+        auth.authenticate_session(active_token).await.unwrap_err(),
+        AuthError::Revoked
+    );
+    assert_eq!(
+        service
+            .login(LoginAccountRequest {
+                email: email.clone(),
+                password: password.to_owned(),
+                device_name: "Suspended account".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
+            })
+            .await
+            .unwrap_err(),
+        AuthError::InvalidCredentials
+    );
 
     // Remove only this test's records. The migration script performs the final
     // full rollback after this integration test returns.

@@ -33,6 +33,10 @@ import {
   SafiAuthConfigurationError,
   type SafiLoginResponse
 } from "../../lib/auth-api";
+import {
+  getSafiDeviceIdentity,
+  SafiDeviceIdentityError
+} from "../../lib/device-identity";
 import type { SafiLang, SafiThemeId } from "../layout/FloatingGlassDock";
 import {
   DUPLICATE_ACCOUNT_MESSAGE_AR,
@@ -318,10 +322,13 @@ export function AuthModal({
             : "Account created. Check your inbox to verify the address, then sign in."
         });
       } else {
+        const device = await getSafiDeviceIdentity();
         const result = await postSafiAuth<SafiLoginResponse>("/login", {
           email: normalizedEmail,
           password,
-          device_name: "Web browser"
+          device_name: "Web browser",
+          installation_id: device.installationId,
+          platform: device.platform
         });
         const owner = isOwnerEmail(normalizedEmail);
         setOwnerRecognized(owner);
@@ -340,7 +347,14 @@ export function AuthModal({
         });
       }
     } catch (error) {
-      if (error instanceof SafiAuthConfigurationError) {
+      if (error instanceof SafiDeviceIdentityError) {
+        setFeedback({
+          kind: "error",
+          message: isAr
+            ? "تعذّر إنشاء هوية ثابتة لهذا التثبيت. اسمح باستخدام قاعدة بيانات المتصفح ثم أعد المحاولة."
+            : "This installation could not create a stable device identity. Allow browser database storage and try again."
+        });
+      } else if (error instanceof SafiAuthConfigurationError) {
         setFeedback({
           kind: "error",
           message: isAr

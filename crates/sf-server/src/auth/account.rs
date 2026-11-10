@@ -28,6 +28,7 @@ use crate::auth::service::{AuthService, IssuedSession};
 use crate::auth::unix_now;
 use crate::auth::{AuthMethod, Principal, Scope};
 use crate::error::AuthError;
+use super::device::{DevicePlatform, DeviceRegistration};
 
 const DEFAULT_VERIFICATION_TTL_SECS: i64 = 24 * 60 * 60;
 const DEFAULT_PASSWORD_RESET_TTL_SECS: i64 = 60 * 60;
@@ -42,6 +43,7 @@ pub struct LoginAccount {
     pub password_hash: String,
     pub email_verified: bool,
     pub deleted: bool,
+    pub suspended: bool,
 }
 
 impl std::fmt::Debug for LoginAccount {
@@ -53,6 +55,7 @@ impl std::fmt::Debug for LoginAccount {
             .field("password_hash", &"[REDACTED]")
             .field("email_verified", &self.email_verified)
             .field("deleted", &self.deleted)
+            .field("suspended", &self.suspended)
             .finish()
     }
 }
@@ -125,11 +128,26 @@ pub struct RegisterAccountRequest {
     pub password: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct LoginAccountRequest {
     pub email: String,
     pub password: String,
     pub device_name: String,
+    pub installation_id: Uuid,
+    pub platform: DevicePlatform,
+}
+
+impl std::fmt::Debug for LoginAccountRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LoginAccountRequest")
+            .field("email", &"[REDACTED]")
+            .field("password", &"[REDACTED]")
+            .field("device_name", &self.device_name)
+            .field("installation_id", &"[REDACTED]")
+            .field("platform", &self.platform)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -328,9 +346,9 @@ impl AccountAuthService {
         }
     }
 
-    /// Verifies both the password and email status before issuing the existing
-    /// sfs_* session. Unknown, incorrect, deleted, and unverified accounts do
-    /// not reveal which condition occurred.
+    /// Verifies the password, email status, and account lifecycle before
+    /// issuing a device-bound sfs_* session. Unknown, incorrect, deleted,
+    /// suspended, and unverified accounts share the same public failure.
     pub async fn login(&self, request: LoginAccountRequest) -> Result<IssuedSession, AuthError> {
         let email = normalize_email(&request.email)?;
         validate_login_password(&request.password)?;
@@ -345,7 +363,7 @@ impl AccountAuthService {
         let Some(account) = account else {
             return Err(AuthError::InvalidCredentials);
         };
-        if !password_matches || !account.email_verified || account.deleted {
+        if !password_matches || !account.email_verified || account.deleted || account.suspended {
             return Err(AuthError::InvalidCredentials);
         }
         let Some(workspace_id) = account.workspace_id else {
@@ -358,8 +376,13 @@ impl AccountAuthService {
             scopes: vec![Scope::Read, Scope::Write],
             auth_method: AuthMethod::Password,
         };
+        let device = DeviceRegistration::from_installation_id(
+            account.user_id,
+            request.installation_id,
+            request.platform,
+        )?;
         self.sessions
-            .create_session(&principal, &request.device_name)
+            .create_session_for_device(&principal, &request.device_name, device)
             .await
     }
 
@@ -699,7 +722,8 @@ impl AccountRepository for SqlxAccountRepository {
                    membership.workspace_id,
                    user_credentials.password_hash,
                    (users.email_verified_at IS NOT NULL) AS email_verified,
-                   (users.deleted_at IS NOT NULL) AS deleted
+                   (users.deleted_at IS NOT NULL) AS deleted,
+                   (users.suspended_at IS NOT NULL) AS suspended
             FROM users
             INNER JOIN user_credentials ON user_credentials.user_id = users.id
             LEFT JOIN LATERAL (
@@ -734,6 +758,9 @@ impl AccountRepository for SqlxAccountRepository {
                         .map_err(|_| AuthError::BackendUnavailable)?,
                     deleted: row
                         .try_get("deleted")
+                        .map_err(|_| AuthError::BackendUnavailable)?,
+                    suspended: row
+                        .try_get("suspended")
                         .map_err(|_| AuthError::BackendUnavailable)?,
                 })
             })
@@ -1036,6 +1063,7 @@ mod tests {
                     password_hash: password_hash.to_owned(),
                     email_verified: false,
                     deleted: false,
+                    suspended: false,
                 },
             );
             state
@@ -1205,6 +1233,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn login_request_debug_redacts_credentials_and_installation_identity() {
+        let email = "private-user@example.test";
+        let password = "private password for test";
+        let installation_id = Uuid::now_v7();
+        let request = LoginAccountRequest {
+            email: email.to_owned(),
+            password: password.to_owned(),
+            device_name: "Web browser".to_owned(),
+            installation_id,
+            platform: DevicePlatform::Web,
+        };
+
+        let debug_output = format!("{request:?}");
+        assert!(!debug_output.contains(email));
+        assert!(!debug_output.contains(password));
+        assert!(!debug_output.contains(&installation_id.to_string()));
+        assert!(debug_output.contains("[REDACTED]"));
+    }
+
     fn token_from_message(message: &(String, String)) -> String {
         message
             .1
@@ -1235,6 +1283,8 @@ mod tests {
                 email: "user@example.test".to_owned(),
                 password: "A secure phrase 2026!".to_owned(),
                 device_name: "Browser".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
             })
             .await;
         assert_eq!(failed.unwrap_err(), AuthError::InvalidCredentials);
@@ -1250,6 +1300,8 @@ mod tests {
                 email: "user@example.test".to_owned(),
                 password: "A secure phrase 2026!".to_owned(),
                 device_name: "Browser".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
             })
             .await
             .unwrap();
@@ -1315,6 +1367,8 @@ mod tests {
                 email: "unknown@example.test".to_owned(),
                 password: "A secure phrase 2026!".to_owned(),
                 device_name: "Browser".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
             })
             .await;
         let wrong = fixture
@@ -1323,6 +1377,8 @@ mod tests {
                 email: "user@example.test".to_owned(),
                 password: "A different phrase 2026!".to_owned(),
                 device_name: "Browser".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
             })
             .await;
         assert_eq!(unknown.unwrap_err(), AuthError::InvalidCredentials);
@@ -1404,6 +1460,8 @@ mod tests {
                 email: "reset@example.test".to_owned(),
                 password: "A secure phrase 2026!".to_owned(),
                 device_name: "Browser".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
             })
             .await;
         assert_eq!(old_password.unwrap_err(), AuthError::InvalidCredentials);
@@ -1414,6 +1472,8 @@ mod tests {
                 email: "reset@example.test".to_owned(),
                 password: "A brand new phrase 2026!".to_owned(),
                 device_name: "Browser".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
             })
             .await
             .unwrap();
@@ -1516,6 +1576,8 @@ mod tests {
                 email: "user@example.test".to_owned(),
                 password: "A secure phrase 2026!".to_owned(),
                 device_name: "Browser".to_owned(),
+                installation_id: Uuid::now_v7(),
+                platform: DevicePlatform::Web,
             })
             .await;
         assert_eq!(blocked.unwrap_err(), AuthError::InvalidCredentials);

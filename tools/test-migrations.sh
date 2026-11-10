@@ -49,6 +49,13 @@ INSERT INTO memberships (workspace_id, user_id, role) VALUES
     ('20000000-0000-7000-8000-000000000002', '10000000-0000-7000-8000-000000000002', 'owner'),
     ('20000000-0000-7000-8000-000000000003', '10000000-0000-7000-8000-000000000001', 'owner'),
     ('20000000-0000-7000-8000-000000000003', '10000000-0000-7000-8000-000000000003', 'member');
+
+INSERT INTO sessions (
+    workspace_id, user_id, token_hash, device_name, expires_at
+) VALUES
+    ('20000000-0000-7000-8000-000000000001', '10000000-0000-7000-8000-000000000001', decode(repeat('a', 64), 'hex'), 'P0.04 Legacy Session One', now() + INTERVAL '30 minutes'),
+    ('20000000-0000-7000-8000-000000000002', '10000000-0000-7000-8000-000000000002', decode(repeat('b', 64), 'hex'), 'P0.04 Legacy Session Two', now() + INTERVAL '30 minutes'),
+    ('20000000-0000-7000-8000-000000000003', '10000000-0000-7000-8000-000000000003', decode(repeat('c', 64), 'hex'), 'P0.04 Legacy Session Three', now() + INTERVAL '30 minutes');
 SQL
 
 echo "[test-migrations] applying 0002 and P0.01 migration 0003"
@@ -60,7 +67,6 @@ echo "[test-migrations] applying 0002 and P0.01 migration 0003"
     -f "$MIGRATIONS/0004_auth_lookup_rls.up.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0005_customer_accounts_owner_ops.up.sql" >/dev/null
-
 echo "[test-migrations] verifying account, token, device, plan, subscription, and webhook constraints"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -303,6 +309,105 @@ END
 $$;
 SQL
 
+echo "[test-migrations] applying P0.04 migration 0006 after seeding legacy sessions/devices"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0006_session_device_binding.up.sql" >/dev/null
+
+echo "[test-migrations] verifying P0.04 schema, legacy revocation, and rollback records"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+DO $do$
+DECLARE
+    row_count INTEGER;
+    post_migration_device_id UUID;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'sessions'
+          AND column_name = 'device_id'
+    ) THEN
+        RAISE EXCEPTION 'P0.04 did not add sessions.device_id';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'sessions_device_user_fk'
+    ) THEN
+        RAISE EXCEPTION 'P0.04 did not add the user-scoped device/session foreign key';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policy WHERE polname = 'devices_auth_lookup_read'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_policy WHERE polname = 'devices_auth_lookup_insert'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_policy WHERE polname = 'devices_auth_lookup_update'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_policy WHERE polname = 'sessions_auth_lookup_update'
+    ) THEN
+        RAISE EXCEPTION 'P0.04 authentication lookup policies are incomplete';
+    END IF;
+
+    SELECT count(*) INTO row_count FROM sessions_p004_legacy_backup;
+    IF row_count <> 3 THEN
+        RAISE EXCEPTION 'Expected 3 legacy active sessions in the P0.04 rollback ledger; found %', row_count;
+    END IF;
+
+    SELECT count(*) INTO row_count FROM devices_p004_legacy_backup;
+    IF row_count <> 2 THEN
+        RAISE EXCEPTION 'Expected 2 legacy active devices in the P0.04 rollback ledger; found %', row_count;
+    END IF;
+
+    SELECT count(*) INTO row_count
+    FROM sessions
+    WHERE user_id IN (
+        '10000000-0000-7000-8000-000000000001',
+        '10000000-0000-7000-8000-000000000002',
+        '10000000-0000-7000-8000-000000000003'
+    )
+      AND revoked_at IS NULL;
+    IF row_count <> 0 THEN
+        RAISE EXCEPTION 'P0.04 left a legacy session active';
+    END IF;
+
+    SELECT count(*) INTO row_count
+    FROM devices
+    WHERE user_id IN (
+        '10000000-0000-7000-8000-000000000001',
+        '10000000-0000-7000-8000-000000000002'
+    )
+      AND revoked_at IS NULL;
+    IF row_count <> 0 THEN
+        RAISE EXCEPTION 'P0.04 left a legacy device active';
+    END IF;
+
+    -- Simulate a successful post-migration sign-in on a new installation.
+    -- The rollback must not resurrect the revoked legacy device/session over it.
+    INSERT INTO devices (
+        workspace_id, user_id, device_name, platform, installation_key_hash
+    ) VALUES (
+        '20000000-0000-7000-8000-000000000001',
+        '10000000-0000-7000-8000-000000000001',
+        'P0.04 Post-migration Device',
+        'web',
+        decode(repeat('f', 64), 'hex')
+    )
+    RETURNING id INTO post_migration_device_id;
+
+    INSERT INTO sessions (
+        workspace_id, user_id, device_id, token_hash, device_name, expires_at
+    ) VALUES (
+        '20000000-0000-7000-8000-000000000001',
+        '10000000-0000-7000-8000-000000000001',
+        post_migration_device_id,
+        decode(repeat('9', 64), 'hex'),
+        'P0.04 Post-migration Session',
+        now() + INTERVAL '30 minutes'
+    );
+END
+$do$;
+SQL
+
 echo "[test-migrations] verifying real RLS isolation as a non-owner, NOBYPASSRLS role"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE ROLE safi_p0_01_app NOLOGIN NOBYPASSRLS;
@@ -352,6 +457,32 @@ BEGIN
     END IF;
 
     PERFORM set_config('app.auth_lookup', 'true', true);
+    SELECT count(*) INTO row_count FROM devices;
+    IF row_count <> 3 THEN
+        RAISE EXCEPTION 'Trusted auth lookup could not read all device rows: saw % rows', row_count;
+    END IF;
+
+    SELECT count(*) INTO row_count FROM sessions;
+    IF row_count <> 4 THEN
+        RAISE EXCEPTION 'Trusted auth lookup could not read all session rows: saw % rows', row_count;
+    END IF;
+
+    UPDATE sessions
+    SET device_name = device_name
+    WHERE user_id = '10000000-0000-7000-8000-000000000002';
+    GET DIAGNOSTICS row_count = ROW_COUNT;
+    IF row_count <> 1 THEN
+        RAISE EXCEPTION 'Trusted auth lookup could not update a previous-workspace session';
+    END IF;
+
+    UPDATE devices
+    SET device_name = device_name
+    WHERE user_id = '10000000-0000-7000-8000-000000000002';
+    GET DIAGNOSTICS row_count = ROW_COUNT;
+    IF row_count <> 1 THEN
+        RAISE EXCEPTION 'Trusted auth lookup could not update the prior workspace device';
+    END IF;
+
     SELECT count(*) INTO row_count FROM user_credentials;
     IF row_count <> 2 THEN
         RAISE EXCEPTION 'Trusted auth lookup could not read the credential records: saw % rows', row_count;
@@ -408,7 +539,78 @@ SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test acco
 echo "[test-migrations] exercising owner account administration and P0.3 subscription lifecycle under the restricted app role"
 SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test accounts_postgres -- --ignored --test-threads=1
 
-echo "[test-migrations] rolling back 0005, 0004, 0003, 0002, and 0001 in reverse order"
+echo "[test-migrations] rolling back 0006, 0005, 0004, 0003, 0002, and 0001 in reverse order"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0006_session_device_binding.down.sql" >/dev/null
+
+echo "[test-migrations] verifying P0.04 rollback restored untouched legacy rows"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+DO $do$
+DECLARE
+    row_count INTEGER;
+BEGIN
+    SELECT count(*) INTO row_count
+    FROM sessions
+    WHERE user_id IN (
+        '10000000-0000-7000-8000-000000000001',
+        '10000000-0000-7000-8000-000000000002',
+        '10000000-0000-7000-8000-000000000003'
+    )
+      AND revoked_at IS NULL;
+    IF row_count <> 3 THEN
+        RAISE EXCEPTION 'P0.04 rollback did not leave one active newer session and restore the other two legacy sessions';
+    END IF;
+
+    SELECT count(*) INTO row_count
+    FROM sessions
+    WHERE user_id = '10000000-0000-7000-8000-000000000001'
+      AND device_name = 'P0.04 Post-migration Session'
+      AND revoked_at IS NULL;
+    IF row_count <> 1 THEN
+        RAISE EXCEPTION 'P0.04 rollback did not preserve the post-migration session';
+    END IF;
+
+    SELECT count(*) INTO row_count
+    FROM sessions
+    WHERE user_id = '10000000-0000-7000-8000-000000000001'
+      AND device_name = 'P0.04 Legacy Session One'
+      AND revoked_at IS NULL;
+    IF row_count <> 0 THEN
+        RAISE EXCEPTION 'P0.04 rollback resurrected a legacy session over newer account activity';
+    END IF;
+
+    SELECT count(*) INTO row_count
+    FROM devices
+    WHERE user_id IN (
+        '10000000-0000-7000-8000-000000000001',
+        '10000000-0000-7000-8000-000000000002'
+    )
+      AND revoked_at IS NULL;
+    IF row_count <> 2 THEN
+        RAISE EXCEPTION 'P0.04 rollback did not leave one newer device and restore the untouched legacy device';
+    END IF;
+
+    SELECT count(*) INTO row_count
+    FROM devices
+    WHERE user_id = '10000000-0000-7000-8000-000000000001'
+      AND device_name = 'P0.04 Post-migration Device'
+      AND revoked_at IS NULL;
+    IF row_count <> 1 THEN
+        RAISE EXCEPTION 'P0.04 rollback did not preserve the post-migration device';
+    END IF;
+
+    SELECT count(*) INTO row_count
+    FROM devices
+    WHERE user_id = '10000000-0000-7000-8000-000000000001'
+      AND device_name = 'P0.01 Device One'
+      AND revoked_at IS NULL;
+    IF row_count <> 0 THEN
+        RAISE EXCEPTION 'P0.04 rollback resurrected the legacy device over newer account activity';
+    END IF;
+END
+$do$;
+SQL
+
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0005_customer_accounts_owner_ops.down.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
@@ -421,14 +623,14 @@ echo "[test-migrations] rolling back 0005, 0004, 0003, 0002, and 0001 in reverse
     -f "$MIGRATIONS/0001_s4_core.down.sql" >/dev/null
 
 REMAINING="$("$PSQL_BIN" "$SF_TEST_DATABASE_URL" -tAc \
-    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('users','workspaces','memberships','api_keys','sessions','audit_log','user_credentials','email_verification_tokens','password_reset_tokens','devices','plans','subscriptions','billing_webhook_events','session_enforcement_legacy_backup','subscription_events','plan_prices');")"
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('users','workspaces','memberships','api_keys','sessions','audit_log','user_credentials','email_verification_tokens','password_reset_tokens','devices','plans','subscriptions','billing_webhook_events','session_enforcement_legacy_backup','subscription_events','plan_prices','sessions_p004_legacy_backup','devices_p004_legacy_backup');")"
 if [[ "$REMAINING" != "0" ]]; then
     echo "ERROR: rollback left $REMAINING migration table(s) behind." >&2
     exit 1
 fi
 
 COLUMN_REMAINING="$("$PSQL_BIN" "$SF_TEST_DATABASE_URL" -tAc \
-    "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name IN ('email_verified_at','suspended_at');")"
+    "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND ((table_name = 'users' AND column_name IN ('email_verified_at','suspended_at')) OR (table_name = 'sessions' AND column_name = 'device_id'));")"
 if [[ "$COLUMN_REMAINING" != "0" ]]; then
     echo "ERROR: rollback left an account column behind." >&2
     exit 1

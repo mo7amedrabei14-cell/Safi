@@ -433,8 +433,8 @@ BEGIN
     END IF;
 
     SELECT count(*) INTO row_count FROM devices;
-    IF row_count <> 1 THEN
-        RAISE EXCEPTION 'Workspace RLS failed for devices: saw % rows', row_count;
+    IF row_count <> 2 THEN
+        RAISE EXCEPTION 'Workspace RLS failed for devices: expected the revoked legacy row and the new active test row, saw % rows', row_count;
     END IF;
 
     SELECT count(*) INTO row_count FROM subscriptions;

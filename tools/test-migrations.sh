@@ -419,8 +419,11 @@ BEGIN;
 SET LOCAL ROLE safi_p0_01_app;
 SELECT set_config('app.workspace_id', '20000000-0000-7000-8000-000000000001', true);
 SELECT set_config('app.user_id', '10000000-0000-7000-8000-000000000001', true);
+-- Never let a prior or role-level capability marker widen this baseline check.
+SELECT set_config('app.auth_lookup', 'false', true);
+SELECT set_config('app.owner_admin', 'false', true);
 
-DO $$
+DO $
 DECLARE
     row_count INTEGER;
 BEGIN

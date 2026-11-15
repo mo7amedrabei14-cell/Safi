@@ -66,7 +66,10 @@ export function WhatIfPanel({
   };
 
   return (
-    <section className="safi-desktop-studio__panel" aria-label={L("تحليل ماذا لو", "What-If Scenarios")}>
+    <section
+      className="safi-desktop-studio__panel"
+      aria-label={L("تحليل ماذا لو", "What-If Scenarios")}
+    >
       <div className="safi-desktop-studio__panel-head">
         <h2>
           <Sliders size={16} aria-hidden="true" /> {L("ماذا لو والسيناريوهات", "What-If Scenarios")}

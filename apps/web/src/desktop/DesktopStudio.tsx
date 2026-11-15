@@ -24,11 +24,7 @@ import {
 } from "lucide-react";
 import "./desktop-studio.css";
 import type { SafiLang } from "../components/layout/FloatingGlassDock";
-import type {
-  DesktopGroup,
-  DesktopMetric,
-  DesktopStudioState
-} from "./studio-bridge";
+import type { DesktopGroup, DesktopMetric, DesktopStudioState } from "./studio-bridge";
 import {
   addCalculatedColumn,
   defineMetric,
@@ -56,10 +52,7 @@ export interface DesktopStudioProps {
 }
 
 export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
-  const L = useCallback(
-    (ar: string, en: string): string => (lang === "ar" ? ar : en),
-    [lang]
-  );
+  const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const desktop = isDesktopRuntime();
   const [state, setState] = useState<DesktopStudioState | null>(null);
   const [audit, setAudit] = useState<DesktopMetric | null>(null);
@@ -76,20 +69,17 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
   const [groupBy, setGroupBy] = useState("");
   const [groups, setGroups] = useState<readonly DesktopGroup[]>([]);
 
-  const run = useCallback(
-    async (action: () => Promise<DesktopStudioState>): Promise<void> => {
-      setBusy(true);
-      try {
-        setState(await action());
-        setError(null);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        setBusy(false);
-      }
-    },
-    []
-  );
+  const run = useCallback(async (action: () => Promise<DesktopStudioState>): Promise<void> => {
+    setBusy(true);
+    try {
+      setState(await action());
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const openFile = useCallback(async (): Promise<void> => {
     setBusy(true);
@@ -305,9 +295,7 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
               </button>
             ))}
             {state.metrics.length === 0 ? (
-              <p className="safi-desktop-studio__empty">
-                {L("لا مؤشرات بعد.", "No metrics yet.")}
-              </p>
+              <p className="safi-desktop-studio__empty">{L("لا مؤشرات بعد.", "No metrics yet.")}</p>
             ) : null}
           </div>
 
@@ -511,8 +499,8 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
               {state.anomalies.map((anomaly, index) => (
                 <li key={`${anomaly.kind}-${index}`}>
                   <strong>{anomaly.kind}</strong>
-                  {anomaly.column !== null ? ` · ${anomaly.column}` : ""} ·{" "}
-                  {anomaly.rows.length} {L("صف", "row(s)")}
+                  {anomaly.column !== null ? ` · ${anomaly.column}` : ""} · {anomaly.rows.length}{" "}
+                  {L("صف", "row(s)")}
                   <span className="safi-desktop-studio__note"> ({anomaly.suggestionKey})</span>
                 </li>
               ))}
@@ -552,7 +540,12 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
               </div>
               <div>
                 <dt>{L("الصفوف المصدرية", "Source rows")}</dt>
-                <dd>{audit.rows.slice(0, 20).map((row) => row + 1).join(", ")}</dd>
+                <dd>
+                  {audit.rows
+                    .slice(0, 20)
+                    .map((row) => row + 1)
+                    .join(", ")}
+                </dd>
               </div>
               <div>
                 <dt>{L("بصمة BLAKE3", "BLAKE3 fingerprint")}</dt>

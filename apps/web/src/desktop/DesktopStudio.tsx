@@ -1,50 +1,74 @@
 /**
  * `apps/web/src/desktop/DesktopStudio.tsx`
  *
- * Quad-Studio workspace for the packaged desktop app. Execution is remote from this component:
- * every number arrives from `crates/sf-desktop/src/studio.rs` through the IPC bridge, so the
- * component never aggregates, parses a file or computes a percentage of user data.
+ * Quad-Studio workspace for the packaged desktop app. Execution runs exclusively inside
+ * `crates/sf-desktop/src/studio.rs` behind the IPC bridge; this component never parses files,
+ * aggregates numbers, or recomputes metrics in TypeScript.
  *
  * In a browser the runtime guard renders a notice instead of the workspace, which keeps the
  * public site a showcase.
  */
 import type { ReactNode } from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle,
+  ArrowDownUp,
   BarChart3,
   CheckCircle2,
   Download,
   FileSpreadsheet,
+  Plus,
   Redo2,
+  RefreshCw,
   Save,
   ShieldCheck,
+  Trash2,
   Undo2,
   XCircle
 } from "lucide-react";
 import "./desktop-studio.css";
 import type { SafiLang } from "../components/layout/FloatingGlassDock";
-import type { DesktopGroup, DesktopMetric, DesktopStudioState } from "./studio-bridge";
+import type {
+  DesktopGroup,
+  DesktopRowPage,
+  DesktopStudioState
+} from "./studio-bridge";
 import {
+  activateScenario,
   addCalculatedColumn,
+  addScenario,
+  compareScenarios,
+  createRequestTracker,
   defineMetric,
+  defineParameter,
+  deleteRow,
   exportCapsule,
+  fetchRowsPage,
   grouped,
+  insertRow,
   isDesktopRuntime,
+  isNewerOrEqualRevision,
   openProject,
+  pickCapsuleOutputFile,
   pickInputFile,
-  pickOutputFile,
   projectState,
   redo,
+  renameScenario,
+  resetScenario,
   restoreProject,
-  setCell,
+  setCellById,
+  setScenarioParameter,
   snapshot,
-  undo
+  sortRows,
+  undo,
+  updateParameter
 } from "./studio-bridge";
+import { VerifiedNumberChip } from "./components/VerifiedNumberChip";
+import { WhatIfPanel } from "./components/WhatIfPanel";
 
 const PROJECT = "main";
 const SAVED_KEY = "safi.desktop.studio.snapshot.v1";
 const AGGREGATES = ["SUM", "AVG", "COUNT", "MIN", "MAX"] as const;
+const PAGE_SIZES = [25, 50, 100, 200] as const;
 type Aggregate = (typeof AGGREGATES)[number];
 
 export interface DesktopStudioProps {
@@ -55,50 +79,159 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const desktop = isDesktopRuntime();
   const [state, setState] = useState<DesktopStudioState | null>(null);
-  const [audit, setAudit] = useState<DesktopMetric | null>(null);
+  const [rowPage, setRowPage] = useState<DesktopRowPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
+
   const [metricId, setMetricId] = useState("total_amount");
   const [metricName, setMetricName] = useState("Total amount");
   const [metricUnit, setMetricUnit] = useState("EGP");
   const [metricFormula, setMetricFormula] = useState("SUM(amount)");
   const [columnName, setColumnName] = useState("line_total");
   const [columnFormula, setColumnFormula] = useState("amount * quantity");
+
   const [aggregate, setAggregate] = useState<Aggregate>("SUM");
   const [valueColumn, setValueColumn] = useState("");
   const [groupBy, setGroupBy] = useState("");
   const [groups, setGroups] = useState<readonly DesktopGroup[]>([]);
 
+  // Paginated viewport query state (UI only holds one bounded page <= 200 rows)
+  const [pageOffset, setPageOffset] = useState(0);
+  const [pageLimit, setPageLimit] = useState<number>(50);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterColumn, setFilterColumn] = useState("");
+  const [filterValue, setFilterValue] = useState("");
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortAscending, setSortAscending] = useState(true);
+
+  const stateRef = useRef<DesktopStudioState | null>(null);
+  stateRef.current = state;
+
+  const stateTracker = useRef(createRequestTracker());
+  const rowsTracker = useRef(createRequestTracker());
+  const chartTracker = useRef(createRequestTracker());
+
   const run = useCallback(async (action: () => Promise<DesktopStudioState>): Promise<void> => {
+    const seq = stateTracker.current.next();
     setBusy(true);
+    setRecalculating(true);
     try {
-      setState(await action());
-      setError(null);
+      const next = await action();
+      if (!stateTracker.current.isCurrent(seq)) {
+        return;
+      }
+      if (isNewerOrEqualRevision(next, stateRef.current)) {
+        setState(next);
+        setError(null);
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (stateTracker.current.isCurrent(seq)) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
-      setBusy(false);
+      if (stateTracker.current.isCurrent(seq)) {
+        setBusy(false);
+        setRecalculating(false);
+      }
     }
   }, []);
 
+  // Automatically load paginated rows whenever revision or query parameters change.
+  const loadRows = useCallback(async (): Promise<void> => {
+    if (!desktop || stateRef.current === null) {
+      return;
+    }
+    const seq = rowsTracker.current.next();
+    const expectedRevision = stateRef.current.revision;
+    try {
+      const page = await fetchRowsPage(PROJECT, {
+        offset: pageOffset,
+        limit: pageLimit,
+        search: searchQuery.trim().length > 0 ? searchQuery : null,
+        sort_column: sortColumn,
+        ascending: sortAscending,
+        filter_column: filterColumn.length > 0 ? filterColumn : null,
+        filter_value: filterValue.trim().length > 0 ? filterValue : null
+      });
+      if (!rowsTracker.current.isCurrent(seq)) {
+        return;
+      }
+      if (stateRef.current !== null && page.revision < stateRef.current.revision) {
+        return;
+      }
+      if (page.revision >= expectedRevision) {
+        setRowPage(page);
+      }
+    } catch (cause) {
+      if (rowsTracker.current.isCurrent(seq)) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    }
+  }, [desktop, filterColumn, filterValue, pageLimit, pageOffset, searchQuery, sortAscending, sortColumn]);
+
+  // Automatically recompute chart grouping in Rust whenever data or chart spec changes.
+  const loadChart = useCallback(async (): Promise<void> => {
+    if (!desktop || stateRef.current === null || groupBy.length === 0 || valueColumn.length === 0) {
+      return;
+    }
+    const seq = chartTracker.current.next();
+    try {
+      const nextGroups = await grouped(PROJECT, aggregate, valueColumn, groupBy);
+      if (chartTracker.current.isCurrent(seq)) {
+        setGroups(nextGroups);
+      }
+    } catch (cause) {
+      if (chartTracker.current.isCurrent(seq)) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    }
+  }, [aggregate, desktop, groupBy, valueColumn]);
+
+  useEffect(() => {
+    if (state !== null) {
+      void loadRows();
+    }
+  }, [state, state?.revision, loadRows]);
+
+  useEffect(() => {
+    if (state !== null) {
+      void loadChart();
+    }
+  }, [state, state?.revision, loadChart]);
+
   const openFile = useCallback(async (): Promise<void> => {
+    const seq = stateTracker.current.next();
     setBusy(true);
+    setRecalculating(true);
     try {
       const path = await pickInputFile();
-      if (path === null) {
+      if (path === null || !stateTracker.current.isCurrent(seq)) {
         return;
       }
       const next = await openProject(PROJECT, path);
+      if (!stateTracker.current.isCurrent(seq)) {
+        return;
+      }
       setState(next);
+      setPageOffset(0);
+      setSortColumn(null);
+      setSearchQuery("");
+      setFilterValue("");
       setGroups([]);
       const first = next.columns[0]?.name ?? "";
       setGroupBy(first);
       setValueColumn(next.columns[1]?.name ?? first);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (stateTracker.current.isCurrent(seq)) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
-      setBusy(false);
+      if (stateTracker.current.isCurrent(seq)) {
+        setBusy(false);
+        setRecalculating(false);
+      }
     }
   }, []);
 
@@ -117,28 +250,21 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
       setError(L("لا يوجد مشروع محفوظ على هذا الجهاز.", "No saved project on this device."));
       return;
     }
-    await run(() => restoreProject(PROJECT, saved));
-  }, [L, run]);
-
-  const refreshChart = useCallback(async (): Promise<void> => {
-    if (groupBy.length === 0 || valueColumn.length === 0) {
-      return;
-    }
-    setBusy(true);
-    try {
-      setGroups(await grouped(PROJECT, aggregate, valueColumn, groupBy));
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [aggregate, groupBy, valueColumn]);
+    await run(async () => {
+      const next = await restoreProject(PROJECT, saved);
+      const first = next.columns[0]?.name ?? "";
+      if (first.length > 0 && groupBy.length === 0) {
+        setGroupBy(first);
+        setValueColumn(next.columns[1]?.name ?? first);
+      }
+      return next;
+    });
+  }, [L, groupBy.length, run]);
 
   const writeCapsule = useCallback(async (): Promise<void> => {
     setBusy(true);
     try {
-      const target = await pickOutputFile();
+      const target = await pickCapsuleOutputFile();
       if (target === null) {
         return;
       }
@@ -205,24 +331,24 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
         <button type="button" onClick={() => void save()} disabled={state === null}>
           <Save size={16} aria-hidden="true" /> {L("حفظ", "Save")}
         </button>
-        <button type="button" onClick={() => void restore()}>
+        <button type="button" onClick={() => void restore()} disabled={busy}>
           {L("استعادة", "Restore")}
         </button>
         <button
           type="button"
           onClick={() => void run(() => undo(PROJECT))}
-          disabled={state === null}
+          disabled={state === null || busy}
         >
           <Undo2 size={16} aria-hidden="true" /> {L("تراجع", "Undo")}
         </button>
         <button
           type="button"
           onClick={() => void run(() => redo(PROJECT))}
-          disabled={state === null}
+          disabled={state === null || busy}
         >
           <Redo2 size={16} aria-hidden="true" /> {L("إعادة", "Redo")}
         </button>
-        <button type="button" onClick={() => void writeCapsule()} disabled={state === null}>
+        <button type="button" onClick={() => void writeCapsule()} disabled={state === null || busy}>
           <Download size={16} aria-hidden="true" />
           {L("تصدير كبسولة (.safi.html)", "Export capsule (.safi.html)")}
         </button>
@@ -232,10 +358,16 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             onClick={() => void run(() => projectState(PROJECT))}
             disabled={busy}
           >
-            {L("تحديث", "Refresh")}
+            <RefreshCw size={16} aria-hidden="true" /> {L("تحديث", "Refresh")}
           </button>
         ) : null}
       </div>
+
+      {recalculating ? (
+        <p className="safi-desktop-studio__note" role="status" aria-live="polite">
+          {L("جارٍ إعادة الحساب في Rust — النتائج السابقة موسومة كقديمة.", "Recalculating in Rust — previous values are marked Stale.")}
+        </p>
+      ) : null}
 
       {error !== null ? (
         <p className="safi-desktop-studio__error" role="alert">
@@ -263,7 +395,7 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             </div>
             <div>
               <dt>{L("صفوف", "Rows")}</dt>
-              <dd>{state.rows.length}</dd>
+              <dd>{state.rowCount}</dd>
             </div>
             <div>
               <dt>{L("أعمدة", "Columns")}</dt>
@@ -274,27 +406,23 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
           <h2>{L("المؤشرات الموثقة", "Verified metrics")}</h2>
           <div className="safi-desktop-studio__chips">
             {state.metrics.map((metric) => (
-              <button
+              <VerifiedNumberChip
                 key={metric.id}
-                type="button"
-                className={`safi-desktop-chip safi-desktop-chip--${metric.status.toLowerCase()}`}
-                onClick={() => setAudit(metric)}
-              >
-                <span className="safi-desktop-chip__name">{metric.name}</span>
-                <span className="safi-desktop-chip__value">
-                  {metric.value} {metric.unit ?? ""}
-                </span>
-                <span className="safi-desktop-chip__state">
-                  {metric.status === "Verified" ? (
-                    <CheckCircle2 size={14} aria-hidden="true" />
-                  ) : (
-                    <AlertTriangle size={14} aria-hidden="true" />
-                  )}
-                  {metric.status}
-                </span>
-              </button>
+                metric={metric}
+                lang={lang}
+                recalculating={recalculating}
+              />
             ))}
-            {state.metrics.length === 0 ? (
+            {state.errors.map((metricErr) => (
+              <VerifiedNumberChip
+                key={`err-${metricErr.id}`}
+                metric={null}
+                fallbackLabel={metricErr.id}
+                errorCode={metricErr.code}
+                lang={lang}
+              />
+            ))}
+            {state.metrics.length === 0 && state.errors.length === 0 ? (
               <p className="safi-desktop-studio__empty">{L("لا مؤشرات بعد.", "No metrics yet.")}</p>
             ) : null}
           </div>
@@ -364,14 +492,115 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             </button>
           </form>
 
-          <h2>{L("الجدول الحي", "Live sheet")}</h2>
+          <WhatIfPanel
+            state={state}
+            lang={lang}
+            busy={busy}
+            onDefineParameter={(name, value) => run(() => defineParameter(PROJECT, name, value))}
+            onUpdateParameter={(name, value) => run(() => updateParameter(PROJECT, name, value))}
+            onAddScenario={(id, name) => run(() => addScenario(PROJECT, id, name, {}))}
+            onRenameScenario={(id, newName) => run(() => renameScenario(PROJECT, id, newName))}
+            onActivateScenario={(id) => run(() => activateScenario(PROJECT, id))}
+            onResetScenario={() => run(() => resetScenario(PROJECT))}
+            onSetScenarioParameter={(sid, p, v) =>
+              run(() => setScenarioParameter(PROJECT, sid, p, v))
+            }
+            onCompareScenarios={(left, right) => compareScenarios(PROJECT, left, right)}
+          />
+
+          <div className="safi-desktop-studio__panel-head">
+            <h2>{L("الجدول الحي (مقسّم الصفحات)", "Live sheet (paginated)")}</h2>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void run(() => insertRow(PROJECT, null, {}))}
+            >
+              <Plus size={14} aria-hidden="true" /> {L("أضف صفاً", "Insert row")}
+            </button>
+          </div>
+
+          <div className="safi-desktop-studio__form">
+            <label>
+              {L("بحث", "Search")}
+              <input
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setPageOffset(0);
+                }}
+                placeholder={L("ابحث في الأعمدة...", "Search columns...")}
+              />
+            </label>
+            <label>
+              {L("تصفية العمود", "Filter column")}
+              <select
+                value={filterColumn}
+                onChange={(event) => {
+                  setFilterColumn(event.target.value);
+                  setPageOffset(0);
+                }}
+              >
+                <option value="">{L("الكل", "All")}</option>
+                {state.columns.map((col) => (
+                  <option key={col.id} value={col.name}>
+                    {col.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {L("قيمة التصفية", "Filter value")}
+              <input
+                value={filterValue}
+                onChange={(event) => {
+                  setFilterValue(event.target.value);
+                  setPageOffset(0);
+                }}
+              />
+            </label>
+            <label>
+              {L("حجم الصفحة", "Page size")}
+              <select
+                value={pageLimit}
+                onChange={(event) => {
+                  setPageLimit(Number(event.target.value));
+                  setPageOffset(0);
+                }}
+              >
+                {PAGE_SIZES.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           <div className="safi-desktop-studio__table-wrap">
             <table className="safi-desktop-studio__table">
               <thead>
                 <tr>
+                  <th scope="col">{L("هوية الصف", "Row ID")}</th>
                   {state.columns.map((column) => (
-                    <th key={column.name} scope="col">
-                      {column.name}
+                    <th key={column.id} scope="col">
+                      <button
+                        type="button"
+                        className="safi-desktop-studio__col-sort"
+                        onClick={() => {
+                          if (sortColumn === column.name) {
+                            const nextAsc = !sortAscending;
+                            setSortAscending(nextAsc);
+                            void run(() => sortRows(PROJECT, column.name, nextAsc));
+                          } else {
+                            setSortColumn(column.name);
+                            setSortAscending(true);
+                            void run(() => sortRows(PROJECT, column.name, true));
+                          }
+                        }}
+                      >
+                        <span>{column.name}</span>
+                        <ArrowDownUp size={12} aria-hidden="true" />
+                      </button>
                       {state.calculated.includes(column.name) ? (
                         <span className="safi-desktop-studio__calc">
                           {" "}
@@ -380,24 +609,44 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
                       ) : null}
                     </th>
                   ))}
+                  <th scope="col">{L("إجراء", "Action")}</th>
                 </tr>
               </thead>
               <tbody>
-                {state.rows.slice(0, 50).map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                    {row.map((cell, columnIndex) => {
+                {(rowPage?.rows ?? []).map((rowItem) => (
+                  <tr key={rowItem.row_id}>
+                    <td>
+                      <span className="safi-desktop-studio__rowid">
+                        r{rowItem.row_id}
+                        {rowItem.origin_row_id !== null
+                          ? ` (src r${rowItem.origin_row_id})`
+                          : ` (${L("جديد", "new")})`}
+                      </span>
+                    </td>
+                    {rowItem.cells.map((cell, columnIndex) => {
                       const columnLabel = state.columns[columnIndex]?.name ?? "";
                       const editable = !state.calculated.includes(columnLabel);
                       return (
-                        <td key={`${rowIndex}-${columnIndex}`}>
+                        <td
+                          key={`${rowItem.row_id}-${columnLabel}`}
+                          data-changed={cell.changed ? "true" : undefined}
+                        >
                           {editable ? (
                             <input
-                              defaultValue={cell}
-                              aria-label={`${columnLabel} ${rowIndex + 1}`}
+                              key={`${rowItem.row_id}-${columnLabel}-${state.revision}`}
+                              defaultValue={cell.raw}
+                              aria-label={`${columnLabel} r${rowItem.row_id}`}
                               onBlur={(event) => {
-                                if (event.target.value !== cell) {
+                                if (event.target.value !== cell.raw) {
+                                  const nextVal = event.target.value;
                                   void run(() =>
-                                    setCell(PROJECT, rowIndex, columnLabel, event.target.value)
+                                    setCellById(
+                                      PROJECT,
+                                      rowItem.row_id,
+                                      columnLabel,
+                                      nextVal,
+                                      state.revision
+                                    )
                                   );
                                 }
                               }}
@@ -408,18 +657,52 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
                               }}
                             />
                           ) : (
-                            <span>{cell}</span>
+                            <span>{cell.visible}</span>
                           )}
                         </td>
                       );
                     })}
+                    <td>
+                      <button
+                        type="button"
+                        aria-label={`${L("حذف", "Delete")} r${rowItem.row_id}`}
+                        disabled={busy}
+                        onClick={() => void run(() => deleteRow(PROJECT, rowItem.row_id))}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <h2>{L("اللوحة", "Dashboard")}</h2>
+          {rowPage !== null ? (
+            <div className="safi-desktop-studio__pager">
+              <button
+                type="button"
+                disabled={pageOffset === 0}
+                onClick={() => setPageOffset(Math.max(0, pageOffset - pageLimit))}
+              >
+                {L("السابق", "Previous")}
+              </button>
+              <span>
+                {rowPage.filtered_rows === 0
+                  ? L("0 صفوف مطابقة", "0 matching rows")
+                  : `${rowPage.offset + 1}–${rowPage.offset + rowPage.rows.length} / ${rowPage.filtered_rows} (${L("الإجمالي", "total")}: ${rowPage.total_rows})`}
+              </span>
+              <button
+                type="button"
+                disabled={rowPage.offset + rowPage.rows.length >= rowPage.filtered_rows}
+                onClick={() => setPageOffset(pageOffset + pageLimit)}
+              >
+                {L("التالي", "Next")}
+              </button>
+            </div>
+          ) : null}
+
+          <h2>{L("اللوحة (تحديث تفاعلي)", "Dashboard (reactive)")}</h2>
           <div className="safi-desktop-studio__form">
             <label>
               {L("التجميع", "Aggregate")}
@@ -438,7 +721,7 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
               {L("العمود", "Column")}
               <select value={valueColumn} onChange={(event) => setValueColumn(event.target.value)}>
                 {state.columns.map((column) => (
-                  <option key={column.name} value={column.name}>
+                  <option key={column.id} value={column.name}>
                     {column.name}
                   </option>
                 ))}
@@ -448,13 +731,13 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
               {L("التجميع حسب", "Group by")}
               <select value={groupBy} onChange={(event) => setGroupBy(event.target.value)}>
                 {state.columns.map((column) => (
-                  <option key={column.name} value={column.name}>
+                  <option key={column.id} value={column.name}>
                     {column.name}
                   </option>
                 ))}
               </select>
             </label>
-            <button type="button" onClick={() => void refreshChart()} disabled={busy}>
+            <button type="button" onClick={() => void loadChart()} disabled={busy}>
               <BarChart3 size={16} aria-hidden="true" /> {L("حدّث الرسم", "Refresh chart")}
             </button>
           </div>
@@ -482,8 +765,8 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
           {groups.length > 0 ? (
             <p className="safi-desktop-studio__note">
               {L(
-                "القيم مجمّعة في Rust؛ الواجهة ترسم النسبة فقط.",
-                "Values are aggregated in Rust; the UI only draws a ratio."
+                "القيم مجمّعة في Rust وتُحدَّث تلقائياً عند كل تعديل؛ الواجهة ترسم النسبة فقط.",
+                "Values are aggregated in Rust and update automatically on every edit; the UI only draws ratios."
               )}
             </p>
           ) : null}
@@ -508,60 +791,6 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
           )}
         </>
       )}
-
-      {audit !== null ? (
-        <div
-          className="safi-desktop-studio__audit"
-          role="dialog"
-          aria-modal="true"
-          aria-label={audit.name}
-        >
-          <div className="safi-desktop-studio__audit-card">
-            <h3>{audit.name}</h3>
-            <p className="safi-desktop-studio__audit-value">
-              {audit.value} {audit.unit ?? ""}
-            </p>
-            <dl>
-              <div>
-                <dt>{L("المعادلة", "Formula")}</dt>
-                <dd>{audit.formula}</dd>
-              </div>
-              <div>
-                <dt>{L("إصدار المعادلة", "Formula version")}</dt>
-                <dd>{audit.formulaVersion}</dd>
-              </div>
-              <div>
-                <dt>{L("نسخة البيانات", "Dataset version")}</dt>
-                <dd>{audit.sourceVersion}</dd>
-              </div>
-              <div>
-                <dt>{L("الأعمدة المصدرية", "Source columns")}</dt>
-                <dd>{audit.columns.join(", ")}</dd>
-              </div>
-              <div>
-                <dt>{L("الصفوف المصدرية", "Source rows")}</dt>
-                <dd>
-                  {audit.rows
-                    .slice(0, 20)
-                    .map((row) => row + 1)
-                    .join(", ")}
-                </dd>
-              </div>
-              <div>
-                <dt>{L("بصمة BLAKE3", "BLAKE3 fingerprint")}</dt>
-                <dd className="safi-desktop-studio__fingerprint">{audit.fingerprint}</dd>
-              </div>
-              <div>
-                <dt>{L("محرك الحساب", "Engine")}</dt>
-                <dd>{audit.engineVersion}</dd>
-              </div>
-            </dl>
-            <button type="button" onClick={() => setAudit(null)}>
-              {L("إغلاق", "Close")}
-            </button>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

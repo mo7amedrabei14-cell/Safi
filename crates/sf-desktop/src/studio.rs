@@ -11,15 +11,17 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sf_core::datagraph::{MetricId, ScenarioId, SourceId, VerifiedMetricToken};
+use sf_core::Decimal;
+use sf_core::datagraph::{ColumnId, MetricId, RowId, ScenarioId, SourceId, VerifiedMetricToken};
 use sf_core::error::SafiError;
 use sf_core::limits::PlatformLimits;
 use sf_core::table::Table;
 use sf_io::{read_csv_stream, read_excel_stream};
-use sf_recipe::datagraph::{AggFunc, ChangeOutcome, DataGraph, datagraph_display};
+use sf_recipe::datagraph::{AggFunc, ChangeOutcome, DataGraph, RowQuery, datagraph_display};
 use sf_recipe::studio_anomaly::detect_anomalies;
 use sf_recipe::studio_capsule::{CapsuleChart, CapsuleOptions, export_capsule};
 use sf_recipe::studio_dsl::{apply_command, parse_command, render_narrative};
@@ -65,7 +67,7 @@ impl StudioStore {
         self.state(project)
     }
 
-    /// Returns the state snapshot the UI renders.
+    /// Returns the state snapshot (metadata, columns, tokens, scenarios — never unbounded rows).
     ///
     /// # Errors
     /// [`UNKNOWN_PROJECT_CODE`] when the project is not open.
@@ -80,7 +82,28 @@ impl StudioStore {
         state_json(graph)
     }
 
-    /// Replaces one cell and returns the recomputed state.
+    /// Queries a bounded viewport page of working rows without transferring the full table.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-SYS-001` for malformed query JSON, or `SF-CAL-001` for unknown columns.
+    pub fn rows_page(&self, project: &str, query_json: &str) -> Result<String, String> {
+        let query: RowQuery = if query_json.trim().is_empty() {
+            RowQuery::default()
+        } else {
+            serde_json::from_str(query_json).map_err(|_| "SF-SYS-001".to_owned())?
+        };
+        let projects = self
+            .projects
+            .lock()
+            .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+        let graph = projects
+            .get(project)
+            .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+        let page = graph.rows_page(&query).map_err(|error| code_of(&error))?;
+        serde_json::to_string(&page).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Replaces one cell by positional display row and returns the updated state.
     ///
     /// # Errors
     /// [`UNKNOWN_PROJECT_CODE`] or the engine's own `SF-CAL-*` code.
@@ -93,6 +116,86 @@ impl StudioStore {
         now_ms: u64,
     ) -> Result<String, String> {
         self.mutate(project, |graph| graph.set_cell(row, column, raw, now_ms))
+    }
+
+    /// Replaces one cell using its stable [`RowId`] and optional optimistic revision guard.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-CAL-007` on stale `expected_revision`, or `SF-CAL-*`.
+    pub fn set_cell_by_id(
+        &self,
+        project: &str,
+        row_id: u64,
+        column: &str,
+        raw: &str,
+        expected_revision: Option<u64>,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        self.mutate_at_revision(project, expected_revision, |graph| {
+            graph.set_cell_by_id(RowId::from_raw(row_id), column, raw, now_ms)
+        })
+    }
+
+    /// Sorts working rows without altering stable row identities.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-CAL-001`.
+    pub fn sort_rows(
+        &self,
+        project: &str,
+        column: &str,
+        ascending: bool,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        self.mutate(project, |graph| graph.sort_rows(column, ascending, now_ms))
+    }
+
+    /// Filters working rows on a column while preserving stable row identities.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-CAL-001`.
+    pub fn filter_rows(
+        &self,
+        project: &str,
+        column: &str,
+        query: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        self.mutate(project, |graph| graph.filter_rows(column, query, now_ms))
+    }
+
+    /// Deletes a working row by stable row identity.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-SYS-001`.
+    pub fn delete_row(&self, project: &str, row_id: u64, now_ms: u64) -> Result<String, String> {
+        self.mutate(project, |graph| {
+            graph.delete_row(RowId::from_raw(row_id), now_ms)
+        })
+    }
+
+    /// Inserts a row with a freshly allocated stable row identity.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-SYS-001`, or `SF-CAL-001`.
+    pub fn insert_row(
+        &self,
+        project: &str,
+        after_row_id: Option<u64>,
+        values_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let values: BTreeMap<String, String> = if values_json.trim().is_empty() {
+            BTreeMap::new()
+        } else {
+            serde_json::from_str(values_json).map_err(|_| "SF-SYS-001".to_owned())?
+        };
+        let after = after_row_id.map(RowId::from_raw);
+        self.mutate(project, |graph| {
+            graph
+                .insert_row(after, values, now_ms)
+                .map(|(_, outcome)| outcome)
+        })
     }
 
     /// Adds a calculated column.
@@ -109,6 +212,166 @@ impl StudioStore {
         self.mutate(project, |graph| {
             graph.add_calculated_column(name, formula, now_ms)
         })
+    }
+
+    /// Registers a baseline What-If parameter assumption.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-SYS-001`.
+    pub fn define_parameter(
+        &self,
+        project: &str,
+        name: &str,
+        value_str: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
+        self.mutate_unit(project, None, |graph| {
+            graph.define_parameter(name, value, now_ms)
+        })
+    }
+
+    /// Updates a baseline What-If assumption value and recomputes dependent metrics.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-CAL-002`, or `SF-CAL-005`.
+    pub fn update_parameter(
+        &self,
+        project: &str,
+        name: &str,
+        value_str: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
+        self.mutate(project, |graph| graph.update_parameter(name, value, now_ms))
+    }
+
+    /// Creates a What-If scenario with optional parameter overrides (`{name: "decimal"}`).
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-SYS-001`, or `SF-CAL-002`.
+    pub fn add_scenario(
+        &self,
+        project: &str,
+        id: &str,
+        name: &str,
+        params_json: &str,
+    ) -> Result<String, String> {
+        let scenario_id = ScenarioId::new(id).map_err(|error| code_of(&error))?;
+        let raw_params: BTreeMap<String, String> = if params_json.trim().is_empty() {
+            BTreeMap::new()
+        } else {
+            serde_json::from_str(params_json).map_err(|_| "SF-CAL-002".to_owned())?
+        };
+        let mut parsed = BTreeMap::new();
+        for (key, val) in raw_params {
+            let decimal = Decimal::from_str(val.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
+            parsed.insert(key, decimal);
+        }
+        self.mutate_unit(project, None, |graph| {
+            graph.add_scenario(scenario_id, name, parsed)
+        })
+    }
+
+    /// Renames an existing What-If scenario.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-SYS-001`.
+    pub fn rename_scenario(
+        &self,
+        project: &str,
+        id: &str,
+        new_name: &str,
+    ) -> Result<String, String> {
+        let scenario_id = ScenarioId::new(id).map_err(|error| code_of(&error))?;
+        self.mutate_unit(project, None, |graph| {
+            graph.rename_scenario(&scenario_id, new_name)
+        })
+    }
+
+    /// Activates a scenario (`Some(id)`) or clears to baseline (`None`) and recomputes metrics.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-SYS-001`.
+    pub fn activate_scenario(
+        &self,
+        project: &str,
+        id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let scenario_id = match id {
+            Some(raw) if !raw.trim().is_empty() => {
+                Some(ScenarioId::new(raw).map_err(|error| code_of(&error))?)
+            }
+            _ => None,
+        };
+        self.mutate_unit(project, None, |graph| {
+            graph.activate_scenario(scenario_id.as_ref(), now_ms)
+        })
+    }
+
+    /// Resets active scenario to baseline assumptions.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-SYS-001`.
+    pub fn reset_scenario(&self, project: &str, now_ms: u64) -> Result<String, String> {
+        self.mutate_unit(project, None, |graph| graph.reset_scenario(now_ms))
+    }
+
+    /// Sets a numeric What-If parameter override inside a scenario and recomputes active metrics.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-CAL-002`, `SF-CAL-005`, or `SF-SYS-001`.
+    pub fn set_scenario_parameter(
+        &self,
+        project: &str,
+        scenario_id: &str,
+        parameter: &str,
+        value_str: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let id = ScenarioId::new(scenario_id).map_err(|error| code_of(&error))?;
+        let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
+        self.mutate(project, |graph| {
+            graph.set_scenario_parameter(&id, parameter, value, now_ms)
+        })
+    }
+
+    /// Compares two scenarios across all metrics without mutating active project state.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-SYS-001`, or evaluation codes.
+    pub fn compare_scenarios(
+        &self,
+        project: &str,
+        left: &str,
+        right: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let left_id = ScenarioId::new(left).map_err(|error| code_of(&error))?;
+        let right_id = ScenarioId::new(right).map_err(|error| code_of(&error))?;
+        let projects = self
+            .projects
+            .lock()
+            .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+        let graph = projects
+            .get(project)
+            .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+        let comparisons = graph
+            .compare_scenarios(&left_id, &right_id, now_ms)
+            .map_err(|error| code_of(&error))?;
+        let payload = comparisons
+            .into_iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "metricId": entry.metric_id.as_str(),
+                    "metricName": entry.metric_name,
+                    "left": entry.left.normalize().to_string(),
+                    "right": entry.right.normalize().to_string(),
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
     }
 
     /// Defines a metric and computes its verified token.
@@ -280,16 +543,17 @@ impl StudioStore {
             let graph = projects
                 .get(project)
                 .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
-            let charts = options
-                .charts
-                .into_iter()
-                .map(|chart| CapsuleChart {
+            let mut charts = Vec::with_capacity(options.charts.len());
+            for chart in options.charts {
+                let function =
+                    AggFunc::from_name(&chart.function).ok_or_else(|| "SF-CAL-002".to_owned())?;
+                charts.push(CapsuleChart {
                     title: chart.title,
-                    function: AggFunc::from_name(&chart.function).unwrap_or(AggFunc::Sum),
+                    function,
                     column: chart.column,
                     group_by: chart.group_by,
-                })
-                .collect();
+                });
+            }
             export_capsule(
                 graph,
                 &CapsuleOptions {
@@ -309,6 +573,15 @@ impl StudioStore {
         project: &str,
         action: impl FnOnce(&mut DataGraph) -> Result<ChangeOutcome, SafiError>,
     ) -> Result<String, String> {
+        self.mutate_at_revision(project, None, action)
+    }
+
+    fn mutate_at_revision(
+        &self,
+        project: &str,
+        expected_revision: Option<u64>,
+        action: impl FnOnce(&mut DataGraph) -> Result<ChangeOutcome, SafiError>,
+    ) -> Result<String, String> {
         {
             let mut projects = self
                 .projects
@@ -317,6 +590,35 @@ impl StudioStore {
             let graph = projects
                 .get_mut(project)
                 .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+            if let Some(expected) = expected_revision
+                && graph.revision().get() != expected
+            {
+                return Err("SF-CAL-007".to_owned());
+            }
+            action(graph).map_err(|error| code_of(&error))?;
+        }
+        self.state(project)
+    }
+
+    fn mutate_unit(
+        &self,
+        project: &str,
+        expected_revision: Option<u64>,
+        action: impl FnOnce(&mut DataGraph) -> Result<(), SafiError>,
+    ) -> Result<String, String> {
+        {
+            let mut projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let graph = projects
+                .get_mut(project)
+                .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+            if let Some(expected) = expected_revision
+                && graph.revision().get() != expected
+            {
+                return Err("SF-CAL-007".to_owned());
+            }
             action(graph).map_err(|error| code_of(&error))?;
         }
         self.state(project)
@@ -389,33 +691,21 @@ fn read_table(path: &Path) -> Result<Table, String> {
         .ok_or_else(|| "SF-IMP-001".to_owned())
 }
 
-/// Serializes the state the desktop UI renders.
+/// Serializes the metadata & provenance state the desktop UI renders without dumping all rows.
 fn state_json(graph: &DataGraph) -> Result<String, String> {
     let columns = graph
         .working()
         .columns()
         .iter()
-        .map(|column| {
+        .enumerate()
+        .map(|(index, column)| {
+            let prov = graph.column_provenance().get(index);
             serde_json::json!({
+                "id": prov.map_or((index as u64).saturating_add(1), |entry| entry.column_id.get()),
                 "name": column.schema().name,
                 "type": format!("{:?}", column.schema().column_type),
+                "originColumnIndex": prov.and_then(|entry| entry.origin_column_index),
             })
-        })
-        .collect::<Vec<_>>();
-
-    let rows = (0..graph.working().row_count())
-        .map(|row| {
-            graph
-                .working()
-                .columns()
-                .iter()
-                .map(|column| {
-                    column
-                        .cell_at(row)
-                        .map(|cell| cell.visible_text().to_owned())
-                        .unwrap_or_default()
-                })
-                .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
 
@@ -449,24 +739,41 @@ fn state_json(graph: &DataGraph) -> Result<String, String> {
         })
         .collect::<Vec<_>>();
 
+    let scenarios = graph
+        .scenarios()
+        .values()
+        .map(|scenario| {
+            let params: BTreeMap<&String, String> = scenario
+                .parameters()
+                .iter()
+                .map(|(key, val)| (key, val.normalize().to_string()))
+                .collect();
+            serde_json::json!({
+                "id": scenario.id().as_str(),
+                "name": scenario.name(),
+                "parameters": params,
+            })
+        })
+        .collect::<Vec<_>>();
+
     let payload = serde_json::json!({
         "sourceId": graph.source_id().as_str(),
         "revision": graph.revision().get(),
         "datasetVersion": graph.dataset_version().get(),
         "originFingerprint": graph.origin_fingerprint(),
+        "rowCount": graph.working().row_count(),
         "columns": columns,
-        "rows": rows,
         "metrics": metrics,
         "errors": errors,
         "anomalies": anomalies,
         "calculated": graph.calculated_columns(),
         "lastRecomputed": graph.last_recomputed().iter().map(MetricId::as_str).collect::<Vec<_>>(),
         "activeScenario": graph.active_scenario().map(ScenarioId::as_str),
-        "scenarios": graph.scenarios().keys().map(ScenarioId::as_str).collect::<Vec<_>>(),
+        "scenarios": scenarios,
         "parameters": graph
             .parameters()
             .iter()
-            .map(|(name, value)| serde_json::json!({ "name": name, "value": value.to_string() }))
+            .map(|(name, value)| serde_json::json!({ "name": name, "value": value.normalize().to_string() }))
             .collect::<Vec<_>>(),
     });
     serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
@@ -480,11 +787,16 @@ fn token_json(token: &VerifiedMetricToken) -> serde_json::Value {
         "unit": token.unit,
         "formula": token.formula,
         "formulaVersion": token.formula_version,
+        "sourceId": token.source_id.as_str(),
         "sourceVersion": token.source_version.get(),
+        "sourceFingerprint": token.source_fingerprint,
         "fingerprint": token.fingerprint(),
         "status": format!("{:?}", token.status),
         "rows": token.row_refs,
+        "sourceRowIds": token.source_row_ids.iter().copied().map(RowId::get).collect::<Vec<_>>(),
         "columns": token.column_refs,
+        "columnIds": token.column_ids.iter().copied().map(ColumnId::get).collect::<Vec<_>>(),
+        "transformationTrace": token.transformation_trace,
         "engineVersion": token.engine_version,
         "computedAtMs": token.computed_at_ms,
     })
@@ -549,8 +861,16 @@ mod tests {
         let (store, _) = open_csv(directory.path());
         let state = state(&store);
         assert_eq!(state["columns"][0]["name"], serde_json::json!("region"));
-        assert_eq!(state["rows"].as_array().map(Vec::len), Some(3));
-        assert_eq!(state["rows"][0][0], serde_json::json!("Cairo"));
+        assert_eq!(state["rowCount"], serde_json::json!(3));
+        assert!(state.get("rows").is_none());
+
+        let page = json(&test_result(store.rows_page("p1", "{}")));
+        assert_eq!(page["total_rows"], serde_json::json!(3));
+        assert_eq!(page["rows"][0]["row_id"], serde_json::json!(1));
+        assert_eq!(
+            page["rows"][0]["cells"][0]["visible"],
+            serde_json::json!("Cairo")
+        );
     }
 
     #[test]
@@ -639,6 +959,76 @@ mod tests {
         assert_eq!(
             store.open_file("p1", &path, 1_000),
             Err("SF-IMP-002".to_owned())
+        );
+    }
+
+    #[test]
+    fn large_dataset_pagination_is_bounded_and_state_stays_compact() {
+        let directory = test_result(tempfile::tempdir());
+        let path = directory.path().join("large.csv");
+        let mut csv = String::from("region,amount\n");
+        for i in 1..=600 {
+            let region = if i % 2 == 0 { "Cairo" } else { "Giza" };
+            csv.push_str(&format!("{region},{i}\n"));
+        }
+        test_result(fs::write(&path, &csv));
+        let store = StudioStore::new();
+        let state_raw = test_result(store.open_file("big", &path, 1_000));
+        let parsed = json(&state_raw);
+        assert_eq!(parsed["rowCount"], serde_json::json!(600));
+        assert!(parsed.get("rows").is_none());
+
+        let page = json(&test_result(store.rows_page(
+            "big",
+            r#"{"offset":100,"limit":999,"search":"Cairo","sort_column":"amount","ascending":false,"filter_column":null,"filter_value":null}"#,
+        )));
+        assert_eq!(page["total_rows"], serde_json::json!(600));
+        assert_eq!(page["filtered_rows"], serde_json::json!(300));
+        assert_eq!(page["limit"], serde_json::json!(200));
+        assert_eq!(page["rows"].as_array().map(Vec::len), Some(200));
+    }
+
+    #[test]
+    fn revision_guard_what_if_scenarios_and_strict_chart_aggregation_work() {
+        let directory = test_result(tempfile::tempdir());
+        let (store, _) = open_csv(directory.path());
+        test_result(store.define_parameter("p1", "tax", "1.1", 1_500));
+        test_result(store.define_metric(
+            "p1",
+            "proj",
+            "Projected",
+            Some("EGP"),
+            "SUM(amount) * tax",
+            2_000,
+        ));
+        let rev = state(&store)["revision"].as_u64().unwrap_or(0);
+
+        // Stale revision must be rejected with SF-CAL-007
+        assert_eq!(
+            store.set_cell_by_id("p1", 1, "amount", "500", Some(rev.saturating_sub(1)), 2_100),
+            Err("SF-CAL-007".to_owned())
+        );
+
+        // Add, rename, activate, and update scenario parameter
+        test_result(store.add_scenario("p1", "s1", "Optimistic", r#"{"tax":"2"}"#));
+        test_result(store.rename_scenario("p1", "s1", "Optimistic Q4"));
+        test_result(store.activate_scenario("p1", Some("s1"), 2_200));
+        let active_state = state(&store);
+        assert_eq!(
+            active_state["metrics"][0]["value"],
+            serde_json::json!("350")
+        );
+        assert_eq!(
+            active_state["scenarios"][0]["name"],
+            serde_json::json!("Optimistic Q4")
+        );
+
+        // Invalid aggregation in capsule must return SF-CAL-002 rather than falling back to SUM
+        let bad_capsule = r#"{"title":"Capsule","created_at":"2026-11-10T00:00:00Z","charts":[{"title":"Bad","function":"MEDIAN","column":"amount","group_by":"region"}]}"#;
+        let target = directory.path().join("bad.safi.html");
+        assert_eq!(
+            store.export_capsule("p1", &target, bad_capsule),
+            Err("SF-CAL-002".to_owned())
         );
     }
 }

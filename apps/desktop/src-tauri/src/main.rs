@@ -69,6 +69,22 @@ async fn pick_output_file(app: tauri::AppHandle) -> Result<Option<String>, &'sta
     .map_err(|_| "SF-SYS-011")
 }
 
+/// Native save dialog restricted to `.safi.html` offline capsule exports.
+#[tauri::command]
+async fn pick_capsule_output_file(app: tauri::AppHandle) -> Result<Option<String>, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Safi Capsule", &["html"])
+            .set_file_name("report.safi.html")
+            .blocking_save_file()
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.display().to_string())
+    })
+    .await
+    .map_err(|_| "SF-SYS-011")
+}
+
 /// Current wall clock in milliseconds; the engine takes time as an argument so it stays
 /// replayable in tests.
 fn now_ms() -> u64 {
@@ -96,6 +112,15 @@ fn studio_state(store: tauri::State<'_, StudioStore>, project: String) -> Result
 }
 
 #[tauri::command]
+fn studio_rows_page(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    query: String,
+) -> Result<String, String> {
+    store.rows_page(&project, &query)
+}
+
+#[tauri::command]
 fn studio_set_cell(
     store: tauri::State<'_, StudioStore>,
     project: String,
@@ -104,6 +129,143 @@ fn studio_set_cell(
     value: String,
 ) -> Result<String, String> {
     store.set_cell(&project, row, &column, &value, now_ms())
+}
+
+#[tauri::command]
+fn studio_set_cell_by_id(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    row_id: u64,
+    column: String,
+    value: String,
+    expected_revision: Option<u64>,
+) -> Result<String, String> {
+    store.set_cell_by_id(
+        &project,
+        row_id,
+        &column,
+        &value,
+        expected_revision,
+        now_ms(),
+    )
+}
+
+#[tauri::command]
+fn studio_sort_rows(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    column: String,
+    ascending: bool,
+) -> Result<String, String> {
+    store.sort_rows(&project, &column, ascending, now_ms())
+}
+
+#[tauri::command]
+fn studio_filter_rows(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    column: String,
+    query: String,
+) -> Result<String, String> {
+    store.filter_rows(&project, &column, &query, now_ms())
+}
+
+#[tauri::command]
+fn studio_delete_row(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    row_id: u64,
+) -> Result<String, String> {
+    store.delete_row(&project, row_id, now_ms())
+}
+
+#[tauri::command]
+fn studio_insert_row(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    after_row_id: Option<u64>,
+    values: String,
+) -> Result<String, String> {
+    store.insert_row(&project, after_row_id, &values, now_ms())
+}
+
+#[tauri::command]
+fn studio_define_parameter(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    name: String,
+    value: String,
+) -> Result<String, String> {
+    store.define_parameter(&project, &name, &value, now_ms())
+}
+
+#[tauri::command]
+fn studio_update_parameter(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    name: String,
+    value: String,
+) -> Result<String, String> {
+    store.update_parameter(&project, &name, &value, now_ms())
+}
+
+#[tauri::command]
+fn studio_add_scenario(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    id: String,
+    name: String,
+    parameters: String,
+) -> Result<String, String> {
+    store.add_scenario(&project, &id, &name, &parameters)
+}
+
+#[tauri::command]
+fn studio_rename_scenario(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    id: String,
+    new_name: String,
+) -> Result<String, String> {
+    store.rename_scenario(&project, &id, &new_name)
+}
+
+#[tauri::command]
+fn studio_activate_scenario(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    id: Option<String>,
+) -> Result<String, String> {
+    store.activate_scenario(&project, id.as_deref(), now_ms())
+}
+
+#[tauri::command]
+fn studio_reset_scenario(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+) -> Result<String, String> {
+    store.reset_scenario(&project, now_ms())
+}
+
+#[tauri::command]
+fn studio_set_scenario_parameter(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    scenario_id: String,
+    parameter: String,
+    value: String,
+) -> Result<String, String> {
+    store.set_scenario_parameter(&project, &scenario_id, &parameter, &value, now_ms())
+}
+
+#[tauri::command]
+fn studio_compare_scenarios(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    left: String,
+    right: String,
+) -> Result<String, String> {
+    store.compare_scenarios(&project, &left, &right, now_ms())
 }
 
 #[tauri::command]
@@ -209,11 +371,26 @@ fn main() {
             take_pending_deep_link,
             pick_input_file,
             pick_output_file,
+            pick_capsule_output_file,
             studio_open_file,
             studio_state,
+            studio_rows_page,
             studio_set_cell,
+            studio_set_cell_by_id,
+            studio_sort_rows,
+            studio_filter_rows,
+            studio_delete_row,
+            studio_insert_row,
             studio_define_metric,
             studio_add_calculated_column,
+            studio_define_parameter,
+            studio_update_parameter,
+            studio_add_scenario,
+            studio_rename_scenario,
+            studio_activate_scenario,
+            studio_reset_scenario,
+            studio_set_scenario_parameter,
+            studio_compare_scenarios,
             studio_apply_command,
             studio_undo,
             studio_redo,

@@ -10,16 +10,31 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 17] = [
+pub const ALLOWED_COMMANDS: [&str; 32] = [
     "app_info",
     "take_pending_deep_link",
     "pick_input_file",
     "pick_output_file",
+    "pick_capsule_output_file",
     "studio_open_file",
     "studio_state",
+    "studio_rows_page",
     "studio_set_cell",
+    "studio_set_cell_by_id",
+    "studio_sort_rows",
+    "studio_filter_rows",
+    "studio_delete_row",
+    "studio_insert_row",
     "studio_define_metric",
     "studio_add_calculated_column",
+    "studio_define_parameter",
+    "studio_update_parameter",
+    "studio_add_scenario",
+    "studio_rename_scenario",
+    "studio_activate_scenario",
+    "studio_reset_scenario",
+    "studio_set_scenario_parameter",
+    "studio_compare_scenarios",
     "studio_apply_command",
     "studio_undo",
     "studio_redo",

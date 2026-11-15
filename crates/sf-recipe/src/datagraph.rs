@@ -23,8 +23,9 @@
 use rust_decimal::Decimal;
 use sf_core::column::{Column, ColumnSchema, ColumnType, ConfidenceScore};
 use sf_core::datagraph::{
-    DatasetVersion, MetricId, MetricTokenParts, Revision, ScenarioId, SourceId,
-    VerificationOutcome, VerificationStatus, VerifiedMetricToken,
+    ColumnId, ColumnProvenance, DatasetVersion, MetricId, MetricTokenParts, Revision, RowId,
+    RowProvenance, ScenarioId, SourceId, VerificationOutcome, VerificationStatus,
+    VerifiedMetricToken,
 };
 use sf_core::error::{ErrorCode, ErrorSeverity, SafiError};
 use sf_core::table::Table;
@@ -510,9 +511,13 @@ fn evaluate(formula: &Formula, context: &mut dyn FormulaContext) -> Result<Decim
 
 fn aggregate_column(
     table: &Table,
+    row_provenance: &[RowProvenance],
     function: AggFunc,
     column: &str,
-) -> Result<(Decimal, Vec<u64>), SafiError> {
+) -> Result<(Decimal, Vec<RowId>), SafiError> {
+    if row_provenance.len() != table.row_count() {
+        return Err(verification_mismatch());
+    }
     let source = table.column_by_name(column).ok_or_else(unknown_column)?;
     let mut rows = Vec::new();
     let mut sum = Decimal::ZERO;
@@ -523,13 +528,18 @@ fn aggregate_column(
         if cell.is_empty() {
             continue;
         }
+        let row_id = row_provenance
+            .get(row)
+            .map(|entry| entry.row_id)
+            .ok_or_else(verification_mismatch)?;
         non_empty += 1;
         if matches!(function, AggFunc::Count) {
+            rows.push(row_id);
             continue;
         }
         let number = cell_number(cell).ok_or_else(type_mismatch)?;
         numeric += 1;
-        rows.push(row as u64);
+        rows.push(row_id);
         sum = sum.checked_add(number).ok_or_else(type_mismatch)?;
         extreme = Some(match (function, extreme) {
             (AggFunc::Min, Some(current)) => current.min(number),
@@ -538,16 +548,7 @@ fn aggregate_column(
         });
     }
     let value = match function {
-        AggFunc::Count => {
-            rows = (0..source.len() as u64)
-                .filter(|row| {
-                    source
-                        .cell_at(*row as usize)
-                        .is_some_and(|cell| !cell.is_empty())
-                })
-                .collect();
-            Decimal::from(non_empty)
-        }
+        AggFunc::Count => Decimal::from(non_empty),
         AggFunc::Sum => sum,
         AggFunc::Avg => {
             if numeric == 0 {
@@ -564,8 +565,9 @@ fn aggregate_column(
 
 struct MetricContext<'a> {
     table: &'a Table,
+    row_provenance: &'a [RowProvenance],
     parameters: &'a BTreeMap<String, Decimal>,
-    rows: BTreeSet<u64>,
+    rows: BTreeSet<RowId>,
     columns: BTreeSet<String>,
 }
 
@@ -578,7 +580,7 @@ impl FormulaContext for MetricContext<'_> {
     }
 
     fn aggregate(&mut self, function: AggFunc, column: &str) -> Result<Decimal, SafiError> {
-        let (value, rows) = aggregate_column(self.table, function, column)?;
+        let (value, rows) = aggregate_column(self.table, self.row_provenance, function, column)?;
         self.columns.insert(column.to_owned());
         self.rows.extend(rows);
         Ok(value)
@@ -606,10 +608,19 @@ impl FormulaContext for CellContext<'_> {
 /// A recorded, replayable change.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Transformation {
-    /// Replace one cell of a source column.
+    /// Replace one cell of a source column using a legacy positional row index.
     SetCell {
         /// Zero-based row.
         row: usize,
+        /// Column name.
+        column: String,
+        /// New raw text.
+        raw: String,
+    },
+    /// Replace one cell of a source column using a stable row identity.
+    SetCellByRowId {
+        /// Stable row identity.
+        row_id: RowId,
         /// Column name.
         column: String,
         /// New raw text.
@@ -622,14 +633,54 @@ pub enum Transformation {
         /// Formula source text.
         formula: String,
     },
+    /// Sort working rows by a column without altering any [`RowId`] provenance.
+    SortRows {
+        /// Column name to sort by.
+        column: String,
+        /// Sort ascending (`true`) or descending (`false`).
+        ascending: bool,
+    },
+    /// Keep only working rows matching the query while preserving stable [`RowId`]s.
+    FilterRows {
+        /// Column name to inspect.
+        column: String,
+        /// Case-insensitive substring query.
+        query: String,
+    },
+    /// Delete a row identified by its stable [`RowId`] without ever reusing its identity.
+    DeleteRow {
+        /// Stable row identity to remove.
+        row_id: RowId,
+    },
+    /// Insert a new row with a freshly allocated monotonic [`RowId`].
+    InsertRow {
+        /// Allocated stable row identity (never reused).
+        row_id: RowId,
+        /// Optional stable row identity after which the new row is placed; `None` appends at end.
+        after_row_id: Option<RowId>,
+        /// Raw cell text keyed by column name.
+        values: BTreeMap<String, String>,
+    },
 }
 
 impl Transformation {
     fn columns(&self) -> BTreeSet<String> {
         match self {
-            Self::SetCell { column, .. } => BTreeSet::from([column.clone()]),
+            Self::SetCell { column, .. }
+            | Self::SetCellByRowId { column, .. }
+            | Self::SortRows { column, .. }
+            | Self::FilterRows { column, .. } => BTreeSet::from([column.clone()]),
             Self::AddColumn { name, .. } => BTreeSet::from([name.clone()]),
+            Self::DeleteRow { .. } => BTreeSet::new(),
+            Self::InsertRow { values, .. } => values.keys().cloned().collect(),
         }
+    }
+
+    fn touches_all_columns(&self) -> bool {
+        matches!(
+            self,
+            Self::DeleteRow { .. } | Self::InsertRow { .. } | Self::FilterRows { .. }
+        )
     }
 
     fn digest(&self) -> String {
@@ -640,7 +691,41 @@ impl Transformation {
                     blake3::hash(raw.as_bytes()).to_hex()
                 )
             }
+            Self::SetCellByRowId {
+                row_id,
+                column,
+                raw,
+            } => {
+                format!(
+                    "setid:{}:{column}:{}",
+                    row_id.get(),
+                    blake3::hash(raw.as_bytes()).to_hex()
+                )
+            }
             Self::AddColumn { name, formula } => format!("add:{name}:{formula}"),
+            Self::SortRows { column, ascending } => format!("sort:{column}:{ascending}"),
+            Self::FilterRows { column, query } => {
+                format!(
+                    "filter:{column}:{}",
+                    blake3::hash(query.as_bytes()).to_hex()
+                )
+            }
+            Self::DeleteRow { row_id } => format!("del:{}", row_id.get()),
+            Self::InsertRow {
+                row_id,
+                after_row_id,
+                values,
+            } => {
+                let mut pairs = String::new();
+                for (key, value) in values {
+                    pairs.push_str(key);
+                    pairs.push('=');
+                    pairs.push_str(&blake3::hash(value.as_bytes()).to_hex());
+                    pairs.push(';');
+                }
+                let after = after_row_id.map_or(0, RowId::get);
+                format!("ins:{}:{after}:{pairs}", row_id.get())
+            }
         };
         blake3::hash(payload.as_bytes()).to_hex().to_string()
     }
@@ -721,6 +806,10 @@ pub struct DataGraph {
     dataset_version: DatasetVersion,
     revision: Revision,
     working: Table,
+    row_provenance: Vec<RowProvenance>,
+    column_provenance: Vec<ColumnProvenance>,
+    next_row_id: u64,
+    next_column_id: u64,
     transforms: Vec<Transformation>,
     redo: Vec<Transformation>,
     calculated: Vec<(String, Formula)>,
@@ -733,6 +822,36 @@ pub struct DataGraph {
     last_recomputed: Vec<MetricId>,
     last_rows: Vec<u64>,
     last_columns: Vec<String>,
+}
+
+fn initial_row_provenance(origin: &Table) -> Vec<RowProvenance> {
+    (0..origin.row_count())
+        .map(|index| {
+            let row_id = RowId::from_raw((index as u64).saturating_add(1));
+            RowProvenance {
+                row_id,
+                origin_row_id: Some(row_id),
+                origin_row_index: Some(index),
+            }
+        })
+        .collect()
+}
+
+fn initial_column_provenance(origin: &Table) -> Vec<ColumnProvenance> {
+    origin
+        .columns()
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            let name = column.schema().name.clone();
+            ColumnProvenance {
+                column_id: ColumnId::from_raw((index as u64).saturating_add(1)),
+                origin_column_index: Some(index),
+                origin_name: Some(name.clone()),
+                current_name: name,
+            }
+        })
+        .collect()
 }
 
 fn table_fingerprint(table: &Table) -> String {
@@ -791,25 +910,239 @@ fn append_column(table: &Table, name: &str, cells: Vec<CellValue>) -> Result<Tab
     Table::new(table.id(), table.name(), columns)
 }
 
-fn apply_transformation(
+fn compare_cells(left: &CellValue, right: &CellValue) -> std::cmp::Ordering {
+    match (left.is_empty(), right.is_empty()) {
+        (true, true) => return std::cmp::Ordering::Equal,
+        (true, false) => return std::cmp::Ordering::Greater,
+        (false, true) => return std::cmp::Ordering::Less,
+        (false, false) => {}
+    }
+    if let (Some(a), Some(b)) = (cell_number(left), cell_number(right)) {
+        return a.cmp(&b);
+    }
+    let a_lower = left.visible_text().to_lowercase();
+    let b_lower = right.visible_text().to_lowercase();
+    a_lower
+        .cmp(&b_lower)
+        .then_with(|| left.visible_text().cmp(&right.visible_text()))
+}
+
+fn reorder_table_and_provenance(
     table: &Table,
+    row_provenance: &[RowProvenance],
+    indices: &[usize],
+) -> Result<(Table, Vec<RowProvenance>), SafiError> {
+    let mut columns = Vec::with_capacity(table.column_count());
+    for column in table.columns() {
+        let mut cells = Vec::with_capacity(indices.len());
+        for &index in indices {
+            let cell = column.cell_at(index).ok_or_else(invalid_request)?;
+            cells.push(cell.clone());
+        }
+        columns.push(Column::new(column.schema().clone(), cells));
+    }
+    let mut next_prov = Vec::with_capacity(indices.len());
+    for &index in indices {
+        let entry = row_provenance
+            .get(index)
+            .copied()
+            .ok_or_else(invalid_request)?;
+        next_prov.push(entry);
+    }
+    Ok((Table::new(table.id(), table.name(), columns)?, next_prov))
+}
+
+fn insert_row_at(
+    table: &Table,
+    row_provenance: &[RowProvenance],
+    insert_at: usize,
+    row_id: RowId,
+    values: &BTreeMap<String, String>,
+) -> Result<(Table, Vec<RowProvenance>), SafiError> {
+    if insert_at > table.row_count() || row_provenance.len() != table.row_count() {
+        return Err(invalid_request());
+    }
+    let mut columns = Vec::with_capacity(table.column_count());
+    for column in table.columns() {
+        let mut cells = column.cells().to_vec();
+        let raw = values
+            .get(&column.schema().name)
+            .cloned()
+            .unwrap_or_default();
+        cells.insert(insert_at, CellValue::from_raw(raw));
+        columns.push(Column::new(column.schema().clone(), cells));
+    }
+    let mut next_prov = row_provenance.to_vec();
+    next_prov.insert(
+        insert_at,
+        RowProvenance {
+            row_id,
+            origin_row_id: None,
+            origin_row_index: None,
+        },
+    );
+    Ok((Table::new(table.id(), table.name(), columns)?, next_prov))
+}
+
+struct MutableGraphState {
+    table: Table,
+    row_provenance: Vec<RowProvenance>,
+    column_provenance: Vec<ColumnProvenance>,
+    active_calculated: Vec<(String, Formula)>,
+    next_column_id: u64,
+}
+
+fn refresh_calculated_columns(
+    table: &mut Table,
+    calculated: &[(String, Formula)],
+) -> Result<(), SafiError> {
+    for (name, formula) in calculated {
+        let cells = evaluate_column(table, formula)?;
+        let index = table
+            .columns()
+            .iter()
+            .position(|column| column.schema().name == *name)
+            .ok_or_else(unknown_column)?;
+        let mut rebuilt = Vec::with_capacity(table.column_count());
+        for (position, column) in table.columns().iter().enumerate() {
+            if position == index {
+                rebuilt.push(Column::new(column.schema().clone(), cells.clone()));
+            } else {
+                rebuilt.push(column.clone());
+            }
+        }
+        *table = Table::new(table.id(), table.name(), rebuilt)?;
+    }
+    Ok(())
+}
+
+fn apply_transformation_step(
+    state: &mut MutableGraphState,
     transformation: &Transformation,
-) -> Result<Table, SafiError> {
+) -> Result<(), SafiError> {
     match transformation {
         Transformation::SetCell { row, column, raw } => {
-            let index = table
+            let index = state
+                .table
                 .columns()
                 .iter()
                 .position(|existing| existing.schema().name == *column)
                 .ok_or_else(unknown_column)?;
-            replace_cell(table, *row, index, CellValue::from_raw(raw.clone()))
+            state.table =
+                replace_cell(&state.table, *row, index, CellValue::from_raw(raw.clone()))?;
+            refresh_calculated_columns(&mut state.table, &state.active_calculated)?;
+        }
+        Transformation::SetCellByRowId {
+            row_id,
+            column,
+            raw,
+        } => {
+            let row = state
+                .row_provenance
+                .iter()
+                .position(|entry| entry.row_id == *row_id)
+                .ok_or_else(invalid_request)?;
+            let index = state
+                .table
+                .columns()
+                .iter()
+                .position(|existing| existing.schema().name == *column)
+                .ok_or_else(unknown_column)?;
+            state.table = replace_cell(&state.table, row, index, CellValue::from_raw(raw.clone()))?;
+            refresh_calculated_columns(&mut state.table, &state.active_calculated)?;
         }
         Transformation::AddColumn { name, formula } => {
-            let formula = parse_formula(formula)?;
-            let cells = evaluate_column(table, &formula)?;
-            append_column(table, name, cells)
+            let parsed = parse_formula(formula)?;
+            let cells = evaluate_column(&state.table, &parsed)?;
+            state.table = append_column(&state.table, name, cells)?;
+            let column_id = ColumnId::from_raw(state.next_column_id);
+            state.next_column_id = state.next_column_id.saturating_add(1);
+            state.column_provenance.push(ColumnProvenance {
+                column_id,
+                origin_column_index: None,
+                origin_name: Some(name.clone()),
+                current_name: name.clone(),
+            });
+            state.active_calculated.push((name.clone(), parsed));
+        }
+        Transformation::SortRows { column, ascending } => {
+            let col = state
+                .table
+                .column_by_name(column)
+                .ok_or_else(unknown_column)?;
+            let mut indices: Vec<usize> = (0..state.table.row_count()).collect();
+            indices.sort_by(|&a, &b| {
+                let left = col.cell_at(a);
+                let right = col.cell_at(b);
+                let ord = match (left, right) {
+                    (Some(l), Some(r)) => compare_cells(l, r),
+                    _ => std::cmp::Ordering::Equal,
+                };
+                let ord = if *ascending { ord } else { ord.reverse() };
+                ord.then_with(|| a.cmp(&b))
+            });
+            let (table, row_provenance) =
+                reorder_table_and_provenance(&state.table, &state.row_provenance, &indices)?;
+            state.table = table;
+            state.row_provenance = row_provenance;
+        }
+        Transformation::FilterRows { column, query } => {
+            let col = state
+                .table
+                .column_by_name(column)
+                .ok_or_else(unknown_column)?;
+            let needle = query.trim().to_lowercase();
+            let indices: Vec<usize> = (0..state.table.row_count())
+                .filter(|&row| {
+                    col.cell_at(row).is_some_and(|cell| {
+                        needle.is_empty() || cell.visible_text().to_lowercase().contains(&needle)
+                    })
+                })
+                .collect();
+            let (table, row_provenance) =
+                reorder_table_and_provenance(&state.table, &state.row_provenance, &indices)?;
+            state.table = table;
+            state.row_provenance = row_provenance;
+        }
+        Transformation::DeleteRow { row_id } => {
+            let pos = state
+                .row_provenance
+                .iter()
+                .position(|entry| entry.row_id == *row_id)
+                .ok_or_else(invalid_request)?;
+            let indices: Vec<usize> = (0..state.table.row_count()).filter(|&r| r != pos).collect();
+            let (table, row_provenance) =
+                reorder_table_and_provenance(&state.table, &state.row_provenance, &indices)?;
+            state.table = table;
+            state.row_provenance = row_provenance;
+        }
+        Transformation::InsertRow {
+            row_id,
+            after_row_id,
+            values,
+        } => {
+            let insert_at = match after_row_id {
+                Some(after) => state
+                    .row_provenance
+                    .iter()
+                    .position(|entry| entry.row_id == *after)
+                    .map(|idx| idx + 1)
+                    .ok_or_else(invalid_request)?,
+                None => state.table.row_count(),
+            };
+            let (mut table, row_provenance) = insert_row_at(
+                &state.table,
+                &state.row_provenance,
+                insert_at,
+                *row_id,
+                values,
+            )?;
+            refresh_calculated_columns(&mut table, &state.active_calculated)?;
+            state.table = table;
+            state.row_provenance = row_provenance;
         }
     }
+    Ok(())
 }
 
 fn evaluate_column(table: &Table, formula: &Formula) -> Result<Vec<CellValue>, SafiError> {
@@ -824,6 +1157,14 @@ fn evaluate_column(table: &Table, formula: &Formula) -> Result<Vec<CellValue>, S
     Ok(cells)
 }
 
+struct ReplayedProvenance {
+    table: Table,
+    row_provenance: Vec<RowProvenance>,
+    column_provenance: Vec<ColumnProvenance>,
+    max_row_id: u64,
+    next_column_id: u64,
+}
+
 impl DataGraph {
     /// Creates a graph over an immutable original dataset.
     ///
@@ -832,6 +1173,10 @@ impl DataGraph {
     pub fn new(source_id: SourceId, origin: Table, now_ms: u64) -> Result<Self, SafiError> {
         unique_columns(&origin)?;
         let fingerprint = table_fingerprint(&origin);
+        let row_provenance = initial_row_provenance(&origin);
+        let column_provenance = initial_column_provenance(&origin);
+        let next_row_id = (origin.row_count() as u64).saturating_add(1);
+        let next_column_id = (origin.column_count() as u64).saturating_add(1);
         let working = origin.clone();
         let mut graph = Self {
             source_id,
@@ -840,6 +1185,10 @@ impl DataGraph {
             dataset_version: DatasetVersion::INITIAL,
             revision: Revision::INITIAL,
             working,
+            row_provenance,
+            column_provenance,
+            next_row_id,
+            next_column_id,
             transforms: Vec::new(),
             redo: Vec::new(),
             calculated: Vec::new(),
@@ -873,6 +1222,167 @@ impl DataGraph {
     #[must_use]
     pub fn working(&self) -> &Table {
         &self.working
+    }
+
+    /// Returns row provenance entries aligned with the working table's display order.
+    #[must_use]
+    pub fn row_provenance(&self) -> &[RowProvenance] {
+        &self.row_provenance
+    }
+
+    /// Returns column provenance entries aligned with the working table's column order.
+    #[must_use]
+    pub fn column_provenance(&self) -> &[ColumnProvenance] {
+        &self.column_provenance
+    }
+
+    /// Resolves a stable [`RowId`] to its current zero-based index in `working()`, if still present.
+    #[must_use]
+    pub fn working_row_for_id(&self, row_id: RowId) -> Option<usize> {
+        self.row_provenance
+            .iter()
+            .position(|entry| entry.row_id == row_id)
+    }
+
+    /// Returns the stable [`RowId`] currently displayed at zero-based row `index`.
+    #[must_use]
+    pub fn row_id_at(&self, index: usize) -> Option<RowId> {
+        self.row_provenance.get(index).map(|entry| entry.row_id)
+    }
+
+    /// Resolves a column name to its stable [`ColumnId`].
+    #[must_use]
+    pub fn column_id_for_name(&self, name: &str) -> Option<ColumnId> {
+        self.column_provenance
+            .iter()
+            .find(|entry| entry.current_name == name)
+            .map(|entry| entry.column_id)
+    }
+
+    /// Queries a bounded page of working rows without serializing the entire dataset.
+    ///
+    /// Sorting or searching here only reorders/filters the viewport query and never alters
+    /// stable [`RowId`] identities or metric aggregations.
+    ///
+    /// # Errors
+    /// `SF-CAL-001` when `sort_column` or `filter_column` names a missing column.
+    pub fn rows_page(&self, query: &RowQuery) -> Result<RowPage, SafiError> {
+        if let Some(ref column) = query.sort_column
+            && self.working.column_by_name(column).is_none()
+        {
+            return Err(unknown_column());
+        }
+        if let Some(ref column) = query.filter_column
+            && self.working.column_by_name(column).is_none()
+        {
+            return Err(unknown_column());
+        }
+        let search_needle = query
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase);
+        let filter_needle = query
+            .filter_value
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase);
+        let filter_col = query
+            .filter_column
+            .as_deref()
+            .and_then(|name| self.working.column_by_name(name));
+
+        let mut matched: Vec<usize> = (0..self.working.row_count())
+            .filter(|&row| {
+                if let (Some(col), Some(needle)) = (filter_col, filter_needle.as_deref()) {
+                    let ok = col
+                        .cell_at(row)
+                        .is_some_and(|c| c.visible_text().to_lowercase().contains(needle));
+                    if !ok {
+                        return false;
+                    }
+                }
+                if let Some(needle) = search_needle.as_deref() {
+                    let any_match = self.working.columns().iter().any(|col| {
+                        col.cell_at(row)
+                            .is_some_and(|c| c.visible_text().to_lowercase().contains(needle))
+                    });
+                    if !any_match {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+
+        if let Some(ref sort_col_name) = query.sort_column
+            && let Some(sort_col) = self.working.column_by_name(sort_col_name)
+        {
+            matched.sort_by(|&a, &b| {
+                let ord = match (sort_col.cell_at(a), sort_col.cell_at(b)) {
+                    (Some(l), Some(r)) => compare_cells(l, r),
+                    _ => std::cmp::Ordering::Equal,
+                };
+                let ord = if query.ascending { ord } else { ord.reverse() };
+                ord.then_with(|| a.cmp(&b))
+            });
+        }
+
+        let filtered_rows = matched.len();
+        let limit = query.limit.clamp(1, MAX_ROW_PAGE_LIMIT);
+        let offset = query.offset.min(filtered_rows);
+        let end = offset.saturating_add(limit).min(filtered_rows);
+        let slice = &matched[offset..end];
+
+        let mut rows = Vec::with_capacity(slice.len());
+        for &working_row in slice {
+            let provenance = self
+                .row_provenance
+                .get(working_row)
+                .copied()
+                .ok_or_else(verification_mismatch)?;
+            let mut cells = Vec::with_capacity(self.working.column_count());
+            for (col_idx, column) in self.working.columns().iter().enumerate() {
+                let cell = column.cell_at(working_row).ok_or_else(invalid_request)?;
+                let changed = provenance
+                    .origin_row_index
+                    .and_then(|orig_row| self.origin.cell(orig_row, col_idx))
+                    .is_none_or(|orig_cell| orig_cell.raw_text() != cell.raw_text());
+                let validation_error = match column.schema().column_type {
+                    ColumnType::MoneyAndCurrency | ColumnType::Percentage
+                        if !cell.is_empty() && cell_number(cell).is_none() =>
+                    {
+                        Some("SF-CAL-004".to_owned())
+                    }
+                    _ => None,
+                };
+                cells.push(RowCellView {
+                    raw: cell.raw_text().to_owned(),
+                    normalized: cell.matching_text().to_owned(),
+                    visible: cell.visible_text().to_owned(),
+                    changed,
+                    validation_error,
+                });
+            }
+            rows.push(RowPageItem {
+                working_row,
+                row_id: provenance.row_id.get(),
+                origin_row_id: provenance.origin_row_id.map(RowId::get),
+                origin_row_index: provenance.origin_row_index,
+                cells,
+            });
+        }
+
+        Ok(RowPage {
+            total_rows: self.working.row_count(),
+            filtered_rows,
+            offset,
+            limit,
+            revision: self.revision.get(),
+            rows,
+        })
     }
 
     /// Returns the published revision.
@@ -967,7 +1477,7 @@ impl DataGraph {
     /// # Errors
     /// Returns the first `SF-CAL-*` error raised by a transformation.
     pub fn replay(&self) -> Result<Table, SafiError> {
-        self.rebuild_with(&self.origin)
+        Ok(self.rebuild_provenance_with(&self.origin)?.table)
     }
 
     /// Returns the dataset unchanged for `count` reversible steps. Used by tests to assert that
@@ -977,7 +1487,10 @@ impl DataGraph {
         table_fingerprint(&self.origin) == self.origin_fingerprint
     }
 
-    /// Applies a cell edit and recomputes only dependent metrics.
+    /// Applies a cell edit at display row index and recomputes only dependent metrics.
+    ///
+    /// Records the edit against the row's stable [`RowId`] so later sorts or row operations keep
+    /// pointing to the same logical row.
     ///
     /// # Errors
     /// `SF-CAL-001` for an unknown column, `SF-CAL-004` for a formula-owned column, `SF-SYS-001`
@@ -985,6 +1498,22 @@ impl DataGraph {
     pub fn set_cell(
         &mut self,
         row: usize,
+        column: &str,
+        raw: &str,
+        now_ms: u64,
+    ) -> Result<ChangeOutcome, SafiError> {
+        let row_id = self.row_id_at(row).ok_or_else(invalid_request)?;
+        self.set_cell_by_id(row_id, column, raw, now_ms)
+    }
+
+    /// Applies a cell edit targeting a stable [`RowId`] and recomputes only dependent metrics.
+    ///
+    /// # Errors
+    /// `SF-CAL-001` for an unknown column, `SF-CAL-004` for a formula-owned column, `SF-SYS-001`
+    /// when `row_id` does not exist in the working table.
+    pub fn set_cell_by_id(
+        &mut self,
+        row_id: RowId,
         column: &str,
         raw: &str,
         now_ms: u64,
@@ -1002,26 +1531,182 @@ impl DataGraph {
             .iter()
             .position(|existing| existing.schema().name == column)
             .ok_or_else(unknown_column)?;
-        if row >= self.working.row_count() {
-            return Err(invalid_request());
-        }
+        let row = self
+            .working_row_for_id(row_id)
+            .ok_or_else(invalid_request)?;
         let working = replace_cell(&self.working, row, index, CellValue::from_raw(raw))?;
         self.working = working;
-        self.transforms.push(Transformation::SetCell {
-            row,
+        self.transforms.push(Transformation::SetCellByRowId {
+            row_id,
             column: column.to_owned(),
             raw: raw.to_owned(),
         });
         self.redo.clear();
         self.revision = self.revision.next();
         let recomputed = self.propagate(&BTreeSet::from([column.to_owned()]), now_ms)?;
-        self.last_rows = vec![row as u64];
+        self.last_rows = vec![row_id.get()];
         Ok(ChangeOutcome {
             revision: self.revision,
             recomputed,
-            rows: vec![row as u64],
+            rows: vec![row_id.get()],
             columns: vec![column.to_owned()],
         })
+    }
+
+    /// Sorts the working table by `column` while preserving every row's stable [`RowId`] and
+    /// origin provenance.
+    ///
+    /// # Errors
+    /// `SF-CAL-001` when `column` does not exist.
+    pub fn sort_rows(
+        &mut self,
+        column: &str,
+        ascending: bool,
+        now_ms: u64,
+    ) -> Result<ChangeOutcome, SafiError> {
+        if self.working.column_by_name(column).is_none() {
+            return Err(unknown_column());
+        }
+        let transformation = Transformation::SortRows {
+            column: column.to_owned(),
+            ascending,
+        };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.row_provenance = state.row_provenance;
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: self.last_rows.clone(),
+            columns: vec![column.to_owned()],
+        })
+    }
+
+    /// Filters working rows by case-insensitive substring on `column`, preserving stable [`RowId`]s.
+    ///
+    /// # Errors
+    /// `SF-CAL-001` when `column` does not exist.
+    pub fn filter_rows(
+        &mut self,
+        column: &str,
+        query: &str,
+        now_ms: u64,
+    ) -> Result<ChangeOutcome, SafiError> {
+        if self.working.column_by_name(column).is_none() {
+            return Err(unknown_column());
+        }
+        let transformation = Transformation::FilterRows {
+            column: column.to_owned(),
+            query: query.to_owned(),
+        };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.row_provenance = state.row_provenance;
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: self.last_rows.clone(),
+            columns: vec![column.to_owned()],
+        })
+    }
+
+    /// Deletes a working row by stable [`RowId`]. Deleted IDs are never reassigned.
+    ///
+    /// # Errors
+    /// `SF-SYS-001` when `row_id` does not exist or deletion would leave zero columns invalid.
+    pub fn delete_row(&mut self, row_id: RowId, now_ms: u64) -> Result<ChangeOutcome, SafiError> {
+        if self.working_row_for_id(row_id).is_none() {
+            return Err(invalid_request());
+        }
+        let transformation = Transformation::DeleteRow { row_id };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.row_provenance = state.row_provenance;
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: vec![row_id.get()],
+            columns: self.last_columns.clone(),
+        })
+    }
+
+    /// Inserts a new row with a freshly allocated monotonic [`RowId`] and recomputes derived state.
+    ///
+    /// # Errors
+    /// `SF-CAL-001` if `values` references an unknown column, `SF-SYS-001` when `after_row_id`
+    /// does not exist.
+    pub fn insert_row(
+        &mut self,
+        after_row_id: Option<RowId>,
+        values: BTreeMap<String, String>,
+        now_ms: u64,
+    ) -> Result<(RowId, ChangeOutcome), SafiError> {
+        for column in values.keys() {
+            if self.working.column_by_name(column).is_none() {
+                return Err(unknown_column());
+            }
+        }
+        let row_id = RowId::from_raw(self.next_row_id);
+        let transformation = Transformation::InsertRow {
+            row_id,
+            after_row_id,
+            values,
+        };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.next_row_id = self.next_row_id.saturating_add(1);
+        self.working = state.table;
+        self.row_provenance = state.row_provenance;
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        let outcome = ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: vec![row_id.get()],
+            columns: self.last_columns.clone(),
+        };
+        Ok((row_id, outcome))
     }
 
     /// Appends a calculated column derived per row.
@@ -1060,6 +1745,14 @@ impl DataGraph {
         }
         let cells = evaluate_column(&self.working, &formula)?;
         self.working = append_column(&self.working, name, cells)?;
+        let column_id = ColumnId::from_raw(self.next_column_id);
+        self.next_column_id = self.next_column_id.saturating_add(1);
+        self.column_provenance.push(ColumnProvenance {
+            column_id,
+            origin_column_index: None,
+            origin_name: Some(name.to_owned()),
+            current_name: name.to_owned(),
+        });
         self.calculated.push((name.to_owned(), formula));
         self.transforms.push(Transformation::AddColumn {
             name: name.to_owned(),
@@ -1206,19 +1899,109 @@ impl DataGraph {
         name: &str,
         parameters: BTreeMap<String, Decimal>,
     ) -> Result<(), SafiError> {
-        if self.scenarios.contains_key(&id) {
+        if self.scenarios.contains_key(&id) || name.trim().is_empty() {
             return Err(invalid_request());
         }
         let _ = self.scenarios.insert(
             id.clone(),
             Scenario {
                 id,
-                name: name.to_owned(),
+                name: name.trim().to_owned(),
                 parameters,
             },
         );
         self.revision = self.revision.next();
         Ok(())
+    }
+
+    /// Renames an existing What-If scenario without altering its parameters.
+    ///
+    /// # Errors
+    /// `SF-SYS-001` when the scenario does not exist or `new_name` is empty.
+    pub fn rename_scenario(&mut self, id: &ScenarioId, new_name: &str) -> Result<(), SafiError> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return Err(invalid_request());
+        }
+        let scenario = self.scenarios.get_mut(id).ok_or_else(invalid_request)?;
+        scenario.name = trimmed.to_owned();
+        self.revision = self.revision.next();
+        Ok(())
+    }
+
+    /// Updates a numeric What-If parameter override inside an existing scenario and recomputes
+    /// dependent metrics when that scenario is active.
+    ///
+    /// # Errors
+    /// `SF-SYS-001` when `id` does not exist, `SF-CAL-005` when `parameter` has no registered
+    /// default assumption.
+    pub fn set_scenario_parameter(
+        &mut self,
+        id: &ScenarioId,
+        parameter: &str,
+        value: Decimal,
+        now_ms: u64,
+    ) -> Result<ChangeOutcome, SafiError> {
+        if !self.defaults.contains_key(parameter) {
+            return Err(unknown_parameter());
+        }
+        let scenario = self.scenarios.get_mut(id).ok_or_else(invalid_request)?;
+        let _ = scenario.parameters.insert(parameter.to_owned(), value);
+        self.revision = self.revision.next();
+        let is_active = self.active_scenario.as_ref() == Some(id);
+        let recomputed: Vec<MetricId> = self
+            .metrics
+            .values()
+            .filter(|def| def.parameters.contains(parameter))
+            .map(|def| def.id.clone())
+            .collect();
+        if is_active {
+            for metric_id in &recomputed {
+                self.refresh_metric(metric_id, now_ms);
+            }
+            self.last_recomputed = recomputed.clone();
+            self.collect_provenance();
+        }
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed,
+            rows: self.last_rows.clone(),
+            columns: self.last_columns.clone(),
+        })
+    }
+
+    /// Updates a baseline assumption parameter and recomputes dependent metrics when active.
+    ///
+    /// # Errors
+    /// `SF-CAL-005` when `parameter` is not registered.
+    pub fn update_parameter(
+        &mut self,
+        parameter: &str,
+        value: Decimal,
+        now_ms: u64,
+    ) -> Result<ChangeOutcome, SafiError> {
+        if !self.defaults.contains_key(parameter) {
+            return Err(unknown_parameter());
+        }
+        let _ = self.defaults.insert(parameter.to_owned(), value);
+        self.revision = self.revision.next();
+        let recomputed: Vec<MetricId> = self
+            .metrics
+            .values()
+            .filter(|def| def.parameters.contains(parameter))
+            .map(|def| def.id.clone())
+            .collect();
+        for metric_id in &recomputed {
+            self.refresh_metric(metric_id, now_ms);
+        }
+        self.last_recomputed = recomputed.clone();
+        self.collect_provenance();
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed,
+            rows: self.last_rows.clone(),
+            columns: self.last_columns.clone(),
+        })
     }
 
     /// Activates a scenario (or clears it with `None`) and recomputes every metric.
@@ -1274,6 +2057,9 @@ impl DataGraph {
 
     /// Recomputes a metric and compares it with the token supplied by a view.
     ///
+    /// Also validates that every provenance row/column identity referenced by the token exists in
+    /// the current working graph state.
+    ///
     /// # Errors
     /// `SF-CAL-006` for an unknown metric, plus evaluation errors.
     pub fn verify(&self, token: &VerifiedMetricToken) -> Result<VerificationOutcome, SafiError> {
@@ -1281,6 +2067,38 @@ impl DataGraph {
             .metrics
             .get(&token.metric_id)
             .ok_or_else(unknown_metric)?;
+        if token.source_row_ids.len() != token.row_refs.len() {
+            return Ok(VerificationOutcome::Mismatch {
+                expected: token.fingerprint().to_owned(),
+                actual: "missing-row-provenance".to_owned(),
+            });
+        }
+        for row_id in &token.source_row_ids {
+            if self.working_row_for_id(*row_id).is_none() {
+                return Ok(VerificationOutcome::Mismatch {
+                    expected: token.fingerprint().to_owned(),
+                    actual: "stale-row-provenance".to_owned(),
+                });
+            }
+        }
+        if !definition.columns.is_empty() && token.column_ids.is_empty() {
+            return Ok(VerificationOutcome::Mismatch {
+                expected: token.fingerprint().to_owned(),
+                actual: "missing-column-provenance".to_owned(),
+            });
+        }
+        for column_id in &token.column_ids {
+            if !self
+                .column_provenance
+                .iter()
+                .any(|entry| entry.column_id == *column_id)
+            {
+                return Ok(VerificationOutcome::Mismatch {
+                    expected: token.fingerprint().to_owned(),
+                    actual: "stale-column-provenance".to_owned(),
+                });
+            }
+        }
         let parameters = self.parameters_for(self.active_scenario.as_ref())?;
         let recomputed = self.compute_metric(definition, &parameters, token.computed_at_ms)?;
         Ok(token.verify_against(&recomputed))
@@ -1326,6 +2144,10 @@ impl DataGraph {
             metrics: self.metric_specs(),
             parameters: self.defaults.clone(),
             scenarios: self.scenarios.values().cloned().collect(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            next_row_id: self.next_row_id,
+            next_column_id: self.next_column_id,
         }
     }
 
@@ -1337,15 +2159,17 @@ impl DataGraph {
         serde_json::to_string(&self.to_snapshot()).map_err(|_| invalid_request())
     }
 
-    /// Restores a project and re-verifies it against its own data.
+    /// Restores a project and re-verifies it against its own data and provenance.
     ///
     /// # Errors
     /// `SF-SYS-001` for a malformed or unsupported file and `SF-CAL-008` when the stored origin
-    /// fingerprint does not match the stored data.
+    /// fingerprint or stored provenance does not match the replayed dataset state.
     pub fn from_json(json: &str, now_ms: u64) -> Result<Self, SafiError> {
         let snapshot: ProjectSnapshot =
             serde_json::from_str(json).map_err(|_| invalid_request())?;
-        if snapshot.schema_version != PROJECT_SCHEMA_VERSION {
+        if snapshot.schema_version != PROJECT_SCHEMA_VERSION
+            && snapshot.schema_version != LEGACY_PROJECT_SCHEMA_VERSION
+        {
             return Err(invalid_request());
         }
         let mut graph = Self::new(snapshot.source_id.clone(), snapshot.origin.clone(), now_ms)?;
@@ -1360,7 +2184,47 @@ impl DataGraph {
                 Transformation::SetCell { row, column, raw } => {
                     graph.set_cell(*row, column, raw, now_ms)?;
                 }
+                Transformation::SetCellByRowId {
+                    row_id,
+                    column,
+                    raw,
+                } => {
+                    graph.set_cell_by_id(*row_id, column, raw, now_ms)?;
+                }
+                Transformation::SortRows { column, ascending } => {
+                    graph.sort_rows(column, *ascending, now_ms)?;
+                }
+                Transformation::FilterRows { column, query } => {
+                    graph.filter_rows(column, query, now_ms)?;
+                }
+                Transformation::DeleteRow { row_id } => {
+                    graph.delete_row(*row_id, now_ms)?;
+                }
+                Transformation::InsertRow {
+                    row_id,
+                    after_row_id,
+                    values,
+                } => {
+                    graph.replay_insert_row(*row_id, *after_row_id, values.clone(), now_ms)?;
+                }
             }
+        }
+        if snapshot.schema_version == PROJECT_SCHEMA_VERSION {
+            if snapshot.row_provenance.is_empty() && graph.working.row_count() > 0 {
+                return Err(verification_mismatch());
+            }
+            if snapshot.row_provenance != graph.row_provenance
+                || snapshot.column_provenance != graph.column_provenance
+            {
+                return Err(verification_mismatch());
+            }
+            let unique_rows: BTreeSet<RowId> =
+                snapshot.row_provenance.iter().map(|r| r.row_id).collect();
+            if unique_rows.len() != snapshot.row_provenance.len() {
+                return Err(verification_mismatch());
+            }
+            graph.next_row_id = graph.next_row_id.max(snapshot.next_row_id);
+            graph.next_column_id = graph.next_column_id.max(snapshot.next_column_id);
         }
         for spec in &snapshot.metrics {
             graph.define_metric(
@@ -1387,6 +2251,38 @@ impl DataGraph {
         Ok(graph)
     }
 
+    fn replay_insert_row(
+        &mut self,
+        row_id: RowId,
+        after_row_id: Option<RowId>,
+        values: BTreeMap<String, String>,
+        now_ms: u64,
+    ) -> Result<(), SafiError> {
+        if row_id.get() < self.next_row_id || self.working_row_for_id(row_id).is_some() {
+            return Err(verification_mismatch());
+        }
+        let transformation = Transformation::InsertRow {
+            row_id,
+            after_row_id,
+            values,
+        };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.next_row_id = row_id.get().saturating_add(1);
+        self.working = state.table;
+        self.row_provenance = state.row_provenance;
+        self.transforms.push(transformation);
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        Ok(())
+    }
+
     /// Recomputes a single metric token.
     ///
     /// # Errors
@@ -1410,10 +2306,14 @@ impl DataGraph {
         now_ms: u64,
     ) -> Result<ChangeOutcome, SafiError> {
         unique_columns(&origin)?;
-        let replayed = self.rebuild_with(&origin)?;
+        let replayed = self.rebuild_provenance_with(&origin)?;
         self.origin = origin;
         self.origin_fingerprint = table_fingerprint(&self.origin);
-        self.working = replayed;
+        self.working = replayed.table;
+        self.row_provenance = replayed.row_provenance;
+        self.column_provenance = replayed.column_provenance;
+        self.next_row_id = self.next_row_id.max(replayed.max_row_id);
+        self.next_column_id = self.next_column_id.max(replayed.next_column_id);
         self.dataset_version = self.dataset_version.next();
         self.revision = self.revision.next();
         self.refresh_all(now_ms);
@@ -1462,12 +2362,22 @@ impl DataGraph {
         let Some(transformation) = self.redo.pop() else {
             return Err(stale_command());
         };
-        let working = apply_transformation(&self.working, &transformation)?;
-        if let Transformation::AddColumn { name, formula } = &transformation {
-            let parsed = parse_formula(formula)?;
-            self.calculated.push((name.clone(), parsed));
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.row_provenance = state.row_provenance;
+        self.column_provenance = state.column_provenance;
+        self.calculated = state.active_calculated;
+        self.next_column_id = self.next_column_id.max(state.next_column_id);
+        if let Transformation::InsertRow { row_id, .. } = &transformation {
+            self.next_row_id = self.next_row_id.max(row_id.get().saturating_add(1));
         }
-        self.working = working;
         self.transforms.push(transformation);
         self.revision = self.revision.next();
         self.refresh_all(now_ms);
@@ -1502,7 +2412,7 @@ impl DataGraph {
             .column_by_name(column)
             .ok_or_else(unknown_column)?;
         let mut order: Vec<String> = Vec::new();
-        let mut buckets: BTreeMap<String, (Decimal, u64, Vec<u64>)> = BTreeMap::new();
+        let mut buckets: BTreeMap<String, (Decimal, u64, Vec<usize>, Vec<u64>)> = BTreeMap::new();
         for row in 0..self.working.row_count() {
             let label = group_column
                 .cell_at(row)
@@ -1512,10 +2422,10 @@ impl DataGraph {
                 Some(existing) => existing.clone(),
                 None => {
                     order.push(label.clone());
-                    (Decimal::ZERO, 0, Vec::new())
+                    (Decimal::ZERO, 0, Vec::new(), Vec::new())
                 }
             };
-            let (mut sum, mut count, mut rows) = entry;
+            let (mut sum, mut count, mut indices, mut row_ids) = entry;
             let cell = value_column.cell_at(row).ok_or_else(invalid_request)?;
             if !cell.is_empty() {
                 if matches!(function, AggFunc::Count) {
@@ -1525,13 +2435,19 @@ impl DataGraph {
                     sum = sum.checked_add(number).ok_or_else(type_mismatch)?;
                     count += 1;
                 }
-                rows.push(row as u64);
+                indices.push(row);
+                let row_id = self
+                    .row_id_at(row)
+                    .map(RowId::get)
+                    .ok_or_else(verification_mismatch)?;
+                row_ids.push(row_id);
             }
-            let _ = buckets.insert(label, (sum, count, rows));
+            let _ = buckets.insert(label, (sum, count, indices, row_ids));
         }
         let mut groups = Vec::with_capacity(order.len());
         for label in order {
-            let (sum, count, rows) = buckets.remove(&label).ok_or_else(invalid_request)?;
+            let (sum, count, indices, row_ids) =
+                buckets.remove(&label).ok_or_else(invalid_request)?;
             let value = match function {
                 AggFunc::Count => Decimal::from(count),
                 AggFunc::Sum => sum,
@@ -1546,10 +2462,8 @@ impl DataGraph {
                 }
                 AggFunc::Min | AggFunc::Max => {
                     let mut extreme: Option<Decimal> = None;
-                    for row in &rows {
-                        let cell = value_column
-                            .cell_at(*row as usize)
-                            .ok_or_else(invalid_request)?;
+                    for row in &indices {
+                        let cell = value_column.cell_at(*row).ok_or_else(invalid_request)?;
                         let number = cell_number(cell).ok_or_else(type_mismatch)?;
                         extreme = Some(match (function, extreme) {
                             (AggFunc::Min, Some(current)) => current.min(number),
@@ -1563,31 +2477,44 @@ impl DataGraph {
             groups.push(GroupedValue {
                 label,
                 value,
-                row_refs: rows,
+                row_refs: row_ids,
             });
         }
         Ok(groups)
     }
 
-    /// Rebuilds the derived table: source edits are replayed on the immutable original, then
-    /// every calculated column is re-derived in creation order. Calculated columns are derived
-    /// state, not point-in-time patches, which is what makes `replay() == working()` hold.
-    fn rebuild_with(&self, origin: &Table) -> Result<Table, SafiError> {
-        let mut table = origin.clone();
+    /// Rebuilds the derived table and full provenance by replaying recorded transformations in order.
+    fn rebuild_provenance_with(&self, origin: &Table) -> Result<ReplayedProvenance, SafiError> {
+        let mut state = MutableGraphState {
+            table: origin.clone(),
+            row_provenance: initial_row_provenance(origin),
+            column_provenance: initial_column_provenance(origin),
+            active_calculated: Vec::new(),
+            next_column_id: (origin.column_count() as u64).saturating_add(1),
+        };
+        let mut max_row_id = (origin.row_count() as u64).saturating_add(1);
         for transformation in &self.transforms {
-            if matches!(transformation, Transformation::SetCell { .. }) {
-                table = apply_transformation(&table, transformation)?;
+            if let Transformation::InsertRow { row_id, .. } = transformation {
+                max_row_id = max_row_id.max(row_id.get().saturating_add(1));
             }
+            apply_transformation_step(&mut state, transformation)?;
         }
-        for (name, formula) in &self.calculated {
-            let cells = evaluate_column(&table, formula)?;
-            table = append_column(&table, name, cells)?;
-        }
-        Ok(table)
+        Ok(ReplayedProvenance {
+            table: state.table,
+            row_provenance: state.row_provenance,
+            column_provenance: state.column_provenance,
+            max_row_id,
+            next_column_id: state.next_column_id,
+        })
     }
 
     fn rebuild_state(&mut self) -> Result<(), SafiError> {
-        self.working = self.replay()?;
+        let replayed = self.rebuild_provenance_with(&self.origin)?;
+        self.working = replayed.table;
+        self.row_provenance = replayed.row_provenance;
+        self.column_provenance = replayed.column_provenance;
+        self.next_row_id = self.next_row_id.max(replayed.max_row_id);
+        self.next_column_id = self.next_column_id.max(replayed.next_column_id);
         Ok(())
     }
 
@@ -1621,7 +2548,10 @@ impl DataGraph {
     fn relevant_trace(&self, columns: &BTreeSet<String>) -> Vec<String> {
         self.transforms
             .iter()
-            .filter(|transformation| !transformation.columns().is_disjoint(columns))
+            .filter(|transformation| {
+                transformation.touches_all_columns()
+                    || !transformation.columns().is_disjoint(columns)
+            })
             .map(Transformation::digest)
             .collect()
     }
@@ -1634,11 +2564,22 @@ impl DataGraph {
     ) -> Result<VerifiedMetricToken, SafiError> {
         let mut context = MetricContext {
             table: &self.working,
+            row_provenance: &self.row_provenance,
             parameters,
             rows: BTreeSet::new(),
             columns: BTreeSet::new(),
         };
         let value = evaluate(&definition.formula, &mut context)?;
+        let source_row_ids: Vec<RowId> = context.rows.iter().copied().collect();
+        let row_refs: Vec<u64> = source_row_ids.iter().copied().map(RowId::get).collect();
+        let column_refs: Vec<String> = definition.columns.iter().cloned().collect();
+        let column_ids: Vec<ColumnId> = column_refs
+            .iter()
+            .filter_map(|name| self.column_id_for_name(name))
+            .collect();
+        if column_ids.len() != column_refs.len() {
+            return Err(verification_mismatch());
+        }
         Ok(VerifiedMetricToken::from_parts(MetricTokenParts {
             metric_id: definition.id.clone(),
             metric_name: definition.name.clone(),
@@ -1649,8 +2590,10 @@ impl DataGraph {
             source_id: self.source_id.clone(),
             source_version: self.dataset_version,
             source_fingerprint: self.origin_fingerprint.clone(),
-            row_refs: context.rows.into_iter().collect(),
-            column_refs: definition.columns.iter().cloned().collect(),
+            row_refs,
+            source_row_ids,
+            column_refs,
+            column_ids,
             transformation_trace: self.relevant_trace(&definition.columns),
             computed_at_ms: now_ms,
             status: VerificationStatus::Verified,
@@ -1756,8 +2699,95 @@ impl DataGraph {
     }
 }
 
+/// Maximum rows returned by a single paginated grid query.
+pub const MAX_ROW_PAGE_LIMIT: usize = 200;
+
+/// Legacy persisted snapshot schema version without explicit provenance tables.
+pub const LEGACY_PROJECT_SCHEMA_VERSION: u32 = 1;
+
 /// Schema version of a persisted Studio project.
-pub const PROJECT_SCHEMA_VERSION: u32 = 1;
+pub const PROJECT_SCHEMA_VERSION: u32 = 2;
+
+/// Query specification for paginated/virtualized row retrieval without transferring the full table.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct RowQuery {
+    /// Zero-based offset inside the filtered result set.
+    pub offset: usize,
+    /// Maximum number of rows to return (clamped to `1..=MAX_ROW_PAGE_LIMIT`).
+    pub limit: usize,
+    /// Optional global case-insensitive search substring across columns.
+    pub search: Option<String>,
+    /// Optional column name to sort by (view-only, does not mutate provenance).
+    pub sort_column: Option<String>,
+    /// Sort direction when `sort_column` is specified.
+    pub ascending: bool,
+    /// Optional column name for targeted filtering.
+    pub filter_column: Option<String>,
+    /// Optional filter value substring matched within `filter_column`.
+    pub filter_value: Option<String>,
+}
+
+impl Default for RowQuery {
+    fn default() -> Self {
+        Self {
+            offset: 0,
+            limit: 50,
+            search: None,
+            sort_column: None,
+            ascending: true,
+            filter_column: None,
+            filter_value: None,
+        }
+    }
+}
+
+/// Cell payload returned for a single visible row page entry.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RowCellView {
+    /// Unmodified raw cell text.
+    pub raw: String,
+    /// Normalized canonical string.
+    pub normalized: String,
+    /// Formatted visible string.
+    pub visible: String,
+    /// Whether the working cell differs from the immutable original cell.
+    pub changed: bool,
+    /// Validation error text, if any.
+    pub validation_error: Option<String>,
+}
+
+/// One working row inside a paginated [`RowPage`] along with its stable provenance identity.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RowPageItem {
+    /// Current zero-based position in the working table.
+    pub working_row: usize,
+    /// Stable monotonic row identity (`RowId::get()`).
+    pub row_id: u64,
+    /// Original source row identity (`None` for rows inserted inside Studio).
+    pub origin_row_id: Option<u64>,
+    /// Original zero-based row index inside the immutable source table (`None` if inserted).
+    pub origin_row_index: Option<usize>,
+    /// Cell views aligned with working columns.
+    pub cells: Vec<RowCellView>,
+}
+
+/// Bounded response returned by [`DataGraph::rows_page`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RowPage {
+    /// Total rows in the working table before query filters.
+    pub total_rows: usize,
+    /// Total rows matching the query filters.
+    pub filtered_rows: usize,
+    /// Actual offset used.
+    pub offset: usize,
+    /// Clamped page limit used.
+    pub limit: usize,
+    /// Graph revision at the time the page was produced.
+    pub revision: u64,
+    /// Slice of rows for the requested window.
+    pub rows: Vec<RowPageItem>,
+}
 
 /// Public, serializable description of a metric definition (used by project persistence).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1801,6 +2831,18 @@ pub struct ProjectSnapshot {
     pub parameters: BTreeMap<String, Decimal>,
     /// Saved scenarios.
     pub scenarios: Vec<Scenario>,
+    /// Working-row to origin-row provenance mapping aligned with working row order.
+    #[serde(default)]
+    pub row_provenance: Vec<RowProvenance>,
+    /// Working-column to origin-column provenance mapping.
+    #[serde(default)]
+    pub column_provenance: Vec<ColumnProvenance>,
+    /// Next monotonic row identity (retained across save/restore so deleted IDs are never reused).
+    #[serde(default)]
+    pub next_row_id: u64,
+    /// Next monotonic column identity.
+    #[serde(default)]
+    pub next_column_id: u64,
 }
 
 fn metric_decimal(token: &VerifiedMetricToken) -> Result<Decimal, SafiError> {

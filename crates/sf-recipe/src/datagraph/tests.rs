@@ -9,7 +9,7 @@ use std::str::FromStr;
 use rust_decimal::Decimal;
 use sf_core::column::{Column, ColumnSchema, ColumnType, ConfidenceScore};
 use sf_core::datagraph::{
-    MetricId, ScenarioId, SourceId, VerificationOutcome, VerifiedMetricToken,
+    MetricId, RowId, ScenarioId, SourceId, VerificationOutcome, VerifiedMetricToken,
 };
 use sf_core::error::{ErrorCode, SafiError};
 use sf_core::table::Table;
@@ -245,17 +245,22 @@ fn every_reported_row_is_reachable_in_the_working_table() -> Result<(), SafiErro
     graph.define_metric(count.clone(), "Rows", None, "COUNT(region)", 10)?;
 
     let sum_token = token(&graph, &sum)?;
-    assert_eq!(sum_token.row_refs, vec![0, 1, 2]);
+    assert_eq!(sum_token.row_refs, vec![1, 2, 3]);
+    assert_eq!(
+        sum_token.source_row_ids,
+        vec![RowId::from_raw(1), RowId::from_raw(2), RowId::from_raw(3)]
+    );
     let mut total = Decimal::ZERO;
-    for row in &sum_token.row_refs {
-        let cell = graph.working().cell(*row as usize, 1).ok_or_else(missing)?;
+    for row_id in &sum_token.source_row_ids {
+        let working_row = graph.working_row_for_id(*row_id).ok_or_else(missing)?;
+        let cell = graph.working().cell(working_row, 1).ok_or_else(missing)?;
         total += cell_number(cell).ok_or_else(missing)?;
     }
     assert_eq!(total, value_of(&sum_token)?);
 
     let count_token = token(&graph, &count)?;
     assert_eq!(value_of(&count_token)?, decimal("3")?);
-    assert_eq!(count_token.row_refs, vec![0, 1, 2]);
+    assert_eq!(count_token.row_refs, vec![1, 2, 3]);
     Ok(())
 }
 
@@ -376,5 +381,154 @@ fn invalid_formulas_report_registered_sf_codes() -> Result<(), SafiError> {
             .map(|error| error.code()),
         Some(ErrorCode::SF_CAL_005)
     );
+    Ok(())
+}
+
+#[test]
+fn stable_row_identities_survive_sort_filter_delete_insert_and_restore() -> Result<(), SafiError> {
+    let mut graph = graph()?;
+    let sum = metric("sum_amount")?;
+    graph.define_metric(sum.clone(), "Total", Some("EGP"), "SUM(amount)", 10)?;
+    // Initial row IDs: [r1 (100), r2 (200), r3 (50.5)]
+    assert_eq!(
+        graph
+            .row_provenance()
+            .iter()
+            .map(|p| p.row_id.get())
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+
+    // Edit row r1 after sorting ascending by amount -> row r3 moves to display index 0, r1 to 1, r2 to 2
+    graph.sort_rows("amount", true, 20)?;
+    assert_eq!(
+        graph
+            .row_provenance()
+            .iter()
+            .map(|p| p.row_id.get())
+            .collect::<Vec<_>>(),
+        vec![3, 1, 2]
+    );
+    assert_eq!(
+        graph.working().cell(0, 1).and_then(cell_number),
+        Some(decimal("50.5")?)
+    );
+    // Token provenance retains stable IDs [1, 2, 3]
+    assert_eq!(token(&graph, &sum)?.row_refs, vec![1, 2, 3]);
+
+    // Edit display row 0 (which is r3!) then delete r2 -> r2 must never be reused
+    graph.set_cell(0, "amount", "60", 30)?;
+    graph.delete_row(RowId::from_raw(2), 40)?;
+    assert_eq!(
+        graph
+            .row_provenance()
+            .iter()
+            .map(|p| p.row_id.get())
+            .collect::<Vec<_>>(),
+        vec![3, 1]
+    );
+
+    // Insert a new row: must receive RowId(4), never RowId(2)
+    let mut values = BTreeMap::new();
+    values.insert("region".to_owned(), "Alex".to_owned());
+    values.insert("amount".to_owned(), "40".to_owned());
+    values.insert("quantity".to_owned(), "1".to_owned());
+    let (new_id, _) = graph.insert_row(None, values, 50)?;
+    assert_eq!(new_id, RowId::from_raw(4));
+    assert_eq!(
+        graph.row_provenance().last().and_then(|p| p.origin_row_id),
+        None
+    );
+
+    // Snapshot & restore must retain identical provenance and monotonic next_row_id
+    let saved = graph.to_json()?;
+    let mut restored = DataGraph::from_json(&saved, 60)?;
+    assert_eq!(restored.row_provenance(), graph.row_provenance());
+    assert_eq!(restored.column_provenance(), graph.column_provenance());
+    let (after_restore_id, _) = restored.insert_row(None, BTreeMap::new(), 70)?;
+    assert_eq!(after_restore_id, RowId::from_raw(5));
+
+    // Filter rows to Cairo: preserves original RowIds [3, 1]
+    graph.filter_rows("region", "Cairo", 80)?;
+    assert_eq!(
+        graph
+            .row_provenance()
+            .iter()
+            .map(|p| p.row_id.get())
+            .collect::<Vec<_>>(),
+        vec![3, 1]
+    );
+    assert!(tables_equal(graph.working(), &graph.replay()?));
+    assert!(graph.origin_unchanged());
+    Ok(())
+}
+
+#[test]
+fn missing_or_corrupt_provenance_invalidates_verification() -> Result<(), SafiError> {
+    let mut graph = graph()?;
+    let sum = metric("sum_amount")?;
+    graph.define_metric(sum.clone(), "Total", Some("EGP"), "SUM(amount)", 10)?;
+
+    let mut stripped_token = token(&graph, &sum)?;
+    stripped_token.source_row_ids.clear();
+    assert_ne!(
+        graph.verify(&stripped_token)?,
+        VerificationOutcome::Verified
+    );
+    assert_eq!(
+        graph.verify_strict(&stripped_token).err().map(|e| e.code()),
+        Some(ErrorCode::SF_CAL_008)
+    );
+
+    let mut snapshot = graph.to_snapshot();
+    snapshot.row_provenance.clear();
+    let tampered_json = serde_json::to_string(&snapshot).map_err(|_| missing())?;
+    assert_eq!(
+        DataGraph::from_json(&tampered_json, 20)
+            .err()
+            .map(|e| e.code()),
+        Some(ErrorCode::SF_CAL_008)
+    );
+    Ok(())
+}
+
+#[test]
+fn scenario_rename_parameter_update_and_paginated_query_work() -> Result<(), SafiError> {
+    let mut graph = graph()?;
+    let projected = metric("projected")?;
+    graph.define_parameter("growth", Decimal::ONE, 10)?;
+    graph.define_metric(
+        projected.clone(),
+        "Projected",
+        Some("EGP"),
+        "SUM(amount) * growth",
+        10,
+    )?;
+    let scenario_id = ScenarioId::new("upside")?;
+    graph.add_scenario(scenario_id.clone(), "Upside", BTreeMap::new())?;
+    graph.rename_scenario(&scenario_id, "Upside Q4")?;
+    assert_eq!(
+        graph.scenarios().get(&scenario_id).map(|s| s.name()),
+        Some("Upside Q4")
+    );
+    graph.activate_scenario(Some(&scenario_id), 20)?;
+    graph.set_scenario_parameter(&scenario_id, "growth", decimal("1.5")?, 30)?;
+    assert_eq!(value_of(&token(&graph, &projected)?)?, decimal("525.75")?);
+
+    let page = graph.rows_page(&super::RowQuery {
+        offset: 0,
+        limit: 500,
+        search: Some("Cairo".to_owned()),
+        sort_column: Some("amount".to_owned()),
+        ascending: true,
+        filter_column: None,
+        filter_value: None,
+    })?;
+    assert_eq!(page.total_rows, 3);
+    assert_eq!(page.filtered_rows, 2);
+    assert_eq!(page.limit, super::MAX_ROW_PAGE_LIMIT);
+    assert_eq!(page.rows.len(), 2);
+    assert_eq!(page.rows[0].row_id, 3);
+    assert_eq!(page.rows[1].row_id, 1);
     Ok(())
 }

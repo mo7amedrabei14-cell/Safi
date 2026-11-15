@@ -82,6 +82,92 @@ studio_identifier!(SourceId, "Stable identifier of an imported dataset source.")
 studio_identifier!(MetricId, "Stable identifier of a Studio metric.");
 studio_identifier!(ScenarioId, "Stable identifier of a What-If scenario.");
 
+/// Stable identity of a dataset row independent of its current display or sort position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RowId(u64);
+
+impl RowId {
+    /// Returns the underlying numeric row identity.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Returns the next monotonic row identity without ever reusing deleted identities.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+
+    /// Rebuilds a [`RowId`] from a stored or serialized raw value.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for RowId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "r{}", self.0)
+    }
+}
+
+/// Stable identity of a dataset column independent of rename or display order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ColumnId(u64);
+
+impl ColumnId {
+    /// Returns the underlying numeric column identity.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// Returns the next monotonic column identity without ever reusing removed identities.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+
+    /// Rebuilds a [`ColumnId`] from a stored or serialized raw value.
+    #[must_use]
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl fmt::Display for ColumnId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "c{}", self.0)
+    }
+}
+
+/// Provenance link from a working-table row back to the immutable original source row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RowProvenance {
+    /// Stable identity of this working row (never reused after deletion).
+    pub row_id: RowId,
+    /// Original immutable source row identity, or `None` if inserted inside Studio.
+    pub origin_row_id: Option<RowId>,
+    /// Original zero-based row index in the immutable source table, or `None` if inserted.
+    pub origin_row_index: Option<usize>,
+}
+
+/// Provenance link for a column inside the working dataset.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ColumnProvenance {
+    /// Stable identity of this column.
+    pub column_id: ColumnId,
+    /// Original zero-based column index in the immutable source table, or `None` if derived/added.
+    pub origin_column_index: Option<usize>,
+    /// Column name at import/creation time.
+    pub origin_name: Option<String>,
+    /// Current column name in the working table.
+    pub current_name: String,
+}
+
 /// Monotonic version of the published dataset state (bumped by every accepted change).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
@@ -199,10 +285,14 @@ pub struct MetricTokenParts {
     pub source_version: DatasetVersion,
     /// Fingerprint of the immutable original dataset.
     pub source_fingerprint: String,
-    /// Zero-based rows that contributed to the value.
+    /// Stable row identities (`RowId::get()`) that contributed to the value.
     pub row_refs: Vec<u64>,
+    /// Typed stable source-row identities that contributed to the value.
+    pub source_row_ids: Vec<RowId>,
     /// Column names that contributed to the value.
     pub column_refs: Vec<String>,
+    /// Typed stable source-column identities that contributed to the value.
+    pub column_ids: Vec<ColumnId>,
     /// Digest of each transformation applied before the metric was evaluated.
     pub transformation_trace: Vec<String>,
     /// Calculation timestamp (metadata only, excluded from the fingerprint).
@@ -232,10 +322,16 @@ pub struct VerifiedMetricToken {
     pub source_version: DatasetVersion,
     /// Fingerprint of the immutable original dataset.
     pub source_fingerprint: String,
-    /// Contributing zero-based rows.
+    /// Contributing stable row identity numbers (`RowId::get()`).
     pub row_refs: Vec<u64>,
+    /// Typed stable source-row identities contributing to the metric.
+    #[serde(default)]
+    pub source_row_ids: Vec<RowId>,
     /// Contributing column names.
     pub column_refs: Vec<String>,
+    /// Typed stable column identities contributing to the metric.
+    #[serde(default)]
+    pub column_ids: Vec<ColumnId>,
     /// Digest of each applied transformation.
     pub transformation_trace: Vec<String>,
     /// Calculation timestamp in milliseconds since the Unix epoch (metadata only).
@@ -262,7 +358,9 @@ impl VerifiedMetricToken {
             source_version: parts.source_version,
             source_fingerprint: parts.source_fingerprint,
             row_refs: parts.row_refs,
+            source_row_ids: parts.source_row_ids,
             column_refs: parts.column_refs,
+            column_ids: parts.column_ids,
             transformation_trace: parts.transformation_trace,
             computed_at_ms: parts.computed_at_ms,
             engine_version: STUDIO_ENGINE_VERSION.to_owned(),
@@ -349,8 +447,18 @@ impl VerifiedMetricToken {
             payload.push(',');
         }
         payload.push(FIELD_SEPARATOR);
+        for row_id in &self.source_row_ids {
+            payload.push_str(&row_id.get().to_string());
+            payload.push(',');
+        }
+        payload.push(FIELD_SEPARATOR);
         for column in &self.column_refs {
             payload.push_str(column);
+            payload.push(',');
+        }
+        payload.push(FIELD_SEPARATOR);
+        for column_id in &self.column_ids {
+            payload.push_str(&column_id.get().to_string());
             payload.push(',');
         }
         payload.push(FIELD_SEPARATOR);
@@ -385,7 +493,7 @@ mod tests {
     use rust_decimal::Decimal;
 
     use super::{
-        DatasetVersion, MetricId, MetricTokenParts, SourceId, VerificationOutcome,
+        ColumnId, DatasetVersion, MetricId, MetricTokenParts, RowId, SourceId, VerificationOutcome,
         VerificationStatus, VerifiedMetricToken,
     };
     use crate::error::SafiError;
@@ -405,8 +513,10 @@ mod tests {
             source_id: SourceId::new("sales")?,
             source_version: DatasetVersion::INITIAL,
             source_fingerprint: "source".to_owned(),
-            row_refs: vec![0, 1],
+            row_refs: vec![1, 2],
+            source_row_ids: vec![RowId::from_raw(1), RowId::from_raw(2)],
             column_refs: vec!["amount".to_owned()],
+            column_ids: vec![ColumnId::from_raw(1)],
             transformation_trace: vec!["t1".to_owned()],
             computed_at_ms: 1,
             status: VerificationStatus::Verified,

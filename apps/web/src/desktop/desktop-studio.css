@@ -365,3 +365,103 @@
   font: inherit;
   cursor: pointer;
 }
+
+.safi-desktop-chip--error {
+  border-color: color-mix(in srgb, #d33 65%, transparent);
+}
+
+.safi-desktop-studio__audit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.safi-desktop-studio__status-note {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.safi-desktop-studio__status-note--stale,
+.safi-desktop-studio__status-note--unverified {
+  border: 1px solid color-mix(in srgb, #b58900 50%, transparent);
+}
+
+.safi-desktop-studio__status-note--error {
+  border: 1px solid color-mix(in srgb, #d33 55%, transparent);
+}
+
+.safi-desktop-studio__rowrefs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.safi-desktop-studio__rowrefs-pager,
+.safi-desktop-studio__pager,
+.safi-desktop-studio__panel-head,
+.safi-desktop-studio__scenario-list,
+.safi-desktop-studio__scenario-pill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.safi-desktop-studio__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.safi-desktop-studio__panel h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.safi-desktop-studio__sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.safi-desktop-studio__slider-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 22%) 1fr 110px;
+  align-items: center;
+  gap: 10px;
+}
+
+.safi-desktop-studio__col-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.safi-desktop-studio__rowid {
+  display: inline-block;
+  padding: 0 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  opacity: 0.78;
+}
+
+.safi-desktop-studio td[data-changed="true"] {
+  background: color-mix(in srgb, #b58900 10%, transparent);
+}
+

@@ -19,8 +19,9 @@ pub use crate::column::{
     ConfidenceScore, MAX_COLUMN_SAMPLE_VALUES, USER_CONFIRM_CONFIDENCE_THRESHOLD,
 };
 pub use crate::datagraph::{
-    DatasetVersion, MetricId, MetricTokenParts, Revision, STUDIO_ENGINE_VERSION, ScenarioId,
-    SourceId, VerificationOutcome, VerificationStatus, VerifiedMetricToken, canonical_value,
+    ColumnId, ColumnProvenance, DatasetVersion, MetricId, MetricTokenParts, Revision, RowId,
+    RowProvenance, STUDIO_ENGINE_VERSION, ScenarioId, SourceId, VerificationOutcome,
+    VerificationStatus, VerifiedMetricToken, canonical_value,
 };
 pub use crate::error::{
     DiagnosticToken, ErrorCode, ErrorCodeParseError, ErrorDomain, ErrorSeverity,

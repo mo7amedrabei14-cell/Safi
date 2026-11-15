@@ -11,9 +11,10 @@ pub mod studio_dsl;
 pub mod studio_templates;
 
 pub use datagraph::{
-    AggFunc, BinaryOp, ChangeOutcome, DataGraph, Formula, GroupedValue, MetricSpec,
-    PROJECT_SCHEMA_VERSION, ProjectSnapshot, Scenario, ScenarioComparison, Transformation,
-    datagraph_display, parse_formula, tables_equal,
+    AggFunc, BinaryOp, ChangeOutcome, DataGraph, Formula, GroupedValue,
+    LEGACY_PROJECT_SCHEMA_VERSION, MAX_ROW_PAGE_LIMIT, MetricSpec, PROJECT_SCHEMA_VERSION,
+    ProjectSnapshot, RowCellView, RowPage, RowPageItem, RowQuery, Scenario, ScenarioComparison,
+    Transformation, datagraph_display, parse_formula, tables_equal,
 };
 pub use recipe::{RecipeOperation, RecipeStep, SafiRecipe};
 pub use studio_anomaly::{Anomaly, AnomalyKind, detect_anomalies};

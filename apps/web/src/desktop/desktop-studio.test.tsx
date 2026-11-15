@@ -334,7 +334,14 @@ describe("phase 1: what-if panel & reactive stale-revision guards", () => {
     }
 
     const rejected = validateUntrustedDslPayload(
-      JSON.stringify({ op: "define_metric", id: "x", name: "X", unit: null, formula: "1", extra: true })
+      JSON.stringify({
+        op: "define_metric",
+        id: "x",
+        name: "X",
+        unit: null,
+        formula: "1",
+        extra: true
+      })
     );
     expect(rejected).toMatchObject({ ok: false, code: "SF-AIX-002" });
   });
@@ -400,7 +407,9 @@ describe("phase 1: what-if panel & reactive stale-revision guards", () => {
         return JSON.stringify({
           text: "Total 350.5",
           missing: [],
-          references: [{ id: "rev_total", value: "350.5", unit: "EGP", status: "Verified", fingerprint: "f" }]
+          references: [
+            { id: "rev_total", value: "350.5", unit: "EGP", status: "Verified", fingerprint: "f" }
+          ]
         });
       }
       return JSON.stringify(sampleState());

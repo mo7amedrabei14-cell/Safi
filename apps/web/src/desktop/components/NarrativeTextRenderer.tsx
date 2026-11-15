@@ -23,7 +23,7 @@ export function NarrativeTextRenderer({
   metricsById,
   language,
   onInspectMetric,
-  onUnlinkMetric,
+  onUnlinkMetric
 }: NarrativeTextRendererProps): React.ReactElement {
   const isAr = language === "ar";
   const parts: React.ReactNode[] = [];
@@ -53,11 +53,7 @@ export function NarrativeTextRenderer({
             <button
               type="button"
               className="studio-unlink-btn"
-              title={
-                isAr
-                  ? "فك الربط وتحويله لنص ثابت غير موثّق"
-                  : "Unlink to plain static text"
-              }
+              title={isAr ? "فك الربط وتحويله لنص ثابت غير موثّق" : "Unlink to plain static text"}
               onClick={() => onUnlinkMetric(metricId, frozenText)}
             >
               {isAr ? "فك الربط" : "Unlink"}

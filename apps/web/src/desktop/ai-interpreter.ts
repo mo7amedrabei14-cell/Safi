@@ -80,7 +80,7 @@ export const DEFAULT_AI_PROVIDER: AiProviderConfig = {
   kind: "unconfigured",
   endpointUrl: "",
   modelName: "",
-  consentedToSchemaContext: false,
+  consentedToSchemaContext: false
 };
 
 export type AiInterpretationResult =
@@ -106,7 +106,7 @@ const ALLOWED_OPS = new Set<StudioDslCommand["op"]>([
   "activate_scenario",
   "sort_rows",
   "filter_rows",
-  "delete_row",
+  "delete_row"
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -137,7 +137,7 @@ export function validateUntrustedDslPayload(
     return {
       ok: false,
       code: "SF-AIX-002",
-      reason: `Unsupported DSL operation '${parsed.op}'.`,
+      reason: `Unsupported DSL operation '${parsed.op}'.`
     };
   }
   const op = parsed.op as StudioDslCommand["op"];
@@ -298,16 +298,20 @@ export async function interpretPromptWithRealAi(
     return {
       ok: false,
       code: "SF-AIX-002",
-      blockerDetail: "Prompt is empty.",
+      blockerDetail: "Prompt is empty."
     };
   }
 
-  if (provider.kind === "unconfigured" || !provider.endpointUrl.trim() || !provider.modelName.trim()) {
+  if (
+    provider.kind === "unconfigured" ||
+    !provider.endpointUrl.trim() ||
+    !provider.modelName.trim()
+  ) {
     return {
       ok: false,
       code: "SF-AIX-001",
       blockerDetail:
-        "No local LLM weights, runtime daemon (e.g., local OpenAI-compatible server), or approved API provider is configured in this offline desktop environment. Enter or edit a structured DSL command below to execute verified actions safely.",
+        "No local LLM weights, runtime daemon (e.g., local OpenAI-compatible server), or approved API provider is configured in this offline desktop environment. Enter or edit a structured DSL command below to execute verified actions safely."
     };
   }
 
@@ -316,7 +320,7 @@ export async function interpretPromptWithRealAi(
       ok: false,
       code: "SF-AIX-001",
       blockerDetail:
-        "Explicit consent is required before sending schema metadata (column names, metric IDs, parameter names) to the configured provider.",
+        "Explicit consent is required before sending schema metadata (column names, metric IDs, parameter names) to the configured provider."
     };
   }
 
@@ -324,7 +328,7 @@ export async function interpretPromptWithRealAi(
   const schemaSummary = {
     columns: schema.columns.map((c) => ({ name: c.name, type: c.type })),
     metrics: [...schema.metricIds],
-    parameters: [...schema.parameterNames],
+    parameters: [...schema.parameterNames]
   };
 
   try {
@@ -344,21 +348,21 @@ export async function interpretPromptWithRealAi(
           {
             role: "system",
             content:
-              "Output strict JSON ONLY matching one Safi StudioCommand (define_metric, update_metric_formula, set_cell_by_id, add_calculated_column, define_parameter, activate_scenario, sort_rows, filter_rows, delete_row). Never compute numeric results or invent values.",
+              "Output strict JSON ONLY matching one Safi StudioCommand (define_metric, update_metric_formula, set_cell_by_id, add_calculated_column, define_parameter, activate_scenario, sort_rows, filter_rows, delete_row). Never compute numeric results or invent values."
           },
           {
             role: "user",
-            content: JSON.stringify({ request: trimmed, schema: schemaSummary }),
-          },
-        ],
-      }),
+            content: JSON.stringify({ request: trimmed, schema: schemaSummary })
+          }
+        ]
+      })
     });
 
     if (!response.ok) {
       return {
         ok: false,
         code: "SF-AIX-001",
-        blockerDetail: `Configured AI endpoint responded with HTTP ${response.status} (offline/CSP sandbox or endpoint unreachable).`,
+        blockerDetail: `Configured AI endpoint responded with HTTP ${response.status} (offline/CSP sandbox or endpoint unreachable).`
       };
     }
 
@@ -371,7 +375,7 @@ export async function interpretPromptWithRealAi(
       return {
         ok: false,
         code: "SF-AIX-002",
-        blockerDetail: validated.reason,
+        blockerDetail: validated.reason
       };
     }
 
@@ -380,7 +384,7 @@ export async function interpretPromptWithRealAi(
       model: provider.modelName,
       suggestedSummary: previewDslCommand(validated.command, "en"),
       command: validated.command,
-      dslJson: JSON.stringify(validated.command, null, 2),
+      dslJson: JSON.stringify(validated.command, null, 2)
     };
   } catch (err) {
     return {
@@ -389,7 +393,7 @@ export async function interpretPromptWithRealAi(
       blockerDetail:
         err instanceof Error
           ? `AI request blocked or unreachable in sandbox: ${err.message}`
-          : "AI provider unreachable in offline sandbox.",
+          : "AI provider unreachable in offline sandbox."
     };
   }
 }

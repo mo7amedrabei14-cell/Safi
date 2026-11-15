@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { DesktopStudio } from "./DesktopStudio";
@@ -32,6 +34,7 @@ import {
   compareScenarios,
   createRequestTracker,
   deleteColumn,
+  deleteProjectBundle,
   exportCapsule,
   fetchRowsPage,
   instantiateTemplate,
@@ -655,5 +658,67 @@ describe("phase 3 & 4: Quad-Studio editors, artifacts persistence, templates & b
         value: originalWindow
       });
     }
+  });
+});
+
+describe("phase 5: browser security boundary, bilingual RTL/LTR, accessibility & reduced motion", () => {
+  it("blocks every Phase 3 & 4 Studio IPC call with SF-SYS-010 when running in a public browser", async () => {
+    await expect(addSourceColumn("main", "c")).rejects.toThrow("SF-SYS-010");
+    await expect(renameColumn("main", "a", "b")).rejects.toThrow("SF-SYS-010");
+    await expect(deleteColumn("main", "a")).rejects.toThrow("SF-SYS-010");
+    await expect(trimColumn("main", "a")).rejects.toThrow("SF-SYS-010");
+    await expect(
+      setArtifacts("main", {
+        charts: [],
+        slides: [],
+        docBlocks: [],
+        freeformBlocks: [],
+        assets: [],
+        templateConfig: null
+      })
+    ).rejects.toThrow("SF-SYS-010");
+    await expect(saveProjectBundle("main", "p", "P")).rejects.toThrow("SF-SYS-010");
+    await expect(listProjectBundles()).rejects.toThrow("SF-SYS-010");
+    await expect(loadProjectBundle("main", "p")).rejects.toThrow("SF-SYS-010");
+    await expect(deleteProjectBundle("p")).rejects.toThrow("SF-SYS-010");
+    await expect(listTemplates()).rejects.toThrow("SF-SYS-010");
+    await expect(instantiateTemplate("main", "boardroom-keynote", {})).rejects.toThrow(
+      "SF-SYS-010"
+    );
+  });
+
+  it("renders clean bilingual EN/AR UI, accessible ARIA roles, and reduced-motion rules", () => {
+    const state = sampleState();
+    const arHtml = renderToString(
+      createElement(DashboardChartsView, {
+        language: "ar",
+        project: "main",
+        revision: state.revision,
+        activeScenario: null,
+        columns: state.columns,
+        metrics: state.metrics,
+        charts: [],
+        onUpdateCharts: vi.fn()
+      })
+    );
+    expect(arHtml).toContain("لوحة المؤشرات والرسوم التفاعلية");
+    expect(arHtml).toContain("إضافة رسم");
+
+    const enLocked = renderToString(createElement(DesktopStudio, { lang: "en" }));
+    expect(enLocked).toContain("The Studio runs inside the app");
+    expect(enLocked).toContain('role="note"');
+
+    const modalHtml = renderToString(
+      createElement(VerifiedAuditModal, {
+        metric: sampleMetric(),
+        status: "Verified",
+        lang: "ar",
+        onClose: () => undefined
+      })
+    );
+    expect(modalHtml).toContain('role="dialog"');
+
+    const css = fs.readFileSync(path.join(__dirname, "desktop-studio.css"), "utf8");
+    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
   });
 });

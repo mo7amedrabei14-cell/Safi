@@ -1,6 +1,6 @@
 # خطة STUDIO-Phase-4
 
-**الحالة:** لم يبدأ؛ يعتمد على نجاح Phase 3.  
+**الحالة:** مكتملة ومختبرة (2026-11-15، `f988505c0b592e8abf606b04259f303fadfe9cf0`) — القوالب الحية الخمسة (`list_templates`, `instantiate_template`) مع `TemplatesAndProjectsPanel` ومنع الصمت عند غياب الربط (`SF-CAL-006`)، وتصدير الكبسولة `.safi.html` بـCSP صارم (`style-src 'sha256-...'` بلا أي `unsafe-inline` ولا `frame-ancestors` داخل `<meta>`) مبرهن في Chromium حقيقي عبر `file://`.  
 **العقد:** [المهمة](../tasks/STUDIO-Phase-4.md).
 
 ## خطوات التنفيذ

@@ -1,6 +1,6 @@
 # خطة STUDIO-Phase-3
 
-**الحالة:** لم يبدأ؛ يعتمد على نجاح Phase 2.  
+**الحالة:** مكتملة ومختبرة (2026-11-15، `f988505c0b592e8abf606b04259f303fadfe9cf0`) — المحررات الأربعة داخل `DesktopStudio.tsx` (`DashboardChartsView`, `KeynoteSlidesView`, `VerifiedDocView`, `FreeFormBuilderView`)، عمليات أعمدة الجدول (`add_source_column`, `rename_column`, `delete_column`, `trim_column`)، وحفظ المشاريع ذرياً ببصمة `BLAKE3`.  
 **العقد:** [المهمة](../tasks/STUDIO-Phase-3.md).
 
 ## التصميم

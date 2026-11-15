@@ -170,3 +170,35 @@ fn shell_wires_single_instance_deep_links_and_the_navigation_guard() -> Result<(
 
     Ok(())
 }
+
+#[test]
+fn shell_ipc_allowlist_and_boundary_controls_hold() -> Result<(), Box<dyn Error>> {
+    let source = std::fs::read_to_string(shell_root().join("src/main.rs"))?;
+    for allowed in sf_desktop::commands::ALLOWED_COMMANDS {
+        assert!(
+            source.contains(allowed),
+            "ALLOWED_COMMANDS entry `{allowed}` must be wired in apps/desktop/src-tauri/src/main.rs"
+        );
+        sf_desktop::commands::authorize_command(allowed)?;
+    }
+
+    for forbidden in [
+        "shell_exec",
+        "http_fetch",
+        "fs_read_arbitrary",
+        "eval_js",
+        "bypass_auth",
+    ] {
+        assert!(
+            sf_desktop::commands::authorize_command(forbidden).is_err(),
+            "forbidden IPC command `{forbidden}` must be rejected"
+        );
+    }
+
+    assert!(sf_desktop::content::validate_app_navigation("https://evil.example/exfil").is_err());
+    assert!(
+        sf_desktop::content::validate_app_navigation("http://localhost:9999").is_ok()
+            || sf_desktop::content::validate_app_navigation("tauri://localhost").is_ok()
+    );
+    Ok(())
+}

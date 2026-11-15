@@ -498,7 +498,7 @@ pub fn export_capsule(graph: &DataGraph, options: &CapsuleOptions) -> Result<Str
     );
     html.push_str("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n");
     html.push_str(&format!(
-        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'none'; style-src 'sha256-{style_hash}'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\">\n"
+        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'none'; style-src 'sha256-{style_hash}'; img-src data:; base-uri 'none'; form-action 'none'\">\n"
     ));
     html.push_str(&format!(
         "<title>{}</title>\n<style>{stylesheet}</style>\n</head>\n<body>\n<main>\n{body}</main>\n</body>\n</html>\n",

@@ -131,7 +131,7 @@ jobs:
 
   intro-visual:
     name: Intro visual regression (Chromium)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository

@@ -11,6 +11,21 @@ import { VerifiedNumberChip } from "./VerifiedNumberChip";
 const ALLOWED_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_IMAGE_BYTES = 700_000;
 
+function clamp(val: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.trunc(val)));
+}
+
+function normalizeBlockBounds(block: StudioFreeFormBlockArtifact): StudioFreeFormBlockArtifact {
+  return {
+    ...block,
+    col: clamp(block.col, 1, 12),
+    row: clamp(block.row, 1, 32),
+    colSpan: clamp(block.colSpan, 1, 12),
+    rowSpan: clamp(block.rowSpan, 1, 8),
+    zIndex: clamp(block.zIndex, 1, 50)
+  };
+}
+
 export interface FreeFormBuilderViewProps {
   readonly language: "en" | "ar";
   readonly metrics: readonly DesktopMetric[];
@@ -71,7 +86,7 @@ export function FreeFormBuilderView({
 
   function updateBlock(id: string, patch: Partial<StudioFreeFormBlockArtifact>): void {
     onUpdateFreeForm(
-      freeformBlocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+      freeformBlocks.map((b) => (b.id === id ? normalizeBlockBounds({ ...b, ...patch }) : b)),
       assets
     );
   }
@@ -155,10 +170,31 @@ export function FreeFormBuilderView({
             <article
               key={block.id}
               className="studio-subcard studio-ff-item"
+              tabIndex={0}
+              data-grid-col={clamp(block.col, 1, 12)}
+              data-grid-row={clamp(block.row, 1, 32)}
+              data-grid-col-span={clamp(block.colSpan, 1, 12)}
+              data-grid-row-span={clamp(block.rowSpan, 1, 8)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.shiftKey && e.key === "ArrowDown") {
+                  e.preventDefault();
+                  updateBlock(block.id, { rowSpan: block.rowSpan + 1 });
+                } else if (e.shiftKey && e.key === "ArrowUp") {
+                  e.preventDefault();
+                  updateBlock(block.id, { rowSpan: block.rowSpan - 1 });
+                } else if (e.shiftKey && e.key === "ArrowRight") {
+                  e.preventDefault();
+                  updateBlock(block.id, { colSpan: block.colSpan + 1 });
+                } else if (e.shiftKey && e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  updateBlock(block.id, { colSpan: block.colSpan - 1 });
+                }
+              }}
               style={{
-                gridColumn: `${Math.min(12, Math.max(1, block.col))} / span ${Math.min(12, Math.max(1, block.colSpan))}`,
-                gridRow: `${Math.min(32, Math.max(1, block.row))} / span ${Math.min(8, Math.max(1, block.rowSpan))}`,
-                zIndex: block.zIndex
+                gridColumn: `${clamp(block.col, 1, 12)} / span ${clamp(block.colSpan, 1, 12)}`,
+                gridRow: `${clamp(block.row, 1, 32)} / span ${clamp(block.rowSpan, 1, 8)}`,
+                zIndex: clamp(block.zIndex, 1, 50)
               }}
             >
               <div className="studio-panel-header">
@@ -205,6 +241,7 @@ export function FreeFormBuilderView({
                   <button
                     type="button"
                     className="studio-chip-btn"
+                    aria-label={isAr ? "تغيير العرض" : "Cycle width"}
                     onClick={() =>
                       updateBlock(block.id, {
                         colSpan: block.colSpan >= 12 ? 4 : block.colSpan + 2
@@ -212,6 +249,40 @@ export function FreeFormBuilderView({
                     }
                   >
                     {`W:${block.colSpan}`}
+                  </button>
+                  <button
+                    type="button"
+                    className="studio-chip-btn"
+                    aria-label={isAr ? "تقليل الارتفاع" : "Decrease height"}
+                    disabled={block.rowSpan <= 1}
+                    onClick={() =>
+                      updateBlock(block.id, { rowSpan: Math.max(1, block.rowSpan - 1) })
+                    }
+                  >
+                    {`-H`}
+                  </button>
+                  <button
+                    type="button"
+                    className="studio-chip-btn"
+                    aria-label={isAr ? "تغيير الارتفاع" : "Cycle height"}
+                    onClick={() =>
+                      updateBlock(block.id, {
+                        rowSpan: block.rowSpan >= 8 ? 1 : block.rowSpan + 1
+                      })
+                    }
+                  >
+                    {`H:${block.rowSpan}`}
+                  </button>
+                  <button
+                    type="button"
+                    className="studio-chip-btn"
+                    aria-label={isAr ? "زيادة الارتفاع" : "Increase height"}
+                    disabled={block.rowSpan >= 8}
+                    onClick={() =>
+                      updateBlock(block.id, { rowSpan: Math.min(8, block.rowSpan + 1) })
+                    }
+                  >
+                    {`+H`}
                   </button>
                   <button
                     type="button"

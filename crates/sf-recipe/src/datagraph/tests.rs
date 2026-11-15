@@ -15,7 +15,7 @@ use sf_core::error::{ErrorCode, SafiError};
 use sf_core::table::Table;
 use sf_core::value::{CellValue, Value};
 
-use super::{DataGraph, cell_number, tables_equal};
+use super::{AggFunc, ChartType, DataGraph, cell_number, tables_equal};
 
 fn table(columns: &[(&str, &[&str])]) -> Result<Table, SafiError> {
     let columns = columns
@@ -636,5 +636,67 @@ fn column_management_and_trim_preserve_provenance_and_undo() -> Result<(), SafiE
     // Undo restores remarks column cleanly
     graph.undo(60)?;
     assert!(graph.working().column_by_name("remarks").is_some());
+    Ok(())
+}
+
+#[test]
+fn all_eight_chart_types_compute_in_rust_and_reject_unsuitable_columns() -> Result<(), SafiError> {
+    let source = table(&[
+        ("region", &["Cairo", "Giza", "Cairo", "Alex"]),
+        ("amount", &["100", "200", "50", "150"]),
+        ("quantity", &["2", "4", "1", "3"]),
+    ])?;
+    let graph = DataGraph::new(SourceId::new("src_charts")?, source, 1)?;
+
+    for kind in [
+        ChartType::Bar,
+        ChartType::Line,
+        ChartType::Area,
+        ChartType::Pie,
+        ChartType::Donut,
+        ChartType::Kpi,
+    ] {
+        let series = graph.compute_chart_series(kind, AggFunc::Sum, "amount", "region")?;
+        assert_eq!(series.chart_type, kind.as_str());
+        assert_eq!(series.total_or_kpi, "500");
+        assert!(!series.points.is_empty());
+    }
+
+    let scatter =
+        graph.compute_chart_series(ChartType::Scatter, AggFunc::Sum, "amount", "quantity")?;
+    assert_eq!(scatter.chart_type, "scatter");
+    assert_eq!(scatter.points.len(), 4);
+    assert_eq!(scatter.points[0].x_value.as_deref(), Some("2"));
+    assert_eq!(scatter.points[0].y_value.as_deref(), Some("100"));
+
+    let histogram =
+        graph.compute_chart_series(ChartType::Histogram, AggFunc::Count, "amount", "region")?;
+    assert_eq!(histogram.chart_type, "histogram");
+    assert_eq!(histogram.total_or_kpi, "4");
+    assert_eq!(histogram.points.len(), 5);
+
+    // Non-numeric X column in Scatter must be rejected with SF-CAL-004
+    let bad_scatter =
+        graph.compute_chart_series(ChartType::Scatter, AggFunc::Sum, "amount", "region");
+    assert_eq!(
+        bad_scatter.err().map(|e| e.code()),
+        Some(ErrorCode::SF_CAL_004)
+    );
+
+    // Non-numeric column in Histogram must be rejected with SF-CAL-004
+    let bad_hist =
+        graph.compute_chart_series(ChartType::Histogram, AggFunc::Count, "region", "region");
+    assert_eq!(
+        bad_hist.err().map(|e| e.code()),
+        Some(ErrorCode::SF_CAL_004)
+    );
+
+    // Negative values in Pie or Donut must be rejected with SF-CAL-004
+    let mut neg_graph = graph.clone();
+    neg_graph.set_cell(1, "amount", "-300", 10)?;
+    for kind in [ChartType::Pie, ChartType::Donut] {
+        let bad_pie = neg_graph.compute_chart_series(kind, AggFunc::Sum, "amount", "region");
+        assert_eq!(bad_pie.err().map(|e| e.code()), Some(ErrorCode::SF_CAL_004));
+    }
     Ok(())
 }

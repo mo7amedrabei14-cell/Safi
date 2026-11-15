@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   DEFAULT_AI_PROVIDER,
+  buildOutboundAiPayload,
   interpretPromptWithRealAi,
   previewDslCommand,
   validateUntrustedDslPayload,
@@ -92,6 +93,10 @@ export function CommandBarPanel({
     }
     return previewDslCommand(dslValidation.command, language);
   }, [dslValidation, language]);
+
+  const outboundPayloadPreview = useMemo(() => {
+    return JSON.stringify(buildOutboundAiPayload(promptInput, schema), null, 2);
+  }, [promptInput, schema]);
 
   async function handleAskAi(): Promise<void> {
     if (!promptInput.trim() || !projectLoaded) {
@@ -210,6 +215,18 @@ export function CommandBarPanel({
                 onChange={(e) => setProvider((prev) => ({ ...prev, modelName: e.target.value }))}
               />
             </label>
+            <label>
+              <span>{isAr ? "مفتاح API (ذاكرة مؤقتة فقط)" : "API Key (volatile memory only)"}</span>
+              <input
+                type="password"
+                data-testid="ai-api-key-volatile"
+                value={provider.apiKey ?? ""}
+                placeholder={
+                  isAr ? "لا يُحفظ في الملفات أو التخزين" : "Never saved to disk/storage"
+                }
+                onChange={(e) => setProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+              />
+            </label>
           </div>
           <label className="studio-checkbox-label">
             <input
@@ -224,10 +241,18 @@ export function CommandBarPanel({
             />
             <span>
               {isAr
-                ? "أوافق صراحةً على إرسال أسماء الأعمدة والمؤشرات فقط (بدون قيم الصفوف أو أسماء الملفات)"
-                : "I explicitly consent to sending column/metric schema names only (zero row data or filenames)"}
+                ? "أوافق صراحةً على إرسال نص طلبي وأسماء الأعمدة وأنواعها ومعرفات المؤشرات والمتغيرات إلى المزود المحدد (بدون قيم الصفوف أو الخلايا أو أسماء الملفات)"
+                : "I explicitly consent to sending my prompt text, column names & types, metric IDs, and parameter names to the configured provider (zero row values, cell contents, or filenames)"}
             </span>
           </label>
+          <div className="studio-preview-box" data-testid="ai-outbound-payload-preview">
+            <div className="studio-preview-title">
+              {isAr
+                ? "معاينة الحمولة التي ستغادر الجهاز قبل الإرسال (لا تتضمن أي صفوف أو خلايا أو أسماء ملفات):"
+                : "Exact outbound payload preview before sending (zero rows, cell values, or filenames):"}
+            </div>
+            <pre className="studio-code-preview">{outboundPayloadPreview}</pre>
+          </div>
         </div>
       ) : null}
 

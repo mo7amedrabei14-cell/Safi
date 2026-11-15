@@ -375,6 +375,7 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
       }
       const savedCharts = artifacts.charts.map((c) => ({
         title: c.title,
+        chart_type: c.chartType ?? "bar",
         function: c.function,
         column: c.column,
         group_by: c.groupBy

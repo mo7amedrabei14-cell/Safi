@@ -282,6 +282,67 @@ export function previewDslCommand(command: StudioDslCommand, language: "en" | "a
   }
 }
 
+export interface OutboundAiUserPayload {
+  readonly request: string;
+  readonly schema: {
+    readonly columns: ReadonlyArray<{ name: string; type: string }>;
+    readonly metrics: ReadonlyArray<string>;
+    readonly parameters: ReadonlyArray<string>;
+  };
+}
+
+/**
+ * Constructs the exact outbound user payload sent to a configured AI provider.
+ * Contains ONLY the user's prompt text, column names & types, metric IDs, and
+ * parameter names — never row values, cell contents, or filenames.
+ */
+export function buildOutboundAiPayload(
+  prompt: string,
+  schema: AiSchemaContext
+): OutboundAiUserPayload {
+  return {
+    request: prompt.trim(),
+    schema: {
+      columns: schema.columns.map((c) => ({ name: c.name, type: c.type })),
+      metrics: [...schema.metricIds],
+      parameters: [...schema.parameterNames]
+    }
+  };
+}
+
+/**
+ * Validates that the configured AI endpoint complies with the desktop CSP:
+ * - Local plaintext HTTP is permitted ONLY on the pinned loopback origin `http://127.0.0.1:11434`.
+ * - Remote endpoints must use `https://`.
+ */
+export function validateAiEndpointUrl(
+  rawUrl: string
+):
+  | { readonly ok: true; readonly normalizedUrl: string }
+  | { readonly ok: false; readonly reason: string } {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return { ok: false, reason: "AI endpoint URL is empty." };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { ok: false, reason: "AI endpoint URL is not a valid URL." };
+  }
+  if (parsed.protocol === "https:") {
+    return { ok: true, normalizedUrl: parsed.toString() };
+  }
+  if (parsed.protocol === "http:" && parsed.origin === "http://127.0.0.1:11434") {
+    return { ok: true, normalizedUrl: parsed.toString() };
+  }
+  return {
+    ok: false,
+    reason:
+      "Desktop CSP permits only the pinned local loopback AI origin (http://127.0.0.1:11434) or HTTPS endpoints."
+  };
+}
+
 /**
  * Translates a natural-language request using ONLY a real, explicitly configured & consented
  * AI provider. When running in offline desktop mode with no local/approved model configured,
@@ -311,7 +372,16 @@ export async function interpretPromptWithRealAi(
       ok: false,
       code: "SF-AIX-001",
       blockerDetail:
-        "No local LLM weights, runtime daemon (e.g., local OpenAI-compatible server), or approved API provider is configured in this offline desktop environment. Enter or edit a structured DSL command below to execute verified actions safely."
+        "No local LLM weights, runtime daemon (e.g., local OpenAI-compatible server on http://127.0.0.1:11434), or approved HTTPS API provider is configured in this offline desktop environment. Enter or edit a structured DSL command below to execute verified actions safely."
+    };
+  }
+
+  const endpointCheck = validateAiEndpointUrl(provider.endpointUrl);
+  if (!endpointCheck.ok) {
+    return {
+      ok: false,
+      code: "SF-AIX-001",
+      blockerDetail: endpointCheck.reason
     };
   }
 
@@ -320,16 +390,12 @@ export async function interpretPromptWithRealAi(
       ok: false,
       code: "SF-AIX-001",
       blockerDetail:
-        "Explicit consent is required before sending schema metadata (column names, metric IDs, parameter names) to the configured provider."
+        "Explicit consent is required before sending your prompt text, column names and types, metric IDs, and parameter names to the configured provider."
     };
   }
 
-  // Send ONLY schema identifiers — zero raw rows, cell values, or file paths.
-  const schemaSummary = {
-    columns: schema.columns.map((c) => ({ name: c.name, type: c.type })),
-    metrics: [...schema.metricIds],
-    parameters: [...schema.parameterNames]
-  };
+  // Send ONLY prompt + schema identifiers — zero raw rows, cell values, or file paths.
+  const outboundUserPayload = buildOutboundAiPayload(trimmed, schema);
 
   try {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -337,7 +403,7 @@ export async function interpretPromptWithRealAi(
       headers.Authorization = `Bearer ${provider.apiKey.trim()}`;
     }
 
-    const response = await fetch(provider.endpointUrl, {
+    const response = await fetch(endpointCheck.normalizedUrl, {
       method: "POST",
       headers,
       ...(signal !== undefined ? { signal } : {}),
@@ -352,7 +418,7 @@ export async function interpretPromptWithRealAi(
           },
           {
             role: "user",
-            content: JSON.stringify({ request: trimmed, schema: schemaSummary })
+            content: JSON.stringify(outboundUserPayload)
           }
         ]
       })

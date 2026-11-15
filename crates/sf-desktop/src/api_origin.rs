@@ -7,6 +7,30 @@
 /// Environment variable read at desktop build time.
 pub const API_ORIGIN_ENV: &str = "SAFI_API_BASE_URL";
 
+/// Pinned loopback origin permitted exclusively for opt-in local Ollama inference.
+pub const LOCAL_OLLAMA_ORIGIN: &str = "http://127.0.0.1:11434";
+
+/// Validates an opt-in local AI loopback origin (`http://127.0.0.1:11434` or
+/// `http://localhost:11434`), normalizing to [`LOCAL_OLLAMA_ORIGIN`] and rejecting every other
+/// host, scheme, path, or port so arbitrary network ports are never opened.
+///
+/// # Errors
+///
+/// Returns [`ApiOriginError`] when `raw` is not the exact local Ollama loopback origin.
+pub fn validate_local_ai_origin(raw: &str) -> Result<&'static str, ApiOriginError> {
+    let trimmed = raw.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return Err(ApiOriginError::Missing);
+    }
+    if trimmed == "http://127.0.0.1:11434" || trimmed == "http://localhost:11434" {
+        Ok(LOCAL_OLLAMA_ORIGIN)
+    } else if trimmed.contains('/') && !trimmed.starts_with("http://") {
+        Err(ApiOriginError::NotAnOrigin)
+    } else {
+        Err(ApiOriginError::InvalidPort)
+    }
+}
+
 const HTTPS_SCHEME: &str = "https://";
 
 /// Why an account-service origin was rejected.
@@ -325,5 +349,21 @@ mod tests {
             apply_csp_origin("  ;; ", &origin),
             Err(ApiOriginError::NotAnOrigin)
         );
+    }
+
+    #[test]
+    fn validates_pinned_local_ollama_loopback_only() {
+        assert_eq!(
+            validate_local_ai_origin("http://127.0.0.1:11434"),
+            Ok(LOCAL_OLLAMA_ORIGIN)
+        );
+        assert_eq!(
+            validate_local_ai_origin("http://localhost:11434"),
+            Ok(LOCAL_OLLAMA_ORIGIN)
+        );
+        assert!(validate_local_ai_origin("").is_err());
+        assert!(validate_local_ai_origin("http://127.0.0.1:8080").is_err());
+        assert!(validate_local_ai_origin("http://192.168.1.5:11434").is_err());
+        assert!(validate_local_ai_origin("https://api.openai.com").is_err());
     }
 }

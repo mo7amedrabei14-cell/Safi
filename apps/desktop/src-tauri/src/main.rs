@@ -11,10 +11,18 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Mutex;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use sf_desktop::commands::enforce_ipc_command;
 use sf_desktop::deep_link::DeepLinkAction;
-use sf_desktop::studio::StudioStore;
+use sf_desktop::studio::{
+    parse_installation_uuid, parse_safi_session_token, StudioSessionAuthority,
+    StudioSessionVerifier, StudioStore, VerifiedStudioSession, AUTH_EXPIRED_CODE,
+    AUTH_REQUIRED_CODE,
+};
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
@@ -22,25 +30,131 @@ use tauri_plugin_dialog::DialogExt;
 #[derive(Default)]
 struct PendingDeepLink(Mutex<Option<DeepLinkAction>>);
 
+/// Native fail-closed session verifier for the Tauri shell.
+///
+/// Verifies `sfs_` session tokens against the authoritative in-process registry or by querying
+/// the Safi authentication server's `GET /v1/auth/sessions/current` endpoint (`Bearer` token).
+/// Never trusts a token merely because it arrived from the React webview.
+#[derive(Debug)]
+struct DesktopShellSessionVerifier {
+    authority: Arc<StudioSessionAuthority>,
+    loopback_auth_addr: Option<SocketAddr>,
+}
+
+impl DesktopShellSessionVerifier {
+    fn new(authority: Arc<StudioSessionAuthority>) -> Self {
+        let loopback_auth_addr = std::env::var("SAFI_DESKTOP_AUTH_LOOPBACK_ADDR")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<SocketAddr>().ok())
+            .filter(|addr| addr.ip().is_loopback());
+        Self {
+            authority,
+            loopback_auth_addr,
+        }
+    }
+
+    fn verify_via_loopback_server(
+        &self,
+        addr: SocketAddr,
+        token: &str,
+        installation_id: &str,
+        now_ms: u64,
+    ) -> Result<VerifiedStudioSession, String> {
+        let canonical_token = parse_safi_session_token(token)?;
+        let canonical_inst = parse_installation_uuid(installation_id)?;
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2))
+            .map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+        let req = format!(
+            "GET /v1/auth/sessions/current HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {canonical_token}\r\nX-Safi-Installation-Id: {canonical_inst}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+        );
+        stream
+            .write_all(req.as_bytes())
+            .map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
+        let mut buf = Vec::with_capacity(4096);
+        stream
+            .take(16 * 1024)
+            .read_to_end(&mut buf)
+            .map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
+        let response_text = std::str::from_utf8(&buf).map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
+        let (headers, body) = response_text
+            .split_once("\r\n\r\n")
+            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
+        let status_line = headers
+            .lines()
+            .next()
+            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
+        if !status_line.starts_with("HTTP/1.1 200") && !status_line.starts_with("HTTP/1.0 200") {
+            return Err(AUTH_REQUIRED_CODE.to_owned());
+        }
+        let parsed: serde_json::Value =
+            serde_json::from_str(body.trim()).map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
+        let session_id = parsed["id"]
+            .as_str()
+            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
+        let workspace_id = parsed["workspace_id"]
+            .as_str()
+            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
+        let expires_at_secs = parsed["expires_at"]
+            .as_u64()
+            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
+        let expires_at_ms = expires_at_secs.saturating_mul(1_000);
+        if now_ms >= expires_at_ms {
+            return Err(AUTH_EXPIRED_CODE.to_owned());
+        }
+        self.authority.register_session(
+            session_id,
+            workspace_id,
+            canonical_token,
+            &canonical_inst,
+            expires_at_ms,
+        )
+    }
+}
+
+impl StudioSessionVerifier for DesktopShellSessionVerifier {
+    fn verify_session(
+        &self,
+        token: &str,
+        installation_id: &str,
+        now_ms: u64,
+    ) -> Result<VerifiedStudioSession, String> {
+        if let Some(addr) = self.loopback_auth_addr {
+            return self.verify_via_loopback_server(addr, token, installation_id, now_ms);
+        }
+        self.authority
+            .verify_session(token, installation_id, now_ms)
+    }
+}
+
 /// Non-sensitive build information for the about screen.
 #[tauri::command]
-fn app_info() -> serde_json::Value {
-    serde_json::json!({
+fn app_info() -> Result<serde_json::Value, String> {
+    enforce_ipc_command("app_info", 0)?;
+    Ok(serde_json::json!({
         "product": "SafiData",
         "version": env!("CARGO_PKG_VERSION"),
         "shell": "tauri-2.2"
-    })
+    }))
 }
 
 /// Hand the UI a deep link that arrived while it was still starting.
 #[tauri::command]
-fn take_pending_deep_link(state: tauri::State<'_, PendingDeepLink>) -> Option<DeepLinkAction> {
-    state.0.lock().ok().and_then(|mut slot| slot.take())
+fn take_pending_deep_link(
+    state: tauri::State<'_, PendingDeepLink>,
+) -> Result<Option<DeepLinkAction>, String> {
+    enforce_ipc_command("take_pending_deep_link", 0)?;
+    Ok(state.0.lock().ok().and_then(|mut slot| slot.take()))
 }
 
-/// Native open dialog restricted to spreadsheets.
+/// Native open dialog restricted to spreadsheets (requires an authenticated Studio session).
 #[tauri::command]
-async fn pick_input_file(app: tauri::AppHandle) -> Result<Option<String>, &'static str> {
+async fn pick_input_file(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, StudioStore>,
+) -> Result<Option<String>, String> {
+    store.gate_command("pick_input_file", 0, Some(now_ms()))?;
     tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -50,12 +164,16 @@ async fn pick_input_file(app: tauri::AppHandle) -> Result<Option<String>, &'stat
             .map(|path| path.display().to_string())
     })
     .await
-    .map_err(|_| "SF-SYS-011")
+    .map_err(|_| "SF-SYS-011".to_owned())
 }
 
-/// Native save dialog restricted to new CSV exports.
+/// Native save dialog restricted to new CSV exports (requires an authenticated Studio session).
 #[tauri::command]
-async fn pick_output_file(app: tauri::AppHandle) -> Result<Option<String>, &'static str> {
+async fn pick_output_file(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, StudioStore>,
+) -> Result<Option<String>, String> {
+    store.gate_command("pick_output_file", 0, Some(now_ms()))?;
     tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -66,12 +184,16 @@ async fn pick_output_file(app: tauri::AppHandle) -> Result<Option<String>, &'sta
             .map(|path| path.display().to_string())
     })
     .await
-    .map_err(|_| "SF-SYS-011")
+    .map_err(|_| "SF-SYS-011".to_owned())
 }
 
-/// Native save dialog restricted to `.safi.html` offline capsule exports.
+/// Native save dialog restricted to `.safi.html` offline capsule exports (requires an authenticated Studio session).
 #[tauri::command]
-async fn pick_capsule_output_file(app: tauri::AppHandle) -> Result<Option<String>, &'static str> {
+async fn pick_capsule_output_file(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, StudioStore>,
+) -> Result<Option<String>, String> {
+    store.gate_command("pick_capsule_output_file", 0, Some(now_ms()))?;
     tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -82,7 +204,7 @@ async fn pick_capsule_output_file(app: tauri::AppHandle) -> Result<Option<String
             .map(|path| path.display().to_string())
     })
     .await
-    .map_err(|_| "SF-SYS-011")
+    .map_err(|_| "SF-SYS-011".to_owned())
 }
 
 /// Current wall clock in milliseconds; the engine takes time as an argument so it stays
@@ -96,6 +218,20 @@ fn now_ms() -> u64 {
 
 /// Every studio command below delegates to `sf_desktop::studio`, where the engine actually
 /// runs. The webview only ever receives JSON snapshots.
+
+#[tauri::command]
+fn studio_set_auth_session(
+    store: tauri::State<'_, StudioStore>,
+    token: String,
+    installation_id: String,
+) -> Result<String, String> {
+    store.set_auth_session(&token, &installation_id, now_ms())
+}
+
+#[tauri::command]
+fn studio_clear_auth_session(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.clear_auth_session()
+}
 
 #[tauri::command]
 fn studio_open_file(
@@ -331,6 +467,18 @@ fn studio_grouped(
 }
 
 #[tauri::command]
+fn studio_chart_data(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    chart_type: String,
+    function: String,
+    column: String,
+    group_by: String,
+) -> Result<String, String> {
+    store.chart_data(&project, &chart_type, &function, &column, &group_by)
+}
+
+#[tauri::command]
 fn studio_narrative(
     store: tauri::State<'_, StudioStore>,
     project: String,
@@ -476,6 +624,8 @@ fn main() {
             pick_input_file,
             pick_output_file,
             pick_capsule_output_file,
+            studio_set_auth_session,
+            studio_clear_auth_session,
             studio_open_file,
             studio_state,
             studio_rows_page,
@@ -500,6 +650,7 @@ fn main() {
             studio_undo,
             studio_redo,
             studio_grouped,
+            studio_chart_data,
             studio_narrative,
             studio_snapshot,
             studio_restore,
@@ -523,7 +674,14 @@ fn main() {
                 .app_local_data_dir()
                 .map(|dir| dir.join("studio-projects"))
                 .unwrap_or_else(|_| std::env::temp_dir().join("safi-studio-projects"));
-            app.manage(StudioStore::with_storage_dir(storage_dir));
+            let authority = Arc::new(StudioSessionAuthority::new());
+            let verifier: Arc<dyn StudioSessionVerifier> =
+                Arc::new(DesktopShellSessionVerifier::new(authority.clone()));
+            app.manage(StudioStore::with_storage_dir_and_verifier(
+                storage_dir,
+                authority,
+                verifier,
+            ));
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",

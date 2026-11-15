@@ -19,6 +19,26 @@ fn generate_csv(rows: usize) -> String {
     out
 }
 
+const TEST_TOKEN: &str = "sfs_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const TEST_INSTALLATION_ID: &str = "11111111-2222-4333-8444-555555555555";
+
+fn authenticate(store: &StudioStore) {
+    store.set_clock_ms(Some(1_000));
+    store
+        .session_authority()
+        .register_session(
+            "sess_e2e",
+            "ws_e2e",
+            TEST_TOKEN,
+            TEST_INSTALLATION_ID,
+            10_000_000,
+        )
+        .expect("register session");
+    store
+        .set_auth_session(TEST_TOKEN, TEST_INSTALLATION_ID, 1_000)
+        .expect("bind session");
+}
+
 #[test]
 fn studio_eighteen_journeys_end_to_end() {
     let temp = std::env::temp_dir().join(format!(
@@ -37,6 +57,13 @@ fn studio_eighteen_journeys_end_to_end() {
     .expect("write csv");
 
     let store = StudioStore::with_storage_dir(temp.join("bundles"));
+
+    // 0. Unauthenticated Studio command must be rejected fail-closed with SF-AUTH-001
+    assert_eq!(
+        store.open_file("p1", &csv_path, 1000).expect_err("locked"),
+        "SF-AUTH-001"
+    );
+    authenticate(&store);
 
     // 1. Open project
     let state1: serde_json::Value =
@@ -174,12 +201,21 @@ fn studio_eighteen_journeys_end_to_end() {
         "SF-CAL-006"
     );
 
-    // 14-16. Save artifacts (charts + slides + docs + freeform + raster image) & bundle BLAKE3 persistence
+    // 14-16. Save artifacts (all 8 chart types + slides + docs + freeform with rowSpan + raster image) & bundle BLAKE3 persistence
     let artifacts_json = r#"{
-      "charts":[{"id":"c1","title":"Revenue by region","function":"SUM","column":"amount","groupBy":"region"}],
+      "charts":[
+        {"id":"c1","title":"Revenue by region","chartType":"bar","function":"SUM","column":"amount","groupBy":"region"},
+        {"id":"c2","title":"Trend Line","chartType":"line","function":"SUM","column":"amount","groupBy":"region"},
+        {"id":"c3","title":"Cumulative Area","chartType":"area","function":"SUM","column":"amount","groupBy":"region"},
+        {"id":"c4","title":"Regional Share","chartType":"pie","function":"SUM","column":"amount","groupBy":"region"},
+        {"id":"c5","title":"Donut Breakdown","chartType":"donut","function":"SUM","column":"amount","groupBy":"region"},
+        {"id":"c6","title":"Quantity vs Amount","chartType":"scatter","function":"SUM","column":"amount","groupBy":"quantity"},
+        {"id":"c7","title":"Amount Distribution","chartType":"histogram","function":"COUNT","column":"amount","groupBy":"region"},
+        {"id":"c8","title":"Headline KPI Card","chartType":"kpi","function":"SUM","column":"amount","groupBy":"region"}
+      ],
       "slides":[{"id":"s1","title":"Executive Deck","body":"Total: {{metric:rev_total}}","metricId":"rev_total","chartIndex":0,"layout":"title_body"}],
       "docBlocks":[{"id":"d1","kind":"callout","title":"Audit Summary","content":"Approved at {{metric:rev_total}}","metricId":"rev_total","authoredBy":"user"}],
-      "freeformBlocks":[{"id":"f1","kind":"kpi","title":"Headline KPI","body":"{{metric:rev_total}}","metricId":"rev_total","assetId":"a1","col":1,"row":1,"colSpan":6,"rowSpan":2,"zIndex":2}],
+      "freeformBlocks":[{"id":"f1","kind":"kpi","title":"Headline KPI","body":"{{metric:rev_total}}","metricId":"rev_total","assetId":"a1","col":1,"row":1,"colSpan":6,"rowSpan":3,"zIndex":2}],
       "assets":[{"id":"a1","name":"Badge","dataUri":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}],
       "templateConfig":{"templateId":"boardroom-keynote","titleOverride":"Q4 Review","bindings":{"headline":"rev_total"},"sectionOverrides":{}}
     }"#;
@@ -251,6 +287,7 @@ fn studio_multi_size_benchmarks_and_sample_capsule() {
         fs::write(&csv_path, generate_csv(rows)).expect("write csv");
 
         let store = StudioStore::new();
+        authenticate(&store);
         let t_open_start = Instant::now();
         store.open_file("bench", &csv_path, 2000).expect("open");
         let open_ms = t_open_start.elapsed().as_secs_f64() * 1000.0;

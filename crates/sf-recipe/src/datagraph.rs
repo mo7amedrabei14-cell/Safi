@@ -2603,6 +2603,7 @@ impl DataGraph {
             metrics: self.metric_specs(),
             parameters: self.defaults.clone(),
             scenarios: self.scenarios.values().cloned().collect(),
+            active_scenario: self.active_scenario.clone(),
             row_provenance: self.row_provenance.clone(),
             column_provenance: self.column_provenance.clone(),
             next_row_id: self.next_row_id,
@@ -2704,15 +2705,6 @@ impl DataGraph {
             graph.next_row_id = graph.next_row_id.max(snapshot.next_row_id);
             graph.next_column_id = graph.next_column_id.max(snapshot.next_column_id);
         }
-        for spec in &snapshot.metrics {
-            graph.define_metric(
-                spec.id.clone(),
-                &spec.name,
-                spec.unit.as_deref(),
-                &spec.formula,
-                now_ms,
-            )?;
-        }
         for (name, value) in &snapshot.parameters {
             graph.define_parameter(name, *value, now_ms)?;
         }
@@ -2722,6 +2714,18 @@ impl DataGraph {
                 scenario.name(),
                 scenario.parameters().clone(),
             )?;
+        }
+        for spec in &snapshot.metrics {
+            graph.define_metric(
+                spec.id.clone(),
+                &spec.name,
+                spec.unit.as_deref(),
+                &spec.formula,
+                now_ms,
+            )?;
+        }
+        if let Some(active) = snapshot.active_scenario {
+            graph.activate_scenario(Some(&active), now_ms)?;
         }
         graph.dataset_version = DatasetVersion::from_raw(snapshot.dataset_version);
         graph.revision = Revision::from_raw(snapshot.revision);
@@ -2959,6 +2963,389 @@ impl DataGraph {
             });
         }
         Ok(groups)
+    }
+
+    /// Computes a complete, validated dataset for any of the 8 Quad-Studio dashboard chart types
+    /// (`bar`, `line`, `area`, `pie`, `donut`, `scatter`, `histogram`, `kpi`) entirely in Rust.
+    ///
+    /// # Errors
+    /// `SF-CAL-001` when a required column does not exist, or `SF-CAL-004` when the selected
+    /// columns or cell values are unsuitable for the requested chart type (e.g. non-numeric X/Y
+    /// in `scatter`, non-numeric values in `histogram`, or negative values / zero total in `pie`
+    /// and `donut`).
+    #[allow(clippy::too_many_lines)]
+    pub fn compute_chart_series(
+        &self,
+        chart_type: ChartType,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        match chart_type {
+            ChartType::Bar | ChartType::Line | ChartType::Area => {
+                let groups = self.grouped_aggregate(function, column, group_by)?;
+                if groups.is_empty() {
+                    return Err(type_mismatch());
+                }
+                let max_val = groups
+                    .iter()
+                    .map(|g| g.value)
+                    .fold(Decimal::ZERO, Decimal::max);
+                let min_val = groups
+                    .iter()
+                    .map(|g| g.value)
+                    .fold(Decimal::ZERO, Decimal::min);
+                let span = max_val.checked_sub(min_val).unwrap_or(Decimal::ZERO);
+                let total = groups
+                    .iter()
+                    .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+                    .ok_or_else(type_mismatch)?;
+                let count = groups.len();
+                let mut points = Vec::with_capacity(count);
+                for (idx, group) in groups.into_iter().enumerate() {
+                    let ratio_pct = scale_percentage(group.value, max_val);
+                    let x_pct = if count <= 1 {
+                        50
+                    } else {
+                        u32::try_from(10 + (idx * 80) / (count - 1)).unwrap_or(50)
+                    };
+                    let y_pct = if span <= Decimal::ZERO {
+                        50
+                    } else {
+                        let norm = group
+                            .value
+                            .checked_sub(min_val)
+                            .and_then(|d| d.checked_div(span))
+                            .unwrap_or(Decimal::ZERO);
+                        let scaled = (Decimal::from(90) - (norm * Decimal::from(80))).round();
+                        u32::try_from(scaled.max(Decimal::from(10)).min(Decimal::from(90)).trunc())
+                            .unwrap_or(50)
+                    };
+                    points.push(ComputedChartPoint {
+                        label: group.label,
+                        value: group.value.normalize().to_string(),
+                        x_value: None,
+                        y_value: None,
+                        share_pct: None,
+                        ratio_pct,
+                        start_pct: 0,
+                        x_pct,
+                        y_pct,
+                        row_refs: group.row_refs,
+                    });
+                }
+                Ok(ComputedChartSeries {
+                    chart_type: chart_type.as_str().to_owned(),
+                    function: function.as_str().to_owned(),
+                    column: column.to_owned(),
+                    group_by: group_by.to_owned(),
+                    total_or_kpi: total.normalize().to_string(),
+                    points,
+                })
+            }
+            ChartType::Pie | ChartType::Donut => {
+                let groups = self.grouped_aggregate(function, column, group_by)?;
+                if groups.is_empty() || groups.iter().any(|g| g.value < Decimal::ZERO) {
+                    return Err(type_mismatch());
+                }
+                let total = groups
+                    .iter()
+                    .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+                    .ok_or_else(type_mismatch)?;
+                if total <= Decimal::ZERO {
+                    return Err(type_mismatch());
+                }
+                let mut cumulative_pct = 0_u32;
+                let mut points = Vec::with_capacity(groups.len());
+                for (idx, group) in groups.into_iter().enumerate() {
+                    let share = (group.value.checked_div(total).ok_or_else(type_mismatch)?
+                        * Decimal::from(100))
+                    .round_dp(2);
+                    let ratio_pct = scale_percentage(group.value, total);
+                    let start_pct = cumulative_pct.min(100);
+                    cumulative_pct = cumulative_pct.saturating_add(ratio_pct).min(100);
+                    let x_pct = u32::try_from(10 + idx * 15).unwrap_or(50).min(90);
+                    points.push(ComputedChartPoint {
+                        label: group.label,
+                        value: group.value.normalize().to_string(),
+                        x_value: None,
+                        y_value: None,
+                        share_pct: Some(share.normalize().to_string()),
+                        ratio_pct,
+                        start_pct,
+                        x_pct,
+                        y_pct: 50,
+                        row_refs: group.row_refs,
+                    });
+                }
+                Ok(ComputedChartSeries {
+                    chart_type: chart_type.as_str().to_owned(),
+                    function: function.as_str().to_owned(),
+                    column: column.to_owned(),
+                    group_by: group_by.to_owned(),
+                    total_or_kpi: total.normalize().to_string(),
+                    points,
+                })
+            }
+            ChartType::Scatter => {
+                let x_col = self
+                    .working
+                    .column_by_name(group_by)
+                    .ok_or_else(unknown_column)?;
+                let y_col = self
+                    .working
+                    .column_by_name(column)
+                    .ok_or_else(unknown_column)?;
+                let mut pairs: Vec<(u64, Decimal, Decimal)> = Vec::new();
+                for row in 0..self.working.row_count() {
+                    let x_cell = x_col.cell_at(row).ok_or_else(invalid_request)?;
+                    let y_cell = y_col.cell_at(row).ok_or_else(invalid_request)?;
+                    if x_cell.is_empty() && y_cell.is_empty() {
+                        continue;
+                    }
+                    let x_num = cell_number(x_cell).ok_or_else(type_mismatch)?;
+                    let y_num = cell_number(y_cell).ok_or_else(type_mismatch)?;
+                    let row_id = self
+                        .row_id_at(row)
+                        .map(RowId::get)
+                        .ok_or_else(verification_mismatch)?;
+                    pairs.push((row_id, x_num, y_num));
+                }
+                if pairs.is_empty() {
+                    return Err(type_mismatch());
+                }
+                let min_x = pairs
+                    .iter()
+                    .map(|(_, x, _)| *x)
+                    .fold(pairs[0].1, Decimal::min);
+                let max_x = pairs
+                    .iter()
+                    .map(|(_, x, _)| *x)
+                    .fold(pairs[0].1, Decimal::max);
+                let min_y = pairs
+                    .iter()
+                    .map(|(_, _, y)| *y)
+                    .fold(pairs[0].2, Decimal::min);
+                let max_y = pairs
+                    .iter()
+                    .map(|(_, _, y)| *y)
+                    .fold(pairs[0].2, Decimal::max);
+                let span_x = max_x.checked_sub(min_x).unwrap_or(Decimal::ZERO);
+                let span_y = max_y.checked_sub(min_y).unwrap_or(Decimal::ZERO);
+                let count_str = pairs.len().to_string();
+                let mut points = Vec::with_capacity(pairs.len());
+                for (row_id, x_val, y_val) in pairs {
+                    let x_pct = if span_x <= Decimal::ZERO {
+                        50
+                    } else {
+                        let norm = x_val
+                            .checked_sub(min_x)
+                            .and_then(|d| d.checked_div(span_x))
+                            .unwrap_or(Decimal::ZERO);
+                        let scaled = (Decimal::from(10) + (norm * Decimal::from(80))).round();
+                        u32::try_from(scaled.max(Decimal::from(10)).min(Decimal::from(90)).trunc())
+                            .unwrap_or(50)
+                    };
+                    let y_pct = if span_y <= Decimal::ZERO {
+                        50
+                    } else {
+                        let norm = y_val
+                            .checked_sub(min_y)
+                            .and_then(|d| d.checked_div(span_y))
+                            .unwrap_or(Decimal::ZERO);
+                        let scaled = (Decimal::from(90) - (norm * Decimal::from(80))).round();
+                        u32::try_from(scaled.max(Decimal::from(10)).min(Decimal::from(90)).trunc())
+                            .unwrap_or(50)
+                    };
+                    points.push(ComputedChartPoint {
+                        label: format!("#{row_id}"),
+                        value: y_val.normalize().to_string(),
+                        x_value: Some(x_val.normalize().to_string()),
+                        y_value: Some(y_val.normalize().to_string()),
+                        share_pct: None,
+                        ratio_pct: scale_percentage(y_val.abs(), max_y.abs().max(Decimal::ONE)),
+                        start_pct: 0,
+                        x_pct,
+                        y_pct,
+                        row_refs: vec![row_id],
+                    });
+                }
+                Ok(ComputedChartSeries {
+                    chart_type: chart_type.as_str().to_owned(),
+                    function: function.as_str().to_owned(),
+                    column: column.to_owned(),
+                    group_by: group_by.to_owned(),
+                    total_or_kpi: count_str,
+                    points,
+                })
+            }
+            ChartType::Histogram => {
+                let val_col = self
+                    .working
+                    .column_by_name(column)
+                    .ok_or_else(unknown_column)?;
+                let mut values: Vec<(u64, Decimal)> = Vec::new();
+                for row in 0..self.working.row_count() {
+                    let cell = val_col.cell_at(row).ok_or_else(invalid_request)?;
+                    if cell.is_empty() {
+                        continue;
+                    }
+                    let num = cell_number(cell).ok_or_else(type_mismatch)?;
+                    let row_id = self
+                        .row_id_at(row)
+                        .map(RowId::get)
+                        .ok_or_else(verification_mismatch)?;
+                    values.push((row_id, num));
+                }
+                if values.is_empty() {
+                    return Err(type_mismatch());
+                }
+                let min_v = values
+                    .iter()
+                    .map(|(_, v)| *v)
+                    .fold(values[0].1, Decimal::min);
+                let max_v = values
+                    .iter()
+                    .map(|(_, v)| *v)
+                    .fold(values[0].1, Decimal::max);
+                let total_count = values.len();
+                let mut points = Vec::new();
+                if min_v == max_v {
+                    let refs: Vec<u64> = values.into_iter().map(|(id, _)| id).collect();
+                    points.push(ComputedChartPoint {
+                        label: format!("{}", min_v.normalize()),
+                        value: total_count.to_string(),
+                        x_value: None,
+                        y_value: None,
+                        share_pct: Some("100".to_owned()),
+                        ratio_pct: 100,
+                        start_pct: 0,
+                        x_pct: 50,
+                        y_pct: 10,
+                        row_refs: refs,
+                    });
+                } else {
+                    let bin_count = 5_usize;
+                    let width = (max_v - min_v)
+                        .checked_div(Decimal::from(bin_count as u64))
+                        .ok_or_else(type_mismatch)?;
+                    let mut bins: Vec<(Decimal, Decimal, Vec<u64>)> = (0..bin_count)
+                        .map(|i| {
+                            let low = min_v + width * Decimal::from(i as u64);
+                            let high = if i + 1 == bin_count {
+                                max_v
+                            } else {
+                                min_v + width * Decimal::from((i + 1) as u64)
+                            };
+                            (low, high, Vec::new())
+                        })
+                        .collect();
+                    for (row_id, v) in values {
+                        let mut placed = false;
+                        for (idx, (low, high, bucket)) in bins.iter_mut().enumerate() {
+                            let in_bin = if idx + 1 == bin_count {
+                                v >= *low && v <= *high
+                            } else {
+                                v >= *low && v < *high
+                            };
+                            if in_bin {
+                                bucket.push(row_id);
+                                placed = true;
+                                break;
+                            }
+                        }
+                        if !placed && let Some((_, _, last)) = bins.last_mut() {
+                            last.push(row_id);
+                        }
+                    }
+                    let max_bin_len = bins
+                        .iter()
+                        .map(|(_, _, b)| b.len())
+                        .max()
+                        .unwrap_or(1)
+                        .max(1);
+                    for (idx, (low, high, bucket)) in bins.into_iter().enumerate() {
+                        let count = bucket.len();
+                        let ratio_pct = u32::try_from((count * 100) / max_bin_len)
+                            .unwrap_or(0)
+                            .min(100);
+                        let x_pct = u32::try_from(10 + (idx * 80) / (bin_count - 1)).unwrap_or(50);
+                        let y_pct = 90_u32.saturating_sub((ratio_pct * 80) / 100).clamp(10, 90);
+                        points.push(ComputedChartPoint {
+                            label: format!(
+                                "{}–{}",
+                                low.round_dp(2).normalize(),
+                                high.round_dp(2).normalize()
+                            ),
+                            value: count.to_string(),
+                            x_value: None,
+                            y_value: None,
+                            share_pct: None,
+                            ratio_pct,
+                            start_pct: 0,
+                            x_pct,
+                            y_pct,
+                            row_refs: bucket,
+                        });
+                    }
+                }
+                Ok(ComputedChartSeries {
+                    chart_type: chart_type.as_str().to_owned(),
+                    function: function.as_str().to_owned(),
+                    column: column.to_owned(),
+                    group_by: group_by.to_owned(),
+                    total_or_kpi: total_count.to_string(),
+                    points,
+                })
+            }
+            ChartType::Kpi => {
+                let (overall, row_ids) =
+                    aggregate_column(&self.working, &self.row_provenance, function, column)?;
+                let mut points = Vec::new();
+                if !group_by.trim().is_empty() && self.working.column_by_name(group_by).is_some() {
+                    let groups = self.grouped_aggregate(function, column, group_by)?;
+                    let max_val = groups
+                        .iter()
+                        .map(|g| g.value)
+                        .fold(Decimal::ZERO, Decimal::max);
+                    for group in groups {
+                        points.push(ComputedChartPoint {
+                            label: group.label,
+                            value: group.value.normalize().to_string(),
+                            x_value: None,
+                            y_value: None,
+                            share_pct: None,
+                            ratio_pct: scale_percentage(group.value, max_val),
+                            start_pct: 0,
+                            x_pct: 50,
+                            y_pct: 50,
+                            row_refs: group.row_refs,
+                        });
+                    }
+                } else {
+                    points.push(ComputedChartPoint {
+                        label: format!("{}({column})", function.as_str()),
+                        value: overall.normalize().to_string(),
+                        x_value: None,
+                        y_value: None,
+                        share_pct: Some("100".to_owned()),
+                        ratio_pct: 100,
+                        start_pct: 0,
+                        x_pct: 50,
+                        y_pct: 50,
+                        row_refs: row_ids.iter().copied().map(RowId::get).collect(),
+                    });
+                }
+                Ok(ComputedChartSeries {
+                    chart_type: chart_type.as_str().to_owned(),
+                    function: function.as_str().to_owned(),
+                    column: column.to_owned(),
+                    group_by: group_by.to_owned(),
+                    total_or_kpi: overall.normalize().to_string(),
+                    points,
+                })
+            }
+        }
     }
 
     /// Rebuilds the derived table and full provenance by replaying recorded transformations in order.
@@ -3309,6 +3696,9 @@ pub struct ProjectSnapshot {
     pub parameters: BTreeMap<String, Decimal>,
     /// Saved scenarios.
     pub scenarios: Vec<Scenario>,
+    /// Currently active What-If scenario, if any.
+    #[serde(default)]
+    pub active_scenario: Option<ScenarioId>,
     /// Working-row to origin-row provenance mapping aligned with working row order.
     #[serde(default)]
     pub row_provenance: Vec<RowProvenance>,
@@ -3352,6 +3742,116 @@ pub struct GroupedValue {
     pub value: Decimal,
     /// Rows that fed this group.
     pub row_refs: Vec<u64>,
+}
+
+/// Supported Quad-Studio dashboard chart visualisations (`STUDIO-PHASE-2`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChartType {
+    /// Categorical bar chart.
+    #[default]
+    Bar,
+    /// Ordered series line chart.
+    Line,
+    /// Filled series area chart.
+    Area,
+    /// Proportional pie chart (requires non-negative values and positive total).
+    Pie,
+    /// Proportional donut ring chart (requires non-negative values and positive total).
+    Donut,
+    /// Two-column numeric `(x, y)` scatter plot (`group_by` = X column, `column` = Y column).
+    Scatter,
+    /// Numeric frequency distribution histogram across equal-width bins.
+    Histogram,
+    /// Single headline KPI card with optional group breakdown.
+    Kpi,
+}
+
+impl ChartType {
+    /// Parses a chart type identifier case-insensitively.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "bar" => Some(Self::Bar),
+            "line" => Some(Self::Line),
+            "area" => Some(Self::Area),
+            "pie" => Some(Self::Pie),
+            "donut" => Some(Self::Donut),
+            "scatter" => Some(Self::Scatter),
+            "histogram" => Some(Self::Histogram),
+            "kpi" => Some(Self::Kpi),
+            _ => None,
+        }
+    }
+
+    /// Canonical lowercase identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bar => "bar",
+            Self::Line => "line",
+            Self::Area => "area",
+            Self::Pie => "pie",
+            Self::Donut => "donut",
+            Self::Scatter => "scatter",
+            Self::Histogram => "histogram",
+            Self::Kpi => "kpi",
+        }
+    }
+}
+
+/// One pre-computed chart data point produced in Rust (never calculated in TypeScript).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputedChartPoint {
+    /// Category, bin range, or point label.
+    pub label: String,
+    /// Primary numeric value formatted canonically.
+    pub value: String,
+    /// Optional X-axis numeric value (for Scatter charts).
+    pub x_value: Option<String>,
+    /// Optional Y-axis numeric value (for Scatter charts).
+    pub y_value: Option<String>,
+    /// Optional percentage share string (`0..=100`, for Pie and Donut charts).
+    pub share_pct: Option<String>,
+    /// Pre-scaled magnitude percentage (`0..=100`) for bar/histogram/pie widths.
+    pub ratio_pct: u32,
+    /// Pre-scaled cumulative start percentage (`0..=100`) for pie/donut ring offsets.
+    pub start_pct: u32,
+    /// Pre-scaled horizontal SVG coordinate (`10..=90`) for line/area/scatter charts.
+    pub x_pct: u32,
+    /// Pre-scaled vertical SVG coordinate (`10..=90`, top=10, bottom=90) for line/area/scatter charts.
+    pub y_pct: u32,
+    /// Stable source row identities (`RowId::get()`) contributing to this point.
+    pub row_refs: Vec<u64>,
+}
+
+/// Complete Rust-computed chart dataset ready for rendering in Desktop UI or `.safi.html` capsule.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputedChartSeries {
+    /// Canonical chart type (`bar`, `line`, `area`, `pie`, `donut`, `scatter`, `histogram`, `kpi`).
+    pub chart_type: String,
+    /// Canonical aggregation function (`SUM`, `AVG`, `COUNT`, `MIN`, `MAX`).
+    pub function: String,
+    /// Primary value column (or Y column for `scatter`).
+    pub column: String,
+    /// Group-by column (or X column for `scatter`).
+    pub group_by: String,
+    /// Overall headline/total value computed in Rust (used by KPI, Pie, Donut, and summary badges).
+    pub total_or_kpi: String,
+    /// Pre-computed points/slices/bins/coordinates.
+    pub points: Vec<ComputedChartPoint>,
+}
+
+fn scale_percentage(value: Decimal, maximum: Decimal) -> u32 {
+    if maximum <= Decimal::ZERO || value <= Decimal::ZERO {
+        return 0;
+    }
+    let ratio = value.checked_div(maximum).unwrap_or(Decimal::ZERO);
+    let percent = (ratio * Decimal::from(100)).round();
+    let clamped = percent.max(Decimal::ZERO).min(Decimal::from(100));
+    u32::try_from(clamped.trunc()).unwrap_or(100)
 }
 
 /// Returns `true` when two tables are byte-identical for Studio purposes.

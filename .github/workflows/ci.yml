@@ -137,6 +137,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      - name: Install Rust toolchain (Edition 2024)
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
@@ -170,6 +173,16 @@ jobs:
         env:
           PLAYWRIGHT_MODULE_URL: file:///tmp/safi-playwright/node_modules/playwright/index.mjs
         run: node tools/verify-device-identity.mjs
+
+      - name: Verify exported .safi.html capsule in real Chromium over file://
+        env:
+          PLAYWRIGHT_MODULE_URL: file:///tmp/safi-playwright/node_modules/playwright/index.mjs
+        run: node tools/verify-capsule-chromium.mjs
+
+      - name: Verify full Quad-Studio Desktop E2E in Chromium + Rust StudioStore
+        env:
+          PLAYWRIGHT_MODULE_URL: file:///tmp/safi-playwright/node_modules/playwright/index.mjs
+        run: node tools/verify-studio-desktop-e2e.mjs
 
       - name: Upload visual evidence
         if: always()

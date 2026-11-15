@@ -93,12 +93,45 @@ export interface DesktopScenarioComparison {
   readonly right: string;
 }
 
+export type StudioChartType =
+  | "bar"
+  | "line"
+  | "area"
+  | "pie"
+  | "donut"
+  | "scatter"
+  | "histogram"
+  | "kpi";
+
 export interface StudioChartArtifact {
   readonly id: string;
   readonly title: string;
+  readonly chartType?: StudioChartType;
   readonly function: string;
   readonly column: string;
   readonly groupBy: string;
+}
+
+export interface DesktopChartPoint {
+  readonly label: string;
+  readonly value: string;
+  readonly xValue?: string | null;
+  readonly yValue?: string | null;
+  readonly sharePct?: string | null;
+  readonly ratioPct: number;
+  readonly startPct: number;
+  readonly xPct: number;
+  readonly yPct: number;
+  readonly rowRefs?: readonly number[];
+}
+
+export interface DesktopChartSeries {
+  readonly chartType: StudioChartType;
+  readonly function: string;
+  readonly column: string;
+  readonly groupBy: string;
+  readonly totalOrKpi: string;
+  readonly points: readonly DesktopChartPoint[];
 }
 
 export interface StudioSlideArtifact {
@@ -299,6 +332,31 @@ export function createRequestTracker(): RequestTracker {
     isCurrent(seq: number): boolean {
       return seq === latest;
     }
+  };
+}
+
+/** Binds the verified Safi session token and device installation UUID inside the native Tauri store. */
+export async function setStudioAuthSession(
+  token: string,
+  installationId: string
+): Promise<{
+  readonly authenticated: boolean;
+  readonly sessionId?: string;
+  readonly workspaceId?: string;
+  readonly expiresAtMs?: number;
+}> {
+  return JSON.parse(await call("studio_set_auth_session", { token, installationId })) as {
+    readonly authenticated: boolean;
+    readonly sessionId?: string;
+    readonly workspaceId?: string;
+    readonly expiresAtMs?: number;
+  };
+}
+
+/** Immediately clears the native Studio session context on sign-out. */
+export async function clearStudioAuthSession(): Promise<{ readonly authenticated: boolean }> {
+  return JSON.parse(await call("studio_clear_auth_session")) as {
+    readonly authenticated: boolean;
   };
 }
 
@@ -561,6 +619,25 @@ export async function grouped(
   return JSON.parse(
     await call("studio_grouped", { project, function: aggregate, column, groupBy })
   ) as readonly DesktopGroup[];
+}
+
+/** Computes a complete Dashboard chart series inside Rust for any of the 8 chart types. */
+export async function chartData(
+  project: string,
+  chartType: StudioChartType,
+  aggregate: string,
+  column: string,
+  groupBy: string
+): Promise<DesktopChartSeries> {
+  return JSON.parse(
+    await call("studio_chart_data", {
+      project,
+      chartType,
+      function: aggregate,
+      column,
+      groupBy
+    })
+  ) as DesktopChartSeries;
 }
 
 /** Serializes the project for local storage. */

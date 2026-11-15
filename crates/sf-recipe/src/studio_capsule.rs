@@ -15,11 +15,10 @@
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use rust_decimal::Decimal;
 use sf_core::error::{ErrorCode, ErrorSeverity, SafiError};
 use sha2::{Digest as _, Sha256};
 
-use crate::datagraph::{AggFunc, DataGraph, datagraph_display};
+use crate::datagraph::{AggFunc, ChartType, ComputedChartPoint, DataGraph, datagraph_display};
 use crate::studio_dsl::render_narrative_strict;
 
 /// Maximum accepted size of the generated document (`8 MiB`).
@@ -33,11 +32,13 @@ pub const MAX_ASSET_DATA_URI_BYTES: usize = 1024 * 1024;
 pub struct CapsuleChart {
     /// Chart title (already localized by the caller).
     pub title: String,
+    /// Visual chart kind (`Bar`, `Line`, `Area`, `Pie`, `Donut`, `Scatter`, `Histogram`, `Kpi`).
+    pub chart_type: ChartType,
     /// Aggregation function.
     pub function: AggFunc,
-    /// Column being aggregated.
+    /// Column being aggregated (or Y column for Scatter).
     pub column: String,
-    /// Column used for grouping.
+    /// Column used for grouping (or X column for Scatter).
     pub group_by: String,
 }
 
@@ -183,16 +184,6 @@ pub fn escape_html(text: &str) -> String {
     escaped
 }
 
-fn bar_width(value: Decimal, maximum: Decimal) -> u32 {
-    if maximum <= Decimal::ZERO || value <= Decimal::ZERO {
-        return 0;
-    }
-    let ratio = value.checked_div(maximum).unwrap_or(Decimal::ZERO);
-    let percent = (ratio * Decimal::from(100)).round();
-    let clamped = percent.max(Decimal::ZERO).min(Decimal::from(100));
-    u32::try_from(clamped.trunc()).unwrap_or(100)
-}
-
 const STYLE: &str = r#"
 :root{color-scheme:light dark}
 *{box-sizing:border-box}
@@ -206,7 +197,7 @@ h2{font-size:20px;margin:32px 0 12px}
 .nav{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
 .nav a{color:#93c5fd;text-decoration:none;border:1px solid #2b3b58;border-radius:999px;padding:4px 12px;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
-.ff-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+.ff-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:minmax(72px,auto);gap:12px}
 .card{background:#121b2d;border:1px solid #1f2b42;border-radius:14px;padding:16px}
 .card h3{margin:0 0 8px;font-size:16px}
 .doc-stack{display:flex;flex-direction:column;gap:12px}
@@ -220,6 +211,7 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 .bar span{min-width:90px}
 .track{flex:1;background:#1b2740;border-radius:999px;height:12px;overflow:hidden}
 .fill{height:100%;background:linear-gradient(90deg,#2563eb,#22d3ee)}
+.chart-svg{width:100%;height:140px;display:block;margin:8px 0;background:#0e1726;border-radius:10px}
 .filters{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
 .filters input{position:absolute;opacity:0;pointer-events:none}
 .filters label{cursor:pointer;padding:4px 10px;border-radius:999px;border:1px solid #2b3b58;font-size:12px}
@@ -235,9 +227,9 @@ fn width_utility_rules() -> String {
     rules
 }
 
-fn filter_rules(chart_index: usize, groups: &[crate::datagraph::GroupedValue]) -> String {
+fn filter_rules(chart_index: usize, points: &[ComputedChartPoint]) -> String {
     let mut rules = String::new();
-    for (group_index, _) in groups.iter().enumerate() {
+    for (group_index, _) in points.iter().enumerate() {
         rules.push_str(&format!(
             "#c{chart_index}-{group_index}:checked ~ .bars .bar{{display:none}}"
         ));
@@ -293,45 +285,99 @@ pub fn export_capsule(graph: &DataGraph, options: &CapsuleOptions) -> Result<Str
     // Dashboard charts
     body.push_str("<h2 id=\"dashboard\">Dashboard</h2>\n<div class=\"grid\">\n");
     for (chart_index, chart) in options.charts.iter().enumerate() {
-        let groups = graph.grouped_aggregate(chart.function, &chart.column, &chart.group_by)?;
-        let maximum = groups
-            .iter()
-            .map(|group| group.value)
-            .fold(Decimal::ZERO, Decimal::max);
-        body.push_str("<section class=\"card chart\">\n");
-        body.push_str(&format!("<h3>{}</h3>\n", escape_html(&chart.title)));
-        if groups.len() > 1 {
+        let series = graph.compute_chart_series(
+            chart.chart_type,
+            chart.function,
+            &chart.column,
+            &chart.group_by,
+        )?;
+        body.push_str(&format!(
+            "<section class=\"card chart\" data-chart-type=\"{}\">\n",
+            escape_html(chart.chart_type.as_str())
+        ));
+        body.push_str(&format!(
+            "<h3>{} <span class=\"badge\">{}</span></h3>\n",
+            escape_html(&chart.title),
+            escape_html(chart.chart_type.as_str())
+        ));
+        if matches!(chart.chart_type, ChartType::Kpi) {
+            body.push_str(&format!(
+                "<p class=\"value\">{}</p>\n",
+                escape_html(&series.total_or_kpi)
+            ));
+        }
+        if matches!(
+            chart.chart_type,
+            ChartType::Line | ChartType::Area | ChartType::Scatter
+        ) {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            if matches!(chart.chart_type, ChartType::Line | ChartType::Area)
+                && !series.points.is_empty()
+            {
+                let poly = series
+                    .points
+                    .iter()
+                    .map(|p| format!("{},{}", p.x_pct, p.y_pct))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if matches!(chart.chart_type, ChartType::Area)
+                    && let (Some(first), Some(last)) = (series.points.first(), series.points.last())
+                {
+                    body.push_str(&format!(
+                        "<polygon points=\"{},90 {} {},90\" fill=\"#1d4ed8\" fill-opacity=\"0.35\"></polygon>\n",
+                        first.x_pct, poly, last.x_pct
+                    ));
+                }
+                body.push_str(&format!(
+                    "<polyline points=\"{poly}\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\"></polyline>\n"
+                ));
+            }
+            for point in &series.points {
+                body.push_str(&format!(
+                    "<circle cx=\"{}\" cy=\"{}\" r=\"2.5\" fill=\"#22d3ee\"></circle>\n",
+                    point.x_pct, point.y_pct
+                ));
+            }
+            body.push_str("</svg>\n");
+        }
+        if series.points.len() > 1 {
             body.push_str("<div class=\"filters\">\n");
             body.push_str(&format!("<label for=\"c{chart_index}-all\">All</label>\n"));
-            for (group_index, group) in groups.iter().enumerate() {
+            for (group_index, point) in series.points.iter().enumerate() {
                 body.push_str(&format!(
                     "<label for=\"c{chart_index}-{group_index}\">{}</label>\n",
-                    escape_html(&group.label)
+                    escape_html(&point.label)
                 ));
             }
             body.push_str("</div>\n");
             body.push_str(&format!(
                 "<input type=\"radio\" name=\"f{chart_index}\" id=\"c{chart_index}-all\" checked>\n"
             ));
-            for (group_index, _) in groups.iter().enumerate() {
+            for (group_index, _) in series.points.iter().enumerate() {
                 body.push_str(&format!(
                     "<input type=\"radio\" name=\"f{chart_index}\" id=\"c{chart_index}-{group_index}\">\n"
                 ));
             }
-            dynamic_css.push_str(&filter_rules(chart_index, &groups));
+            dynamic_css.push_str(&filter_rules(chart_index, &series.points));
         }
         body.push_str("<div class=\"bars\">\n");
-        for (group_index, group) in groups.iter().enumerate() {
-            let pct = bar_width(group.value, maximum);
+        for (group_index, point) in series.points.iter().enumerate() {
+            let pct = point.ratio_pct.min(100);
+            let detail = match (&point.share_pct, &point.x_value, &point.y_value) {
+                (Some(share), _, _) => format!("{} ({share}%)", point.value),
+                (_, Some(x), Some(y)) => format!("({x}, {y})"),
+                _ => point.value.clone(),
+            };
             body.push_str(&format!(
                 "<div class=\"bar g{group_index}\"><span>{}</span><div class=\"track\"><div class=\"fill w{pct}\"></div></div><span class=\"provenance\">{}</span></div>\n",
-                escape_html(&group.label),
-                escape_html(&datagraph_display(&sf_core::value::Value::Decimal(group.value))),
+                escape_html(&point.label),
+                escape_html(&detail),
             ));
         }
         body.push_str("</div>\n");
         body.push_str(&format!(
-            "<p class=\"provenance\">{} of {} grouped by {}</p>\n",
+            "<p class=\"provenance\">{} · {} of {} grouped by {}</p>\n",
+            escape_html(chart.chart_type.as_str()),
             escape_html(chart.function.as_str()),
             escape_html(&chart.column),
             escape_html(&chart.group_by)
@@ -437,7 +483,9 @@ pub fn export_capsule(graph: &DataGraph, options: &CapsuleOptions) -> Result<Str
             dynamic_css.push_str(&format!(
                 "#ff-{idx}{{grid-column:{col_start} / span {col_span};grid-row:{row_start} / span {row_span};z-index:{z}}}"
             ));
-            body.push_str(&format!("<section id=\"ff-{idx}\" class=\"card\">\n"));
+            body.push_str(&format!(
+                "<section id=\"ff-{idx}\" class=\"card\" data-grid-col=\"{col_start}\" data-grid-row=\"{row_start}\" data-grid-col-span=\"{col_span}\" data-grid-row-span=\"{row_span}\">\n"
+            ));
             if !block.title.trim().is_empty() {
                 body.push_str(&format!("<h3>{}</h3>\n", escape_html(&block.title)));
             }
@@ -523,7 +571,7 @@ mod tests {
         CapsuleAsset, CapsuleChart, CapsuleDocBlock, CapsuleFreeFormBlock, CapsuleOptions,
         CapsuleSlide, escape_html, export_capsule,
     };
-    use crate::datagraph::{AggFunc, DataGraph};
+    use crate::datagraph::{AggFunc, ChartType, DataGraph};
 
     fn graph() -> Result<DataGraph, SafiError> {
         let columns = [
@@ -560,6 +608,7 @@ mod tests {
             created_at: "2026-11-11T00:00:00Z".to_owned(),
             charts: vec![CapsuleChart {
                 title: "Revenue by region".to_owned(),
+                chart_type: ChartType::Bar,
                 function: AggFunc::Sum,
                 column: "amount".to_owned(),
                 group_by: "region".to_owned(),

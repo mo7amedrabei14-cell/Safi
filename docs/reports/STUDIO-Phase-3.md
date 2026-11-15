@@ -29,3 +29,10 @@
 - `crates/sf-desktop/src/{commands.rs,studio.rs}`، `apps/desktop/src-tauri/src/main.rs`
 - `apps/web/src/desktop/{studio-bridge.ts,DesktopStudio.tsx,desktop-studio.css,desktop-studio.test.tsx}`
 - `apps/web/src/desktop/components/{DashboardChartsView.tsx,KeynoteSlidesView.tsx,VerifiedDocView.tsx,FreeFormBuilderView.tsx}`
+
+---
+
+## تحديث التحصين النهائي (v6 — 2026-11-15)
+
+- **دعم الأنواع الـ 8 للرسوم البيانية في Rust والواجهة والكبسولة**: أُضيف `ChartType` (`bar`, `line`, `area`, `pie`, `donut`, `scatter`, `histogram`, `kpi`) و`DataGraph::compute_chart_series` في `crates/sf-recipe/src/datagraph.rs` وأمر `studio_chart_data` في `crates/sf-desktop/src/studio.rs`، ورسم SVG أصلي للأنواع الثمانية في `DashboardChartsView.tsx` و`studio_capsule.rs` مع رفض التركيبات غير الصالحة برمز `SF-CAL-004`.
+- **إكمال تحكم الارتفاع `rowSpan` في `FreeFormBuilderView.tsx`**: أُضيفت أزرار `+H` / `-H` واختصارات `Shift+ArrowDown` / `Shift+ArrowUp` لتعديل `rowSpan` (`1..8`) مع شارة الأبعاد `W:{colSpan}×H:{rowSpan}` وحفظها في المشروع والكبسولة (`data-grid-row-span`).

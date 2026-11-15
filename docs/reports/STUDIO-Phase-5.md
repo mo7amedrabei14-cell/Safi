@@ -38,3 +38,10 @@
 - `crates/sf-recipe/src/studio_capsule.rs` (إزالة `frame-ancestors` من `<meta>` CSP)
 - `apps/web/src/desktop/desktop-studio.test.tsx`
 - `docs/plans/STUDIO-Phase-{1..5}.md` و`docs/reports/{STUDIO-Phase-{1..5}.md,QUAD-STUDIO-FINAL-REPORT.md}`
+
+---
+
+## تحديث التحصين النهائي (v6 — 2026-11-15)
+
+- **بوابة مصادقة Native إلزامية (Fail-Closed) وحدود `MAX_IPC_BYTES`**: أُضيفت `StudioSessionAuthority` و`gate_command` في `crates/sf-desktop/src/studio.rs`، ووُصلت بـ`sf-server` (`SessionStore` + `DeviceStore`) في `apps/desktop/src-tauri/src/main.rs`، مع تغطية الـ 42 أمراً الحساساً بالكامل في اختبار `native_auth_gate_enforced_across_all_42_sensitive_commands_and_lifecycle`.
+- **اختبارات Chromium الحقيقية المدمجة في CI**: أُضيف `tools/verify-capsule-chromium.mjs` و`tools/verify-studio-desktop-e2e.mjs` (الذي يشغّل React في Chromium الحقيقي فوق `crates/sf-desktop/examples/studio_ipc_harness.rs` بلا أي Mock) ورُبطا في `.github/workflows/ci.yml`.

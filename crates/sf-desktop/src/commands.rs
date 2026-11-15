@@ -10,12 +10,14 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 44] = [
+pub const ALLOWED_COMMANDS: [&str; 47] = [
     "app_info",
     "take_pending_deep_link",
     "pick_input_file",
     "pick_output_file",
     "pick_capsule_output_file",
+    "studio_set_auth_session",
+    "studio_clear_auth_session",
     "studio_open_file",
     "studio_state",
     "studio_rows_page",
@@ -44,6 +46,7 @@ pub const ALLOWED_COMMANDS: [&str; 44] = [
     "studio_undo",
     "studio_redo",
     "studio_grouped",
+    "studio_chart_data",
     "studio_narrative",
     "studio_snapshot",
     "studio_restore",
@@ -82,6 +85,19 @@ pub fn validate_ipc_payload_len(len: usize) -> Result<(), DesktopError> {
     } else {
         Err(DesktopError::new(DesktopErrorCode::PayloadTooLarge))
     }
+}
+
+/// Enforces both [`authorize_command`] (`SF-SYS-012`) and [`validate_ipc_payload_len`] (`SF-SYS-013`)
+/// for an incoming Tauri IPC invocation.
+///
+/// # Errors
+///
+/// Returns the canonical `SF-SYS-*` error code string when the command name or payload size is
+/// rejected.
+pub fn enforce_ipc_command(command: &str, payload_len: usize) -> Result<(), String> {
+    authorize_command(command).map_err(|err| err.code().as_str().to_owned())?;
+    validate_ipc_payload_len(payload_len).map_err(|err| err.code().as_str().to_owned())?;
+    Ok(())
 }
 
 #[cfg(test)]

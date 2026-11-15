@@ -1,6 +1,6 @@
 # خطة STUDIO-Phase-4
 
-**الحالة:** مكتملة ومختبرة (2026-11-15، `f988505c0b592e8abf606b04259f303fadfe9cf0`) — القوالب الحية الخمسة (`list_templates`, `instantiate_template`) مع `TemplatesAndProjectsPanel` ومنع الصمت عند غياب الربط (`SF-CAL-006`)، وتصدير الكبسولة `.safi.html` بـCSP صارم (`style-src 'sha256-...'` بلا أي `unsafe-inline` ولا `frame-ancestors` داخل `<meta>`) مبرهن في Chromium حقيقي عبر `file://`.  
+**الحالة:** مكتملة ومحصّنة ومختبرة (2026-11-15، مراجعة v6) — القوالب الحية الخمسة (`list_templates`, `instantiate_template`) مع `TemplatesAndProjectsPanel` ومنع الصمت عند غياب الربط (`SF-CAL-006`)، وتصدير الكبسولة `.safi.html` بجميع أنواع الرسوم الـ 8 وكتل اللوح الحر (`data-grid-row-span`) وبـCSP صارم (`style-src 'sha256-...'`) مبرهن آلياً عبر `tools/verify-capsule-chromium.mjs`.  
 **العقد:** [المهمة](../tasks/STUDIO-Phase-4.md).
 
 ## خطوات التنفيذ

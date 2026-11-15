@@ -28,6 +28,8 @@ import { DesktopStudio } from "./desktop/DesktopStudio";
 import { isDesktopRuntime } from "./desktop/studio-bridge";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { canAnimate } from "./components/ui/motion-preference";
+import { clearStudioAuthSession, setStudioAuthSession } from "./desktop/studio-bridge";
+import { getSafiDeviceIdentity } from "./lib/device-identity";
 import { applySafiLang, getInitialSafiLang } from "./lib/locale";
 import { isOwnerEmail } from "./lib/auth-rules";
 
@@ -192,8 +194,20 @@ export function ApplicationShell({
           setSessionToken(token);
           setSessionEmail(email);
           setOwnerAccount(isOwnerEmail(email));
+          if (isDesktopRuntime()) {
+            void getSafiDeviceIdentity()
+              .then((device) => setStudioAuthSession(token, device.installationId))
+              .catch(() => {
+                setSessionToken(null);
+                setSessionEmail(null);
+                setOwnerAccount(false);
+              });
+          }
         }}
         onLoggedOut={() => {
+          if (isDesktopRuntime()) {
+            void clearStudioAuthSession().catch(() => undefined);
+          }
           setSessionToken(null);
           setSessionEmail(null);
           setOwnerAccount(false);
@@ -214,9 +228,21 @@ export function ApplicationShell({
         setSessionToken(session.token);
         setSessionEmail(session.email);
         setOwnerAccount(session.isOwner);
+        if (isDesktopRuntime()) {
+          void getSafiDeviceIdentity()
+            .then((device) => setStudioAuthSession(session.token, device.installationId))
+            .catch(() => {
+              setSessionToken(null);
+              setSessionEmail(null);
+              setOwnerAccount(false);
+            });
+        }
       }}
       onOwnerDetected={() => setOwnerAccount(true)}
       onSignedOut={() => {
+        if (isDesktopRuntime()) {
+          void clearStudioAuthSession().catch(() => undefined);
+        }
         setSessionToken(null);
         setSessionEmail(null);
         setOwnerAccount(false);

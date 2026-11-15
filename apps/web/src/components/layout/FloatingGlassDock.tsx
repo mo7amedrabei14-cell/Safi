@@ -278,6 +278,19 @@ export function FloatingGlassDock({
             <span>{currentThemeLabel}</span>
           </button>
 
+          {tabs.some((tab) => tab.id === "studio") ? (
+            <button
+              type="button"
+              data-desktop-studio-trigger="true"
+              onClick={() => onSelect("studio")}
+              className="safi-btn safi-btn-primary"
+              style={{ minHeight: "44px", height: "38px", padding: "6px 16px", fontSize: "13px" }}
+            >
+              <LayoutDashboard size={14} aria-hidden="true" />
+              <span>{lang === "ar" ? STUDIO_TAB.label : STUDIO_TAB.labelEn}</span>
+            </button>
+          ) : null}
+
           {/* 3. Direct Jump to Download App */}
           <a
             href="#download"

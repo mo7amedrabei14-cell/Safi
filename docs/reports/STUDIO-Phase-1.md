@@ -120,3 +120,11 @@
 - `crates/sf-core/src/datagraph.rs`، `crates/sf-recipe/src/datagraph.rs`، `crates/sf-desktop/src/studio.rs`
 - `apps/desktop/src-tauri/src/main.rs`
 - `apps/web/src/desktop/studio-bridge.ts`، `apps/web/src/desktop/DesktopStudio.tsx`، `apps/web/src/desktop/components/VerifiedNumberChip.tsx`، `apps/web/src/desktop/components/WhatIfPanel.tsx`، `apps/web/src/desktop/desktop-studio.test.tsx`
+
+---
+
+## تحديث التحصين النهائي (v6 — 2026-11-15)
+
+- **حفظ واستعادة السيناريو النشط (`active_scenario`)**: حُدّث `ProjectSnapshot` و`DataGraph::from_json` في `crates/sf-recipe/src/datagraph.rs` لحفظ واستعادة السيناريو النشط وإعادة حساب جميع المؤشرات وفق المتغيرات النشطة عند فتح المشروع المحفوظ.
+- **بوابة مصادقة Native في Tauri (`SF-AUTH-001` / `SF-AUTH-002`)**: رُبطت جميع أوامر Phase 1 في `StudioStore` بـ`gate_command` الذي يفرض `authorize_command` و`validate_ipc_payload_len` (`MAX_IPC_BYTES = 64 KiB`) والتحقق الفعلي من الجلسة النشطة وهوية الجهاز الوحيد قبل أي قراءة أو تعديل.
+- **إثبات E2E في Chromium + Rust `StudioStore`**: جرى التحقق من رحلة Phase 1 كاملة عبر `tools/verify-studio-desktop-e2e.mjs` (تعديل الخلية `r1` من `100` إلى `250` وتحديث `VerifiedNumberChip` من `350 EGP` إلى `500 EGP` ثم تفعيل سيناريو `What-If` لتصبح `1000 EGP`).

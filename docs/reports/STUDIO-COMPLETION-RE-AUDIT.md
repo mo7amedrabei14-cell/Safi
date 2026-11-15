@@ -117,3 +117,26 @@
 7. **IPC Session Gate & Comprehensive Integration / Browser / Offline Capsule / Benchmark Tests (Phase 5.1, 5.2, 5.4):**
    - Tauri `studio_*` commands currently rely on the UI authentication gate (`ApplicationShell`) without an IPC-level session check.
    - Only 3 SSR unit tests exist in `desktop-studio.test.tsx`; no end-to-end 18-journey tests, offline Chromium `file://` capsule test, accessibility/theme/RTL tests, or real multi-size performance benchmarks exist yet.
+
+---
+
+## 4. Final Hardening & Acceptance v6 Remediation Summary (`2026-11-15`)
+
+Following the code review at commit `361d3a20f8d80d34c536ecd273bfcb16b7c14dd5`, the six remaining audit findings were remediated directly on `main`:
+
+1. **Native Fail-Closed Tauri Auth & IPC Payload Gate (`crates/sf-desktop/src/{commands.rs,studio.rs}`, `apps/desktop/src-tauri/src/main.rs`, `apps/web/src/{ApplicationShell.tsx,desktop/studio-bridge.ts}`):**
+   - Added `StudioSessionAuthority`, `StudioSessionVerifier`, `VerifiedStudioSession`, `ActiveStudioSession` (with `[REDACTED]` `Debug`), `set_auth_session`, `clear_auth_session`, and `gate_command` inside `StudioStore`.
+   - Every sensitive Studio and file-picker command (`43` commands in `apps/desktop/src-tauri/src/main.rs`) now executes `authorize_command`, `validate_ipc_payload_len` (`MAX_IPC_BYTES = 1 MiB` -> `SF-SYS-007`), and fail-closed session + single-device verification (`SF-AUTH-001` / `SF-AUTH-002`) before touching `DataGraph` or the filesystem.
+   - `DesktopShellSessionVerifier` in `apps/desktop/src-tauri/src/main.rs` verifies tokens against the in-process `StudioSessionAuthority` or loopback `GET /v1/auth/sessions/current`, never trusting a token merely because it arrived from React.
+2. **Real Desktop E2E & Standalone `file://` Capsule Browser Verification (`tools/verify-studio-desktop-e2e.mjs`, `tools/verify-capsule-chromium.mjs`, `crates/sf-desktop/examples/studio_ipc_harness.rs`, `.github/workflows/ci.yml`):**
+   - Added `tools/verify-capsule-chromium.mjs` opening the Rust-exported `.safi.html` capsule over `file://` in headless Chromium and asserting all 8 chart types, Slides, Executive Report, Free-Form (`rowSpan=3`), Verified Metrics, embedded `data:image/png;base64` asset decoding, zero `<script>` tags, zero external network requests, and zero Console/CSP errors.
+   - Added `tools/verify-studio-desktop-e2e.mjs` backed by the real compiled Rust `studio_ipc_harness` process over stdio JSON-RPC, exercising the full 10-step journey from locked pre-login state through CSV import, cell edit, What-If scenario, all 4 creative surfaces, atomic `BLAKE3` bundle save/reload, `.safi.html` export, and sign-out revocation.
+3. **Complete 8 Dashboard Chart Types (`crates/sf-recipe/src/{datagraph.rs,studio_capsule.rs}`, `crates/sf-desktop/src/studio.rs`, `apps/web/src/desktop/components/DashboardChartsView.tsx`):**
+   - Added `ChartType` (`bar`, `line`, `area`, `pie`, `donut`, `scatter`, `histogram`, `kpi`) and `DataGraph::compute_chart_series` in Rust with strict column/data suitability checks (`SF-CAL-004` on non-numeric scatter/histogram columns or negative pie/donut slices).
+4. **Free-Form Builder `rowSpan` Controls & Strict Bounds (`crates/sf-desktop/src/studio.rs`, `crates/sf-recipe/src/studio_capsule.rs`, `apps/web/src/desktop/components/FreeFormBuilderView.tsx`):**
+   - Added `-H`, `H:n`, `+H` height buttons and `Shift+ArrowUp`/`Shift+ArrowDown` keyboard resizing, enforcing `col: 1..=12`, `row: 1..=32`, `colSpan: 1..=12`, `rowSpan: 1..=8`, and `zIndex: 1..=50` in both Rust and UI, and preserving `grid-row: <row> / span <rowSpan>` in `.safi.html` capsules.
+5. **`AnomalyPanel` Human-Readable EN/AR Translations (`apps/web/src/desktop/components/AnomalyPanel.tsx`):**
+   - Translated all `messageKey`, `methodKey`, and `suggestionKey` entries across all 5 anomaly kinds (`MissingValue`, `DuplicateRow`, `InconsistentType`, `ImpossibleDate`, `StatisticalOutlier`) into human-readable English and Arabic with a safe fallback humanizer so raw `studio.*` keys never appear.
+6. **AI Integration Privacy Disclosure & Pinned Loopback CSP (`apps/web/src/desktop/ai-interpreter.ts`, `apps/web/src/desktop/components/CommandBarPanel.tsx`, `crates/sf-desktop/src/api_origin.rs`, `apps/desktop/src-tauri/tauri.conf.json`):**
+   - Updated the consent checkbox and added a live outbound payload preview (`data-testid="ai-outbound-payload-preview"`) explicitly disclosing that the user's prompt text, column names & types, metric IDs, and parameter names are sent (and never row values, cell contents, or filenames).
+   - Permitted only the pinned loopback Ollama origin (`http://127.0.0.1:11434`) or `https://` endpoints in `validateAiEndpointUrl`, `api_origin.rs`, and `tauri.conf.json`.

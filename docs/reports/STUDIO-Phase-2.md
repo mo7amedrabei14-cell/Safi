@@ -30,3 +30,13 @@
 - `crates/sf-desktop/src/{commands.rs,studio.rs}`، `apps/desktop/src-tauri/src/main.rs`
 - `apps/web/src/desktop/{ai-interpreter.ts,studio-bridge.ts,DesktopStudio.tsx,desktop-studio.css,desktop-studio.test.tsx}`
 - `apps/web/src/desktop/components/{CommandBarPanel.tsx,AnomalyPanel.tsx,NarrativeTextRenderer.tsx}`
+
+---
+
+## تحديث التحصين النهائي (v6 — 2026-11-15)
+
+- **إصلاح مفاتيح ترجمة الشذوذ (`AnomalyPanel`)**: استُبدلت المقارنة الحرفية بجدول `STUDIO_ANOMALY_METHODS` الثابت الذي يطابق مفاتيح `crates/sf-recipe/src/studio_anomaly.rs` (`studio.method.empty_cell`, `studio.method.duplicate_row`, `studio.method.iqr_3x`, `studio.method.iso_date`) مع دالة `resolveAnomalyMethodText` بالعربية والإنجليزية واختبار يمنع تسرب أي مفتاح خام `studio.method.*` إلى DOM.
+- **الصدق الكامل في خصوصية الذكاء الاصطناعي وCSP (`CommandBarPanel` + `ai-interpreter.ts` + `tauri.conf.json`)**:
+  - حُدّث نص الموافقة ليذكر بدقة ما يُرسل (`نص الطلب` + `أسماء الأعمدة وأنواعها` + `معرّفات المؤشرات` + `أسماء متغيرات What-If`) مع معاينة JSON حية (`data-testid="ai-outbound-payload-preview"`) قابلة للتفتيش قبل التفعيل.
+  - أُضيف حقل مفتاح API اختياري في الذاكرة فقط (`type="password"`, `autoComplete="off"`) لا يُحفظ في `localStorage` أو ملفات المشاريع أو السجلات.
+  - فُرضت دالة `validateAiEndpointUrl` لقبول `http://127.0.0.1:11434` (أو `localhost:11434`) أو نقاط `https://` فقط، وحُدّث `connect-src` في `apps/desktop/src-tauri/tauri.conf.json` ليتطابق مع هذا العقد بدقة.

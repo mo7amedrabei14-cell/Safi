@@ -1,15 +1,41 @@
 import React, { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, BarChart3, Plus, Trash2 } from "lucide-react";
 import {
+  chartData as fetchChartData,
   grouped,
+  type DesktopChartPoint,
+  type DesktopChartSeries,
   type DesktopColumn,
-  type DesktopGroup,
   type DesktopMetric,
-  type StudioChartArtifact
+  type StudioChartArtifact,
+  type StudioChartType
 } from "../studio-bridge";
 import { VerifiedNumberChip } from "./VerifiedNumberChip";
 
 const AGGREGATES = ["SUM", "AVG", "COUNT", "MIN", "MAX"] as const;
+export const CHART_TYPES: readonly StudioChartType[] = [
+  "bar",
+  "line",
+  "area",
+  "pie",
+  "donut",
+  "scatter",
+  "histogram",
+  "kpi"
+];
+
+const CHART_TYPE_LABELS: Readonly<
+  Record<StudioChartType, { readonly en: string; readonly ar: string }>
+> = {
+  bar: { en: "Bar", ar: "أعمدة (Bar)" },
+  line: { en: "Line", ar: "خطي (Line)" },
+  area: { en: "Area", ar: "مساحي (Area)" },
+  pie: { en: "Pie", ar: "دائري (Pie)" },
+  donut: { en: "Donut", ar: "حلقي (Donut)" },
+  scatter: { en: "Scatter", ar: "انتشار (Scatter)" },
+  histogram: { en: "Histogram", ar: "مدرج تكراري (Histogram)" },
+  kpi: { en: "KPI", ar: "بطاقة مؤشر (KPI)" }
+};
 
 export interface DashboardChartsViewProps {
   readonly language: "en" | "ar";
@@ -37,8 +63,10 @@ export function DashboardChartsView({
   onInspectMetric
 }: DashboardChartsViewProps): React.ReactElement {
   const isAr = language === "ar";
-  const [chartData, setChartData] = useState<Record<string, readonly DesktopGroup[]>>({});
+  const [seriesByChart, setSeriesByChart] = useState<Record<string, DesktopChartSeries>>({});
+  const [errorsByChart, setErrorsByChart] = useState<Record<string, string>>({});
   const [title, setTitle] = useState(isAr ? "توزيع الإيرادات" : "Grouped Breakdown");
+  const [chartType, setChartType] = useState<StudioChartType>("bar");
   const [func, setFunc] = useState<(typeof AGGREGATES)[number]>("SUM");
   const [col, setCol] = useState("");
   const [groupCol, setGroupCol] = useState("");
@@ -63,22 +91,65 @@ export function DashboardChartsView({
   useEffect(() => {
     let cancelled = false;
     async function loadAll(): Promise<void> {
-      const next: Record<string, readonly DesktopGroup[]> = {};
+      const nextSeries: Record<string, DesktopChartSeries> = {};
+      const nextErrors: Record<string, string> = {};
       for (const chart of charts) {
+        const resolvedType: StudioChartType = chart.chartType ?? "bar";
         try {
-          next[chart.id] = await grouped(project, chart.function, chart.column, chart.groupBy);
-        } catch {
-          next[chart.id] = [];
+          nextSeries[chart.id] = await fetchChartData(
+            project,
+            resolvedType,
+            chart.function,
+            chart.column,
+            chart.groupBy
+          );
+        } catch (err) {
+          const code = err instanceof Error ? err.message : String(err);
+          if (code === "SF-SYS-012" || code.includes("unknown")) {
+            try {
+              const fallbackGroups = await grouped(
+                project,
+                chart.function,
+                chart.column,
+                chart.groupBy
+              );
+              const pts: DesktopChartPoint[] = fallbackGroups.map((g, i) => ({
+                label: g.label,
+                value: g.value,
+                ratioPct: 75,
+                startPct: 0,
+                xPct:
+                  fallbackGroups.length > 1
+                    ? Math.round(10 + (i * 80) / (fallbackGroups.length - 1))
+                    : 50,
+                yPct: 40
+              }));
+              nextSeries[chart.id] = {
+                chartType: resolvedType,
+                function: chart.function,
+                column: chart.column,
+                groupBy: chart.groupBy,
+                totalOrKpi: fallbackGroups[0]?.value ?? "0",
+                points: pts
+              };
+            } catch (innerErr) {
+              nextErrors[chart.id] = innerErr instanceof Error ? innerErr.message : "SF-CAL-004";
+            }
+          } else {
+            nextErrors[chart.id] = code;
+          }
         }
       }
       if (!cancelled) {
-        setChartData(next);
+        setSeriesByChart(nextSeries);
+        setErrorsByChart(nextErrors);
       }
     }
     if (charts.length > 0) {
       void loadAll();
     } else {
-      setChartData({});
+      setSeriesByChart({});
+      setErrorsByChart({});
     }
     return () => {
       cancelled = true;
@@ -95,11 +166,16 @@ export function DashboardChartsView({
       {
         id,
         title: title.trim() || `${func}(${col})`,
+        chartType,
         function: func,
         column: col,
         groupBy: groupCol
       }
     ]);
+  }
+
+  function updateChartType(id: string, nextType: StudioChartType): void {
+    onUpdateCharts(charts.map((c) => (c.id === id ? { ...c, chartType: nextType } : c)));
   }
 
   function moveChart(idx: number, delta: -1 | 1): void {
@@ -122,8 +198,8 @@ export function DashboardChartsView({
           <h3>{isAr ? "لوحة المؤشرات والرسوم التفاعلية" : "CodeMotion Reactive Dashboard"}</h3>
           <p className="studio-muted-note">
             {isAr
-              ? "كل المؤشرات والرسوم تُحسب في محرك Rust وتتحدث تلقائيًا فور تعديل البيانات أو السيناريو."
-              : "Every KPI and grouped chart is computed in Rust and updates automatically on edits or What-If scenarios."}
+              ? "كل المؤشرات والرسوم الـ 8 تُحسب في محرك Rust وتتحدث تلقائيًا فور تعديل البيانات أو السيناريو."
+              : "Every KPI and all 8 chart types are computed in Rust and update automatically on edits or What-If scenarios."}
           </p>
         </div>
         {activeCrossFilter ? (
@@ -161,6 +237,20 @@ export function DashboardChartsView({
           <input value={title} onChange={(e) => setTitle(e.target.value)} />
         </label>
         <label>
+          <span>{isAr ? "نوع الرسم" : "Chart Type"}</span>
+          <select
+            aria-label={isAr ? "نوع الرسم" : "Chart Type"}
+            value={chartType}
+            onChange={(e) => setChartType(e.target.value as StudioChartType)}
+          >
+            {CHART_TYPES.map((kind) => (
+              <option key={kind} value={kind}>
+                {isAr ? CHART_TYPE_LABELS[kind].ar : CHART_TYPE_LABELS[kind].en}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           <span>{isAr ? "الدالة" : "Function"}</span>
           <select
             value={func}
@@ -184,7 +274,7 @@ export function DashboardChartsView({
           </select>
         </label>
         <label>
-          <span>{isAr ? "تجميع حسب" : "Group By"}</span>
+          <span>{isAr ? "تجميع / محور X" : "Group By / X Axis"}</span>
           <select value={groupCol} onChange={(e) => setGroupCol(e.target.value)}>
             {columns.map((c) => (
               <option key={c.id} value={c.name}>
@@ -209,13 +299,35 @@ export function DashboardChartsView({
       ) : (
         <div className="studio-card-grid">
           {charts.map((chart, idx) => {
-            const groups = chartData[chart.id] ?? [];
-            const maxAbs = Math.max(...groups.map((g) => Math.abs(Number(g.value))), 1);
+            const resolvedType: StudioChartType = chart.chartType ?? "bar";
+            const series = seriesByChart[chart.id];
+            const errorCode = errorsByChart[chart.id];
+            const points = series?.points ?? [];
+            const polyPoints = points.map((p) => `${p.xPct},${p.yPct}`).join(" ");
+            const firstPt = points[0];
+            const lastPt = points[points.length - 1];
+
             return (
-              <article key={chart.id} className="studio-subcard">
+              <article
+                key={chart.id}
+                className="studio-subcard"
+                data-testid={`chart-card-${resolvedType}`}
+                data-chart-type={resolvedType}
+              >
                 <div className="studio-panel-header">
                   <strong>{chart.title}</strong>
                   <div className="studio-quick-templates">
+                    <select
+                      aria-label={isAr ? "تغيير نوع الرسم" : "Change chart type"}
+                      value={resolvedType}
+                      onChange={(e) => updateChartType(chart.id, e.target.value as StudioChartType)}
+                    >
+                      {CHART_TYPES.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {isAr ? CHART_TYPE_LABELS[kind].ar : CHART_TYPE_LABELS[kind].en}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
                       className="studio-chip-btn"
@@ -245,34 +357,91 @@ export function DashboardChartsView({
                   </div>
                 </div>
                 <div className="studio-muted-note">
-                  {`${chart.function}(${chart.column}) · ${isAr ? "حسب" : "by"} ${chart.groupBy}`}
+                  {`${resolvedType.toUpperCase()} · ${chart.function}(${chart.column}) · ${isAr ? "حسب" : "by"} ${chart.groupBy}`}
                 </div>
+
+                {errorCode ? (
+                  <div className="studio-alert-error" role="alert">
+                    {isAr
+                      ? `الأعمدة المختارة غير متوافقة مع هذا النوع من الرسوم (${errorCode}).`
+                      : `Selected columns are not suitable for this chart type (${errorCode}).`}
+                  </div>
+                ) : null}
+
+                {resolvedType === "kpi" && series ? (
+                  <div className="studio-kpi-callout" data-testid="chart-kpi-total">
+                    <strong>{series.totalOrKpi}</strong>
+                  </div>
+                ) : null}
+
+                {(resolvedType === "line" ||
+                  resolvedType === "area" ||
+                  resolvedType === "scatter") &&
+                points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    {resolvedType === "area" && firstPt && lastPt ? (
+                      <polygon
+                        points={`${firstPt.xPct},90 ${polyPoints} ${lastPt.xPct},90`}
+                        fill="currentColor"
+                        fillOpacity="0.2"
+                      />
+                    ) : null}
+                    {(resolvedType === "line" || resolvedType === "area") && points.length > 1 ? (
+                      <polyline
+                        points={polyPoints}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                      />
+                    ) : null}
+                    {points.map((pt, pIdx) => (
+                      <circle
+                        key={`${pt.label}_${pIdx}`}
+                        cx={pt.xPct}
+                        cy={pt.yPct}
+                        r="3"
+                        fill="currentColor"
+                      />
+                    ))}
+                  </svg>
+                ) : null}
+
                 <div className="safi-desktop-studio__bars">
-                  {groups.map((group) => {
-                    const width = Math.round((Math.abs(Number(group.value)) / maxAbs) * 100);
+                  {points.map((point, pIdx) => {
+                    const detail = point.sharePct
+                      ? `${point.value} (${point.sharePct}%)`
+                      : point.xValue && point.yValue
+                        ? `(${point.xValue}, ${point.yValue})`
+                        : point.value;
                     return (
                       <button
-                        key={group.label}
+                        key={`${point.label}_${pIdx}`}
                         type="button"
                         className="safi-desktop-studio__bar studio-bar-btn"
                         onClick={() => {
-                          setActiveCrossFilter({ col: chart.groupBy, val: group.label });
-                          onCrossFilter?.(chart.groupBy, group.label);
+                          setActiveCrossFilter({ col: chart.groupBy, val: point.label });
+                          onCrossFilter?.(chart.groupBy, point.label);
                         }}
                         title={
                           isAr
-                            ? `انقر لتصفية الجدول حسب ${group.label}`
-                            : `Click to cross-filter sheet by ${group.label}`
+                            ? `انقر لتصفية الجدول حسب ${point.label}`
+                            : `Click to cross-filter sheet by ${point.label}`
                         }
                       >
-                        <span>{group.label}</span>
+                        <span>{point.label}</span>
                         <div className="safi-desktop-studio__track">
                           <div
                             className="safi-desktop-studio__fill"
-                            style={{ width: `${width}%` }}
+                            style={{ width: `${point.ratioPct}%` }}
                           />
                         </div>
-                        <strong>{group.value}</strong>
+                        <strong>{detail}</strong>
                       </button>
                     );
                   })}

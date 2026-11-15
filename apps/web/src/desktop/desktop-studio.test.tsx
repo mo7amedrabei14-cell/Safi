@@ -20,17 +20,21 @@ import {
 import { WhatIfPanel } from "./components/WhatIfPanel";
 import {
   DEFAULT_AI_PROVIDER,
+  buildOutboundAiPayload,
   interpretPromptWithRealAi,
   previewDslCommand,
+  validateAiEndpointUrl,
   validateUntrustedDslPayload
 } from "./ai-interpreter";
-import type { DesktopMetric, DesktopStudioState } from "./studio-bridge";
+import type { DesktopMetric, DesktopStudioState, StudioChartType } from "./studio-bridge";
 import {
   activateScenario,
   addScenario,
   addSourceColumn,
   applyAnomalyFix,
   applyDslCommand,
+  chartData,
+  clearStudioAuthSession,
   compareScenarios,
   createRequestTracker,
   deleteColumn,
@@ -53,6 +57,7 @@ import {
   setCell,
   setCellById,
   setScenarioParameter,
+  setStudioAuthSession,
   trimColumn
 } from "./studio-bridge";
 import { DOCK_TABS, STUDIO_TAB } from "../components/layout/FloatingGlassDock";
@@ -402,7 +407,8 @@ describe("phase 1: what-if panel & reactive stale-revision guards", () => {
       })
     );
     expect(anomHtml).toContain("#42");
-    expect(anomHtml).toContain("studio.method.empty_cell");
+    expect(anomHtml).not.toContain("studio.method.empty_cell");
+    expect(anomHtml).toContain("Empty-cell &amp; null-sentinel scan");
     expect(anomHtml).toContain("Fix 1 missing cells");
 
     const narrativeTpl = "Total is {{metric:rev_total}} and missing {{metric:ghost_metric}}.";
@@ -720,5 +726,264 @@ describe("phase 5: browser security boundary, bilingual RTL/LTR, accessibility &
 
     const css = fs.readFileSync(path.join(__dirname, "desktop-studio.css"), "utf8");
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+  });
+});
+
+describe("v6 hardening: native auth gate, 8 chart types, Free-Form rowSpan, Anomaly i18n, and AI disclosure", () => {
+  it("binds and clears the native Tauri auth session and forwards chartData IPC", async () => {
+    let activeToken: string | null = null;
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "studio_set_auth_session") {
+        activeToken = String(args?.token ?? "");
+        return JSON.stringify({ authenticated: true });
+      }
+      if (command === "studio_clear_auth_session") {
+        activeToken = null;
+        return JSON.stringify({ authenticated: false });
+      }
+      if (!activeToken) {
+        throw new Error('{"code":"SF-AUTH-001","message":"Authentication is required."}');
+      }
+      if (command === "studio_chart_data") {
+        return JSON.stringify({
+          chartType: args?.chartType ?? "bar",
+          function: "SUM",
+          column: "amount",
+          groupBy: "region",
+          totalOrKpi: "350.5",
+          points: [
+            {
+              label: "Cairo",
+              value: "350.5",
+              xValue: "1",
+              yValue: "350.5",
+              sharePct: "100",
+              ratioPct: 100,
+              startPct: 0,
+              xPct: 50,
+              yPct: 100,
+              rowRefs: [1]
+            }
+          ]
+        });
+      }
+      return JSON.stringify(sampleState());
+    });
+
+    const originalWindow = globalThis.window;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: { invoke } }
+    });
+
+    try {
+      await expect(openProject("main", "/tmp/sales.csv")).rejects.toThrow("SF-AUTH-001");
+      await setStudioAuthSession("sfs_" + "a".repeat(64), "018f4b2a-1111-7000-8000-000000000001");
+      const opened = await openProject("main", "/tmp/sales.csv");
+      expect(opened.sourceId).toBe("sales");
+
+      const series = await chartData("main", "scatter", "SUM", "amount", "region");
+      expect(series.chartType).toBe("scatter");
+      expect(series.points[0]?.yValue).toBe("350.5");
+
+      await clearStudioAuthSession();
+      await expect(openProject("main", "/tmp/sales.csv")).rejects.toThrow("SF-AUTH-001");
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow
+      });
+    }
+  });
+
+  it("renders all 8 Dashboard chart types and Free-Form rowSpan height controls", () => {
+    const state = sampleState();
+    const chartTypes: ReadonlyArray<StudioChartType> = [
+      "bar",
+      "line",
+      "area",
+      "pie",
+      "donut",
+      "scatter",
+      "histogram",
+      "kpi"
+    ];
+
+    const dashHtml = renderToString(
+      createElement(DashboardChartsView, {
+        language: "en",
+        project: "main",
+        revision: state.revision,
+        activeScenario: state.activeScenario,
+        columns: state.columns,
+        metrics: state.metrics,
+        charts: chartTypes.map((chartType, idx) => ({
+          id: `chart_${idx + 1}`,
+          title: `Chart ${chartType.toUpperCase()}`,
+          chartType,
+          function: "SUM",
+          column: "amount",
+          groupBy: "region"
+        })),
+        onUpdateCharts: vi.fn()
+      })
+    );
+
+    for (const ct of chartTypes) {
+      expect(dashHtml).toContain(`data-chart-type="${ct}"`);
+      expect(dashHtml).toContain(`Chart ${ct.toUpperCase()}`);
+    }
+
+    const freeformHtml = renderToString(
+      createElement(FreeFormBuilderView, {
+        language: "en",
+        metrics: state.metrics,
+        freeformBlocks: [
+          {
+            id: "ff_height",
+            kind: "kpi",
+            title: "Tall Tile",
+            body: "{{metric:rev_total}}",
+            metricId: "rev_total",
+            assetId: null,
+            col: 2,
+            row: 3,
+            colSpan: 5,
+            rowSpan: 4,
+            zIndex: 6
+          }
+        ],
+        assets: [],
+        onUpdateFreeForm: vi.fn()
+      })
+    );
+    expect(freeformHtml).toContain("-H");
+    expect(freeformHtml).toContain("H:4");
+    expect(freeformHtml).toContain("+H");
+    expect(freeformHtml).toContain("W:5");
+    expect(freeformHtml).toContain("Z:6");
+  });
+
+  it("translates all 5 AnomalyPanel kinds in both English and Arabic with zero raw i18n keys", () => {
+    const allFiveAnomalies = [
+      {
+        kind: "MissingValue",
+        messageKey: "studio.anomaly.missing_value",
+        methodKey: "studio.method.empty_cell",
+        suggestionKey: "studio.fix.fill_or_remove_missing",
+        column: "region",
+        rows: [1],
+        rowIds: [11]
+      },
+      {
+        kind: "DuplicateRow",
+        messageKey: "studio.anomaly.duplicate_row",
+        methodKey: "studio.method.structural_row_key",
+        suggestionKey: "studio.fix.drop_duplicate_rows",
+        column: null,
+        rows: [2],
+        rowIds: [12]
+      },
+      {
+        kind: "InconsistentType",
+        messageKey: "studio.anomaly.inconsistent_type",
+        methodKey: "studio.method.type_consistency",
+        suggestionKey: "studio.fix.confirm_column_type",
+        column: "amount",
+        rows: [3],
+        rowIds: [13]
+      },
+      {
+        kind: "ImpossibleDate",
+        messageKey: "studio.anomaly.impossible_date",
+        methodKey: "studio.method.calendar_validation",
+        suggestionKey: "studio.fix.correct_or_blank_date",
+        column: "order_date",
+        rows: [4],
+        rowIds: [14]
+      },
+      {
+        kind: "StatisticalOutlier",
+        messageKey: "studio.anomaly.statistical_outlier",
+        methodKey: "studio.method.iqr_1_5",
+        suggestionKey: "studio.fix.review_outlier",
+        column: "amount",
+        rows: [5],
+        rowIds: [15]
+      }
+    ];
+
+    const enHtml = renderToString(
+      createElement(AnomalyPanel, {
+        language: "en",
+        anomalies: allFiveAnomalies,
+        isMutating: false,
+        onApplyFix: vi.fn(async () => {})
+      })
+    );
+    expect(enHtml).not.toContain("studio.anomaly.");
+    expect(enHtml).not.toContain("studio.method.");
+    expect(enHtml).not.toContain("studio.fix.");
+    expect(enHtml).toContain("Empty-cell &amp; null-sentinel scan");
+    expect(enHtml).toContain("Full-row structural hash comparison");
+    expect(enHtml).toContain("Column numeric vs. text type consistency check");
+    expect(enHtml).toContain("Gregorian calendar &amp; leap-year day bounds check");
+    expect(enHtml).toContain("Exact rust_decimal 1.5 × interquartile range (IQR) fence");
+
+    const arHtml = renderToString(
+      createElement(AnomalyPanel, {
+        language: "ar",
+        anomalies: allFiveAnomalies,
+        isMutating: false,
+        onApplyFix: vi.fn(async () => {})
+      })
+    );
+    expect(arHtml).not.toContain("studio.anomaly.");
+    expect(arHtml).not.toContain("studio.method.");
+    expect(arHtml).not.toContain("studio.fix.");
+    expect(arHtml).toContain("فحص الخلايا الفارغة ورموز القيم الخالية");
+    expect(arHtml).toContain("مقارنة البصمة البنيوية الكاملة للصفوف");
+    expect(arHtml).toContain("فحص اتساق النوع الرقمي والنصي داخل العمود");
+    expect(arHtml).toContain("التحقق من حدود أيام الشهور والسنة الكبيسة في التقويم الميلادي");
+    expect(arHtml).toContain("حساب حدود 1.5 × المدى الربيعي (IQR) بدقة rust_decimal");
+  });
+
+  it("enforces pinned loopback/HTTPS AI endpoint CSP and builds transparent schema-only outbound payloads", async () => {
+    const schema = {
+      columns: [
+        { name: "region", type: "GovernorateOrCity" },
+        { name: "amount", type: "MoneyAndCurrency" }
+      ],
+      metricIds: ["rev_total"],
+      parameterNames: ["growth"]
+    };
+
+    const payload = buildOutboundAiPayload("Sum amount by region", schema);
+    expect(payload).toEqual({
+      request: "Sum amount by region",
+      schema: {
+        columns: [
+          { name: "region", type: "GovernorateOrCity" },
+          { name: "amount", type: "MoneyAndCurrency" }
+        ],
+        metrics: ["rev_total"],
+        parameters: ["growth"]
+      }
+    });
+    expect(JSON.stringify(payload)).not.toContain("Cairo");
+    expect(JSON.stringify(payload)).not.toContain("sales.csv");
+
+    expect(validateAiEndpointUrl("http://127.0.0.1:11434/v1/chat/completions").ok).toBe(true);
+    expect(validateAiEndpointUrl("https://api.example.com/v1/chat/completions").ok).toBe(true);
+    expect(validateAiEndpointUrl("http://127.0.0.1:9999/v1/chat/completions").ok).toBe(false);
+    expect(validateAiEndpointUrl("http://evil.example.com/v1/chat/completions").ok).toBe(false);
+
+    const blockedPort = await interpretPromptWithRealAi("Sum amount", schema, {
+      kind: "openai_compatible",
+      endpointUrl: "http://127.0.0.1:9999/v1/chat/completions",
+      modelName: "qwen2.5:7b",
+      consentedToSchemaContext: true
+    });
+    expect(blockedPort).toMatchObject({ ok: false, code: "SF-AIX-001" });
   });
 });

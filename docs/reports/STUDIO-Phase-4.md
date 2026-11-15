@@ -28,3 +28,10 @@
 - `crates/sf-desktop/src/studio.rs`
 - `apps/web/src/desktop/components/TemplatesAndProjectsPanel.tsx`
 - `apps/web/src/desktop/DesktopStudio.tsx`، `apps/web/src/desktop/desktop-studio.test.tsx`
+
+---
+
+## تحديث التحصين النهائي (v6 — 2026-11-15)
+
+- **دعم جميع أنواع الرسوم الثمانية في الكبسولة المصدّرة**: حُدّث `crates/sf-recipe/src/studio_capsule.rs` ليرسم SVG ثابتاً لكل نوع من الأنواع الثمانية (`bar`, `line`, `area`, `pie`, `donut`, `scatter`, `histogram`, `kpi`) مع وسم `data-chart-type="<type>"` وخصائص `data-grid-row-span` للوح الحر دون أي `style=""` مضمّن وبـCSP صارم (`style-src 'sha256-...'`).
+- **اختبار الكبسولة الآلي في Chromium (`tools/verify-capsule-chromium.mjs`)**: أُنشئ سكربت فحص دائم يولّد كبسولة تضم الأنواع الثمانية جميعاً وكتل اللوح الحر بارتفاع `rowSpan=3` ويفتحها عبر `file://` في Chromium بلا خادم وبـ`offline: true`، ويتحقق من عدم وجود `<script>`، و0 طلبات خارجية، و0 أخطاء Console/CSP، ورسم جميع الأنواع الثمانية.

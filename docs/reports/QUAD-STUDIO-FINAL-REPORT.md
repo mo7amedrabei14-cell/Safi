@@ -38,3 +38,4 @@
 
 - تقارير المراحل: [Phase 1](STUDIO-Phase-1.md)، [Phase 2](STUDIO-Phase-2.md)، [Phase 3](STUDIO-Phase-3.md)، [Phase 4](STUDIO-Phase-4.md)، [Phase 5](STUDIO-Phase-5.md)
 - مراجعة إعادة التدقيق: [STUDIO-COMPLETION-RE-AUDIT.md](STUDIO-COMPLETION-RE-AUDIT.md)
+- **تقرير التحصين والقبول النهائي (v6)**: [QUAD-STUDIO-FINAL-ACCEPTANCE-v6.md](QUAD-STUDIO-FINAL-ACCEPTANCE-v6.md) (يغطي بوابة المصادقة Native على 42 أمراً حساساً، والأنواع الثمانية للرسوم البيانية، وتحكم `rowSpan` في اللوح الحر، وإصلاح ترجمة `AnomalyPanel`، وخصوصية AI + CSP، واختبارات Chromium + Rust الحقيقية).

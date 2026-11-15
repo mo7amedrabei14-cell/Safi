@@ -9,6 +9,92 @@ export interface AnomalyPanelProps {
   readonly onFocusRowId?: (rowId: number) => void;
 }
 
+const MESSAGE_KEY_TRANSLATIONS: Readonly<
+  Record<string, { readonly en: string; readonly ar: string }>
+> = {
+  "studio.anomaly.missing_value": {
+    en: "Missing values",
+    ar: "قيم مفقودة"
+  },
+  "studio.anomaly.duplicate_row": {
+    en: "Duplicate rows",
+    ar: "صفوف مكررة"
+  },
+  "studio.anomaly.inconsistent_type": {
+    en: "Mixed value types",
+    ar: "أنواع بيانات مختلطة"
+  },
+  "studio.anomaly.impossible_date": {
+    en: "Impossible calendar dates",
+    ar: "تواريخ غير صالحة تقويميًا"
+  },
+  "studio.anomaly.statistical_outlier": {
+    en: "Statistical outliers (1.5 × IQR)",
+    ar: "قيم شاذة إحصائيًا (1.5 × IQR)"
+  }
+};
+
+const METHOD_KEY_TRANSLATIONS: Readonly<
+  Record<string, { readonly en: string; readonly ar: string }>
+> = {
+  "studio.method.empty_cell": {
+    en: "Empty-cell & null-sentinel scan",
+    ar: "فحص الخلايا الفارغة ورموز القيم الخالية"
+  },
+  "studio.method.structural_row_key": {
+    en: "Full-row structural hash comparison",
+    ar: "مقارنة البصمة البنيوية الكاملة للصفوف"
+  },
+  "studio.method.type_consistency": {
+    en: "Column numeric vs. text type consistency check",
+    ar: "فحص اتساق النوع الرقمي والنصي داخل العمود"
+  },
+  "studio.method.calendar_validation": {
+    en: "Gregorian calendar & leap-year day bounds check",
+    ar: "التحقق من حدود أيام الشهور والسنة الكبيسة في التقويم الميلادي"
+  },
+  "studio.method.iqr_1_5": {
+    en: "Exact rust_decimal 1.5 × interquartile range (IQR) fence",
+    ar: "حساب حدود 1.5 × المدى الربيعي (IQR) بدقة rust_decimal"
+  }
+};
+
+const SUGGESTION_KEY_TRANSLATIONS: Readonly<
+  Record<string, { readonly en: string; readonly ar: string }>
+> = {
+  "studio.fix.fill_or_remove_missing": {
+    en: "Suggested action: Fill missing cells with a verified replacement value or inspect the rows.",
+    ar: "الإجراء المقترح: تعويض الخلايا الفارغة بقيمة معتمدة أو مراجعة الصفوف المتأثرة."
+  },
+  "studio.fix.drop_duplicate_rows": {
+    en: "Suggested action: Remove duplicate rows after reviewing their stable RowIds.",
+    ar: "الإجراء المقترح: حذف الصفوف المكررة بعد مراجعة معرّفاتها الثابتة."
+  },
+  "studio.fix.confirm_column_type": {
+    en: "Suggested action: Standardize non-numeric text entries in this column so formulas stay valid.",
+    ar: "الإجراء المقترح: توحيد المدخلات النصية غير الرقمية في هذا العمود لضمان صحة المعادلات."
+  },
+  "studio.fix.correct_or_blank_date": {
+    en: "Suggested action: Clear impossible calendar dates or edit the affected cells manually.",
+    ar: "الإجراء المقترح: تفريغ التواريخ المستحيلة تقويميًا أو تعديل الخلايا المتأثرة يدويًا."
+  },
+  "studio.fix.review_outlier": {
+    en: "Suggested action: Review the flagged extreme values in context before deciding whether to edit them.",
+    ar: "الإجراء المقترح: مراجعة القيم المتطرفة في سياقها قبل اتخاذ قرار بتعديلها."
+  }
+};
+
+function humanizeFallbackKey(rawKey: string, isAr: boolean): string {
+  const cleaned = rawKey
+    .replace(/^studio\.(anomaly|method|fix)\./, "")
+    .replace(/_/g, " ")
+    .trim();
+  if (!cleaned) {
+    return isAr ? "فحص جودة البيانات" : "Data quality check";
+  }
+  return isAr ? `فحص جودة البيانات (${cleaned})` : `Data check: ${cleaned}`;
+}
+
 const KIND_LABELS: Record<
   string,
   {
@@ -114,14 +200,24 @@ export function AnomalyPanel({
       <ul className="studio-anomaly-list">
         {anomalies.map((item, idx) => {
           const itemKey = `${item.kind}-${item.column ?? "table"}-${idx}`;
+          const messageTr = MESSAGE_KEY_TRANSLATIONS[item.messageKey];
+          const methodTr = METHOD_KEY_TRANSLATIONS[item.methodKey];
+          const suggestionTr = SUGGESTION_KEY_TRANSLATIONS[item.suggestionKey];
           const meta = KIND_LABELS[item.kind] ?? {
-            en: item.kind,
-            ar: item.kind,
+            en: messageTr?.en ?? humanizeFallbackKey(item.messageKey, false),
+            ar: messageTr?.ar ?? humanizeFallbackKey(item.messageKey, true),
             severityEn: "Info",
             severityAr: "تنبيه",
-            reasonEn: item.methodKey,
-            reasonAr: item.methodKey
+            reasonEn: methodTr?.en ?? humanizeFallbackKey(item.methodKey, false),
+            reasonAr: methodTr?.ar ?? humanizeFallbackKey(item.methodKey, true)
           };
+          const titleLabel = isAr ? (messageTr?.ar ?? meta.ar) : (messageTr?.en ?? meta.en);
+          const methodLabel = isAr
+            ? (methodTr?.ar ?? humanizeFallbackKey(item.methodKey, true))
+            : (methodTr?.en ?? humanizeFallbackKey(item.methodKey, false));
+          const suggestionLabel = isAr
+            ? (suggestionTr?.ar ?? humanizeFallbackKey(item.suggestionKey, true))
+            : (suggestionTr?.en ?? humanizeFallbackKey(item.suggestionKey, false));
           const rowIds = item.rowIds ?? [];
           const fillVal = fillValues[itemKey] ?? "0";
           const canApplyFill =
@@ -133,7 +229,7 @@ export function AnomalyPanel({
           return (
             <li key={itemKey} className="studio-anomaly-card">
               <div className="studio-anomaly-top">
-                <strong>{isAr ? meta.ar : meta.en}</strong>
+                <strong>{titleLabel}</strong>
                 <span className="studio-badge-muted">
                   {`${isAr ? "الخطورة" : "Severity"}: ${isAr ? meta.severityAr : meta.severityEn}`}
                 </span>
@@ -146,8 +242,12 @@ export function AnomalyPanel({
 
               <div className="studio-anomaly-why">
                 <span>{isAr ? meta.reasonAr : meta.reasonEn}</span>
-                <code className="studio-method-key">{item.methodKey}</code>
+                <span className="studio-badge-muted">
+                  {`${isAr ? "آلية الفحص" : "Method"}: ${methodLabel}`}
+                </span>
               </div>
+
+              <div className="studio-muted-note">{suggestionLabel}</div>
 
               <div className="studio-anomaly-rows">
                 <span>{isAr ? "الصفوف المتأثرة (معرّفات ثابتة):" : "Affected RowIds:"}</span>

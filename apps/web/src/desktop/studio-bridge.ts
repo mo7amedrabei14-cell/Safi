@@ -96,7 +96,10 @@ async function call(command: string, args: Record<string, unknown> = {}): Promis
   return typeof result === "string" ? result : JSON.stringify(result);
 }
 
-async function stateCall(command: string, args: Record<string, unknown>): Promise<DesktopStudioState> {
+async function stateCall(
+  command: string,
+  args: Record<string, unknown>
+): Promise<DesktopStudioState> {
   return JSON.parse(await call(command, args)) as DesktopStudioState;
 }
 
@@ -178,10 +181,7 @@ export async function snapshot(project: string): Promise<string> {
 }
 
 /** Restores a saved project; Rust re-derives every metric first. */
-export async function restoreProject(
-  project: string,
-  saved: string
-): Promise<DesktopStudioState> {
+export async function restoreProject(project: string, saved: string): Promise<DesktopStudioState> {
   return stateCall("studio_restore", { project, snapshot: saved });
 }
 

@@ -2,12 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { DesktopStudio } from "./DesktopStudio";
+import { AnomalyPanel } from "./components/AnomalyPanel";
+import { CommandBarPanel } from "./components/CommandBarPanel";
+import { NarrativeTextRenderer, listMissingMetricRefs } from "./components/NarrativeTextRenderer";
 import { VerifiedAuditModal, VerifiedNumberChip, resolveChipStatus } from "./components/VerifiedNumberChip";
 import { WhatIfPanel } from "./components/WhatIfPanel";
+import {
+  DEFAULT_AI_PROVIDER,
+  interpretPromptWithRealAi,
+  previewDslCommand,
+  validateUntrustedDslPayload
+} from "./ai-interpreter";
 import type { DesktopMetric, DesktopStudioState } from "./studio-bridge";
 import {
   activateScenario,
   addScenario,
+  applyAnomalyFix,
+  applyDslCommand,
   compareScenarios,
   createRequestTracker,
   exportCapsule,
@@ -16,6 +27,7 @@ import {
   isNewerOrEqualRevision,
   openProject,
   pickCapsuleOutputFile,
+  renderNarrative,
   renameScenario,
   setCell,
   setCellById,
@@ -243,6 +255,166 @@ describe("phase 1: what-if panel & reactive stale-revision guards", () => {
         "studio_set_scenario_parameter",
         "studio_compare_scenarios",
         "pick_capsule_output_file"
+      ]);
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow
+      });
+    }
+  });
+
+  it("reports honest SF-AIX-001 blocker when AI is unconfigured and rejects untrusted DSL payloads", async () => {
+    const schema = {
+      columns: [{ name: "amount", type: "MoneyAndCurrency" }],
+      metricIds: ["rev_total"],
+      parameterNames: ["growth"]
+    };
+
+    // Offline / unconfigured AI never fakes success
+    const unconfigured = await interpretPromptWithRealAi(
+      "Analyze total revenue by region",
+      schema,
+      DEFAULT_AI_PROVIDER
+    );
+    expect(unconfigured).toMatchObject({ ok: false, code: "SF-AIX-001" });
+
+    // Configured endpoint without explicit schema consent is still blocked
+    const noConsent = await interpretPromptWithRealAi("Analyze total revenue", schema, {
+      kind: "openai_compatible",
+      endpointUrl: "http://127.0.0.1:11434/v1/chat/completions",
+      modelName: "qwen2.5:7b",
+      consentedToSchemaContext: false
+    });
+    expect(noConsent).toMatchObject({ ok: false, code: "SF-AIX-001" });
+
+    // Consented provider sends schema-only payload (no raw rows) and untrusted validator verifies output
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const sentBody = String(init?.body ?? "");
+      expect(sentBody).not.toContain("Cairo");
+      expect(sentBody).toContain("amount");
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  op: "define_metric",
+                  id: "avg_rev",
+                  name: "Average",
+                  unit: "EGP",
+                  formula: "AVG(amount)"
+                })
+              }
+            }
+          ]
+        })
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const interpreted = await interpretPromptWithRealAi("Calculate average revenue", schema, {
+        kind: "openai_compatible",
+        endpointUrl: "http://127.0.0.1:11434/v1/chat/completions",
+        modelName: "qwen2.5:7b",
+        consentedToSchemaContext: true
+      });
+      expect(interpreted.ok).toBe(true);
+      if (interpreted.ok) {
+        expect(interpreted.command.op).toBe("define_metric");
+        expect(previewDslCommand(interpreted.command, "ar")).toContain("AVG(amount)");
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const rejected = validateUntrustedDslPayload(
+      JSON.stringify({ op: "define_metric", id: "x", name: "X", unit: null, formula: "1", extra: true })
+    );
+    expect(rejected).toMatchObject({ ok: false, code: "SF-AIX-002" });
+  });
+
+  it("renders Phase 2 CommandBarPanel, AnomalyPanel with RowIds, and NarrativeTextRenderer", async () => {
+    const metric = sampleMetric();
+    const metricsById = new Map([[metric.id, metric]]);
+
+    const cmdHtml = renderToString(
+      createElement(CommandBarPanel, {
+        language: "en",
+        projectLoaded: true,
+        schema: {
+          columns: [{ name: "amount", type: "MoneyAndCurrency" }],
+          metricIds: ["rev_total"],
+          parameterNames: []
+        },
+        onExecuteDsl: vi.fn(async () => {})
+      })
+    );
+    expect(cmdHtml).toContain("AI Provider: Unconfigured");
+    expect(cmdHtml).toContain("Approve &amp; Execute in Rust");
+
+    const anomHtml = renderToString(
+      createElement(AnomalyPanel, {
+        language: "en",
+        anomalies: [
+          {
+            kind: "MissingValue",
+            messageKey: "studio.anomaly.missing_value",
+            methodKey: "studio.method.empty_cell",
+            suggestionKey: "studio.fix.fill_or_remove_missing",
+            column: "region",
+            rows: [1],
+            rowIds: [42]
+          }
+        ],
+        isMutating: false,
+        onApplyFix: vi.fn(async () => {})
+      })
+    );
+    expect(anomHtml).toContain("#42");
+    expect(anomHtml).toContain("studio.method.empty_cell");
+    expect(anomHtml).toContain("Fix 1 missing cells");
+
+    const narrativeTpl = "Total is {{metric:rev_total}} and missing {{metric:ghost_metric}}.";
+    expect(listMissingMetricRefs(narrativeTpl, metricsById)).toEqual(["ghost_metric"]);
+    const narHtml = renderToString(
+      createElement(NarrativeTextRenderer, {
+        template: narrativeTpl,
+        metricsById,
+        language: "en",
+        onUnlinkMetric: vi.fn()
+      })
+    );
+    expect(narHtml).toContain("350.5 EGP");
+    expect(narHtml).toContain("Missing: ghost_metric");
+    expect(narHtml).toContain("Unlink");
+
+    // Verify Phase 2 IPC wrappers
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "studio_narrative") {
+        return JSON.stringify({
+          text: "Total 350.5",
+          missing: [],
+          references: [{ id: "rev_total", value: "350.5", unit: "EGP", status: "Verified", fingerprint: "f" }]
+        });
+      }
+      return JSON.stringify(sampleState());
+    });
+    const originalWindow = globalThis.window;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: { invoke } }
+    });
+    try {
+      await applyDslCommand("main", '{"op":"sort_rows","column":"amount","ascending":true}');
+      await applyAnomalyFix("main", { action: "drop_duplicate_rows", row_ids: [3] }, 4);
+      const nar = await renderNarrative("main", "Total {{metric:rev_total}}");
+      expect(nar.references[0]?.unit).toBe("EGP");
+      expect(invoke.mock.calls.map((c) => c[0])).toEqual([
+        "studio_apply_command",
+        "studio_apply_anomaly_fix",
+        "studio_narrative"
       ]);
     } finally {
       Object.defineProperty(globalThis, "window", {

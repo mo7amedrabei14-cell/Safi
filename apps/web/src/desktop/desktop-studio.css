@@ -465,3 +465,182 @@
   background: color-mix(in srgb, #b58900 10%, transparent);
 }
 
+.studio-panel {
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.studio-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.studio-panel-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.studio-muted-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  opacity: 0.72;
+}
+
+.studio-inline-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.studio-inline-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.studio-command-nl-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.studio-input-grow {
+  flex: 1 1 280px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.studio-dsl-editor {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  color: inherit;
+}
+
+.studio-dsl-header,
+.studio-quick-templates,
+.studio-command-actions,
+.studio-anomaly-top,
+.studio-anomaly-rows,
+.studio-anomaly-fix-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.studio-dsl-header {
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.studio-btn-primary,
+.studio-btn-secondary,
+.studio-chip-btn,
+.studio-row-chip,
+.studio-unlink-btn {
+  border-radius: 8px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.studio-btn-primary {
+  border: 1px solid currentColor;
+  background: currentColor;
+  color: Canvas;
+  font-weight: 600;
+}
+
+.studio-btn-secondary,
+.studio-chip-btn,
+.studio-row-chip,
+.studio-unlink-btn {
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  background: transparent;
+  color: inherit;
+}
+
+.studio-chip-btn,
+.studio-row-chip,
+.studio-unlink-btn {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.studio-alert-warn,
+.studio-alert-error,
+.studio-alert-info,
+.studio-alert-success,
+.studio-preview-box {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.studio-alert-warn {
+  background: color-mix(in srgb, #b58900 12%, transparent);
+}
+
+.studio-alert-error {
+  background: color-mix(in srgb, #dc322f 12%, transparent);
+}
+
+.studio-alert-success {
+  background: color-mix(in srgb, #1a7f37 12%, transparent);
+}
+
+.studio-anomaly-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.studio-anomaly-card {
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.studio-inline-metric-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline: 2px;
+}
+
+.studio-missing-metric-ref {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid #dc322f;
+  background: color-mix(in srgb, #dc322f 12%, transparent);
+}
+

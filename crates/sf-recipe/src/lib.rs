@@ -17,7 +17,7 @@ pub use datagraph::{
     Transformation, datagraph_display, parse_formula, tables_equal,
 };
 pub use recipe::{RecipeOperation, RecipeStep, SafiRecipe};
-pub use studio_anomaly::{Anomaly, AnomalyKind, detect_anomalies};
+pub use studio_anomaly::{Anomaly, AnomalyFix, AnomalyKind, detect_anomalies};
 pub use studio_capsule::{CapsuleChart, CapsuleOptions, export_capsule};
 pub use studio_dsl::{
     NarrativeReference, RenderedNarrative, StudioCommand, apply_command, metric_references,

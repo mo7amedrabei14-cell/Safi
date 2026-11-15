@@ -55,7 +55,25 @@ export interface DesktopAnomaly {
   readonly suggestionKey: string;
   readonly column: string | null;
   readonly rows: readonly number[];
+  readonly rowIds?: readonly number[];
 }
+
+export type AnomalyFixPayload =
+  | {
+      readonly action: "fill_missing";
+      readonly column: string;
+      readonly row_ids: readonly number[];
+      readonly replacement: string;
+    }
+  | {
+      readonly action: "blank_invalid_dates";
+      readonly column: string;
+      readonly row_ids: readonly number[];
+    }
+  | {
+      readonly action: "drop_duplicate_rows";
+      readonly row_ids: readonly number[];
+    };
 
 export interface DesktopParameter {
   readonly name: string;
@@ -138,6 +156,8 @@ export interface DesktopNarrativeResult {
   readonly references: readonly {
     readonly id: string;
     readonly value: string;
+    readonly unit?: string | null;
+    readonly status?: string;
     readonly fingerprint: string;
   }[];
 }
@@ -414,6 +434,19 @@ export async function applyDslCommand(
   commandJson: string
 ): Promise<DesktopStudioState> {
   return stateCall("studio_apply_command", { project, command: commandJson });
+}
+
+/** Applies an explicit, user-confirmed anomaly remediation batch inside Rust (undoable). */
+export async function applyAnomalyFix(
+  project: string,
+  fix: AnomalyFixPayload,
+  expectedRevision?: number
+): Promise<DesktopStudioState> {
+  return stateCall("studio_apply_anomaly_fix", {
+    project,
+    fix: JSON.stringify(fix),
+    expectedRevision: expectedRevision ?? null
+  });
 }
 
 /** Resolves `{{metric:...}}` narrative tokens inside Rust using verified metric tokens. */

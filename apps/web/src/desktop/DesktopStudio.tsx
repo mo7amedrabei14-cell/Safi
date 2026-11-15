@@ -13,7 +13,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDownUp,
   BarChart3,
-  CheckCircle2,
   Download,
   FileSpreadsheet,
   Plus,
@@ -36,6 +35,8 @@ import {
   activateScenario,
   addCalculatedColumn,
   addScenario,
+  applyAnomalyFix,
+  applyDslCommand,
   compareScenarios,
   createRequestTracker,
   defineMetric,
@@ -62,6 +63,8 @@ import {
   undo,
   updateParameter
 } from "./studio-bridge";
+import { AnomalyPanel } from "./components/AnomalyPanel";
+import { CommandBarPanel } from "./components/CommandBarPanel";
 import { VerifiedNumberChip } from "./components/VerifiedNumberChip";
 import { WhatIfPanel } from "./components/WhatIfPanel";
 
@@ -771,24 +774,29 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             </p>
           ) : null}
 
+          <h2>{L("لوحة الأوامر والذكاء الاصطناعي", "Command Bar & AI Interpreter")}</h2>
+          <CommandBarPanel
+            language={lang}
+            projectLoaded={state !== null}
+            schema={{
+              columns: state.columns.map((c) => ({ name: c.name, type: c.type })),
+              metricIds: state.metrics.map((m) => m.id),
+              parameterNames: state.parameters.map((p) => p.name)
+            }}
+            onExecuteDsl={(dslJson) => run(() => applyDslCommand(PROJECT, dslJson))}
+          />
+
           <h2>{L("جودة البيانات", "Data quality")}</h2>
-          {state.anomalies.length === 0 ? (
-            <p className="safi-desktop-studio__note">
-              <CheckCircle2 size={14} aria-hidden="true" />{" "}
-              {L("لا شذوذ مكتشف.", "No anomalies detected.")}
-            </p>
-          ) : (
-            <ul className="safi-desktop-studio__anomalies">
-              {state.anomalies.map((anomaly, index) => (
-                <li key={`${anomaly.kind}-${index}`}>
-                  <strong>{anomaly.kind}</strong>
-                  {anomaly.column !== null ? ` · ${anomaly.column}` : ""} · {anomaly.rows.length}{" "}
-                  {L("صف", "row(s)")}
-                  <span className="safi-desktop-studio__note"> ({anomaly.suggestionKey})</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <AnomalyPanel
+            language={lang}
+            anomalies={state.anomalies}
+            isMutating={busy}
+            onApplyFix={(fix) => run(() => applyAnomalyFix(PROJECT, fix, state.revision))}
+            onFocusRowId={(rowId) => {
+              setSearchQuery(String(rowId));
+              setPageOffset(0);
+            }}
+          />
         </>
       )}
     </section>

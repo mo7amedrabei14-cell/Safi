@@ -22,7 +22,7 @@ use sf_core::limits::PlatformLimits;
 use sf_core::table::Table;
 use sf_io::{read_csv_stream, read_excel_stream};
 use sf_recipe::datagraph::{AggFunc, ChangeOutcome, DataGraph, RowQuery, datagraph_display};
-use sf_recipe::studio_anomaly::detect_anomalies;
+use sf_recipe::studio_anomaly::{AnomalyFix, detect_anomalies};
 use sf_recipe::studio_capsule::{CapsuleChart, CapsuleOptions, export_capsule};
 use sf_recipe::studio_dsl::{apply_command, parse_command, render_narrative};
 
@@ -407,6 +407,24 @@ impl StudioStore {
         self.mutate(project, |graph| apply_command(graph, &command, now_ms))
     }
 
+    /// Applies an explicit, user-confirmed [`AnomalyFix`] batch atomically as one undoable step.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-CAL-001`, `SF-CAL-002`, `SF-CAL-007`, or `SF-SYS-001`.
+    pub fn apply_anomaly_fix(
+        &self,
+        project: &str,
+        fix_json: &str,
+        expected_revision: Option<u64>,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let fix: AnomalyFix =
+            serde_json::from_str(fix_json).map_err(|_| "SF-CAL-002".to_owned())?;
+        self.mutate_at_revision(project, expected_revision, |graph| {
+            graph.apply_anomaly_fix(fix, now_ms)
+        })
+    }
+
     /// Undoes the last change.
     ///
     /// # Errors
@@ -469,9 +487,15 @@ impl StudioStore {
             .references
             .iter()
             .map(|reference| {
+                let status = graph
+                    .token(&reference.metric_id)
+                    .map(|token| format!("{:?}", token.status))
+                    .unwrap_or_else(|| "Missing".to_owned());
                 serde_json::json!({
                     "id": reference.metric_id.as_str(),
                     "value": reference.value,
+                    "unit": reference.unit,
+                    "status": status,
                     "fingerprint": reference.fingerprint,
                 })
             })
@@ -728,6 +752,12 @@ fn state_json(graph: &DataGraph) -> Result<String, String> {
     let anomalies = detect_anomalies(graph.working())
         .into_iter()
         .map(|anomaly| {
+            let row_ids: Vec<u64> = anomaly
+                .rows
+                .iter()
+                .filter_map(|&row_index| usize::try_from(row_index).ok())
+                .filter_map(|idx| graph.row_id_at(idx).map(RowId::get))
+                .collect();
             serde_json::json!({
                 "kind": format!("{:?}", anomaly.kind),
                 "messageKey": anomaly.kind.message_key(),
@@ -735,6 +765,7 @@ fn state_json(graph: &DataGraph) -> Result<String, String> {
                 "suggestionKey": anomaly.kind.suggestion_key(),
                 "column": anomaly.column,
                 "rows": anomaly.rows,
+                "rowIds": row_ids,
             })
         })
         .collect::<Vec<_>>();
@@ -1030,5 +1061,32 @@ mod tests {
             store.export_capsule("p1", &target, bad_capsule),
             Err("SF-CAL-002".to_owned())
         );
+    }
+
+    #[test]
+    fn anomaly_detection_reports_row_ids_and_confirmed_fix_undoes_in_one_step() {
+        let directory = test_result(tempfile::tempdir());
+        let path = directory.path().join("anom.csv");
+        test_result(fs::write(
+            &path,
+            "region,amount\nCairo,100\n,50\nCairo,100\n",
+        ));
+        let store = StudioStore::new();
+        let initial = json(&test_result(store.open_file("a1", &path, 1_000)));
+        assert_eq!(initial["anomalies"].as_array().map(Vec::len), Some(2));
+        let rev = initial["revision"].as_u64();
+        let missing = &initial["anomalies"][0];
+        assert_eq!(missing["rowIds"], serde_json::json!([2]));
+
+        let after_fill = json(&test_result(store.apply_anomaly_fix(
+            "a1",
+            r#"{"action":"fill_missing","column":"region","row_ids":[2],"replacement":"Alex"}"#,
+            rev,
+            2_000,
+        )));
+        assert_eq!(after_fill["anomalies"].as_array().map(Vec::len), Some(1));
+
+        let after_undo = json(&test_result(store.undo("a1", 3_000)));
+        assert_eq!(after_undo["anomalies"].as_array().map(Vec::len), Some(2));
     }
 }

@@ -13,7 +13,7 @@ use std::str::FromStr;
 
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use sf_core::datagraph::{MetricId, ScenarioId};
+use sf_core::datagraph::{MetricId, RowId, ScenarioId};
 use sf_core::error::{ErrorCode, ErrorSeverity, SafiError};
 
 use crate::datagraph::{ChangeOutcome, DataGraph};
@@ -76,6 +76,15 @@ pub enum StudioCommand {
         /// New raw text.
         value: String,
     },
+    /// Replace one cell of the working table identified by stable `row_id`.
+    SetCellById {
+        /// Stable row identifier.
+        row_id: u64,
+        /// Column name.
+        column: String,
+        /// New raw text.
+        value: String,
+    },
     /// Append a calculated column.
     AddCalculatedColumn {
         /// New column name.
@@ -95,6 +104,25 @@ pub enum StudioCommand {
         /// Scenario identifier, or `null`.
         id: Option<String>,
     },
+    /// Sort working rows by `column` while preserving stable row identities.
+    SortRows {
+        /// Column name.
+        column: String,
+        /// Ascending (`true`) or descending (`false`).
+        ascending: bool,
+    },
+    /// Filter working rows by case-insensitive substring on `column`.
+    FilterRows {
+        /// Column name.
+        column: String,
+        /// Filter query text (empty resets view filter step).
+        query: String,
+    },
+    /// Delete a working row by stable `row_id`.
+    DeleteRow {
+        /// Stable row identifier.
+        row_id: u64,
+    },
 }
 
 /// Parses a Studio command from JSON.
@@ -102,7 +130,7 @@ pub enum StudioCommand {
 /// # Errors
 /// Returns `SF-CAL-002` for malformed JSON, an unknown `op`, or an unexpected field.
 pub fn parse_command(json: &str) -> Result<StudioCommand, SafiError> {
-    if json.len() > 4_096 {
+    if json.len() > 8_192 {
         return Err(invalid_command());
     }
     serde_json::from_str(json).map_err(|_| invalid_command())
@@ -131,6 +159,11 @@ pub fn apply_command(
         StudioCommand::SetCell { row, column, value } => {
             graph.set_cell(*row, column, value, now_ms)
         }
+        StudioCommand::SetCellById {
+            row_id,
+            column,
+            value,
+        } => graph.set_cell_by_id(RowId::from_raw(*row_id), column, value, now_ms),
         StudioCommand::AddCalculatedColumn { name, formula } => {
             graph.add_calculated_column(name, formula, now_ms)
         }
@@ -144,6 +177,11 @@ pub fn apply_command(
             graph.activate_scenario(scenario.as_ref(), now_ms)?;
             Ok(plain_outcome(graph))
         }
+        StudioCommand::SortRows { column, ascending } => {
+            graph.sort_rows(column, *ascending, now_ms)
+        }
+        StudioCommand::FilterRows { column, query } => graph.filter_rows(column, query, now_ms),
+        StudioCommand::DeleteRow { row_id } => graph.delete_row(RowId::from_raw(*row_id), now_ms),
     }
 }
 
@@ -271,5 +309,80 @@ pub fn render_narrative_strict(
         Ok(rendered)
     } else {
         Err(unknown_metric())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sf_core::column::{Column, ColumnSchema, ColumnType, ConfidenceScore};
+    use sf_core::datagraph::{SourceId, VerificationStatus};
+    use sf_core::error::{ErrorCode, SafiError};
+    use sf_core::table::Table;
+    use sf_core::value::CellValue;
+
+    use crate::datagraph::DataGraph;
+
+    use super::{apply_command, parse_command, render_narrative, render_narrative_strict};
+
+    fn sample_graph() -> Result<DataGraph, SafiError> {
+        let cols = vec![
+            Column::new(
+                ColumnSchema::new(0, "region", ColumnType::Unknown, ConfidenceScore::ONE),
+                vec![CellValue::from_raw("Cairo"), CellValue::from_raw("Giza")],
+            ),
+            Column::new(
+                ColumnSchema::new(
+                    1,
+                    "amount",
+                    ColumnType::MoneyAndCurrency,
+                    ConfidenceScore::ONE,
+                ),
+                vec![CellValue::from_raw("100"), CellValue::from_raw("50")],
+            ),
+        ];
+        let table = Table::new("tbl_dsl", "Sales", cols)?;
+        DataGraph::new(SourceId::new("src_dsl")?, table, 1)
+    }
+
+    #[test]
+    fn parse_rejects_unknown_fields_and_unknown_ops() {
+        let extra = parse_command(
+            r#"{"op":"set_cell_by_id","row_id":1,"column":"amount","value":"200","extra":1}"#,
+        );
+        assert_eq!(extra.err().map(|e| e.code()), Some(ErrorCode::SF_CAL_002));
+        let unknown = parse_command(r#"{"op":"eval_js","code":"alert(1)"}"#);
+        assert_eq!(unknown.err().map(|e| e.code()), Some(ErrorCode::SF_CAL_002));
+    }
+
+    #[test]
+    fn identity_commands_sort_filter_set_and_narrative_gate_work() -> Result<(), SafiError> {
+        let mut graph = sample_graph()?;
+        let def = parse_command(
+            r#"{"op":"define_metric","id":"total_rev","name":"Total Revenue","unit":"EGP","formula":"SUM(amount)"}"#,
+        )?;
+        apply_command(&mut graph, &def, 10)?;
+
+        let sort = parse_command(r#"{"op":"sort_rows","column":"amount","ascending":true}"#)?;
+        apply_command(&mut graph, &sort, 20)?;
+        assert_eq!(graph.row_id_at(0).map(|id| id.get()), Some(2));
+
+        let edit =
+            parse_command(r#"{"op":"set_cell_by_id","row_id":2,"column":"amount","value":"75"}"#)?;
+        apply_command(&mut graph, &edit, 30)?;
+
+        let rendered = render_narrative("Revenue: {{metric:total_rev}}", &graph)?;
+        assert_eq!(rendered.text, "Revenue: 175");
+        assert!(rendered.missing.is_empty());
+        assert_eq!(rendered.references.len(), 1);
+        assert_eq!(
+            graph
+                .token(&rendered.references[0].metric_id)
+                .map(|t| t.status),
+            Some(VerificationStatus::Verified)
+        );
+
+        let blocked = render_narrative_strict("Missing {{metric:no_such_kpi}}", &graph);
+        assert_eq!(blocked.err().map(|e| e.code()), Some(ErrorCode::SF_CAL_006));
+        Ok(())
     }
 }

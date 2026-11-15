@@ -300,6 +300,16 @@ fn studio_apply_command(
 }
 
 #[tauri::command]
+fn studio_apply_anomaly_fix(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    fix: String,
+    expected_revision: Option<u64>,
+) -> Result<String, String> {
+    store.apply_anomaly_fix(&project, &fix, expected_revision, now_ms())
+}
+
+#[tauri::command]
 fn studio_undo(store: tauri::State<'_, StudioStore>, project: String) -> Result<String, String> {
     store.undo(&project, now_ms())
 }
@@ -392,6 +402,7 @@ fn main() {
             studio_set_scenario_parameter,
             studio_compare_scenarios,
             studio_apply_command,
+            studio_apply_anomaly_fix,
             studio_undo,
             studio_redo,
             studio_grouped,

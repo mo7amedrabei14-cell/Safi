@@ -532,3 +532,72 @@ fn scenario_rename_parameter_update_and_paginated_query_work() -> Result<(), Saf
     assert_eq!(page.rows[1].row_id, 1);
     Ok(())
 }
+
+#[test]
+fn anomaly_fix_is_atomic_recomputes_metrics_and_undoes_cleanly() -> Result<(), SafiError> {
+    use crate::studio_anomaly::AnomalyFix;
+    let source = table(&[
+        ("region", &["Cairo", "", "Cairo"]),
+        ("amount", &["100", "50", "100"]),
+        ("quantity", &["1", "1", "1"]),
+    ])?;
+    let mut graph = DataGraph::new(SourceId::new("src_anom")?, source, 1)?;
+    let total = metric("total")?;
+    graph.define_metric(total.clone(), "Total", Some("EGP"), "SUM(amount)", 10)?;
+
+    // Invalid RowId fails cleanly with zero mutation
+    let err = graph
+        .apply_anomaly_fix(
+            AnomalyFix::FillMissing {
+                column: "region".to_owned(),
+                row_ids: vec![2, 999],
+                replacement: "Giza".to_owned(),
+            },
+            20,
+        )
+        .err()
+        .map(|e| e.code());
+    assert_eq!(err, Some(ErrorCode::SF_SYS_001));
+    assert_eq!(
+        graph
+            .working()
+            .column_by_name("region")
+            .and_then(|c| c.cell_at(1))
+            .map(|c| c.raw_text().to_owned()),
+        Some(String::new())
+    );
+
+    // Fill missing region atomically, then drop duplicate row 3
+    graph.apply_anomaly_fix(
+        AnomalyFix::FillMissing {
+            column: "region".to_owned(),
+            row_ids: vec![2],
+            replacement: "Giza".to_owned(),
+        },
+        30,
+    )?;
+    assert_eq!(
+        graph
+            .working()
+            .column_by_name("region")
+            .and_then(|c| c.cell_at(1))
+            .map(|c| c.raw_text().to_owned()),
+        Some("Giza".to_owned())
+    );
+    graph.apply_anomaly_fix(AnomalyFix::DropDuplicateRows { row_ids: vec![3] }, 40)?;
+    assert_eq!(graph.working().row_count(), 2);
+    assert_eq!(value_of(&token(&graph, &total)?)?, decimal("150")?);
+
+    // Undo in one step brings row 3 and SUM=250 back
+    graph.undo(50)?;
+    assert_eq!(graph.working().row_count(), 3);
+    assert_eq!(value_of(&token(&graph, &total)?)?, decimal("250")?);
+
+    // Redo + snapshot/restore keeps replay parity
+    graph.redo(60)?;
+    assert_eq!(graph.working().row_count(), 2);
+    let json = graph.to_json()?;
+    let restored = DataGraph::from_json(&json, 70)?;
+    assert!(tables_equal(graph.working(), restored.working()));
+    Ok(())
+}

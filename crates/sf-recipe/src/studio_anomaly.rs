@@ -79,6 +79,36 @@ pub struct Anomaly {
     pub affected_rows: usize,
 }
 
+/// An explicit, user-confirmed fix to execute atomically on a [`crate::datagraph::DataGraph`].
+///
+/// Fixing anomalies is never automatic: the UI displays why each problem was flagged and only
+/// runs one of these actions after explicit confirmation, recorded as a single undoable step.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AnomalyFix {
+    /// Fill missing/empty cells at specific stable row IDs in `column` with `replacement`.
+    FillMissing {
+        /// Target column name.
+        column: String,
+        /// Stable [`sf_core::datagraph::RowId`] integers to update.
+        row_ids: Vec<u64>,
+        /// Replacement text supplied by the user.
+        replacement: String,
+    },
+    /// Clear invalid calendar dates at specific stable row IDs back to empty text.
+    BlankInvalidDates {
+        /// Target column name.
+        column: String,
+        /// Stable [`sf_core::datagraph::RowId`] integers to clear.
+        row_ids: Vec<u64>,
+    },
+    /// Remove duplicate working rows identified by their stable row IDs.
+    DropDuplicateRows {
+        /// Stable [`sf_core::datagraph::RowId`] integers to delete.
+        row_ids: Vec<u64>,
+    },
+}
+
 fn numeric(cell: &CellValue) -> Option<Decimal> {
     match cell.value() {
         sf_core::value::Value::Integer(integer) => Some(Decimal::from(*integer)),

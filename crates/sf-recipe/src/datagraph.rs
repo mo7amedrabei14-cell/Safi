@@ -33,6 +33,8 @@ use sf_core::value::{CellValue, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
+use crate::studio_anomaly::AnomalyFix;
+
 /// Decimal places kept for averages; documented so results are reproducible across platforms.
 pub const AVERAGE_SCALE: u32 = 6;
 
@@ -661,6 +663,8 @@ pub enum Transformation {
         /// Raw cell text keyed by column name.
         values: BTreeMap<String, String>,
     },
+    /// User-confirmed atomic anomaly remediation batch (undoable as one step).
+    AnomalyFixBatch(AnomalyFix),
 }
 
 impl Transformation {
@@ -673,13 +677,21 @@ impl Transformation {
             Self::AddColumn { name, .. } => BTreeSet::from([name.clone()]),
             Self::DeleteRow { .. } => BTreeSet::new(),
             Self::InsertRow { values, .. } => values.keys().cloned().collect(),
+            Self::AnomalyFixBatch(fix) => match fix {
+                AnomalyFix::FillMissing { column, .. }
+                | AnomalyFix::BlankInvalidDates { column, .. } => BTreeSet::from([column.clone()]),
+                AnomalyFix::DropDuplicateRows { .. } => BTreeSet::new(),
+            },
         }
     }
 
     fn touches_all_columns(&self) -> bool {
         matches!(
             self,
-            Self::DeleteRow { .. } | Self::InsertRow { .. } | Self::FilterRows { .. }
+            Self::DeleteRow { .. }
+                | Self::InsertRow { .. }
+                | Self::FilterRows { .. }
+                | Self::AnomalyFixBatch(AnomalyFix::DropDuplicateRows { .. })
         )
     }
 
@@ -725,6 +737,10 @@ impl Transformation {
                 }
                 let after = after_row_id.map_or(0, RowId::get);
                 format!("ins:{}:{after}:{pairs}", row_id.get())
+            }
+            Self::AnomalyFixBatch(fix) => {
+                let encoded = serde_json::to_string(fix).unwrap_or_default();
+                format!("fix:{}", blake3::hash(encoded.as_bytes()).to_hex())
             }
         };
         blake3::hash(payload.as_bytes()).to_hex().to_string()
@@ -1141,6 +1157,88 @@ fn apply_transformation_step(
             state.table = table;
             state.row_provenance = row_provenance;
         }
+        Transformation::AnomalyFixBatch(fix) => match fix {
+            AnomalyFix::FillMissing {
+                column,
+                row_ids,
+                replacement,
+            } => {
+                if row_ids.is_empty() {
+                    return Err(invalid_formula());
+                }
+                let col_idx = state
+                    .table
+                    .columns()
+                    .iter()
+                    .position(|existing| existing.schema().name == *column)
+                    .ok_or_else(unknown_column)?;
+                let mut table = state.table.clone();
+                for raw_id in row_ids {
+                    let row_idx = state
+                        .row_provenance
+                        .iter()
+                        .position(|entry| entry.row_id.get() == *raw_id)
+                        .ok_or_else(invalid_request)?;
+                    table = replace_cell(
+                        &table,
+                        row_idx,
+                        col_idx,
+                        CellValue::from_raw(replacement.clone()),
+                    )?;
+                }
+                refresh_calculated_columns(&mut table, &state.active_calculated)?;
+                state.table = table;
+            }
+            AnomalyFix::BlankInvalidDates { column, row_ids } => {
+                if row_ids.is_empty() {
+                    return Err(invalid_formula());
+                }
+                let col_idx = state
+                    .table
+                    .columns()
+                    .iter()
+                    .position(|existing| existing.schema().name == *column)
+                    .ok_or_else(unknown_column)?;
+                let mut table = state.table.clone();
+                for raw_id in row_ids {
+                    let row_idx = state
+                        .row_provenance
+                        .iter()
+                        .position(|entry| entry.row_id.get() == *raw_id)
+                        .ok_or_else(invalid_request)?;
+                    table = replace_cell(&table, row_idx, col_idx, CellValue::from_raw(""))?;
+                }
+                refresh_calculated_columns(&mut table, &state.active_calculated)?;
+                state.table = table;
+            }
+            AnomalyFix::DropDuplicateRows { row_ids } => {
+                if row_ids.is_empty() {
+                    return Err(invalid_formula());
+                }
+                let mut drop_set = BTreeSet::new();
+                for raw_id in row_ids {
+                    if !state
+                        .row_provenance
+                        .iter()
+                        .any(|entry| entry.row_id.get() == *raw_id)
+                    {
+                        return Err(invalid_request());
+                    }
+                    let _ = drop_set.insert(*raw_id);
+                }
+                let indices: Vec<usize> = state
+                    .row_provenance
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| !drop_set.contains(&entry.row_id.get()))
+                    .map(|(idx, _)| idx)
+                    .collect();
+                let (table, row_provenance) =
+                    reorder_table_and_provenance(&state.table, &state.row_provenance, &indices)?;
+                state.table = table;
+                state.row_provenance = row_provenance;
+            }
+        },
     }
     Ok(())
 }
@@ -1699,6 +1797,7 @@ impl DataGraph {
         self.transforms.push(transformation);
         self.redo.clear();
         self.revision = self.revision.next();
+        self.last_rows = vec![row_id.get()];
         self.refresh_all(now_ms);
         let outcome = ChangeOutcome {
             revision: self.revision,
@@ -1707,6 +1806,53 @@ impl DataGraph {
             columns: self.last_columns.clone(),
         };
         Ok((row_id, outcome))
+    }
+
+    /// Applies an explicit, user-confirmed [`AnomalyFix`] atomically as a single undoable step.
+    ///
+    /// On any invalid column, empty target list, or missing `RowId`, returns an error and leaves
+    /// the working table untouched.
+    ///
+    /// # Errors
+    /// `SF-CAL-002` when `row_ids` is empty, `SF-CAL-001` when `column` does not exist, or
+    /// `SF-SYS-001` when a target `RowId` is missing.
+    pub fn apply_anomaly_fix(
+        &mut self,
+        fix: AnomalyFix,
+        now_ms: u64,
+    ) -> Result<ChangeOutcome, SafiError> {
+        let affected_columns: Vec<String> = match &fix {
+            AnomalyFix::FillMissing { column, .. }
+            | AnomalyFix::BlankInvalidDates { column, .. } => vec![column.clone()],
+            AnomalyFix::DropDuplicateRows { .. } => Vec::new(),
+        };
+        let affected_rows: Vec<u64> = match &fix {
+            AnomalyFix::FillMissing { row_ids, .. }
+            | AnomalyFix::BlankInvalidDates { row_ids, .. }
+            | AnomalyFix::DropDuplicateRows { row_ids } => row_ids.clone(),
+        };
+        let transformation = Transformation::AnomalyFixBatch(fix);
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.row_provenance = state.row_provenance;
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.last_rows = affected_rows.clone();
+        self.refresh_all(now_ms);
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: affected_rows,
+            columns: affected_columns,
+        })
     }
 
     /// Appends a calculated column derived per row.
@@ -2206,6 +2352,9 @@ impl DataGraph {
                     values,
                 } => {
                     graph.replay_insert_row(*row_id, *after_row_id, values.clone(), now_ms)?;
+                }
+                Transformation::AnomalyFixBatch(fix) => {
+                    graph.apply_anomaly_fix(fix.clone(), now_ms)?;
                 }
             }
         }

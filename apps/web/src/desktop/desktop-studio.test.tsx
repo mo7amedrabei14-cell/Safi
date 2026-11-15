@@ -5,7 +5,11 @@ import { DesktopStudio } from "./DesktopStudio";
 import { AnomalyPanel } from "./components/AnomalyPanel";
 import { CommandBarPanel } from "./components/CommandBarPanel";
 import { NarrativeTextRenderer, listMissingMetricRefs } from "./components/NarrativeTextRenderer";
-import { VerifiedAuditModal, VerifiedNumberChip, resolveChipStatus } from "./components/VerifiedNumberChip";
+import {
+  VerifiedAuditModal,
+  VerifiedNumberChip,
+  resolveChipStatus
+} from "./components/VerifiedNumberChip";
 import { WhatIfPanel } from "./components/WhatIfPanel";
 import {
   DEFAULT_AI_PROVIDER,
@@ -119,13 +123,13 @@ describe("phase 1: verified number chip & audit provenance", () => {
     expect(resolveChipStatus(null, false, "SF-CAL-003")).toBe("Error");
 
     const verifiedHtml = renderToString(createElement(VerifiedNumberChip, { metric, lang: "en" }));
-    expect(verifiedHtml).toContain("data-status=\"Verified\"");
+    expect(verifiedHtml).toContain('data-status="Verified"');
     expect(verifiedHtml).toContain("350.5 EGP");
 
     const staleHtml = renderToString(
       createElement(VerifiedNumberChip, { metric, recalculating: true, lang: "en" })
     );
-    expect(staleHtml).toContain("data-status=\"Stale\"");
+    expect(staleHtml).toContain('data-status="Stale"');
 
     const errorHtml = renderToString(
       createElement(VerifiedNumberChip, {
@@ -135,7 +139,7 @@ describe("phase 1: verified number chip & audit provenance", () => {
         lang: "en"
       })
     );
-    expect(errorHtml).toContain("data-status=\"Error\"");
+    expect(errorHtml).toContain('data-status="Error"');
     expect(errorHtml).toContain("SF-CAL-003");
   });
 

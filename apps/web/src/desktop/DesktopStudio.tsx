@@ -26,11 +26,7 @@ import {
 } from "lucide-react";
 import "./desktop-studio.css";
 import type { SafiLang } from "../components/layout/FloatingGlassDock";
-import type {
-  DesktopGroup,
-  DesktopRowPage,
-  DesktopStudioState
-} from "./studio-bridge";
+import type { DesktopGroup, DesktopRowPage, DesktopStudioState } from "./studio-bridge";
 import {
   activateScenario,
   addCalculatedColumn,
@@ -171,7 +167,16 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     }
-  }, [desktop, filterColumn, filterValue, pageLimit, pageOffset, searchQuery, sortAscending, sortColumn]);
+  }, [
+    desktop,
+    filterColumn,
+    filterValue,
+    pageLimit,
+    pageOffset,
+    searchQuery,
+    sortAscending,
+    sortColumn
+  ]);
 
   // Automatically recompute chart grouping in Rust whenever data or chart spec changes.
   const loadChart = useCallback(async (): Promise<void> => {
@@ -368,7 +373,10 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
 
       {recalculating ? (
         <p className="safi-desktop-studio__note" role="status" aria-live="polite">
-          {L("جارٍ إعادة الحساب في Rust — النتائج السابقة موسومة كقديمة.", "Recalculating in Rust — previous values are marked Stale.")}
+          {L(
+            "جارٍ إعادة الحساب في Rust — النتائج السابقة موسومة كقديمة.",
+            "Recalculating in Rust — previous values are marked Stale."
+          )}
         </p>
       ) : null}
 

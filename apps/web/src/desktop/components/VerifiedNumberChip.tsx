@@ -203,7 +203,9 @@ export function VerifiedAuditModal({
         <p className="safi-desktop-studio__audit-value">
           {metric.value} {metric.unit ?? ""}
         </p>
-        <p className={`safi-desktop-studio__status-note safi-desktop-studio__status-note--${status.toLowerCase()}`}>
+        <p
+          className={`safi-desktop-studio__status-note safi-desktop-studio__status-note--${status.toLowerCase()}`}
+        >
           {statusNote()}
         </p>
         <dl>

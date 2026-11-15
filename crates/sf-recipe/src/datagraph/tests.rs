@@ -601,3 +601,40 @@ fn anomaly_fix_is_atomic_recomputes_metrics_and_undoes_cleanly() -> Result<(), S
     assert!(tables_equal(graph.working(), restored.working()));
     Ok(())
 }
+
+#[test]
+fn column_management_and_trim_preserve_provenance_and_undo() -> Result<(), SafiError> {
+    let source = table(&[
+        ("region", &["  Cairo  North  ", "Giza"]),
+        ("amount", &["100", "200"]),
+    ])?;
+    let mut graph = DataGraph::new(SourceId::new("src_cols")?, source, 1)?;
+    graph.trim_column("region", 10)?;
+    assert_eq!(
+        graph
+            .working()
+            .column_by_name("region")
+            .and_then(|c| c.cell_at(0))
+            .map(|c| c.raw_text().to_owned()),
+        Some("Cairo North".to_owned())
+    );
+
+    let (notes_id, _) = graph.add_source_column("notes", "ok", 20)?;
+    assert_eq!(notes_id.get(), 3);
+    graph.rename_column("notes", "remarks", 30)?;
+    assert!(graph.working().column_by_name("remarks").is_some());
+    assert_eq!(graph.column_provenance()[2].column_id, notes_id);
+
+    graph.delete_column("remarks", 40)?;
+    assert!(graph.working().column_by_name("remarks").is_none());
+
+    // Replay + snapshot parity
+    let snap = graph.to_json()?;
+    let restored = DataGraph::from_json(&snap, 50)?;
+    assert!(tables_equal(graph.working(), restored.working()));
+
+    // Undo restores remarks column cleanly
+    graph.undo(60)?;
+    assert!(graph.working().column_by_name("remarks").is_some());
+    Ok(())
+}

@@ -11,7 +11,14 @@ export interface AnomalyPanelProps {
 
 const KIND_LABELS: Record<
   string,
-  { en: string; ar: string; severityEn: string; severityAr: string; reasonEn: string; reasonAr: string }
+  {
+    en: string;
+    ar: string;
+    severityEn: string;
+    severityAr: string;
+    reasonEn: string;
+    reasonAr: string;
+  }
 > = {
   MissingValue: {
     en: "Missing values",
@@ -19,7 +26,7 @@ const KIND_LABELS: Record<
     severityEn: "Medium",
     severityAr: "متوسطة",
     reasonEn: "Empty or recognized null sentinels found in column cells.",
-    reasonAr: "تم رصد خلايا فارغة أو قيم تدل على الفراغ داخل العمود.",
+    reasonAr: "تم رصد خلايا فارغة أو قيم تدل على الفراغ داخل العمود."
   },
   DuplicateRow: {
     en: "Duplicate rows",
@@ -27,7 +34,7 @@ const KIND_LABELS: Record<
     severityEn: "High",
     severityAr: "عالية",
     reasonEn: "Rows share an identical structural key across all columns.",
-    reasonAr: "صفوف متطابقة تمامًا عبر جميع الأعمدة.",
+    reasonAr: "صفوف متطابقة تمامًا عبر جميع الأعمدة."
   },
   InconsistentType: {
     en: "Mixed value types",
@@ -35,7 +42,7 @@ const KIND_LABELS: Record<
     severityEn: "Medium",
     severityAr: "متوسطة",
     reasonEn: "Column mixes numeric values with non-numeric text entries.",
-    reasonAr: "العمود يحتوي على قيم رقمية ونصوص غير رقمية معًا.",
+    reasonAr: "العمود يحتوي على قيم رقمية ونصوص غير رقمية معًا."
   },
   ImpossibleDate: {
     en: "Impossible calendar dates",
@@ -43,7 +50,7 @@ const KIND_LABELS: Record<
     severityEn: "High",
     severityAr: "عالية",
     reasonEn: "ISO date string fails real Gregorian month/leap-year day bounds.",
-    reasonAr: "صيغة التاريخ تتجاوز أيام الشهر الفعلية أو قواعد السنة الكبيسة.",
+    reasonAr: "صيغة التاريخ تتجاوز أيام الشهر الفعلية أو قواعد السنة الكبيسة."
   },
   StatisticalOutlier: {
     en: "Statistical outliers (1.5 × IQR)",
@@ -51,8 +58,8 @@ const KIND_LABELS: Record<
     severityEn: "Low (Review)",
     severityAr: "منخفضة (للمراجعة)",
     reasonEn: "Exact rust_decimal quantile detection outside 1.5 × interquartile range.",
-    reasonAr: "رصد دقيق عبر rust_decimal خارج نطاق 1.5 × المدى الربيعي.",
-  },
+    reasonAr: "رصد دقيق عبر rust_decimal خارج نطاق 1.5 × المدى الربيعي."
+  }
 };
 
 export function AnomalyPanel({
@@ -60,7 +67,7 @@ export function AnomalyPanel({
   anomalies,
   isMutating,
   onApplyFix,
-  onFocusRowId,
+  onFocusRowId
 }: AnomalyPanelProps): React.ReactElement {
   const isAr = language === "ar";
   const [fillValues, setFillValues] = useState<Record<string, string>>({});
@@ -113,12 +120,14 @@ export function AnomalyPanel({
             severityEn: "Info",
             severityAr: "تنبيه",
             reasonEn: item.methodKey,
-            reasonAr: item.methodKey,
+            reasonAr: item.methodKey
           };
           const rowIds = item.rowIds ?? [];
           const fillVal = fillValues[itemKey] ?? "0";
-          const canApplyFill = item.kind === "MissingValue" && Boolean(item.column) && rowIds.length > 0;
-          const canBlankDates = item.kind === "ImpossibleDate" && Boolean(item.column) && rowIds.length > 0;
+          const canApplyFill =
+            item.kind === "MissingValue" && Boolean(item.column) && rowIds.length > 0;
+          const canBlankDates =
+            item.kind === "ImpossibleDate" && Boolean(item.column) && rowIds.length > 0;
           const canDropDups = item.kind === "DuplicateRow" && rowIds.length > 0;
 
           return (
@@ -181,7 +190,7 @@ export function AnomalyPanel({
                               action: "fill_missing",
                               column: item.column as string,
                               row_ids: rowIds,
-                              replacement: fillVal,
+                              replacement: fillVal
                             })
                               .then(() => setPendingKey(null))
                               .catch((e) =>
@@ -226,12 +235,10 @@ export function AnomalyPanel({
                           void onApplyFix({
                             action: "blank_invalid_dates",
                             column: item.column as string,
-                            row_ids: rowIds,
+                            row_ids: rowIds
                           })
                             .then(() => setPendingKey(null))
-                            .catch((e) =>
-                              setErrorText(e instanceof Error ? e.message : String(e))
-                            );
+                            .catch((e) => setErrorText(e instanceof Error ? e.message : String(e)));
                         }}
                       >
                         {isAr ? "تأكيد تفريغ التواريخ المستحيلة" : "Confirm Clear Invalid Dates"}
@@ -269,12 +276,10 @@ export function AnomalyPanel({
                           setErrorText(null);
                           void onApplyFix({
                             action: "drop_duplicate_rows",
-                            row_ids: rowIds,
+                            row_ids: rowIds
                           })
                             .then(() => setPendingKey(null))
-                            .catch((e) =>
-                              setErrorText(e instanceof Error ? e.message : String(e))
-                            );
+                            .catch((e) => setErrorText(e instanceof Error ? e.message : String(e)));
                         }}
                       >
                         {isAr ? "تأكيد حذف الصفوف المكررة" : "Confirm Drop Duplicates"}

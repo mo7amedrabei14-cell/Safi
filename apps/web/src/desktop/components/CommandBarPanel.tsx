@@ -6,7 +6,7 @@ import {
   validateUntrustedDslPayload,
   type AiProviderConfig,
   type AiSchemaContext,
-  type StudioDslCommand,
+  type StudioDslCommand
 } from "../ai-interpreter";
 
 export interface CommandBarPanelProps {
@@ -26,11 +26,11 @@ const SAMPLE_DSL_COMMANDS: ReadonlyArray<{ labelEn: string; labelAr: string; jso
         id: "total_amount",
         name: "Total Amount",
         unit: "EGP",
-        formula: "SUM(amount)",
+        formula: "SUM(amount)"
       },
       null,
       2
-    ),
+    )
   },
   {
     labelEn: "Add calculated column",
@@ -39,11 +39,11 @@ const SAMPLE_DSL_COMMANDS: ReadonlyArray<{ labelEn: string; labelAr: string; jso
       {
         op: "add_calculated_column",
         name: "double_amount",
-        formula: "amount * 2",
+        formula: "amount * 2"
       },
       null,
       2
-    ),
+    )
   },
   {
     labelEn: "Sort descending",
@@ -52,19 +52,19 @@ const SAMPLE_DSL_COMMANDS: ReadonlyArray<{ labelEn: string; labelAr: string; jso
       {
         op: "sort_rows",
         column: "amount",
-        ascending: false,
+        ascending: false
       },
       null,
       2
-    ),
-  },
+    )
+  }
 ];
 
 export function CommandBarPanel({
   language,
   projectLoaded,
   schema,
-  onExecuteDsl,
+  onExecuteDsl
 }: CommandBarPanelProps): React.ReactElement {
   const isAr = language === "ar";
   const [promptInput, setPromptInput] = useState("");
@@ -144,7 +144,9 @@ export function CommandBarPanel({
     >
       <div className="studio-panel-header">
         <div>
-          <h3>{isAr ? "شريط الأوامر المهيكلة والذكاء الاصطناعي" : "Command Bar & AI Interpreter"}</h3>
+          <h3>
+            {isAr ? "شريط الأوامر المهيكلة والذكاء الاصطناعي" : "Command Bar & AI Interpreter"}
+          </h3>
           <p className="studio-muted-note">
             {isAr
               ? "الذكاء الاصطناعي يقترح أوامر DSL فقط ولا يحسب أي رقم؛ التنفيذ يتطلب موافقتك الصريحة ويُتحقق منه في Rust."
@@ -176,12 +178,14 @@ export function CommandBarPanel({
                 onChange={(e) =>
                   setProvider((prev) => ({
                     ...prev,
-                    kind: e.target.value as AiProviderConfig["kind"],
+                    kind: e.target.value as AiProviderConfig["kind"]
                   }))
                 }
               >
                 <option value="unconfigured">
-                  {isAr ? "بدون مزود (وضع عدم الاتصال الافتراضي)" : "Unconfigured (Offline Default)"}
+                  {isAr
+                    ? "بدون مزود (وضع عدم الاتصال الافتراضي)"
+                    : "Unconfigured (Offline Default)"}
                 </option>
                 <option value="openai_compatible">
                   {isAr ? "خادم محلي/معتمد متوافق مع OpenAI" : "Local/Approved OpenAI-Compatible"}
@@ -194,9 +198,7 @@ export function CommandBarPanel({
                 type="url"
                 value={provider.endpointUrl}
                 placeholder="http://127.0.0.1:11434/v1/chat/completions"
-                onChange={(e) =>
-                  setProvider((prev) => ({ ...prev, endpointUrl: e.target.value }))
-                }
+                onChange={(e) => setProvider((prev) => ({ ...prev, endpointUrl: e.target.value }))}
               />
             </label>
             <label>
@@ -205,9 +207,7 @@ export function CommandBarPanel({
                 type="text"
                 value={provider.modelName}
                 placeholder="qwen2.5:7b"
-                onChange={(e) =>
-                  setProvider((prev) => ({ ...prev, modelName: e.target.value }))
-                }
+                onChange={(e) => setProvider((prev) => ({ ...prev, modelName: e.target.value }))}
               />
             </label>
           </div>
@@ -218,7 +218,7 @@ export function CommandBarPanel({
               onChange={(e) =>
                 setProvider((prev) => ({
                   ...prev,
-                  consentedToSchemaContext: e.target.checked,
+                  consentedToSchemaContext: e.target.checked
                 }))
               }
             />

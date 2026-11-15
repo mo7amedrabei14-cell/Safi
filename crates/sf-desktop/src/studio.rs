@@ -23,8 +23,12 @@ use sf_core::table::Table;
 use sf_io::{read_csv_stream, read_excel_stream};
 use sf_recipe::datagraph::{AggFunc, ChangeOutcome, DataGraph, RowQuery, datagraph_display};
 use sf_recipe::studio_anomaly::{AnomalyFix, detect_anomalies};
-use sf_recipe::studio_capsule::{CapsuleChart, CapsuleOptions, export_capsule};
+use sf_recipe::studio_capsule::{
+    CapsuleAsset, CapsuleChart, CapsuleDocBlock, CapsuleFreeFormBlock, CapsuleOptions,
+    CapsuleSlide, export_capsule,
+};
 use sf_recipe::studio_dsl::{apply_command, parse_command, render_narrative};
+use sf_recipe::studio_templates::{TEMPLATES, instantiate as instantiate_tpl, template_by_id};
 
 /// Largest file the desktop app will import (`50 MiB`, matching the drop zone copy).
 pub const MAX_STUDIO_IMPORT_BYTES: u64 = 50 * 1024 * 1024;
@@ -35,10 +39,192 @@ pub const UNKNOWN_PROJECT_CODE: &str = "SF-SYS-015";
 /// Code returned when a capsule cannot be written next to the project.
 pub const EXPORT_FAILED_CODE: &str = "SF-SYS-016";
 
+/// Chart layout spec persisted inside a Studio project bundle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioChartArtifact {
+    /// Stable chart id.
+    pub id: String,
+    /// Display title.
+    pub title: String,
+    /// Aggregation (`SUM`, `AVG`, `COUNT`, `MIN`, `MAX`).
+    pub function: String,
+    /// Value column name.
+    pub column: String,
+    /// Group-by column name.
+    pub group_by: String,
+}
+
+/// Slide definition persisted inside a Studio project bundle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioSlideArtifact {
+    /// Stable slide id.
+    pub id: String,
+    /// Slide heading.
+    pub title: String,
+    /// Slide prose (may contain `{{metric:id}}`).
+    pub body: String,
+    /// Optional spotlight metric id.
+    pub metric_id: Option<String>,
+    /// Optional embedded chart index.
+    pub chart_index: Option<usize>,
+    /// Layout preset (`kpi_split`, `chart_focus`, `narrative`).
+    pub layout: String,
+}
+
+/// Document block persisted inside a Studio project bundle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioDocBlockArtifact {
+    /// Stable block id.
+    pub id: String,
+    /// Block kind (`heading`, `paragraph`, `metric_callout`, `callout`).
+    pub kind: String,
+    /// Block title.
+    pub title: String,
+    /// Block content (may contain `{{metric:id}}`).
+    pub content: String,
+    /// Optional metric reference id.
+    pub metric_id: Option<String>,
+    /// Authorship attribution (`user` or `ai`).
+    pub authored_by: String,
+}
+
+/// Positioned Free-Form Builder block persisted inside a Studio project bundle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioFreeFormBlockArtifact {
+    /// Stable block id.
+    pub id: String,
+    /// Block kind (`kpi`, `text`, `image`).
+    pub kind: String,
+    /// Block title.
+    pub title: String,
+    /// Block prose (may contain `{{metric:id}}`).
+    pub body: String,
+    /// Optional metric id.
+    pub metric_id: Option<String>,
+    /// Optional local asset id.
+    pub asset_id: Option<String>,
+    /// 1-based grid column (`1..=12`).
+    pub col: u8,
+    /// 1-based grid row (`1..=32`).
+    pub row: u8,
+    /// Column span (`1..=12`).
+    pub col_span: u8,
+    /// Row span (`1..=8`).
+    pub row_span: u8,
+    /// Layer ordering (`1..=50`).
+    pub z_index: u16,
+}
+
+/// Local raster asset persisted inside a Studio project bundle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioAssetArtifact {
+    /// Stable asset id.
+    pub id: String,
+    /// Alt / display name.
+    pub name: String,
+    /// Validated raster `data:image/...` URI.
+    pub data_uri: String,
+}
+
+/// Customized Living Template configuration per project.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioTemplateConfigArtifact {
+    /// Selected template id from `studio_templates::TEMPLATES`.
+    pub template_id: String,
+    /// Optional custom deck/report title.
+    pub title_override: Option<String>,
+    /// Mapping from template role (`headline`, `primary_metric`, etc.) to `MetricId`.
+    pub bindings: BTreeMap<String, String>,
+    /// Editable section heading overrides keyed by section `headingKey`.
+    pub section_overrides: BTreeMap<String, String>,
+}
+
+/// Complete Quad-Studio non-table creative artifacts for one project.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioWorkspaceArtifacts {
+    /// Dashboard charts.
+    pub charts: Vec<StudioChartArtifact>,
+    /// Keynote slides.
+    pub slides: Vec<StudioSlideArtifact>,
+    /// Smart Verified Document blocks.
+    pub doc_blocks: Vec<StudioDocBlockArtifact>,
+    /// Free-Form canvas blocks.
+    pub freeform_blocks: Vec<StudioFreeFormBlockArtifact>,
+    /// Embedded raster assets.
+    pub assets: Vec<StudioAssetArtifact>,
+    /// Living Template selection and customizations.
+    pub template_config: Option<StudioTemplateConfigArtifact>,
+}
+
+/// Integrity-checked project bundle persisted on local disk.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StudioProjectBundle {
+    schema_version: u32,
+    project_id: String,
+    display_name: String,
+    updated_at_ms: u64,
+    snapshot_json: String,
+    artifacts: StudioWorkspaceArtifacts,
+    checksum_blake3: String,
+}
+
+#[derive(serde::Serialize)]
+struct BundleChecksumPayload<'a> {
+    schema_version: u32,
+    project_id: &'a str,
+    display_name: &'a str,
+    updated_at_ms: u64,
+    snapshot_json: &'a str,
+    artifacts: &'a StudioWorkspaceArtifacts,
+}
+
+fn bundle_checksum(
+    schema_version: u32,
+    project_id: &str,
+    display_name: &str,
+    updated_at_ms: u64,
+    snapshot_json: &str,
+    artifacts: &StudioWorkspaceArtifacts,
+) -> Result<String, String> {
+    let encoded = serde_json::to_vec(&BundleChecksumPayload {
+        schema_version,
+        project_id,
+        display_name,
+        updated_at_ms,
+        snapshot_json,
+        artifacts,
+    })
+    .map_err(|_| "SF-SYS-001".to_owned())?;
+    Ok(sf_recipe::blake3_hex(&encoded))
+}
+
+fn validate_project_id(id: &str) -> Result<&str, String> {
+    let trimmed = id.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 64
+        || !trimmed
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+    {
+        return Err("SF-SYS-001".to_owned());
+    }
+    Ok(trimmed)
+}
+
 /// Open Studio projects, keyed by the identifier the UI chose.
 #[derive(Debug, Default)]
 pub struct StudioStore {
     projects: Mutex<BTreeMap<String, DataGraph>>,
+    artifacts: Mutex<BTreeMap<String, StudioWorkspaceArtifacts>>,
+    storage_dir: Mutex<Option<PathBuf>>,
 }
 
 impl StudioStore {
@@ -46,6 +232,39 @@ impl StudioStore {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a store backed by an atomic multi-project folder inside `dir`.
+    #[must_use]
+    pub fn with_storage_dir(dir: PathBuf) -> Self {
+        Self {
+            projects: Mutex::new(BTreeMap::new()),
+            artifacts: Mutex::new(BTreeMap::new()),
+            storage_dir: Mutex::new(Some(dir)),
+        }
+    }
+
+    fn resolve_storage_dir(&self) -> Result<PathBuf, String> {
+        let mut guard = self
+            .storage_dir
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        if let Some(existing) = guard.as_ref() {
+            fs::create_dir_all(existing).map_err(|_| EXPORT_FAILED_CODE.to_owned())?;
+            return Ok(existing.clone());
+        }
+        let fallback = std::env::temp_dir().join("safi-studio-projects");
+        fs::create_dir_all(&fallback).map_err(|_| EXPORT_FAILED_CODE.to_owned())?;
+        *guard = Some(fallback.clone());
+        Ok(fallback)
+    }
+
+    fn current_artifacts(&self, project: &str) -> StudioWorkspaceArtifacts {
+        self.artifacts
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project).cloned())
+            .unwrap_or_default()
     }
 
     /// Imports a CSV or Excel file from disk and replaces any project with the same id.
@@ -72,6 +291,7 @@ impl StudioStore {
     /// # Errors
     /// [`UNKNOWN_PROJECT_CODE`] when the project is not open.
     pub fn state(&self, project: &str) -> Result<String, String> {
+        let artifacts = self.current_artifacts(project);
         let projects = self
             .projects
             .lock()
@@ -79,7 +299,299 @@ impl StudioStore {
         let graph = projects
             .get(project)
             .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
-        state_json(graph)
+        state_json(graph, &artifacts)
+    }
+
+    /// Adds a new editable source column while preserving row and column provenance.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-SYS-001`.
+    pub fn add_source_column(
+        &self,
+        project: &str,
+        name: &str,
+        default_value: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        self.mutate(project, |graph| {
+            graph
+                .add_source_column(name, default_value, now_ms)
+                .map(|(_, outcome)| outcome)
+        })
+    }
+
+    /// Renames a working column cleanly while preserving its stable `ColumnId`.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-CAL-001`, or `SF-SYS-001`.
+    pub fn rename_column(
+        &self,
+        project: &str,
+        old_name: &str,
+        new_name: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        self.mutate(project, |graph| {
+            graph.rename_column(old_name, new_name, now_ms)
+        })
+    }
+
+    /// Deletes a working column (refuses deleting the final remaining column).
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-CAL-001`, or `SF-CAL-002`.
+    pub fn delete_column(&self, project: &str, name: &str, now_ms: u64) -> Result<String, String> {
+        self.mutate(project, |graph| graph.delete_column(name, now_ms))
+    }
+
+    /// Trims leading/trailing whitespace and collapses spaces across `column` atomically.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-CAL-001`.
+    pub fn trim_column(&self, project: &str, column: &str, now_ms: u64) -> Result<String, String> {
+        self.mutate(project, |graph| graph.trim_column(column, now_ms))
+    }
+
+    /// Updates the in-memory Quad-Studio creative artifacts (`charts`, `slides`, `docBlocks`,
+    /// `freeformBlocks`, `assets`, `templateConfig`) for an open project.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`] or `SF-CAL-002`.
+    pub fn set_artifacts(&self, project: &str, artifacts_json: &str) -> Result<String, String> {
+        let parsed: StudioWorkspaceArtifacts =
+            serde_json::from_str(artifacts_json).map_err(|_| "SF-CAL-002".to_owned())?;
+        {
+            let projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            if !projects.contains_key(project) {
+                return Err(UNKNOWN_PROJECT_CODE.to_owned());
+            }
+        }
+        {
+            let mut artifacts = self
+                .artifacts
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let _ = artifacts.insert(project.to_owned(), parsed);
+        }
+        self.state(project)
+    }
+
+    /// Saves the active project (origin, transforms, metrics, scenarios, and Quad-Studio artifacts)
+    /// atomically to local storage with a `BLAKE3` tamper-detection checksum.
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-SYS-001`, or [`EXPORT_FAILED_CODE`].
+    pub fn save_project_bundle(
+        &self,
+        project: &str,
+        saved_id: &str,
+        display_name: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let safe_id = validate_project_id(saved_id)?;
+        let snapshot_json = self.snapshot(project)?;
+        let artifacts = self.current_artifacts(project);
+        let dir = self.resolve_storage_dir()?;
+        let checksum_blake3 = bundle_checksum(
+            1,
+            safe_id,
+            display_name.trim(),
+            now_ms,
+            &snapshot_json,
+            &artifacts,
+        )?;
+        let bundle = StudioProjectBundle {
+            schema_version: 1,
+            project_id: safe_id.to_owned(),
+            display_name: display_name.trim().to_owned(),
+            updated_at_ms: now_ms,
+            snapshot_json,
+            artifacts,
+            checksum_blake3,
+        };
+        let encoded = serde_json::to_string(&bundle).map_err(|_| "SF-SYS-001".to_owned())?;
+        let target = dir.join(format!("{safe_id}.safi.json"));
+        write_atomic(&target, &encoded)?;
+        serde_json::to_string(&serde_json::json!({
+            "id": bundle.project_id,
+            "displayName": bundle.display_name,
+            "updatedAtMs": bundle.updated_at_ms,
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Lists saved local Studio project bundles without trusting corrupt payloads.
+    ///
+    /// # Errors
+    /// `SF-SYS-001` or [`EXPORT_FAILED_CODE`].
+    pub fn list_project_bundles(&self) -> Result<String, String> {
+        let dir = self.resolve_storage_dir()?;
+        let mut entries = Vec::new();
+        let read_dir = fs::read_dir(&dir).map_err(|_| EXPORT_FAILED_CODE.to_owned())?;
+        for item in read_dir {
+            let Ok(entry) = item else { continue };
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(raw) = fs::read_to_string(&path) else {
+                continue;
+            };
+            if let Ok(bundle) = serde_json::from_str::<StudioProjectBundle>(&raw) {
+                let valid = bundle_checksum(
+                    bundle.schema_version,
+                    &bundle.project_id,
+                    &bundle.display_name,
+                    bundle.updated_at_ms,
+                    &bundle.snapshot_json,
+                    &bundle.artifacts,
+                )
+                .is_ok_and(|c| c == bundle.checksum_blake3);
+                entries.push(serde_json::json!({
+                    "id": bundle.project_id,
+                    "displayName": bundle.display_name,
+                    "updatedAtMs": bundle.updated_at_ms,
+                    "validChecksum": valid,
+                }));
+            }
+        }
+        entries.sort_by(|a, b| {
+            let left = a["updatedAtMs"].as_u64().unwrap_or(0);
+            let right = b["updatedAtMs"].as_u64().unwrap_or(0);
+            right.cmp(&left)
+        });
+        serde_json::to_string(&entries).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Loads a saved `.safi.json` project bundle, checks `BLAKE3` integrity (`SF-CAL-008`),
+    /// restores both `DataGraph` and creative artifacts into `project`, and returns its state.
+    ///
+    /// # Errors
+    /// `SF-SYS-001` when missing/unreadable or `SF-CAL-008` on checksum mismatch.
+    pub fn load_project_bundle(
+        &self,
+        project: &str,
+        saved_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let safe_id = validate_project_id(saved_id)?;
+        let dir = self.resolve_storage_dir()?;
+        let path = dir.join(format!("{safe_id}.safi.json"));
+        let raw = fs::read_to_string(&path).map_err(|_| "SF-SYS-001".to_owned())?;
+        let bundle: StudioProjectBundle =
+            serde_json::from_str(&raw).map_err(|_| "SF-SYS-001".to_owned())?;
+        let expected = bundle_checksum(
+            bundle.schema_version,
+            &bundle.project_id,
+            &bundle.display_name,
+            bundle.updated_at_ms,
+            &bundle.snapshot_json,
+            &bundle.artifacts,
+        )?;
+        if expected != bundle.checksum_blake3 {
+            return Err("SF-CAL-008".to_owned());
+        }
+        let graph =
+            DataGraph::from_json(&bundle.snapshot_json, now_ms).map_err(|error| code_of(&error))?;
+        {
+            let mut projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let _ = projects.insert(project.to_owned(), graph);
+        }
+        {
+            let mut artifacts = self
+                .artifacts
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let _ = artifacts.insert(project.to_owned(), bundle.artifacts);
+        }
+        self.state(project)
+    }
+
+    /// Deletes a saved project bundle from local storage.
+    ///
+    /// # Errors
+    /// `SF-SYS-001` or [`EXPORT_FAILED_CODE`].
+    pub fn delete_project_bundle(&self, saved_id: &str) -> Result<String, String> {
+        let safe_id = validate_project_id(saved_id)?;
+        let dir = self.resolve_storage_dir()?;
+        let path = dir.join(format!("{safe_id}.safi.json"));
+        if path.exists() {
+            fs::remove_file(&path).map_err(|_| EXPORT_FAILED_CODE.to_owned())?;
+        }
+        self.list_project_bundles()
+    }
+
+    /// Lists all 5 built-in Living Templates cleanly for the desktop gallery.
+    ///
+    /// # Errors
+    /// `SF-SYS-001` on serialization error.
+    pub fn list_templates(&self) -> Result<String, String> {
+        let list = TEMPLATES
+            .iter()
+            .map(|tpl| {
+                let sections = tpl
+                    .sections
+                    .iter()
+                    .map(|sec| {
+                        serde_json::json!({
+                            "headingKey": sec.heading_key,
+                            "role": sec.role,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "id": tpl.id,
+                    "nameKey": tpl.name_key,
+                    "sections": sections,
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::to_string(&list).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Binds one of the 5 Living Templates to real verified metrics (`SF-CAL-006` if missing).
+    ///
+    /// # Errors
+    /// [`UNKNOWN_PROJECT_CODE`], `SF-CAL-002`, or `SF-CAL-006`.
+    pub fn instantiate_template(
+        &self,
+        project: &str,
+        template_id: &str,
+        bindings_json: &str,
+    ) -> Result<String, String> {
+        let tpl = template_by_id(template_id).ok_or_else(|| "SF-SYS-001".to_owned())?;
+        let raw_bindings: BTreeMap<String, String> =
+            serde_json::from_str(bindings_json).map_err(|_| "SF-CAL-002".to_owned())?;
+        let mut typed = BTreeMap::new();
+        for (role, metric_id) in raw_bindings {
+            let parsed_id = MetricId::new(&metric_id).map_err(|error| code_of(&error))?;
+            let _ = typed.insert(role, parsed_id);
+        }
+        let projects = self
+            .projects
+            .lock()
+            .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+        let graph = projects
+            .get(project)
+            .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+        let instantiated = instantiate_tpl(tpl, graph, &typed).map_err(|error| code_of(&error))?;
+        let payload = instantiated
+            .into_iter()
+            .map(|sec| {
+                serde_json::json!({
+                    "headingKey": sec.heading_key,
+                    "role": sec.role,
+                    "token": token_json(&sec.token),
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
     }
 
     /// Queries a bounded viewport page of working rows without transferring the full table.
@@ -559,6 +1071,7 @@ impl StudioStore {
     ) -> Result<String, String> {
         let options: CapsuleInput =
             serde_json::from_str(options_json).map_err(|_| "SF-CAL-002".to_owned())?;
+        let stored_artifacts = self.current_artifacts(project);
         let html = {
             let projects = self
                 .projects
@@ -578,12 +1091,121 @@ impl StudioStore {
                     group_by: chart.group_by,
                 });
             }
+            let slides_source = if options.slides.is_empty() {
+                stored_artifacts
+                    .slides
+                    .into_iter()
+                    .map(|s| CapsuleSlide {
+                        title: s.title,
+                        body: s.body,
+                        metric_id: s.metric_id,
+                    })
+                    .collect()
+            } else {
+                options
+                    .slides
+                    .into_iter()
+                    .map(|s| CapsuleSlide {
+                        title: s.title,
+                        body: s.body,
+                        metric_id: s.metric_id,
+                    })
+                    .collect()
+            };
+            let doc_source = if options.doc_blocks.is_empty() {
+                stored_artifacts
+                    .doc_blocks
+                    .into_iter()
+                    .map(|b| CapsuleDocBlock {
+                        kind: b.kind,
+                        title: b.title,
+                        content: b.content,
+                        authored_by: b.authored_by,
+                    })
+                    .collect()
+            } else {
+                options
+                    .doc_blocks
+                    .into_iter()
+                    .map(|b| CapsuleDocBlock {
+                        kind: b.kind,
+                        title: b.title,
+                        content: b.content,
+                        authored_by: b.authored_by,
+                    })
+                    .collect()
+            };
+            let ff_source = if options.freeform_blocks.is_empty() {
+                stored_artifacts
+                    .freeform_blocks
+                    .into_iter()
+                    .map(|f| CapsuleFreeFormBlock {
+                        kind: f.kind,
+                        title: f.title,
+                        body: f.body,
+                        metric_id: f.metric_id,
+                        asset_id: f.asset_id,
+                        col: f.col,
+                        row: f.row,
+                        col_span: f.col_span,
+                        row_span: f.row_span,
+                        z_index: f.z_index,
+                    })
+                    .collect()
+            } else {
+                options
+                    .freeform_blocks
+                    .into_iter()
+                    .map(|f| CapsuleFreeFormBlock {
+                        kind: f.kind,
+                        title: f.title,
+                        body: f.body,
+                        metric_id: f.metric_id,
+                        asset_id: f.asset_id,
+                        col: f.col,
+                        row: f.row,
+                        col_span: f.col_span,
+                        row_span: f.row_span,
+                        z_index: f.z_index,
+                    })
+                    .collect()
+            };
+            let assets_source = if options.assets.is_empty() {
+                stored_artifacts
+                    .assets
+                    .into_iter()
+                    .map(|a| CapsuleAsset {
+                        id: a.id,
+                        name: a.name,
+                        data_uri: a.data_uri,
+                    })
+                    .collect()
+            } else {
+                options
+                    .assets
+                    .into_iter()
+                    .map(|a| CapsuleAsset {
+                        id: a.id,
+                        name: a.name,
+                        data_uri: a.data_uri,
+                    })
+                    .collect()
+            };
             export_capsule(
                 graph,
                 &CapsuleOptions {
                     title: options.title,
                     created_at: options.created_at,
                     charts,
+                    slides: slides_source,
+                    doc_blocks: doc_source,
+                    freeform_blocks: ff_source,
+                    assets: assets_source,
+                    template_name: options.template_name.or_else(|| {
+                        stored_artifacts
+                            .template_config
+                            .map(|cfg| cfg.title_override.unwrap_or(cfg.template_id))
+                    }),
                 },
             )
             .map_err(|error| code_of(&error))?
@@ -654,6 +1276,16 @@ struct CapsuleInput {
     title: String,
     created_at: String,
     charts: Vec<CapsuleChartInput>,
+    #[serde(default)]
+    slides: Vec<StudioSlideArtifact>,
+    #[serde(default)]
+    doc_blocks: Vec<StudioDocBlockArtifact>,
+    #[serde(default)]
+    freeform_blocks: Vec<StudioFreeFormBlockArtifact>,
+    #[serde(default)]
+    assets: Vec<StudioAssetArtifact>,
+    #[serde(default)]
+    template_name: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -716,7 +1348,7 @@ fn read_table(path: &Path) -> Result<Table, String> {
 }
 
 /// Serializes the metadata & provenance state the desktop UI renders without dumping all rows.
-fn state_json(graph: &DataGraph) -> Result<String, String> {
+fn state_json(graph: &DataGraph, artifacts: &StudioWorkspaceArtifacts) -> Result<String, String> {
     let columns = graph
         .working()
         .columns()
@@ -806,6 +1438,7 @@ fn state_json(graph: &DataGraph) -> Result<String, String> {
             .iter()
             .map(|(name, value)| serde_json::json!({ "name": name, "value": value.normalize().to_string() }))
             .collect::<Vec<_>>(),
+        "artifacts": artifacts,
     });
     serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
 }
@@ -1088,5 +1721,100 @@ mod tests {
 
         let after_undo = json(&test_result(store.undo("a1", 3_000)));
         assert_eq!(after_undo["anomalies"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn multi_project_persistence_templates_column_ops_and_full_capsule_work() {
+        let directory = test_result(tempfile::tempdir());
+        let storage = directory.path().join("projects-storage");
+        let store = StudioStore::with_storage_dir(storage.clone());
+        let csv_path = directory.path().join("sales.csv");
+        test_result(fs::write(
+            &csv_path,
+            "region,amount\n  Cairo  ,100\nGiza,200\n",
+        ));
+        test_result(store.open_file("p1", &csv_path, 1_000));
+        test_result(store.trim_column("p1", "region", 1_100));
+        test_result(store.add_source_column("p1", "notes", "ok", 1_200));
+        test_result(store.rename_column("p1", "notes", "remarks", 1_300));
+        test_result(store.define_metric(
+            "p1",
+            "total_rev",
+            "Total Revenue",
+            Some("EGP"),
+            "SUM(amount)",
+            1_400,
+        ));
+
+        // Templates listing & strict instantiation
+        let tpls = json(&test_result(store.list_templates()));
+        assert_eq!(tpls.as_array().map(Vec::len), Some(5));
+        assert_eq!(
+            store.instantiate_template("p1", "boardroom-keynote", "{}"),
+            Err("SF-CAL-006".to_owned())
+        );
+        let inst = json(&test_result(store.instantiate_template(
+            "p1",
+            "boardroom-keynote",
+            r#"{"headline":"total_rev","primary_metric":"total_rev","secondary_metric":"total_rev","growth":"total_rev","risk":"total_rev"}"#,
+        )));
+        assert_eq!(inst.as_array().map(Vec::len), Some(5));
+
+        // Creative artifacts + persistent save/list/load/tamper check
+        let artifacts_json = r#"{
+            "charts":[{"id":"c1","title":"By Region","function":"SUM","column":"amount","groupBy":"region"}],
+            "slides":[{"id":"s1","title":"Overview","body":"Revenue {{metric:total_rev}}","metricId":"total_rev","layout":"kpi_split"}],
+            "docBlocks":[{"id":"d1","kind":"callout","title":"Decision","content":"Confirmed at {{metric:total_rev}}","authoredBy":"user"}],
+            "freeformBlocks":[{"id":"f1","kind":"kpi","title":"KPI","body":"{{metric:total_rev}}","metricId":"total_rev","col":1,"row":1,"colSpan":6,"rowSpan":2,"zIndex":1}],
+            "assets":[],
+            "templateConfig":{"templateId":"boardroom-keynote","titleOverride":"Q4 Board Deck","bindings":{"headline":"total_rev"},"sectionOverrides":{}}
+        }"#;
+        let updated = json(&test_result(store.set_artifacts("p1", artifacts_json)));
+        assert_eq!(
+            updated["artifacts"]["slides"].as_array().map(Vec::len),
+            Some(1)
+        );
+
+        test_result(store.save_project_bundle("p1", "q4_board", "Q4 Board", 2_000));
+        let listed = json(&test_result(store.list_project_bundles()));
+        assert_eq!(listed.as_array().map(Vec::len), Some(1));
+        assert_eq!(listed[0]["validChecksum"], serde_json::json!(true));
+
+        let reloaded = json(&test_result(
+            store.load_project_bundle("p2", "q4_board", 3_000),
+        ));
+        assert_eq!(reloaded["metrics"][0]["value"], serde_json::json!("300"));
+        assert_eq!(
+            reloaded["artifacts"]["docBlocks"].as_array().map(Vec::len),
+            Some(1)
+        );
+
+        // Full upgraded capsule uses stored artifacts + strict CSP without unsafe-inline
+        let out_capsule = directory.path().join("full.safi.html");
+        test_result(store.export_capsule(
+            "p2",
+            &out_capsule,
+            r#"{"title":"Full Q4","created_at":"2026-11-15T00:00:00Z","charts":[]}"#,
+        ));
+        let html = test_result(fs::read_to_string(&out_capsule));
+        assert!(html.contains("Q4 Board Deck"));
+        assert!(html.contains("Confirmed at 300"));
+        assert!(!html.contains("unsafe-inline"));
+
+        // Tamper bundle on disk -> SF-CAL-008 checksum rejection
+        let saved_path = storage.join("q4_board.safi.json");
+        let corrupted =
+            test_result(fs::read_to_string(&saved_path)).replace("Q4 Board", "Tampered");
+        test_result(fs::write(&saved_path, corrupted));
+        assert_eq!(
+            store.load_project_bundle("p3", "q4_board", 4_000),
+            Err("SF-CAL-008".to_owned())
+        );
+
+        // Delete column & delete bundle
+        test_result(store.delete_column("p1", "remarks", 5_000));
+        test_result(store.delete_project_bundle("q4_board"));
+        let empty_list = json(&test_result(store.list_project_bundles()));
+        assert_eq!(empty_list.as_array().map(Vec::len), Some(0));
     }
 }

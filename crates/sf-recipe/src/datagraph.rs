@@ -665,6 +665,32 @@ pub enum Transformation {
     },
     /// User-confirmed atomic anomaly remediation batch (undoable as one step).
     AnomalyFixBatch(AnomalyFix),
+    /// Add a new editable source column with monotonic [`ColumnId`].
+    AddSourceColumn {
+        /// Stable column identity.
+        column_id: ColumnId,
+        /// Column display name.
+        name: String,
+        /// Initial raw text filled into existing working rows.
+        default_value: String,
+    },
+    /// Rename an existing working column while preserving its stable [`ColumnId`].
+    RenameColumn {
+        /// Current column name.
+        old_name: String,
+        /// Replacement column name.
+        new_name: String,
+    },
+    /// Remove a working column without ever reusing its [`ColumnId`].
+    DeleteColumn {
+        /// Column name to drop.
+        name: String,
+    },
+    /// Trim leading/trailing and collapse internal whitespace on a column's cells atomically.
+    TrimColumn {
+        /// Target column name.
+        column: String,
+    },
 }
 
 impl Transformation {
@@ -673,8 +699,14 @@ impl Transformation {
             Self::SetCell { column, .. }
             | Self::SetCellByRowId { column, .. }
             | Self::SortRows { column, .. }
-            | Self::FilterRows { column, .. } => BTreeSet::from([column.clone()]),
-            Self::AddColumn { name, .. } => BTreeSet::from([name.clone()]),
+            | Self::FilterRows { column, .. }
+            | Self::TrimColumn { column } => BTreeSet::from([column.clone()]),
+            Self::AddColumn { name, .. }
+            | Self::AddSourceColumn { name, .. }
+            | Self::DeleteColumn { name } => BTreeSet::from([name.clone()]),
+            Self::RenameColumn { old_name, new_name } => {
+                BTreeSet::from([old_name.clone(), new_name.clone()])
+            }
             Self::DeleteRow { .. } => BTreeSet::new(),
             Self::InsertRow { values, .. } => values.keys().cloned().collect(),
             Self::AnomalyFixBatch(fix) => match fix {
@@ -742,6 +774,18 @@ impl Transformation {
                 let encoded = serde_json::to_string(fix).unwrap_or_default();
                 format!("fix:{}", blake3::hash(encoded.as_bytes()).to_hex())
             }
+            Self::AddSourceColumn {
+                column_id,
+                name,
+                default_value,
+            } => format!(
+                "addcol:{}:{name}:{}",
+                column_id.get(),
+                blake3::hash(default_value.as_bytes()).to_hex()
+            ),
+            Self::RenameColumn { old_name, new_name } => format!("ren:{old_name}:{new_name}"),
+            Self::DeleteColumn { name } => format!("delcol:{name}"),
+            Self::TrimColumn { column } => format!("trim:{column}"),
         };
         blake3::hash(payload.as_bytes()).to_hex().to_string()
     }
@@ -1239,6 +1283,126 @@ fn apply_transformation_step(
                 state.row_provenance = row_provenance;
             }
         },
+        Transformation::AddSourceColumn {
+            column_id,
+            name,
+            default_value,
+        } => {
+            let trimmed = name.trim();
+            if trimmed.is_empty()
+                || state
+                    .table
+                    .columns()
+                    .iter()
+                    .any(|c| c.schema().name == trimmed)
+            {
+                return Err(invalid_request());
+            }
+            let cells: Vec<CellValue> = (0..state.table.row_count())
+                .map(|_| CellValue::from_raw(default_value.clone()))
+                .collect();
+            state.table = append_column(&state.table, trimmed, cells)?;
+            state.next_column_id = state.next_column_id.max(column_id.get().saturating_add(1));
+            state.column_provenance.push(ColumnProvenance {
+                column_id: *column_id,
+                origin_column_index: None,
+                origin_name: None,
+                current_name: trimmed.to_owned(),
+            });
+            refresh_calculated_columns(&mut state.table, &state.active_calculated)?;
+        }
+        Transformation::RenameColumn { old_name, new_name } => {
+            let trimmed_new = new_name.trim();
+            if trimmed_new.is_empty()
+                || state
+                    .table
+                    .columns()
+                    .iter()
+                    .any(|c| c.schema().name == trimmed_new && c.schema().name != *old_name)
+            {
+                return Err(invalid_request());
+            }
+            let col_idx = state
+                .table
+                .columns()
+                .iter()
+                .position(|c| c.schema().name == *old_name)
+                .ok_or_else(unknown_column)?;
+            let mut columns = Vec::with_capacity(state.table.column_count());
+            for (idx, col) in state.table.columns().iter().enumerate() {
+                let mut schema = col.schema().clone();
+                if idx == col_idx {
+                    schema.name = trimmed_new.to_owned();
+                }
+                columns.push(Column::new(schema, col.cells().to_vec()));
+            }
+            state.table = Table::new(state.table.id(), state.table.name(), columns)?;
+            if let Some(prov) = state.column_provenance.get_mut(col_idx) {
+                prov.current_name = trimmed_new.to_owned();
+            }
+            for (calc_name, _) in &mut state.active_calculated {
+                if calc_name == old_name {
+                    *calc_name = trimmed_new.to_owned();
+                }
+            }
+        }
+        Transformation::DeleteColumn { name } => {
+            if state.table.column_count() <= 1 {
+                return Err(invalid_formula());
+            }
+            let col_idx = state
+                .table
+                .columns()
+                .iter()
+                .position(|c| c.schema().name == *name)
+                .ok_or_else(unknown_column)?;
+            let mut columns = Vec::with_capacity(state.table.column_count().saturating_sub(1));
+            for (idx, col) in state.table.columns().iter().enumerate() {
+                if idx == col_idx {
+                    continue;
+                }
+                let mut schema = col.schema().clone();
+                schema.index = columns.len();
+                columns.push(Column::new(schema, col.cells().to_vec()));
+            }
+            state.table = Table::new(state.table.id(), state.table.name(), columns)?;
+            if col_idx < state.column_provenance.len() {
+                let _ = state.column_provenance.remove(col_idx);
+            }
+            state
+                .active_calculated
+                .retain(|(calc_name, _)| calc_name != name);
+        }
+        Transformation::TrimColumn { column } => {
+            let col_idx = state
+                .table
+                .columns()
+                .iter()
+                .position(|c| c.schema().name == *column)
+                .ok_or_else(unknown_column)?;
+            let mut columns = Vec::with_capacity(state.table.column_count());
+            for (idx, existing) in state.table.columns().iter().enumerate() {
+                if idx == col_idx {
+                    let cells = existing
+                        .cells()
+                        .iter()
+                        .map(|cell| {
+                            let collapsed = cell
+                                .raw_text()
+                                .split_whitespace()
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            CellValue::from_raw(collapsed)
+                        })
+                        .collect();
+                    columns.push(Column::new(existing.schema().clone(), cells));
+                } else {
+                    columns.push(existing.clone());
+                }
+            }
+            state.table = Table::new(state.table.id(), state.table.name(), columns)?;
+            refresh_calculated_columns(&mut state.table, &state.active_calculated)?;
+        }
     }
     Ok(())
 }
@@ -1855,6 +2019,155 @@ impl DataGraph {
         })
     }
 
+    /// Adds a new editable source column with a monotonic [`ColumnId`].
+    ///
+    /// # Errors
+    /// `SF-SYS-001` when `name` is empty or collides with an existing column.
+    pub fn add_source_column(
+        &mut self,
+        name: &str,
+        default_value: &str,
+        now_ms: u64,
+    ) -> Result<(ColumnId, ChangeOutcome), SafiError> {
+        let column_id = ColumnId::from_raw(self.next_column_id);
+        let outcome = self.replay_add_source_column(column_id, name, default_value, now_ms)?;
+        Ok((column_id, outcome))
+    }
+
+    fn replay_add_source_column(
+        &mut self,
+        column_id: ColumnId,
+        name: &str,
+        default_value: &str,
+        now_ms: u64,
+    ) -> Result<ChangeOutcome, SafiError> {
+        let trimmed = name.trim();
+        let transformation = Transformation::AddSourceColumn {
+            column_id,
+            name: trimmed.to_owned(),
+            default_value: default_value.to_owned(),
+        };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.column_provenance = state.column_provenance;
+        self.next_column_id = self.next_column_id.max(column_id.get().saturating_add(1));
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: Vec::new(),
+            columns: vec![trimmed.to_owned()],
+        })
+    }
+
+    /// Renames a working column while preserving its stable [`ColumnId`].
+    ///
+    /// # Errors
+    /// `SF-CAL-001` when `old_name` does not exist or `SF-SYS-001` when `new_name` is invalid.
+    pub fn rename_column(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+        now_ms: u64,
+    ) -> Result<ChangeOutcome, SafiError> {
+        let trimmed = new_name.trim();
+        let transformation = Transformation::RenameColumn {
+            old_name: old_name.to_owned(),
+            new_name: trimmed.to_owned(),
+        };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.column_provenance = state.column_provenance;
+        self.calculated = state.active_calculated;
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: Vec::new(),
+            columns: vec![old_name.to_owned(), trimmed.to_owned()],
+        })
+    }
+
+    /// Deletes a working column (never deleting the final column; never reusing its [`ColumnId`]).
+    ///
+    /// # Errors
+    /// `SF-CAL-001` if unknown or `SF-CAL-002` when only one column remains.
+    pub fn delete_column(&mut self, name: &str, now_ms: u64) -> Result<ChangeOutcome, SafiError> {
+        let transformation = Transformation::DeleteColumn {
+            name: name.to_owned(),
+        };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.column_provenance = state.column_provenance;
+        self.calculated = state.active_calculated;
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: Vec::new(),
+            columns: vec![name.to_owned()],
+        })
+    }
+
+    /// Trims leading/trailing whitespace and collapses internal spaces across a column atomically.
+    ///
+    /// # Errors
+    /// `SF-CAL-001` when `column` does not exist.
+    pub fn trim_column(&mut self, column: &str, now_ms: u64) -> Result<ChangeOutcome, SafiError> {
+        let transformation = Transformation::TrimColumn {
+            column: column.to_owned(),
+        };
+        let mut state = MutableGraphState {
+            table: self.working.clone(),
+            row_provenance: self.row_provenance.clone(),
+            column_provenance: self.column_provenance.clone(),
+            active_calculated: self.calculated.clone(),
+            next_column_id: self.next_column_id,
+        };
+        apply_transformation_step(&mut state, &transformation)?;
+        self.working = state.table;
+        self.transforms.push(transformation);
+        self.redo.clear();
+        self.revision = self.revision.next();
+        self.refresh_all(now_ms);
+        Ok(ChangeOutcome {
+            revision: self.revision,
+            recomputed: self.last_recomputed.clone(),
+            rows: Vec::new(),
+            columns: vec![column.to_owned()],
+        })
+    }
+
     /// Appends a calculated column derived per row.
     ///
     /// # Errors
@@ -2355,6 +2668,22 @@ impl DataGraph {
                 }
                 Transformation::AnomalyFixBatch(fix) => {
                     graph.apply_anomaly_fix(fix.clone(), now_ms)?;
+                }
+                Transformation::AddSourceColumn {
+                    column_id,
+                    name,
+                    default_value,
+                } => {
+                    graph.replay_add_source_column(*column_id, name, default_value, now_ms)?;
+                }
+                Transformation::RenameColumn { old_name, new_name } => {
+                    graph.rename_column(old_name, new_name, now_ms)?;
+                }
+                Transformation::DeleteColumn { name } => {
+                    graph.delete_column(name, now_ms)?;
+                }
+                Transformation::TrimColumn { column } => {
+                    graph.trim_column(column, now_ms)?;
                 }
             }
         }

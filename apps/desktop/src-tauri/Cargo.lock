@@ -4077,6 +4077,7 @@ dependencies = [
 name = "sf-recipe"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "rust_decimal",
  "serde",
@@ -4084,6 +4085,7 @@ dependencies = [
  "sf-arabic",
  "sf-clean",
  "sf-core",
+ "sha2",
 ]
 
 [[package]]

@@ -8,14 +8,19 @@
  * In a browser the runtime guard renders a notice instead of the workspace, which keeps the
  * public site a showcase.
  */
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownUp,
   BarChart3,
   Download,
   FileSpreadsheet,
+  FileText,
+  FolderOpen,
+  Layers,
+  LayoutTemplate,
   Plus,
+  Presentation,
   Redo2,
   RefreshCw,
   Save,
@@ -26,17 +31,30 @@ import {
 } from "lucide-react";
 import "./desktop-studio.css";
 import type { SafiLang } from "../components/layout/FloatingGlassDock";
-import type { DesktopGroup, DesktopRowPage, DesktopStudioState } from "./studio-bridge";
+import type {
+  DesktopGroup,
+  DesktopRowPage,
+  DesktopStudioState,
+  StudioAssetArtifact,
+  StudioChartArtifact,
+  StudioDocBlockArtifact,
+  StudioFreeFormBlockArtifact,
+  StudioSlideArtifact,
+  StudioTemplateConfigArtifact,
+  StudioWorkspaceArtifacts
+} from "./studio-bridge";
 import {
   activateScenario,
   addCalculatedColumn,
   addScenario,
+  addSourceColumn,
   applyAnomalyFix,
   applyDslCommand,
   compareScenarios,
   createRequestTracker,
   defineMetric,
   defineParameter,
+  deleteColumn,
   deleteRow,
   exportCapsule,
   fetchRowsPage,
@@ -44,25 +62,54 @@ import {
   insertRow,
   isDesktopRuntime,
   isNewerOrEqualRevision,
+  loadProjectBundle,
   openProject,
   pickCapsuleOutputFile,
   pickInputFile,
   projectState,
   redo,
+  renameColumn,
   renameScenario,
   resetScenario,
   restoreProject,
+  saveProjectBundle,
+  setArtifacts,
   setCellById,
   setScenarioParameter,
   snapshot,
   sortRows,
+  trimColumn,
   undo,
   updateParameter
 } from "./studio-bridge";
 import { AnomalyPanel } from "./components/AnomalyPanel";
 import { CommandBarPanel } from "./components/CommandBarPanel";
+import { DashboardChartsView } from "./components/DashboardChartsView";
+import { FreeFormBuilderView } from "./components/FreeFormBuilderView";
+import { KeynoteSlidesView } from "./components/KeynoteSlidesView";
+import { listMissingMetricRefs } from "./components/NarrativeTextRenderer";
+import { TemplatesAndProjectsPanel } from "./components/TemplatesAndProjectsPanel";
+import { VerifiedDocView } from "./components/VerifiedDocView";
 import { VerifiedNumberChip } from "./components/VerifiedNumberChip";
 import { WhatIfPanel } from "./components/WhatIfPanel";
+
+type StudioMode = "sheet" | "dashboard" | "slides" | "doc" | "freeform" | "templates";
+const STUDIO_MODES: readonly StudioMode[] = [
+  "sheet",
+  "dashboard",
+  "slides",
+  "doc",
+  "freeform",
+  "templates"
+];
+const EMPTY_ARTIFACTS: StudioWorkspaceArtifacts = {
+  charts: [],
+  slides: [],
+  docBlocks: [],
+  freeformBlocks: [],
+  assets: [],
+  templateConfig: null
+};
 
 const PROJECT = "main";
 const SAVED_KEY = "safi.desktop.studio.snapshot.v1";
@@ -103,6 +150,11 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
   const [filterValue, setFilterValue] = useState("");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortAscending, setSortAscending] = useState(true);
+  const [mode, setMode] = useState<StudioMode>("sheet");
+  const [newColumnName, setNewColumnName] = useState("");
+  const [renameSource, setRenameSource] = useState("");
+  const [renameTarget, setRenameTarget] = useState("");
+  const [trimTarget, setTrimTarget] = useState("");
 
   const stateRef = useRef<DesktopStudioState | null>(null);
   stateRef.current = state;
@@ -269,14 +321,65 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
     });
   }, [L, groupBy.length, run]);
 
+  const artifacts = state?.artifacts ?? EMPTY_ARTIFACTS;
+  const metricsById = useMemo(
+    () => new Map((state?.metrics ?? []).map((metric) => [metric.id, metric])),
+    [state?.metrics]
+  );
+
+  const persistArtifacts = useCallback(
+    async (nextArtifacts: StudioWorkspaceArtifacts): Promise<void> => {
+      await run(() => setArtifacts(PROJECT, nextArtifacts));
+    },
+    [run]
+  );
+
+  const handleTabKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>): void => {
+      const idx = STUDIO_MODES.indexOf(mode);
+      if (idx < 0) {
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setMode(STUDIO_MODES[(idx + 1) % STUDIO_MODES.length] ?? "sheet");
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setMode(STUDIO_MODES[(idx - 1 + STUDIO_MODES.length) % STUDIO_MODES.length] ?? "sheet");
+      }
+    },
+    [mode]
+  );
+
   const writeCapsule = useCallback(async (): Promise<void> => {
+    const unresolved = [
+      ...artifacts.slides.flatMap((s) => listMissingMetricRefs(s.body, metricsById)),
+      ...artifacts.docBlocks.flatMap((b) => listMissingMetricRefs(b.content, metricsById)),
+      ...artifacts.freeformBlocks.flatMap((f) => listMissingMetricRefs(f.body, metricsById))
+    ];
+    if (unresolved.length > 0) {
+      setError(
+        L(
+          `[SF-CAL-006] تعذر التصدير لوجود مراجع مؤشرات مفقودة: ${Array.from(new Set(unresolved)).join(", ")}`,
+          `[SF-CAL-006] Export blocked by unresolved metric references: ${Array.from(new Set(unresolved)).join(", ")}`
+        )
+      );
+      return;
+    }
+
     setBusy(true);
     try {
       const target = await pickCapsuleOutputFile();
       if (target === null) {
         return;
       }
-      const charts =
+      const savedCharts = artifacts.charts.map((c) => ({
+        title: c.title,
+        function: c.function,
+        column: c.column,
+        group_by: c.groupBy
+      }));
+      const fallbackCharts =
         groupBy.length > 0 && valueColumn.length > 0
           ? [
               {
@@ -287,13 +390,19 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
               }
             ]
           : [];
+      const charts = savedCharts.length > 0 ? savedCharts : fallbackCharts;
       await exportCapsule(
         PROJECT,
         target,
         JSON.stringify({
           title: metricName.length > 0 ? metricName : "Safi capsule",
           created_at: new Date().toISOString(),
-          charts
+          charts,
+          slides: artifacts.slides,
+          doc_blocks: artifacts.docBlocks,
+          freeform_blocks: artifacts.freeformBlocks,
+          assets: artifacts.assets,
+          template_name: artifacts.templateConfig?.templateId ?? null
         })
       );
       setError(null);
@@ -302,7 +411,7 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
     } finally {
       setBusy(false);
     }
-  }, [aggregate, groupBy, metricName, valueColumn]);
+  }, [L, aggregate, artifacts, groupBy, metricName, metricsById, valueColumn]);
 
   if (!desktop) {
     return (
@@ -519,292 +628,554 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             onCompareScenarios={(left, right) => compareScenarios(PROJECT, left, right)}
           />
 
-          <div className="safi-desktop-studio__panel-head">
-            <h2>{L("الجدول الحي (مقسّم الصفحات)", "Live sheet (paginated)")}</h2>
+          <div
+            className="studio-tabs"
+            role="tablist"
+            aria-label={L("أوضاع الاستوديو الرباعي", "Quad-Studio workspaces")}
+            onKeyDown={handleTabKeyDown}
+          >
             <button
               type="button"
-              disabled={busy}
-              onClick={() => void run(() => insertRow(PROJECT, null, {}))}
+              role="tab"
+              aria-selected={mode === "sheet"}
+              className="studio-tab-btn"
+              onClick={() => setMode("sheet")}
             >
-              <Plus size={14} aria-hidden="true" /> {L("أضف صفاً", "Insert row")}
+              <FileSpreadsheet size={15} aria-hidden="true" /> {L("الجدول", "Sheet")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "dashboard"}
+              className="studio-tab-btn"
+              onClick={() => setMode("dashboard")}
+            >
+              <BarChart3 size={15} aria-hidden="true" /> {L("اللوحة", "Dashboard")} (
+              {artifacts.charts.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "slides"}
+              className="studio-tab-btn"
+              onClick={() => setMode("slides")}
+            >
+              <Presentation size={15} aria-hidden="true" /> {L("الشرائح", "Slides")} (
+              {artifacts.slides.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "doc"}
+              className="studio-tab-btn"
+              onClick={() => setMode("doc")}
+            >
+              <FileText size={15} aria-hidden="true" /> {L("المستند", "Doc")} (
+              {artifacts.docBlocks.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "freeform"}
+              className="studio-tab-btn"
+              onClick={() => setMode("freeform")}
+            >
+              <Layers size={15} aria-hidden="true" /> {L("اللوح الحر", "Canvas")} (
+              {artifacts.freeformBlocks.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "templates"}
+              className="studio-tab-btn"
+              onClick={() => setMode("templates")}
+            >
+              <LayoutTemplate size={15} aria-hidden="true" />{" "}
+              {L("القوالب والمشاريع", "Templates & Projects")}
             </button>
           </div>
 
-          <div className="safi-desktop-studio__form">
-            <label>
-              {L("بحث", "Search")}
-              <input
-                value={searchQuery}
-                onChange={(event) => {
-                  setSearchQuery(event.target.value);
-                  setPageOffset(0);
+          {mode === "dashboard" ? (
+            <div role="tabpanel" aria-label={L("اللوحة", "Dashboard")}>
+              <DashboardChartsView
+                language={lang}
+                project={PROJECT}
+                revision={state.revision}
+                activeScenario={state.activeScenario}
+                columns={state.columns}
+                metrics={state.metrics}
+                charts={artifacts.charts}
+                onUpdateCharts={(nextCharts: readonly StudioChartArtifact[]) => {
+                  void persistArtifacts({ ...artifacts, charts: nextCharts });
                 }}
-                placeholder={L("ابحث في الأعمدة...", "Search columns...")}
-              />
-            </label>
-            <label>
-              {L("تصفية العمود", "Filter column")}
-              <select
-                value={filterColumn}
-                onChange={(event) => {
-                  setFilterColumn(event.target.value);
+                onCrossFilter={(col, label) => {
+                  setFilterColumn(col);
+                  setFilterValue(label);
                   setPageOffset(0);
-                }}
-              >
-                <option value="">{L("الكل", "All")}</option>
-                {state.columns.map((col) => (
-                  <option key={col.id} value={col.name}>
-                    {col.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {L("قيمة التصفية", "Filter value")}
-              <input
-                value={filterValue}
-                onChange={(event) => {
-                  setFilterValue(event.target.value);
-                  setPageOffset(0);
+                  setMode("sheet");
                 }}
               />
-            </label>
-            <label>
-              {L("حجم الصفحة", "Page size")}
-              <select
-                value={pageLimit}
-                onChange={(event) => {
-                  setPageLimit(Number(event.target.value));
-                  setPageOffset(0);
-                }}
-              >
-                {PAGE_SIZES.map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="safi-desktop-studio__table-wrap">
-            <table className="safi-desktop-studio__table">
-              <thead>
-                <tr>
-                  <th scope="col">{L("هوية الصف", "Row ID")}</th>
-                  {state.columns.map((column) => (
-                    <th key={column.id} scope="col">
-                      <button
-                        type="button"
-                        className="safi-desktop-studio__col-sort"
-                        onClick={() => {
-                          if (sortColumn === column.name) {
-                            const nextAsc = !sortAscending;
-                            setSortAscending(nextAsc);
-                            void run(() => sortRows(PROJECT, column.name, nextAsc));
-                          } else {
-                            setSortColumn(column.name);
-                            setSortAscending(true);
-                            void run(() => sortRows(PROJECT, column.name, true));
-                          }
-                        }}
-                      >
-                        <span>{column.name}</span>
-                        <ArrowDownUp size={12} aria-hidden="true" />
-                      </button>
-                      {state.calculated.includes(column.name) ? (
-                        <span className="safi-desktop-studio__calc">
-                          {" "}
-                          · {L("محسوب", "computed")}
-                        </span>
-                      ) : null}
-                    </th>
-                  ))}
-                  <th scope="col">{L("إجراء", "Action")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(rowPage?.rows ?? []).map((rowItem) => (
-                  <tr key={rowItem.row_id}>
-                    <td>
-                      <span className="safi-desktop-studio__rowid">
-                        r{rowItem.row_id}
-                        {rowItem.origin_row_id !== null
-                          ? ` (src r${rowItem.origin_row_id})`
-                          : ` (${L("جديد", "new")})`}
-                      </span>
-                    </td>
-                    {rowItem.cells.map((cell, columnIndex) => {
-                      const columnLabel = state.columns[columnIndex]?.name ?? "";
-                      const editable = !state.calculated.includes(columnLabel);
-                      return (
-                        <td
-                          key={`${rowItem.row_id}-${columnLabel}`}
-                          data-changed={cell.changed ? "true" : undefined}
-                        >
-                          {editable ? (
-                            <input
-                              key={`${rowItem.row_id}-${columnLabel}-${state.revision}`}
-                              defaultValue={cell.raw}
-                              aria-label={`${columnLabel} r${rowItem.row_id}`}
-                              onBlur={(event) => {
-                                if (event.target.value !== cell.raw) {
-                                  const nextVal = event.target.value;
-                                  void run(() =>
-                                    setCellById(
-                                      PROJECT,
-                                      rowItem.row_id,
-                                      columnLabel,
-                                      nextVal,
-                                      state.revision
-                                    )
-                                  );
-                                }
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.currentTarget.blur();
-                                }
-                              }}
-                            />
-                          ) : (
-                            <span>{cell.visible}</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td>
-                      <button
-                        type="button"
-                        aria-label={`${L("حذف", "Delete")} r${rowItem.row_id}`}
-                        disabled={busy}
-                        onClick={() => void run(() => deleteRow(PROJECT, rowItem.row_id))}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {rowPage !== null ? (
-            <div className="safi-desktop-studio__pager">
-              <button
-                type="button"
-                disabled={pageOffset === 0}
-                onClick={() => setPageOffset(Math.max(0, pageOffset - pageLimit))}
-              >
-                {L("السابق", "Previous")}
-              </button>
-              <span>
-                {rowPage.filtered_rows === 0
-                  ? L("0 صفوف مطابقة", "0 matching rows")
-                  : `${rowPage.offset + 1}–${rowPage.offset + rowPage.rows.length} / ${rowPage.filtered_rows} (${L("الإجمالي", "total")}: ${rowPage.total_rows})`}
-              </span>
-              <button
-                type="button"
-                disabled={rowPage.offset + rowPage.rows.length >= rowPage.filtered_rows}
-                onClick={() => setPageOffset(pageOffset + pageLimit)}
-              >
-                {L("التالي", "Next")}
-              </button>
             </div>
           ) : null}
 
-          <h2>{L("اللوحة (تحديث تفاعلي)", "Dashboard (reactive)")}</h2>
-          <div className="safi-desktop-studio__form">
-            <label>
-              {L("التجميع", "Aggregate")}
-              <select
-                value={aggregate}
-                onChange={(event) => setAggregate(event.target.value as Aggregate)}
-              >
-                {AGGREGATES.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {L("العمود", "Column")}
-              <select value={valueColumn} onChange={(event) => setValueColumn(event.target.value)}>
-                {state.columns.map((column) => (
-                  <option key={column.id} value={column.name}>
-                    {column.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {L("التجميع حسب", "Group by")}
-              <select value={groupBy} onChange={(event) => setGroupBy(event.target.value)}>
-                {state.columns.map((column) => (
-                  <option key={column.id} value={column.name}>
-                    {column.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" onClick={() => void loadChart()} disabled={busy}>
-              <BarChart3 size={16} aria-hidden="true" /> {L("حدّث الرسم", "Refresh chart")}
-            </button>
-          </div>
-          <div className="safi-desktop-studio__bars">
-            {groups.map((group) => {
-              const numeric = Number(group.value);
-              const maximum = Math.max(
-                ...groups.map((candidate) => Math.abs(Number(candidate.value))),
-                1
-              );
-              const width = Number.isFinite(numeric)
-                ? Math.round((Math.abs(numeric) / maximum) * 100)
-                : 0;
-              return (
-                <div key={group.label} className="safi-desktop-studio__bar">
-                  <span>{group.label}</span>
-                  <div className="safi-desktop-studio__track">
-                    <div className="safi-desktop-studio__fill" style={{ width: `${width}%` }} />
-                  </div>
-                  <strong>{group.value}</strong>
-                </div>
-              );
-            })}
-          </div>
-          {groups.length > 0 ? (
-            <p className="safi-desktop-studio__note">
-              {L(
-                "القيم مجمّعة في Rust وتُحدَّث تلقائياً عند كل تعديل؛ الواجهة ترسم النسبة فقط.",
-                "Values are aggregated in Rust and update automatically on every edit; the UI only draws ratios."
-              )}
-            </p>
+          {mode === "slides" ? (
+            <div role="tabpanel" aria-label={L("الشرائح", "Slides")}>
+              <KeynoteSlidesView
+                language={lang}
+                metrics={state.metrics}
+                slides={artifacts.slides}
+                onUpdateSlides={(nextSlides: readonly StudioSlideArtifact[]) => {
+                  void persistArtifacts({ ...artifacts, slides: nextSlides });
+                }}
+              />
+            </div>
           ) : null}
 
-          <h2>{L("لوحة الأوامر والذكاء الاصطناعي", "Command Bar & AI Interpreter")}</h2>
-          <CommandBarPanel
-            language={lang}
-            projectLoaded={state !== null}
-            schema={{
-              columns: state.columns.map((c) => ({ name: c.name, type: c.type })),
-              metricIds: state.metrics.map((m) => m.id),
-              parameterNames: state.parameters.map((p) => p.name)
-            }}
-            onExecuteDsl={(dslJson) => run(() => applyDslCommand(PROJECT, dslJson))}
-          />
+          {mode === "doc" ? (
+            <div role="tabpanel" aria-label={L("المستند", "Doc")}>
+              <VerifiedDocView
+                language={lang}
+                metrics={state.metrics}
+                docBlocks={artifacts.docBlocks}
+                onUpdateDocBlocks={(nextBlocks: readonly StudioDocBlockArtifact[]) => {
+                  void persistArtifacts({ ...artifacts, docBlocks: nextBlocks });
+                }}
+              />
+            </div>
+          ) : null}
 
-          <h2>{L("جودة البيانات", "Data quality")}</h2>
-          <AnomalyPanel
-            language={lang}
-            anomalies={state.anomalies}
-            isMutating={busy}
-            onApplyFix={(fix) => run(() => applyAnomalyFix(PROJECT, fix, state.revision))}
-            onFocusRowId={(rowId) => {
-              setSearchQuery(String(rowId));
-              setPageOffset(0);
-            }}
-          />
+          {mode === "freeform" ? (
+            <div role="tabpanel" aria-label={L("اللوح الحر", "Canvas")}>
+              <FreeFormBuilderView
+                language={lang}
+                metrics={state.metrics}
+                freeformBlocks={artifacts.freeformBlocks}
+                assets={artifacts.assets}
+                onUpdateFreeForm={(
+                  nextBlocks: readonly StudioFreeFormBlockArtifact[],
+                  nextAssets: readonly StudioAssetArtifact[]
+                ) => {
+                  void persistArtifacts({
+                    ...artifacts,
+                    freeformBlocks: nextBlocks,
+                    assets: nextAssets
+                  });
+                }}
+              />
+            </div>
+          ) : null}
+
+          {mode === "templates" ? (
+            <div role="tabpanel" aria-label={L("القوالب والمشاريع", "Templates & Projects")}>
+              <TemplatesAndProjectsPanel
+                language={lang}
+                project={PROJECT}
+                projectLoaded={state !== null}
+                metrics={state.metrics}
+                currentTemplateConfig={artifacts.templateConfig}
+                onApplyTemplateToWorkspace={(
+                  templateConfig: StudioTemplateConfigArtifact,
+                  generatedSlides: readonly StudioSlideArtifact[],
+                  generatedDocBlocks: readonly StudioDocBlockArtifact[]
+                ) => {
+                  void persistArtifacts({
+                    ...artifacts,
+                    slides: generatedSlides,
+                    docBlocks: generatedDocBlocks,
+                    templateConfig
+                  });
+                }}
+                onSaveBundle={async (savedId: string, displayName: string) => {
+                  await saveProjectBundle(PROJECT, savedId, displayName);
+                }}
+                onLoadBundle={async (savedId: string) => {
+                  await run(() => loadProjectBundle(PROJECT, savedId));
+                }}
+              />
+            </div>
+          ) : null}
+
+          {mode === "sheet" ? (
+            <>
+              <div className="safi-desktop-studio__panel-head">
+                <h2>{L("الجدول الحي (مقسّم الصفحات)", "Live sheet (paginated)")}</h2>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run(() => insertRow(PROJECT, null, {}))}
+                >
+                  <Plus size={14} aria-hidden="true" /> {L("أضف صفاً", "Insert row")}
+                </button>
+              </div>
+
+              <div className="safi-desktop-studio__form">
+                <label>
+                  {L("إضافة عمود مصدر", "Add source column")}
+                  <input
+                    value={newColumnName}
+                    onChange={(event) => setNewColumnName(event.target.value)}
+                    placeholder={L("اسم العمود...", "Column name...")}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || newColumnName.trim().length === 0}
+                  onClick={() => {
+                    const name = newColumnName.trim();
+                    setNewColumnName("");
+                    void run(() => addSourceColumn(PROJECT, name));
+                  }}
+                >
+                  <FolderOpen size={14} aria-hidden="true" /> {L("إضافة عمود", "Add column")}
+                </button>
+                <label>
+                  {L("العمود المستهدف", "Target column")}
+                  <select
+                    value={renameSource}
+                    onChange={(event) => setRenameSource(event.target.value)}
+                  >
+                    <option value="">{L("اختر عموداً...", "Pick column...")}</option>
+                    {state.columns.map((col) => (
+                      <option key={col.id} value={col.name}>
+                        {col.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  {L("الاسم الجديد", "New name")}
+                  <input
+                    value={renameTarget}
+                    onChange={(event) => setRenameTarget(event.target.value)}
+                    placeholder={L("اسم بديل...", "Renamed column...")}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || renameSource.length === 0 || renameTarget.trim().length === 0}
+                  onClick={() => {
+                    const from = renameSource;
+                    const to = renameTarget.trim();
+                    setRenameTarget("");
+                    void run(() => renameColumn(PROJECT, from, to));
+                  }}
+                >
+                  {L("إعادة تسمية", "Rename column")}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || renameSource.length === 0}
+                  onClick={() => {
+                    const target = renameSource;
+                    setRenameSource("");
+                    void run(() => deleteColumn(PROJECT, target));
+                  }}
+                >
+                  {L("حذف العمود", "Delete column")}
+                </button>
+                <label>
+                  {L("تنظيف الفراغات", "Trim whitespace")}
+                  <select
+                    value={trimTarget}
+                    onChange={(event) => setTrimTarget(event.target.value)}
+                  >
+                    <option value="">{L("اختر عموداً...", "Pick column...")}</option>
+                    {state.columns.map((col) => (
+                      <option key={col.id} value={col.name}>
+                        {col.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || trimTarget.length === 0}
+                  onClick={() => void run(() => trimColumn(PROJECT, trimTarget))}
+                >
+                  {L("تنظيف العمود", "Trim column")}
+                </button>
+              </div>
+
+              <div className="safi-desktop-studio__form">
+                <label>
+                  {L("بحث", "Search")}
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => {
+                      setSearchQuery(event.target.value);
+                      setPageOffset(0);
+                    }}
+                    placeholder={L("ابحث في الأعمدة...", "Search columns...")}
+                  />
+                </label>
+                <label>
+                  {L("تصفية العمود", "Filter column")}
+                  <select
+                    value={filterColumn}
+                    onChange={(event) => {
+                      setFilterColumn(event.target.value);
+                      setPageOffset(0);
+                    }}
+                  >
+                    <option value="">{L("الكل", "All")}</option>
+                    {state.columns.map((col) => (
+                      <option key={col.id} value={col.name}>
+                        {col.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  {L("قيمة التصفية", "Filter value")}
+                  <input
+                    value={filterValue}
+                    onChange={(event) => {
+                      setFilterValue(event.target.value);
+                      setPageOffset(0);
+                    }}
+                  />
+                </label>
+                <label>
+                  {L("حجم الصفحة", "Page size")}
+                  <select
+                    value={pageLimit}
+                    onChange={(event) => {
+                      setPageLimit(Number(event.target.value));
+                      setPageOffset(0);
+                    }}
+                  >
+                    {PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="safi-desktop-studio__table-wrap">
+                <table className="safi-desktop-studio__table">
+                  <thead>
+                    <tr>
+                      <th scope="col">{L("هوية الصف", "Row ID")}</th>
+                      {state.columns.map((column) => (
+                        <th key={column.id} scope="col">
+                          <button
+                            type="button"
+                            className="safi-desktop-studio__col-sort"
+                            onClick={() => {
+                              if (sortColumn === column.name) {
+                                const nextAsc = !sortAscending;
+                                setSortAscending(nextAsc);
+                                void run(() => sortRows(PROJECT, column.name, nextAsc));
+                              } else {
+                                setSortColumn(column.name);
+                                setSortAscending(true);
+                                void run(() => sortRows(PROJECT, column.name, true));
+                              }
+                            }}
+                          >
+                            <span>{column.name}</span>
+                            <ArrowDownUp size={12} aria-hidden="true" />
+                          </button>
+                          {state.calculated.includes(column.name) ? (
+                            <span className="safi-desktop-studio__calc">
+                              {" "}
+                              · {L("محسوب", "computed")}
+                            </span>
+                          ) : null}
+                        </th>
+                      ))}
+                      <th scope="col">{L("إجراء", "Action")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(rowPage?.rows ?? []).map((rowItem) => (
+                      <tr key={rowItem.row_id}>
+                        <td>
+                          <span className="safi-desktop-studio__rowid">
+                            r{rowItem.row_id}
+                            {rowItem.origin_row_id !== null
+                              ? ` (src r${rowItem.origin_row_id})`
+                              : ` (${L("جديد", "new")})`}
+                          </span>
+                        </td>
+                        {rowItem.cells.map((cell, columnIndex) => {
+                          const columnLabel = state.columns[columnIndex]?.name ?? "";
+                          const editable = !state.calculated.includes(columnLabel);
+                          return (
+                            <td
+                              key={`${rowItem.row_id}-${columnLabel}`}
+                              data-changed={cell.changed ? "true" : undefined}
+                            >
+                              {editable ? (
+                                <input
+                                  key={`${rowItem.row_id}-${columnLabel}-${state.revision}`}
+                                  defaultValue={cell.raw}
+                                  aria-label={`${columnLabel} r${rowItem.row_id}`}
+                                  onBlur={(event) => {
+                                    if (event.target.value !== cell.raw) {
+                                      const nextVal = event.target.value;
+                                      void run(() =>
+                                        setCellById(
+                                          PROJECT,
+                                          rowItem.row_id,
+                                          columnLabel,
+                                          nextVal,
+                                          state.revision
+                                        )
+                                      );
+                                    }
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.currentTarget.blur();
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <span>{cell.visible}</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td>
+                          <button
+                            type="button"
+                            aria-label={`${L("حذف", "Delete")} r${rowItem.row_id}`}
+                            disabled={busy}
+                            onClick={() => void run(() => deleteRow(PROJECT, rowItem.row_id))}
+                          >
+                            <Trash2 size={14} aria-hidden="true" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {rowPage !== null ? (
+                <div className="safi-desktop-studio__pager">
+                  <button
+                    type="button"
+                    disabled={pageOffset === 0}
+                    onClick={() => setPageOffset(Math.max(0, pageOffset - pageLimit))}
+                  >
+                    {L("السابق", "Previous")}
+                  </button>
+                  <span>
+                    {rowPage.filtered_rows === 0
+                      ? L("0 صفوف مطابقة", "0 matching rows")
+                      : `${rowPage.offset + 1}–${rowPage.offset + rowPage.rows.length} / ${rowPage.filtered_rows} (${L("الإجمالي", "total")}: ${rowPage.total_rows})`}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={rowPage.offset + rowPage.rows.length >= rowPage.filtered_rows}
+                    onClick={() => setPageOffset(pageOffset + pageLimit)}
+                  >
+                    {L("التالي", "Next")}
+                  </button>
+                </div>
+              ) : null}
+
+              <h2>{L("اللوحة (تحديث تفاعلي)", "Dashboard (reactive)")}</h2>
+              <div className="safi-desktop-studio__form">
+                <label>
+                  {L("التجميع", "Aggregate")}
+                  <select
+                    value={aggregate}
+                    onChange={(event) => setAggregate(event.target.value as Aggregate)}
+                  >
+                    {AGGREGATES.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  {L("العمود", "Column")}
+                  <select
+                    value={valueColumn}
+                    onChange={(event) => setValueColumn(event.target.value)}
+                  >
+                    {state.columns.map((column) => (
+                      <option key={column.id} value={column.name}>
+                        {column.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  {L("التجميع حسب", "Group by")}
+                  <select value={groupBy} onChange={(event) => setGroupBy(event.target.value)}>
+                    {state.columns.map((column) => (
+                      <option key={column.id} value={column.name}>
+                        {column.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="button" onClick={() => void loadChart()} disabled={busy}>
+                  <BarChart3 size={16} aria-hidden="true" /> {L("حدّث الرسم", "Refresh chart")}
+                </button>
+              </div>
+              <div className="safi-desktop-studio__bars">
+                {groups.map((group) => {
+                  const numeric = Number(group.value);
+                  const maximum = Math.max(
+                    ...groups.map((candidate) => Math.abs(Number(candidate.value))),
+                    1
+                  );
+                  const width = Number.isFinite(numeric)
+                    ? Math.round((Math.abs(numeric) / maximum) * 100)
+                    : 0;
+                  return (
+                    <div key={group.label} className="safi-desktop-studio__bar">
+                      <span>{group.label}</span>
+                      <div className="safi-desktop-studio__track">
+                        <div className="safi-desktop-studio__fill" style={{ width: `${width}%` }} />
+                      </div>
+                      <strong>{group.value}</strong>
+                    </div>
+                  );
+                })}
+              </div>
+              {groups.length > 0 ? (
+                <p className="safi-desktop-studio__note">
+                  {L(
+                    "القيم مجمّعة في Rust وتُحدَّث تلقائياً عند كل تعديل؛ الواجهة ترسم النسبة فقط.",
+                    "Values are aggregated in Rust and update automatically on every edit; the UI only draws ratios."
+                  )}
+                </p>
+              ) : null}
+
+              <h2>{L("لوحة الأوامر والذكاء الاصطناعي", "Command Bar & AI Interpreter")}</h2>
+              <CommandBarPanel
+                language={lang}
+                projectLoaded={state !== null}
+                schema={{
+                  columns: state.columns.map((c) => ({ name: c.name, type: c.type })),
+                  metricIds: state.metrics.map((m) => m.id),
+                  parameterNames: state.parameters.map((p) => p.name)
+                }}
+                onExecuteDsl={(dslJson) => run(() => applyDslCommand(PROJECT, dslJson))}
+              />
+
+              <h2>{L("جودة البيانات", "Data quality")}</h2>
+              <AnomalyPanel
+                language={lang}
+                anomalies={state.anomalies}
+                isMutating={busy}
+                onApplyFix={(fix) => run(() => applyAnomalyFix(PROJECT, fix, state.revision))}
+                onFocusRowId={(rowId) => {
+                  setSearchQuery(String(rowId));
+                  setPageOffset(0);
+                }}
+              />
+            </>
+          ) : null}
         </>
       )}
     </section>

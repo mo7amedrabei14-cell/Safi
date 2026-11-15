@@ -5,18 +5,28 @@
 //! only, so there is no script execution surface for untrusted text and no CDN, font, or API
 //! dependency.
 //!
+//! CSP uses an exact SHA-256 digest of the single `<style>` block in `<head>` with zero
+//! `'unsafe-inline'`, zero `'unsafe-eval'`, and zero inline `style=""` attributes.
+//!
 //! Every number in the file was computed by Rust at export time and carries its metric name,
-//! formula, formula version, dataset version, and `BLAKE3` fingerprint. The file states plainly
-//! that it is a snapshot: editing it never flows back into the Safi project, and a filtered view
-//! only selects between aggregates Rust already computed.
+//! formula, formula version, dataset version, and `BLAKE3` fingerprint. Any `{{metric:id}}`
+//! placeholder in Slides or Narrative Document blocks is resolved strictly via
+//! [`crate::studio_dsl::render_narrative_strict`]; unresolved references block export (`SF-CAL-006`).
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use rust_decimal::Decimal;
 use sf_core::error::{ErrorCode, ErrorSeverity, SafiError};
+use sha2::{Digest as _, Sha256};
 
 use crate::datagraph::{AggFunc, DataGraph, datagraph_display};
+use crate::studio_dsl::render_narrative_strict;
 
-/// Maximum accepted size of the generated document (8 MiB).
+/// Maximum accepted size of the generated document (`8 MiB`).
 pub const MAX_CAPSULE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Maximum single embedded raster asset size (`1 MiB`).
+pub const MAX_ASSET_DATA_URI_BYTES: usize = 1024 * 1024;
 
 /// A chart the caller wants inside the capsule. Aggregation happens in Rust, not in the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,8 +41,68 @@ pub struct CapsuleChart {
     pub group_by: String,
 }
 
+/// A slide from the Quad-Studio Slides editor.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CapsuleSlide {
+    /// Slide heading.
+    pub title: String,
+    /// Slide prose (supports `{{metric:id}}` placeholders).
+    pub body: String,
+    /// Optional primary metric identifier showcased on the slide.
+    pub metric_id: Option<String>,
+}
+
+/// A rich block from the Quad-Studio Smart Verified Document editor.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CapsuleDocBlock {
+    /// Block kind (`heading`, `paragraph`, `metric_callout`, `callout`).
+    pub kind: String,
+    /// Block heading or label.
+    pub title: String,
+    /// Block text (supports `{{metric:id}}` placeholders).
+    pub content: String,
+    /// Authorship badge (`user` or `ai`).
+    pub authored_by: String,
+}
+
+/// A positioned block from the Custom Free-Form Builder canvas.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CapsuleFreeFormBlock {
+    /// Block kind (`kpi`, `text`, `image`).
+    pub kind: String,
+    /// Heading shown inside the block.
+    pub title: String,
+    /// Prose body (supports `{{metric:id}}` placeholders).
+    pub body: String,
+    /// Optional referenced metric ID.
+    pub metric_id: Option<String>,
+    /// Optional local raster asset ID.
+    pub asset_id: Option<String>,
+    /// 1-based grid column (`1..=12`).
+    pub col: u8,
+    /// 1-based grid row (`1..=32`).
+    pub row: u8,
+    /// Column span (`1..=12`).
+    pub col_span: u8,
+    /// Row span (`1..=8`).
+    pub row_span: u8,
+    /// Visual stacking order (`1..=50`).
+    pub z_index: u16,
+}
+
+/// An offline raster image embedded locally as a verified `data:image/...` URI.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CapsuleAsset {
+    /// Stable asset identifier referenced by free-form or doc blocks.
+    pub id: String,
+    /// Accessible alt label.
+    pub name: String,
+    /// Validated `data:image/png|jpeg|webp;base64,...` URI.
+    pub data_uri: String,
+}
+
 /// Options for [`export_capsule`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CapsuleOptions {
     /// Project title shown in the header.
     pub title: String,
@@ -40,6 +110,16 @@ pub struct CapsuleOptions {
     pub created_at: String,
     /// Dashboard charts.
     pub charts: Vec<CapsuleChart>,
+    /// Deck slides.
+    pub slides: Vec<CapsuleSlide>,
+    /// Narrative report blocks.
+    pub doc_blocks: Vec<CapsuleDocBlock>,
+    /// Free-form positioned canvas blocks.
+    pub freeform_blocks: Vec<CapsuleFreeFormBlock>,
+    /// Local raster image assets.
+    pub assets: Vec<CapsuleAsset>,
+    /// Selected Living Template name, if any.
+    pub template_name: Option<String>,
 }
 
 fn export_failed() -> SafiError {
@@ -49,6 +129,41 @@ fn export_failed() -> SafiError {
         "CapsuleExportFailed",
         "studio.capsule_failed",
     )
+}
+
+fn invalid_capsule_option() -> SafiError {
+    SafiError::new(
+        ErrorCode::SF_CAL_002,
+        ErrorSeverity::Error,
+        "InvalidCapsuleOption",
+        "studio.invalid_command",
+    )
+}
+
+/// Validates that an embedded image URI is strictly base64 PNG/JPEG/WEBP with safe characters.
+fn validate_asset_data_uri(uri: &str) -> Result<(), SafiError> {
+    if uri.len() > MAX_ASSET_DATA_URI_BYTES {
+        return Err(invalid_capsule_option());
+    }
+    let allowed_prefixes = [
+        "data:image/png;base64,",
+        "data:image/jpeg;base64,",
+        "data:image/webp;base64,",
+    ];
+    let Some(payload) = allowed_prefixes
+        .iter()
+        .find_map(|prefix| uri.strip_prefix(prefix))
+    else {
+        return Err(invalid_capsule_option());
+    };
+    if payload.is_empty()
+        || !payload
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+    {
+        return Err(invalid_capsule_option());
+    }
+    Ok(())
 }
 
 /// Escapes text so it can only ever be data inside HTML.
@@ -86,10 +201,16 @@ main{max-width:1100px;margin:0 auto;padding:32px 20px 64px}
 h1{font-size:28px;margin:0 0 8px}
 h2{font-size:20px;margin:32px 0 12px}
 .badge{display:inline-block;padding:2px 10px;border-radius:999px;background:#1d4ed8;color:#fff;font-size:12px}
+.badge-ai{background:#6d28d9}
 .meta{color:#9fb0c9;font-size:13px;margin:8px 0 0}
+.nav{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
+.nav a{color:#93c5fd;text-decoration:none;border:1px solid #2b3b58;border-radius:999px;padding:4px 12px;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.ff-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
 .card{background:#121b2d;border:1px solid #1f2b42;border-radius:14px;padding:16px}
 .card h3{margin:0 0 8px;font-size:16px}
+.doc-stack{display:flex;flex-direction:column;gap:12px}
+.callout{border-inline-start:4px solid #38bdf8}
 .value{font-size:26px;font-weight:700;margin:4px 0}
 .provenance{color:#8fa3c0;font-size:12px;word-break:break-all}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -102,8 +223,17 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 .filters{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
 .filters input{position:absolute;opacity:0;pointer-events:none}
 .filters label{cursor:pointer;padding:4px 10px;border-radius:999px;border:1px solid #2b3b58;font-size:12px}
-@media print{.filters{display:none}}
+.asset-img{max-width:100%;height:auto;border-radius:10px;display:block}
+@media print{.filters,.nav{display:none}}
 "#;
+
+fn width_utility_rules() -> String {
+    let mut rules = String::new();
+    for pct in 0_u32..=100 {
+        rules.push_str(&format!(".w{pct}{{width:{pct}%}}"));
+    }
+    rules
+}
 
 fn filter_rules(chart_index: usize, groups: &[crate::datagraph::GroupedValue]) -> String {
     let mut rules = String::new();
@@ -118,122 +248,233 @@ fn filter_rules(chart_index: usize, groups: &[crate::datagraph::GroupedValue]) -
     rules
 }
 
-/// Renders the self-contained capsule document.
+/// Renders the self-contained capsule document without `unsafe-inline` or JavaScript.
 ///
 /// # Errors
-/// `SF-SYS-001` when a chart references an unknown column or the document exceeds
-/// [`MAX_CAPSULE_BYTES`].
+/// `SF-CAL-006` when any `{{metric:...}}` reference in slides, doc blocks, or free-form blocks is
+/// missing, `SF-CAL-002` when a raster asset URI is unsafe, or `SF-SYS-001` when the output
+/// exceeds [`MAX_CAPSULE_BYTES`].
+#[allow(clippy::too_many_lines)]
 pub fn export_capsule(graph: &DataGraph, options: &CapsuleOptions) -> Result<String, SafiError> {
-    let mut html = String::with_capacity(16 * 1024);
-    html.push_str(
-        "<!DOCTYPE html>\n<html lang=\"en\" dir=\"auto\">\n<head>\n<meta charset=\"utf-8\">\n",
-    );
-    html.push_str("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n");
-    // No scripts exist in this document, so script-src can stay 'none'.
-    html.push_str(
-        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\">\n",
-    );
-    html.push_str(&format!(
-        "<title>{}</title>\n<style>{STYLE}</style>\n</head>\n<body>\n<main>\n",
+    let mut assets_by_id = std::collections::BTreeMap::new();
+    for asset in &options.assets {
+        validate_asset_data_uri(&asset.data_uri)?;
+        let _ = assets_by_id.insert(asset.id.as_str(), asset);
+    }
+
+    let mut body = String::with_capacity(16 * 1024);
+    let mut dynamic_css = width_utility_rules();
+
+    body.push_str(&format!(
+        "<h1>{}</h1>\n<p><span class=\"badge\">snapshot</span>",
         escape_html(&options.title)
     ));
-    html.push_str(&format!(
-        "<h1>{}</h1>\n<p><span class=\"badge\">snapshot</span></p>\n",
-        escape_html(&options.title)
-    ));
-    html.push_str(&format!(
+    if let Some(tpl) = &options.template_name {
+        body.push_str(&format!(
+            " <span class=\"badge\">template: {}</span>",
+            escape_html(tpl)
+        ));
+    }
+    body.push_str("</p>\n");
+    body.push_str(&format!(
         "<p class=\"meta\">Created: {} · Dataset version: {} · Revision: {} · Source: {}</p>\n",
         escape_html(&options.created_at),
         graph.dataset_version().get(),
         graph.revision().get(),
         escape_html(graph.source_id().as_str()),
     ));
-    html.push_str(
+    body.push_str(
         "<p class=\"meta\">This file is a fixed snapshot computed by Safi. It is not a live connection: edits made here never return to the project, and every number below is bound to the fingerprint stored next to it.</p>\n",
     );
+    body.push_str(
+        "<nav class=\"nav\" aria-label=\"Capsule sections\"><a href=\"#dashboard\">Dashboard</a><a href=\"#slides\">Slides</a><a href=\"#report\">Report</a><a href=\"#metrics\">Metrics Provenance</a></nav>\n",
+    );
 
-    html.push_str("<h2 id=\"dashboard\">Dashboard</h2>\n<div class=\"grid\">\n");
-    let mut dynamic_css = String::new();
+    // Dashboard charts
+    body.push_str("<h2 id=\"dashboard\">Dashboard</h2>\n<div class=\"grid\">\n");
     for (chart_index, chart) in options.charts.iter().enumerate() {
         let groups = graph.grouped_aggregate(chart.function, &chart.column, &chart.group_by)?;
         let maximum = groups
             .iter()
             .map(|group| group.value)
             .fold(Decimal::ZERO, Decimal::max);
-        html.push_str("<section class=\"card chart\">\n");
-        html.push_str(&format!("<h3>{}</h3>\n", escape_html(&chart.title)));
+        body.push_str("<section class=\"card chart\">\n");
+        body.push_str(&format!("<h3>{}</h3>\n", escape_html(&chart.title)));
         if groups.len() > 1 {
-            html.push_str("<div class=\"filters\">\n");
-            html.push_str(&format!("<label for=\"c{chart_index}-all\">All</label>\n"));
+            body.push_str("<div class=\"filters\">\n");
+            body.push_str(&format!("<label for=\"c{chart_index}-all\">All</label>\n"));
             for (group_index, group) in groups.iter().enumerate() {
-                html.push_str(&format!(
+                body.push_str(&format!(
                     "<label for=\"c{chart_index}-{group_index}\">{}</label>\n",
                     escape_html(&group.label)
                 ));
             }
-            html.push_str("</div>\n");
-            html.push_str(&format!(
+            body.push_str("</div>\n");
+            body.push_str(&format!(
                 "<input type=\"radio\" name=\"f{chart_index}\" id=\"c{chart_index}-all\" checked>\n"
             ));
             for (group_index, _) in groups.iter().enumerate() {
-                html.push_str(&format!(
+                body.push_str(&format!(
                     "<input type=\"radio\" name=\"f{chart_index}\" id=\"c{chart_index}-{group_index}\">\n"
                 ));
             }
             dynamic_css.push_str(&filter_rules(chart_index, &groups));
         }
-        html.push_str("<div class=\"bars\">\n");
+        body.push_str("<div class=\"bars\">\n");
         for (group_index, group) in groups.iter().enumerate() {
-            html.push_str(&format!(
-                "<div class=\"bar g{group_index}\"><span>{}</span><div class=\"track\"><div class=\"fill\" style=\"width:{}%\"></div></div><span class=\"provenance\">{}</span></div>\n",
+            let pct = bar_width(group.value, maximum);
+            body.push_str(&format!(
+                "<div class=\"bar g{group_index}\"><span>{}</span><div class=\"track\"><div class=\"fill w{pct}\"></div></div><span class=\"provenance\">{}</span></div>\n",
                 escape_html(&group.label),
-                bar_width(group.value, maximum),
                 escape_html(&datagraph_display(&sf_core::value::Value::Decimal(group.value))),
             ));
         }
-        html.push_str("</div>\n");
-        html.push_str(&format!(
+        body.push_str("</div>\n");
+        body.push_str(&format!(
             "<p class=\"provenance\">{} of {} grouped by {}</p>\n",
             escape_html(chart.function.as_str()),
             escape_html(&chart.column),
             escape_html(&chart.group_by)
         ));
-        html.push_str("</section>\n");
+        body.push_str("</section>\n");
     }
-    html.push_str("</div>\n");
-    if !dynamic_css.is_empty() {
-        html.push_str(&format!("<style>{dynamic_css}</style>\n"));
+    body.push_str("</div>\n");
+
+    // Slides (authored slides if supplied, or metric deck fallback)
+    body.push_str("<h2 id=\"slides\">Slides</h2>\n<div class=\"grid\">\n");
+    if options.slides.is_empty() {
+        for id in graph.metric_ids() {
+            let Some(token) = graph.token(&id) else {
+                continue;
+            };
+            body.push_str("<section class=\"card\">\n");
+            body.push_str(&format!("<h3>{}</h3>\n", escape_html(&token.metric_name)));
+            body.push_str(&format!(
+                "<p class=\"value\">{} {}</p>\n",
+                escape_html(&datagraph_display(&token.value)),
+                escape_html(token.unit.as_deref().unwrap_or(""))
+            ));
+            body.push_str(&format!(
+                "<p class=\"provenance\">formula: {} · v{} · data v{} · {}…</p>\n",
+                escape_html(&token.formula),
+                token.formula_version,
+                token.source_version.get(),
+                escape_html(&token.fingerprint()[..token.fingerprint().len().min(16)]),
+            ));
+            body.push_str("</section>\n");
+        }
+    } else {
+        for slide in &options.slides {
+            let rendered_body = render_narrative_strict(&slide.body, graph)?;
+            body.push_str("<section class=\"card\">\n");
+            body.push_str(&format!("<h3>{}</h3>\n", escape_html(&slide.title)));
+            if let Some(mid) = &slide.metric_id {
+                let metric_id = sf_core::datagraph::MetricId::new(mid)?;
+                if let Some(token) = graph.token(&metric_id) {
+                    body.push_str(&format!(
+                        "<p class=\"value\">{} {}</p>\n",
+                        escape_html(&datagraph_display(&token.value)),
+                        escape_html(token.unit.as_deref().unwrap_or(""))
+                    ));
+                }
+            }
+            body.push_str(&format!("<p>{}</p>\n", escape_html(&rendered_body.text)));
+            if !rendered_body.references.is_empty() {
+                let refs = rendered_body
+                    .references
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "{}:{}",
+                            escape_html(r.metric_id.as_str()),
+                            escape_html(&r.fingerprint[..r.fingerprint.len().min(12)])
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                body.push_str(&format!(
+                    "<p class=\"provenance\">Verified refs: {refs}</p>\n"
+                ));
+            }
+            body.push_str("</section>\n");
+        }
+    }
+    body.push_str("</div>\n");
+
+    // Narrative document blocks
+    if !options.doc_blocks.is_empty() {
+        body.push_str("<h2 id=\"report\">Executive Report</h2>\n<div class=\"doc-stack\">\n");
+        for block in &options.doc_blocks {
+            let rendered = render_narrative_strict(&block.content, graph)?;
+            let callout_class = if block.kind == "callout" || block.kind == "metric_callout" {
+                "card callout"
+            } else {
+                "card"
+            };
+            body.push_str(&format!("<article class=\"{callout_class}\">\n"));
+            if !block.title.trim().is_empty() {
+                body.push_str(&format!("<h3>{}</h3>\n", escape_html(&block.title)));
+            }
+            if block.authored_by == "ai" {
+                body.push_str("<p><span class=\"badge badge-ai\">AI-assisted draft</span></p>\n");
+            }
+            body.push_str(&format!("<p>{}</p>\n", escape_html(&rendered.text)));
+            body.push_str("</article>\n");
+        }
+        body.push_str("</div>\n");
     }
 
-    html.push_str("<h2 id=\"slides\">Slides</h2>\n<div class=\"grid\">\n");
+    // Free-form canvas blocks (CSS rules placed inside hashed head <style>)
+    if !options.freeform_blocks.is_empty() {
+        body.push_str("<h2 id=\"canvas\">Free-Form Canvas</h2>\n<div class=\"ff-grid\">\n");
+        for (idx, block) in options.freeform_blocks.iter().enumerate() {
+            let rendered = render_narrative_strict(&block.body, graph)?;
+            let col_start = block.col.clamp(1, 12);
+            let col_span = block.col_span.clamp(1, 12);
+            let row_start = block.row.clamp(1, 32);
+            let row_span = block.row_span.clamp(1, 8);
+            let z = block.z_index.clamp(1, 50);
+            dynamic_css.push_str(&format!(
+                "#ff-{idx}{{grid-column:{col_start} / span {col_span};grid-row:{row_start} / span {row_span};z-index:{z}}}"
+            ));
+            body.push_str(&format!("<section id=\"ff-{idx}\" class=\"card\">\n"));
+            if !block.title.trim().is_empty() {
+                body.push_str(&format!("<h3>{}</h3>\n", escape_html(&block.title)));
+            }
+            if let Some(mid) = &block.metric_id {
+                let metric_id = sf_core::datagraph::MetricId::new(mid)?;
+                if let Some(token) = graph.token(&metric_id) {
+                    body.push_str(&format!(
+                        "<p class=\"value\">{} {}</p>\n",
+                        escape_html(&datagraph_display(&token.value)),
+                        escape_html(token.unit.as_deref().unwrap_or(""))
+                    ));
+                }
+            }
+            if let Some(asset_id) = &block.asset_id
+                && let Some(asset) = assets_by_id.get(asset_id.as_str())
+            {
+                body.push_str(&format!(
+                    "<img class=\"asset-img\" src=\"{}\" alt=\"{}\">\n",
+                    asset.data_uri,
+                    escape_html(&asset.name)
+                ));
+            }
+            if !rendered.text.trim().is_empty() {
+                body.push_str(&format!("<p>{}</p>\n", escape_html(&rendered.text)));
+            }
+            body.push_str("</section>\n");
+        }
+        body.push_str("</div>\n");
+    }
+
+    // Verified metrics provenance table
+    body.push_str("<h2 id=\"metrics\">Verified metrics</h2>\n<table>\n<thead><tr><th>Metric</th><th>Value</th><th>Formula</th><th>Version</th><th>Fingerprint</th></tr></thead>\n<tbody>\n");
     for id in graph.metric_ids() {
         let Some(token) = graph.token(&id) else {
             continue;
         };
-        html.push_str("<section class=\"card\">\n");
-        html.push_str(&format!("<h3>{}</h3>\n", escape_html(&token.metric_name)));
-        html.push_str(&format!(
-            "<p class=\"value\">{} {}</p>\n",
-            escape_html(&datagraph_display(&token.value)),
-            escape_html(token.unit.as_deref().unwrap_or(""))
-        ));
-        html.push_str(&format!(
-            "<p class=\"provenance\">formula: {} · v{} · data v{} · {}…</p>\n",
-            escape_html(&token.formula),
-            token.formula_version,
-            token.source_version.get(),
-            escape_html(&token.fingerprint()[..token.fingerprint().len().min(16)]),
-        ));
-        html.push_str("</section>\n");
-    }
-    html.push_str("</div>\n");
-
-    html.push_str("<h2 id=\"report\">Verified metrics</h2>\n<table>\n<thead><tr><th>Metric</th><th>Value</th><th>Formula</th><th>Version</th><th>Fingerprint</th></tr></thead>\n<tbody>\n");
-    for id in graph.metric_ids() {
-        let Some(token) = graph.token(&id) else {
-            continue;
-        };
-        html.push_str(&format!(
+        body.push_str(&format!(
             "<tr><td>{}</td><td>{} {}</td><td>{}</td><td>v{} / data v{}</td><td class=\"provenance\">{}</td></tr>\n",
             escape_html(&token.metric_name),
             escape_html(&datagraph_display(&token.value)),
@@ -244,9 +485,25 @@ pub fn export_capsule(graph: &DataGraph, options: &CapsuleOptions) -> Result<Str
             escape_html(token.fingerprint()),
         ));
     }
-    html.push_str("</tbody>\n</table>\n");
-    html.push_str("<p class=\"meta\">Filter controls only select between aggregates computed by Safi before export; they never calculate a new number.</p>\n");
-    html.push_str("</main>\n</body>\n</html>\n");
+    body.push_str("</tbody>\n</table>\n");
+    body.push_str("<p class=\"meta\">Filter controls only select between aggregates computed by Safi before export; they never calculate a new number.</p>\n");
+
+    let stylesheet = format!("{STYLE}{dynamic_css}");
+    let digest = Sha256::digest(stylesheet.as_bytes());
+    let style_hash = BASE64_STANDARD.encode(digest);
+
+    let mut html = String::with_capacity(stylesheet.len() + body.len() + 512);
+    html.push_str(
+        "<!DOCTYPE html>\n<html lang=\"en\" dir=\"auto\">\n<head>\n<meta charset=\"utf-8\">\n",
+    );
+    html.push_str("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n");
+    html.push_str(&format!(
+        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'none'; style-src 'sha256-{style_hash}'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\">\n"
+    ));
+    html.push_str(&format!(
+        "<title>{}</title>\n<style>{stylesheet}</style>\n</head>\n<body>\n<main>\n{body}</main>\n</body>\n</html>\n",
+        escape_html(&options.title)
+    ));
 
     if html.len() > MAX_CAPSULE_BYTES {
         return Err(export_failed());
@@ -258,11 +515,14 @@ pub fn export_capsule(graph: &DataGraph, options: &CapsuleOptions) -> Result<Str
 mod tests {
     use sf_core::column::{Column, ColumnSchema, ColumnType, ConfidenceScore};
     use sf_core::datagraph::{MetricId, SourceId};
-    use sf_core::error::SafiError;
+    use sf_core::error::{ErrorCode, SafiError};
     use sf_core::table::Table;
     use sf_core::value::CellValue;
 
-    use super::{CapsuleChart, CapsuleOptions, escape_html, export_capsule};
+    use super::{
+        CapsuleAsset, CapsuleChart, CapsuleDocBlock, CapsuleFreeFormBlock, CapsuleOptions,
+        CapsuleSlide, escape_html, export_capsule,
+    };
     use crate::datagraph::{AggFunc, DataGraph};
 
     fn graph() -> Result<DataGraph, SafiError> {
@@ -304,6 +564,7 @@ mod tests {
                 column: "amount".to_owned(),
                 group_by: "region".to_owned(),
             }],
+            ..CapsuleOptions::default()
         }
     }
 
@@ -313,7 +574,7 @@ mod tests {
         let html = export_capsule(&graph, &options("Board review"))?;
         let token = graph.token(&MetricId::new("total")?).ok_or_else(|| {
             SafiError::new(
-                sf_core::error::ErrorCode::SF_CAL_006,
+                ErrorCode::SF_CAL_006,
                 sf_core::error::ErrorSeverity::Error,
                 "UnknownMetric",
                 "studio.unknown_metric",
@@ -325,6 +586,9 @@ mod tests {
         assert!(html.contains("SUM(amount)"));
         assert!(html.contains("snapshot"));
         assert!(html.contains("Cairo"));
+        assert!(!html.contains("unsafe-inline"));
+        assert!(!html.contains("style=\""));
+        assert!(html.contains("style-src 'sha256-"));
         Ok(())
     }
 
@@ -337,7 +601,7 @@ mod tests {
         assert!(!html.contains("http://"));
         assert!(!html.contains("https://"));
         assert!(html.contains("&lt;script&gt;"));
-        assert!(html.contains("script-src") || html.contains("default-src 'none'"));
+        assert!(html.contains("script-src 'none'"));
         Ok(())
     }
 
@@ -348,11 +612,67 @@ mod tests {
             "&lt;img src=x onerror=alert(1)&gt;"
         );
         let graph = graph()?;
-        let mut options = options("ok");
-        options.charts[0].title = "<b>bold</b>".to_owned();
-        let html = export_capsule(&graph, &options)?;
+        let mut opts = options("ok");
+        opts.charts[0].title = "<b>bold</b>".to_owned();
+        let html = export_capsule(&graph, &opts)?;
         assert!(html.contains("&lt;b&gt;bold&lt;/b&gt;"));
         assert!(!html.contains("<b>bold</b>"));
+        Ok(())
+    }
+
+    #[test]
+    fn full_slides_docs_freeform_assets_and_strict_metric_gate_work() -> Result<(), SafiError> {
+        let graph = graph()?;
+        let mut opts = options("Full Quad Studio");
+        opts.slides = vec![CapsuleSlide {
+            title: "Executive Summary".to_owned(),
+            body: "Revenue reached {{metric:total}} EGP.".to_owned(),
+            metric_id: Some("total".to_owned()),
+        }];
+        opts.doc_blocks = vec![CapsuleDocBlock {
+            kind: "callout".to_owned(),
+            title: "Decision".to_owned(),
+            content: "Baseline locked at {{metric:total}}.".to_owned(),
+            authored_by: "user".to_owned(),
+        }];
+        opts.assets = vec![CapsuleAsset {
+            id: "logo1".to_owned(),
+            name: "Logo".to_owned(),
+            data_uri: "data:image/png;base64,iVBORw0KGgo=".to_owned(),
+        }];
+        opts.freeform_blocks = vec![CapsuleFreeFormBlock {
+            kind: "image".to_owned(),
+            title: "Banner".to_owned(),
+            body: "Total {{metric:total}}".to_owned(),
+            metric_id: Some("total".to_owned()),
+            asset_id: Some("logo1".to_owned()),
+            col: 1,
+            row: 1,
+            col_span: 6,
+            row_span: 2,
+            z_index: 2,
+        }];
+        let html = export_capsule(&graph, &opts)?;
+        assert!(html.contains("Revenue reached 350 EGP."));
+        assert!(html.contains("Baseline locked at 350."));
+        assert!(html.contains("id=\"ff-0\""));
+        assert!(html.contains("data:image/png;base64,iVBORw0KGgo="));
+
+        // Unresolved metric ref in slide or doc must fail with SF-CAL-006
+        let mut missing_ref = opts.clone();
+        missing_ref.doc_blocks[0].content = "Broken {{metric:nonexistent}}".to_owned();
+        assert_eq!(
+            export_capsule(&graph, &missing_ref).err().map(|e| e.code()),
+            Some(ErrorCode::SF_CAL_006)
+        );
+
+        // Unsafe SVG asset URI must fail with SF-CAL-002
+        let mut bad_asset = opts;
+        bad_asset.assets[0].data_uri = "data:image/svg+xml;base64,PHN2Zz4=".to_owned();
+        assert_eq!(
+            export_capsule(&graph, &bad_asset).err().map(|e| e.code()),
+            Some(ErrorCode::SF_CAL_002)
+        );
         Ok(())
     }
 }

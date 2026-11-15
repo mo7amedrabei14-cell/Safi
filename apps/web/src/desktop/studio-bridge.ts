@@ -93,6 +93,87 @@ export interface DesktopScenarioComparison {
   readonly right: string;
 }
 
+export interface StudioChartArtifact {
+  readonly id: string;
+  readonly title: string;
+  readonly function: string;
+  readonly column: string;
+  readonly groupBy: string;
+}
+
+export interface StudioSlideArtifact {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly metricId: string | null;
+  readonly chartIndex: number | null;
+  readonly layout: string;
+}
+
+export interface StudioDocBlockArtifact {
+  readonly id: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly content: string;
+  readonly metricId: string | null;
+  readonly authoredBy: string;
+}
+
+export interface StudioFreeFormBlockArtifact {
+  readonly id: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly body: string;
+  readonly metricId: string | null;
+  readonly assetId: string | null;
+  readonly col: number;
+  readonly row: number;
+  readonly colSpan: number;
+  readonly rowSpan: number;
+  readonly zIndex: number;
+}
+
+export interface StudioAssetArtifact {
+  readonly id: string;
+  readonly name: string;
+  readonly dataUri: string;
+}
+
+export interface StudioTemplateConfigArtifact {
+  readonly templateId: string;
+  readonly titleOverride: string | null;
+  readonly bindings: Readonly<Record<string, string>>;
+  readonly sectionOverrides: Readonly<Record<string, string>>;
+}
+
+export interface StudioWorkspaceArtifacts {
+  readonly charts: readonly StudioChartArtifact[];
+  readonly slides: readonly StudioSlideArtifact[];
+  readonly docBlocks: readonly StudioDocBlockArtifact[];
+  readonly freeformBlocks: readonly StudioFreeFormBlockArtifact[];
+  readonly assets: readonly StudioAssetArtifact[];
+  readonly templateConfig: StudioTemplateConfigArtifact | null;
+}
+
+export interface DesktopProjectBundleMeta {
+  readonly id: string;
+  readonly displayName: string;
+  readonly updatedAtMs: number;
+  readonly validChecksum: boolean;
+}
+
+export interface DesktopTemplateSummary {
+  readonly id: string;
+  readonly nameKey: string;
+  readonly sections: readonly { readonly headingKey: string; readonly role: string }[];
+}
+
+export interface DesktopInstantiatedSection {
+  readonly headingKey: string;
+  readonly role: string;
+  readonly token: DesktopMetric;
+}
+
 export interface DesktopStudioState {
   readonly sourceId: string;
   readonly revision: number;
@@ -108,6 +189,7 @@ export interface DesktopStudioState {
   readonly activeScenario: string | null;
   readonly scenarios: readonly DesktopScenario[];
   readonly parameters: readonly DesktopParameter[];
+  readonly artifacts?: StudioWorkspaceArtifacts;
 }
 
 export interface DesktopRowQuery {
@@ -489,6 +571,97 @@ export async function snapshot(project: string): Promise<string> {
 /** Restores a saved project; Rust re-derives every metric first. */
 export async function restoreProject(project: string, saved: string): Promise<DesktopStudioState> {
   return stateCall("studio_restore", { project, snapshot: saved });
+}
+
+/** Adds an editable source column preserving stable provenance. */
+export async function addSourceColumn(
+  project: string,
+  name: string,
+  defaultValue = ""
+): Promise<DesktopStudioState> {
+  return stateCall("studio_add_source_column", { project, name, defaultValue });
+}
+
+/** Renames a working column cleanly without losing its ColumnId provenance. */
+export async function renameColumn(
+  project: string,
+  oldName: string,
+  newName: string
+): Promise<DesktopStudioState> {
+  return stateCall("studio_rename_column", { project, oldName, newName });
+}
+
+/** Deletes a working column cleanly (refuses dropping the final column). */
+export async function deleteColumn(project: string, name: string): Promise<DesktopStudioState> {
+  return stateCall("studio_delete_column", { project, name });
+}
+
+/** Trims leading/trailing whitespace & repeated spaces across a column atomically. */
+export async function trimColumn(project: string, column: string): Promise<DesktopStudioState> {
+  return stateCall("studio_trim_column", { project, column });
+}
+
+/** Updates the active project's Quad-Studio creative artifacts inside Rust memory. */
+export async function setArtifacts(
+  project: string,
+  artifacts: StudioWorkspaceArtifacts
+): Promise<DesktopStudioState> {
+  return stateCall("studio_set_artifacts", { project, artifacts: JSON.stringify(artifacts) });
+}
+
+/** Saves the complete project bundle atomically to local app storage with BLAKE3 integrity. */
+export async function saveProjectBundle(
+  project: string,
+  savedId: string,
+  displayName: string
+): Promise<{ readonly id: string; readonly displayName: string; readonly updatedAtMs: number }> {
+  return JSON.parse(await call("studio_save_project", { project, savedId, displayName })) as {
+    readonly id: string;
+    readonly displayName: string;
+    readonly updatedAtMs: number;
+  };
+}
+
+/** Lists saved local project bundles and reports whether each BLAKE3 checksum verifies. */
+export async function listProjectBundles(): Promise<readonly DesktopProjectBundleMeta[]> {
+  return JSON.parse(await call("studio_list_projects")) as readonly DesktopProjectBundleMeta[];
+}
+
+/** Loads a saved local project bundle, verifying BLAKE3 checksum before restoring. */
+export async function loadProjectBundle(
+  project: string,
+  savedId: string
+): Promise<DesktopStudioState> {
+  return stateCall("studio_load_project", { project, savedId });
+}
+
+/** Removes a saved project bundle from local storage. */
+export async function deleteProjectBundle(
+  savedId: string
+): Promise<readonly DesktopProjectBundleMeta[]> {
+  return JSON.parse(
+    await call("studio_delete_project", { savedId })
+  ) as readonly DesktopProjectBundleMeta[];
+}
+
+/** Lists all 5 built-in Living Templates cleanly. */
+export async function listTemplates(): Promise<readonly DesktopTemplateSummary[]> {
+  return JSON.parse(await call("studio_list_templates")) as readonly DesktopTemplateSummary[];
+}
+
+/** Instantiates a Living Template against real verified tokens (SF-CAL-006 on missing binding). */
+export async function instantiateTemplate(
+  project: string,
+  templateId: string,
+  bindings: Readonly<Record<string, string>>
+): Promise<readonly DesktopInstantiatedSection[]> {
+  return JSON.parse(
+    await call("studio_instantiate_template", {
+      project,
+      templateId,
+      bindings: JSON.stringify(bindings)
+    })
+  ) as readonly DesktopInstantiatedSection[];
 }
 
 /** Writes the capsule to the chosen path and returns it. */

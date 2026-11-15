@@ -10,7 +10,7 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 33] = [
+pub const ALLOWED_COMMANDS: [&str; 44] = [
     "app_info",
     "take_pending_deep_link",
     "pick_input_file",
@@ -25,6 +25,10 @@ pub const ALLOWED_COMMANDS: [&str; 33] = [
     "studio_filter_rows",
     "studio_delete_row",
     "studio_insert_row",
+    "studio_add_source_column",
+    "studio_rename_column",
+    "studio_delete_column",
+    "studio_trim_column",
     "studio_define_metric",
     "studio_add_calculated_column",
     "studio_define_parameter",
@@ -43,6 +47,13 @@ pub const ALLOWED_COMMANDS: [&str; 33] = [
     "studio_narrative",
     "studio_snapshot",
     "studio_restore",
+    "studio_set_artifacts",
+    "studio_save_project",
+    "studio_list_projects",
+    "studio_load_project",
+    "studio_delete_project",
+    "studio_list_templates",
+    "studio_instantiate_template",
     "studio_export_capsule",
 ];
 

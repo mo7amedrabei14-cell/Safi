@@ -357,6 +357,100 @@ fn studio_restore(
 }
 
 #[tauri::command]
+fn studio_add_source_column(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    name: String,
+    default_value: String,
+) -> Result<String, String> {
+    store.add_source_column(&project, &name, &default_value, now_ms())
+}
+
+#[tauri::command]
+fn studio_rename_column(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    old_name: String,
+    new_name: String,
+) -> Result<String, String> {
+    store.rename_column(&project, &old_name, &new_name, now_ms())
+}
+
+#[tauri::command]
+fn studio_delete_column(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    name: String,
+) -> Result<String, String> {
+    store.delete_column(&project, &name, now_ms())
+}
+
+#[tauri::command]
+fn studio_trim_column(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    column: String,
+) -> Result<String, String> {
+    store.trim_column(&project, &column, now_ms())
+}
+
+#[tauri::command]
+fn studio_set_artifacts(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    artifacts: String,
+) -> Result<String, String> {
+    store.set_artifacts(&project, &artifacts)
+}
+
+#[tauri::command]
+fn studio_save_project(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    saved_id: String,
+    display_name: String,
+) -> Result<String, String> {
+    store.save_project_bundle(&project, &saved_id, &display_name, now_ms())
+}
+
+#[tauri::command]
+fn studio_list_projects(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.list_project_bundles()
+}
+
+#[tauri::command]
+fn studio_load_project(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    saved_id: String,
+) -> Result<String, String> {
+    store.load_project_bundle(&project, &saved_id, now_ms())
+}
+
+#[tauri::command]
+fn studio_delete_project(
+    store: tauri::State<'_, StudioStore>,
+    saved_id: String,
+) -> Result<String, String> {
+    store.delete_project_bundle(&saved_id)
+}
+
+#[tauri::command]
+fn studio_list_templates(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.list_templates()
+}
+
+#[tauri::command]
+fn studio_instantiate_template(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    template_id: String,
+    bindings: String,
+) -> Result<String, String> {
+    store.instantiate_template(&project, &template_id, &bindings)
+}
+
+#[tauri::command]
 fn studio_export_capsule(
     store: tauri::State<'_, StudioStore>,
     project: String,
@@ -409,11 +503,27 @@ fn main() {
             studio_narrative,
             studio_snapshot,
             studio_restore,
+            studio_add_source_column,
+            studio_rename_column,
+            studio_delete_column,
+            studio_trim_column,
+            studio_set_artifacts,
+            studio_save_project,
+            studio_list_projects,
+            studio_load_project,
+            studio_delete_project,
+            studio_list_templates,
+            studio_instantiate_template,
             studio_export_capsule
         ])
         .setup(|app| {
             app.manage(PendingDeepLink::default());
-            app.manage(StudioStore::new());
+            let storage_dir = app
+                .path()
+                .app_local_data_dir()
+                .map(|dir| dir.join("studio-projects"))
+                .unwrap_or_else(|_| std::env::temp_dir().join("safi-studio-projects"));
+            app.manage(StudioStore::with_storage_dir(storage_dir));
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",

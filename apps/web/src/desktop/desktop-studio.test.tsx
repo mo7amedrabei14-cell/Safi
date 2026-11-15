@@ -4,7 +4,12 @@ import { renderToString } from "react-dom/server";
 import { DesktopStudio } from "./DesktopStudio";
 import { AnomalyPanel } from "./components/AnomalyPanel";
 import { CommandBarPanel } from "./components/CommandBarPanel";
+import { DashboardChartsView } from "./components/DashboardChartsView";
+import { FreeFormBuilderView } from "./components/FreeFormBuilderView";
+import { KeynoteSlidesView } from "./components/KeynoteSlidesView";
 import { NarrativeTextRenderer, listMissingMetricRefs } from "./components/NarrativeTextRenderer";
+import { TemplatesAndProjectsPanel } from "./components/TemplatesAndProjectsPanel";
+import { VerifiedDocView } from "./components/VerifiedDocView";
 import {
   VerifiedAuditModal,
   VerifiedNumberChip,
@@ -21,21 +26,31 @@ import type { DesktopMetric, DesktopStudioState } from "./studio-bridge";
 import {
   activateScenario,
   addScenario,
+  addSourceColumn,
   applyAnomalyFix,
   applyDslCommand,
   compareScenarios,
   createRequestTracker,
+  deleteColumn,
   exportCapsule,
   fetchRowsPage,
+  instantiateTemplate,
   isDesktopRuntime,
   isNewerOrEqualRevision,
+  listProjectBundles,
+  listTemplates,
+  loadProjectBundle,
   openProject,
   pickCapsuleOutputFile,
+  renameColumn,
   renderNarrative,
   renameScenario,
+  saveProjectBundle,
+  setArtifacts,
   setCell,
   setCellById,
-  setScenarioParameter
+  setScenarioParameter,
+  trimColumn
 } from "./studio-bridge";
 import { DOCK_TABS, STUDIO_TAB } from "../components/layout/FloatingGlassDock";
 
@@ -334,7 +349,14 @@ describe("phase 1: what-if panel & reactive stale-revision guards", () => {
     }
 
     const rejected = validateUntrustedDslPayload(
-      JSON.stringify({ op: "define_metric", id: "x", name: "X", unit: null, formula: "1", extra: true })
+      JSON.stringify({
+        op: "define_metric",
+        id: "x",
+        name: "X",
+        unit: null,
+        formula: "1",
+        extra: true
+      })
     );
     expect(rejected).toMatchObject({ ok: false, code: "SF-AIX-002" });
   });
@@ -400,7 +422,9 @@ describe("phase 1: what-if panel & reactive stale-revision guards", () => {
         return JSON.stringify({
           text: "Total 350.5",
           missing: [],
-          references: [{ id: "rev_total", value: "350.5", unit: "EGP", status: "Verified", fingerprint: "f" }]
+          references: [
+            { id: "rev_total", value: "350.5", unit: "EGP", status: "Verified", fingerprint: "f" }
+          ]
         });
       }
       return JSON.stringify(sampleState());
@@ -419,6 +443,211 @@ describe("phase 1: what-if panel & reactive stale-revision guards", () => {
         "studio_apply_command",
         "studio_apply_anomaly_fix",
         "studio_narrative"
+      ]);
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow
+      });
+    }
+  });
+});
+
+describe("phase 3 & 4: Quad-Studio editors, artifacts persistence, templates & bundles", () => {
+  it("renders Dashboard, Keynote Slides, Smart Doc, Free-Form Canvas, and Templates & Projects", () => {
+    const metric = sampleMetric();
+    const state = sampleState();
+
+    const dashHtml = renderToString(
+      createElement(DashboardChartsView, {
+        language: "en",
+        project: "main",
+        revision: state.revision,
+        activeScenario: state.activeScenario,
+        columns: state.columns,
+        metrics: state.metrics,
+        charts: [
+          {
+            id: "c1",
+            title: "Revenue by region",
+            function: "SUM",
+            column: "amount",
+            groupBy: "region"
+          }
+        ],
+        onUpdateCharts: vi.fn(),
+        onCrossFilter: vi.fn()
+      })
+    );
+    expect(dashHtml).toContain("Revenue by region");
+    expect(dashHtml).toContain("350.5 EGP");
+    expect(dashHtml).toContain("SUM(amount)");
+
+    const slidesHtml = renderToString(
+      createElement(KeynoteSlidesView, {
+        language: "en",
+        metrics: state.metrics,
+        slides: [
+          {
+            id: "s1",
+            title: "Executive Summary",
+            body: "Verified {{metric:rev_total}} vs missing {{metric:ghost}}",
+            metricId: "rev_total",
+            chartIndex: null,
+            layout: "title-body"
+          }
+        ],
+        onUpdateSlides: vi.fn()
+      })
+    );
+    expect(slidesHtml).toContain("Executive Summary");
+    expect(slidesHtml).toContain("350.5 EGP");
+    expect(slidesHtml).toContain("Missing: ghost");
+
+    const docHtml = renderToString(
+      createElement(VerifiedDocView, {
+        language: "en",
+        metrics: state.metrics,
+        docBlocks: [
+          {
+            id: "d1",
+            kind: "callout",
+            title: "Board Note",
+            content: "Baseline confirmed at {{metric:rev_total}}",
+            metricId: "rev_total",
+            authoredBy: "ai"
+          }
+        ],
+        onUpdateDocBlocks: vi.fn()
+      })
+    );
+    expect(docHtml).toContain("Board Note");
+    expect(docHtml).toContain("AI-Assisted Draft");
+    expect(docHtml).toContain("350.5 EGP");
+
+    const freeformHtml = renderToString(
+      createElement(FreeFormBuilderView, {
+        language: "en",
+        metrics: state.metrics,
+        freeformBlocks: [
+          {
+            id: "ff1",
+            kind: "kpi",
+            title: "Revenue Tile",
+            body: "Headline {{metric:rev_total}}",
+            metricId: "rev_total",
+            assetId: null,
+            col: 1,
+            row: 1,
+            colSpan: 4,
+            rowSpan: 2,
+            zIndex: 3
+          }
+        ],
+        assets: [{ id: "img1", name: "Logo", dataUri: "data:image/png;base64,iVBORw0KGgo=" }],
+        onUpdateFreeForm: vi.fn()
+      })
+    );
+    expect(freeformHtml).toContain("Revenue Tile");
+    expect(freeformHtml).toContain("350.5 EGP");
+    expect(freeformHtml).toContain("W:4");
+    expect(freeformHtml).toContain("Z:3");
+
+    const templatesHtml = renderToString(
+      createElement(TemplatesAndProjectsPanel, {
+        language: "en",
+        project: "main",
+        projectLoaded: true,
+        metrics: [metric],
+        currentTemplateConfig: null,
+        onApplyTemplateToWorkspace: vi.fn(),
+        onSaveBundle: vi.fn(async () => {}),
+        onLoadBundle: vi.fn(async () => {})
+      })
+    );
+    expect(templatesHtml).toContain("Living Templates Gallery (5 Built-In)");
+    expect(templatesHtml).toContain("Save Project");
+  });
+
+  it("forwards Phase 3/4 column ops, artifact persistence, templates, and bundle IPC commands", async () => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "studio_list_templates") {
+        return JSON.stringify([
+          {
+            id: "boardroom-keynote",
+            nameKey: "studio.template.boardroom",
+            sections: [{ headingKey: "sec.head", role: "headline" }]
+          }
+        ]);
+      }
+      if (command === "studio_instantiate_template") {
+        return JSON.stringify([
+          { headingKey: "sec.head", role: "headline", token: sampleMetric() }
+        ]);
+      }
+      if (command === "studio_save_project") {
+        return JSON.stringify({
+          id: "q4_board",
+          displayName: "Q4 Board Pack",
+          updatedAtMs: 99999,
+          validChecksum: true
+        });
+      }
+      if (command === "studio_list_projects") {
+        return JSON.stringify([
+          {
+            id: "q4_board",
+            displayName: "Q4 Board Pack",
+            updatedAtMs: 99999,
+            validChecksum: true
+          }
+        ]);
+      }
+      return JSON.stringify(sampleState());
+    });
+
+    const originalWindow = globalThis.window;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: { invoke } }
+    });
+
+    try {
+      await addSourceColumn("main", "notes");
+      await renameColumn("main", "notes", "comments");
+      await trimColumn("main", "comments");
+      await deleteColumn("main", "comments");
+      await setArtifacts("main", {
+        charts: [],
+        slides: [],
+        docBlocks: [],
+        freeformBlocks: [],
+        assets: [],
+        templateConfig: null
+      });
+      const templates = await listTemplates();
+      expect(templates[0]?.id).toBe("boardroom-keynote");
+      const sections = await instantiateTemplate("main", "boardroom-keynote", {
+        headline: "rev_total"
+      });
+      expect(sections[0]?.token.id).toBe("rev_total");
+      const saved = await saveProjectBundle("main", "q4_board", "Q4 Board Pack");
+      expect(saved.id).toBe("q4_board");
+      const listed = await listProjectBundles();
+      expect(listed[0]?.validChecksum).toBe(true);
+      await loadProjectBundle("main", "q4_board");
+
+      expect(invoke.mock.calls.map((c) => c[0])).toEqual([
+        "studio_add_source_column",
+        "studio_rename_column",
+        "studio_trim_column",
+        "studio_delete_column",
+        "studio_set_artifacts",
+        "studio_list_templates",
+        "studio_instantiate_template",
+        "studio_save_project",
+        "studio_list_projects",
+        "studio_load_project"
       ]);
     } finally {
       Object.defineProperty(globalThis, "window", {

@@ -644,3 +644,156 @@
   background: color-mix(in srgb, #dc322f 12%, transparent);
 }
 
+.studio-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.studio-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.studio-tab-btn[aria-selected="true"] {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-weight: 600;
+}
+
+.studio-inline-action-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.studio-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.studio-subcard {
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.studio-doc-blocks,
+.studio-field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.studio-presenter-stage {
+  border: 2px solid currentColor;
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.studio-freeform-canvas {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 220px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px dashed color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.studio-ff-item {
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.studio-canvas-img {
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.studio-bar-btn {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+
+.studio-bar-btn:hover,
+.studio-bar-btn:focus-visible {
+  border-color: color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.studio-file-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.studio-file-label input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.studio-badge-muted,
+.studio-badge-warn,
+.studio-badge-col {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.studio-badge-warn {
+  border-color: #b58900;
+  background: color-mix(in srgb, #b58900 12%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .safi-desktop-studio *,
+  .studio-panel * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

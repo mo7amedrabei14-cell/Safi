@@ -2874,11 +2874,10 @@ mod tests {
 
         // 5. Exact MAX_IPC_BYTES (1_048_576) serialized JSON succeeds, while MAX_IPC_BYTES + 1
         // (1_048_577) fails with SF-SYS-007 without modifying dataset state or revision.
-        let narrative_overhead = serde_json::to_vec(&serde_json::json!({
+        let narrative_overhead = test_result(serde_json::to_vec(&serde_json::json!({
             "project": "p1",
             "template": ""
-        }))
-        .unwrap()
+        })))
         .len();
         let exact_narrative = "x".repeat(MAX_IPC_BYTES - narrative_overhead);
         test_result(store.narrative("p1", &exact_narrative));
@@ -2888,16 +2887,16 @@ mod tests {
             Err("SF-SYS-007".to_owned())
         );
 
-        let rev_before = state(&store)["revision"].as_u64().unwrap();
+        let rev_before = state(&store)["revision"].as_u64();
+        assert!(rev_before.is_some());
         // Verify JSON-serialized accounting across non-string parameters (row: usize, rowId: u64,
         // expectedRevision: Option<u64>, ascending: bool), quotes/control-char escapes, and Unicode:
-        let set_cell_overhead = serde_json::to_vec(&serde_json::json!({
+        let set_cell_overhead = test_result(serde_json::to_vec(&serde_json::json!({
             "project": "p1",
             "row": 0usize,
             "column": "amount",
             "value": ""
-        }))
-        .unwrap()
+        })))
         .len();
         let set_cell_filler = "1".repeat(MAX_IPC_BYTES - set_cell_overhead);
         assert_ne!(
@@ -2910,7 +2909,8 @@ mod tests {
             Err("SF-SYS-007".to_owned())
         );
         // Raw `.len()` smaller than filler, but control char `\u{0000}` expands to `\u0000` (6 bytes in JSON):
-        let rev_before_escape_reject = state(&store)["revision"].as_u64().unwrap();
+        let rev_before_escape_reject = state(&store)["revision"].as_u64();
+        assert!(rev_before_escape_reject.is_some());
         let escaped_value = format!(
             "{}\u{0000}",
             "1".repeat(MAX_IPC_BYTES - set_cell_overhead - 5)
@@ -2921,20 +2921,16 @@ mod tests {
             Err("SF-SYS-007".to_owned())
         );
         // Must reject before mutating dataset revision or cell value:
-        assert_eq!(
-            state(&store)["revision"].as_u64().unwrap(),
-            rev_before_escape_reject
-        );
-        assert_ne!(rev_before, 0);
+        assert_eq!(state(&store)["revision"].as_u64(), rev_before_escape_reject);
+        assert_ne!(rev_before, Some(0));
 
-        let set_cell_by_id_overhead_none = serde_json::to_vec(&serde_json::json!({
+        let set_cell_by_id_overhead_none = test_result(serde_json::to_vec(&serde_json::json!({
             "project": "p1",
             "rowId": 1u64,
             "column": "amount",
             "value": "",
             "expectedRevision": None::<u64>
-        }))
-        .unwrap()
+        })))
         .len();
         let set_cell_by_id_over_none = "1".repeat(MAX_IPC_BYTES - set_cell_by_id_overhead_none + 1);
         assert_eq!(
@@ -2948,17 +2944,13 @@ mod tests {
             store.set_cell_by_id("p1", 1, "amount", &exact_with_none, Some(10_000), 1_650),
             Err("SF-SYS-007".to_owned())
         );
-        assert_eq!(
-            state(&store)["revision"].as_u64().unwrap(),
-            rev_before_escape_reject
-        );
+        assert_eq!(state(&store)["revision"].as_u64(), rev_before_escape_reject);
 
-        let sort_overhead_true = serde_json::to_vec(&serde_json::json!({
+        let sort_overhead_true = test_result(serde_json::to_vec(&serde_json::json!({
             "project": "p1",
             "column": "",
             "ascending": true
-        }))
-        .unwrap()
+        })))
         .len();
         let sort_col_exact = "c".repeat(MAX_IPC_BYTES - sort_overhead_true);
         assert_ne!(

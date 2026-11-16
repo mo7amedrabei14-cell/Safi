@@ -1565,7 +1565,9 @@ mod tests {
             "expectedRevision": serde_json::Value::Null,
             "value": ""
         });
-        let base_len = serde_json::to_vec(&template_obj).unwrap().len();
+        let base_len = serde_json::to_vec(&template_obj)
+            .expect("template JSON must serialize")
+            .len();
         let exact_filler = "a".repeat(MAX_IPC_BYTES - base_len);
         let exact_body = InvokeBody::Json(serde_json::json!({
             "project": "p1",
@@ -1657,27 +1659,27 @@ mod tests {
                 &inst_str,
                 session.expires_at as u64 * 1_000,
             )
-            .unwrap();
+            .expect("register baseline session");
         baseline_store
             .set_auth_session(&tok, &inst_str, now_ms)
-            .unwrap();
+            .expect("bind baseline auth");
         baseline_store
             .open_file("p_base", &csv_path, now_ms)
-            .unwrap();
+            .expect("open baseline csv");
 
         let t0 = Instant::now();
         for _ in 0..50 {
             baseline_store
                 .rows_page("p_base", r#"{"offset":0,"limit":25}"#)
-                .unwrap();
+                .expect("baseline rows_page");
         }
         let baseline_rows_50 = t0.elapsed();
 
-        let base_rev =
-            serde_json::from_str::<serde_json::Value>(&baseline_store.state("p_base").unwrap())
-                .unwrap()["revision"]
-                .as_u64()
-                .unwrap();
+        let base_state = baseline_store.state("p_base").expect("baseline state");
+        let base_rev = serde_json::from_str::<serde_json::Value>(&base_state)
+            .expect("parse baseline state")["revision"]
+            .as_u64()
+            .expect("baseline revision");
         let t1 = Instant::now();
         for i in 0..50u64 {
             baseline_store
@@ -1689,7 +1691,7 @@ mod tests {
                     Some(base_rev + i),
                     now_ms,
                 )
-                .unwrap();
+                .expect("baseline set_cell_by_id");
         }
         let baseline_edit_50 = t1.elapsed();
 
@@ -1707,13 +1709,19 @@ mod tests {
             verifier.clone(),
         );
         tls_store.set_clock_ms(Some(now_ms));
-        tls_store.set_auth_session(&tok, &inst_str, now_ms).unwrap();
-        tls_store.open_file("p_tls", &csv_path, now_ms).unwrap();
+        tls_store
+            .set_auth_session(&tok, &inst_str, now_ms)
+            .expect("bind tls auth");
+        tls_store
+            .open_file("p_tls", &csv_path, now_ms)
+            .expect("open tls csv");
 
         let mut verify_samples_us = Vec::with_capacity(50);
         for _ in 0..50 {
             let s = Instant::now();
-            verifier.verify_session(&tok, &inst_str, now_ms).unwrap();
+            verifier
+                .verify_session(&tok, &inst_str, now_ms)
+                .expect("verify_session");
             verify_samples_us.push(s.elapsed().as_micros());
         }
         verify_samples_us.sort_unstable();
@@ -1722,14 +1730,15 @@ mod tests {
         for _ in 0..50 {
             tls_store
                 .rows_page("p_tls", r#"{"offset":0,"limit":25}"#)
-                .unwrap();
+                .expect("tls rows_page");
         }
         let tls_rows_50 = t2.elapsed();
 
-        let tls_rev = serde_json::from_str::<serde_json::Value>(&tls_store.state("p_tls").unwrap())
-            .unwrap()["revision"]
+        let tls_state = tls_store.state("p_tls").expect("tls state");
+        let tls_rev = serde_json::from_str::<serde_json::Value>(&tls_state)
+            .expect("parse tls state")["revision"]
             .as_u64()
-            .unwrap();
+            .expect("tls revision");
         let t3 = Instant::now();
         for i in 0..50u64 {
             tls_store
@@ -1741,7 +1750,7 @@ mod tests {
                     Some(tls_rev + i),
                     now_ms,
                 )
-                .unwrap();
+                .expect("tls set_cell_by_id");
         }
         let tls_edit_50 = t3.elapsed();
 

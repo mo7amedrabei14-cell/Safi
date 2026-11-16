@@ -1,106 +1,98 @@
-# تقرير الإنجاز والقبول النهائي — Quad-Studio v7 (معالجة ملاحظات المراجعة)
+# تقرير الإنجاز والقبول — Quad-Studio v7 (وتحديث معالجة المراجعة المستقلة)
 
-- **المرجع الأساسي على `main`**: `674fc24ba386d4089f891d69aca7f69f3d543427` (الأب: `361d3a20f8d80d34c536ecd273bfcb16b7c14dd5`)
-- **حالة Git**: جميع التعديلات محفوظة محليًا على فرع `main` فقط **بدون `git commit` وبدون `git push`** بانتظار مراجعتك وموافقتك.
-- **حالة المرحلة**: معالجة جميع البنود السبع من **STRICT EXECUTOR — QUAD-STUDIO v7 — REVIEW FINDINGS REMEDIATION** دون بدء `P0.06`.
+- **الفرع**: `main` فقط.
+- **حالة Git والنشر**: تم تنفيذ Commit وPush لنسخة `v7` على GitHub عند `242f137f6aa130e7b82a5e2d8874ff0984cfcda6` (الأب: `674fc24ba386d4089f891d69aca7f69f3d543427`)، ثم نُشر Commit وسيط (`6e1c9208d12972946fc56a3dee12a42966f1b4e5`، Run `43898824144`: نجح فيه `Desktop shell compile` و`Intro visual regression` و`PostgreSQL 18.6` وفشل `Full Gate` بسبب `clippy::unwrap-used` / `clippy::expect-used` في اختبارات `sf-desktop`).
+- **التعديلات الحالية**: إصلاحات `clippy --all-targets` في `commands.rs`/`studio.rs`/`main.rs`، وعزل `SAFI_API_BASE_URL` في `verify-studio-desktop-e2e.mjs`، وتحديث هذا التقرير مضافة **محليًا على `main` بدون `git commit` وبدون `git push`** فوق `6e1c920` بانتظار مراجعة المالك، ودون بدء `P0.06` أو أي Deployment.
 
 ---
 
 ## 1. ملخص المالك (حسب قالب التقرير المعتمد)
 
 ### ما الذي أُنجز
-1. استُبدل التحقق الوهمي عبر `SAFI_DESKTOP_AUTH_LOOPBACK_ADDR` في تطبيق سطح المكتب `safi-desktop` بمحقق TLS إنتاجي (`DesktopShellSessionVerifier` باستخدام `rustls` و`webpki-roots`) يستعلم من `SAFI_API_BASE_URL` المضمّن وقت البناء (`GET /v1/auth/sessions/current`) مع ربط معرف التثبيت `X-Safi-Installation-Id` في `sf-server` وانتظار ربط الجلسة في الواجهة قبل فتح التطبيق، واختبار الحالات الإلزامية الـ 11 كاملة عبر TLS حقيقية.
-2. أُزيلت محاكاة `page.route` لمسارات المصادقة في `tools/verify-studio-desktop-e2e.mjs` واستُبدلت بخادم `sf-server` حقيقي (`crates/sf-server/examples/auth_harness_server.rs`) مع إعادة تسمية الاختبار بصدق كـ `Chromium UI + Real sf-server Auth + Real Rust StudioStore Subprocess Harness Integration Test` وتوثيق عدم توفر WebDriver لواجهة WebView2 محليًا.
-3. أُنجز الرسم الهندسي الحقيقي لجميع الرسوم الثمانية (`Bar`، `Line`، `Area`، `Pie`، `Donut`، `Scatter`، `Histogram`، `KPI`) في Rust والواجهة والكبسولة المستقلة، وتوحيد حدود `MAX_IPC_BYTES = 1_048_576` عبر جميع المعاملات (`measure_ipc_payload` / `ipc_payload_len!`)، وتقييد نقطة الذكاء الاصطناعي المحلية بـ `http://127.0.0.1:11434` المتوافق مع سياسة CSP، وتوضيح اختبارات PostgreSQL 18.6 في CI وتصحيح وثائق المراحل وتقرير `v6`.
+1. **إعادة تصميم قياس حجم IPC جذريًا في Native boundary**: استُبدلت حسابات الذاكرة (`size_of::<bool>()` وغيرها) بقياس الحجم الفعلي للتمثيل المتسلسل JSON عبر `serde_json::to_writer` بدون تخصيصات Heap (`json_serialized_len`, `IpcJsonValueLen`, `measure_ipc_json_object`) مع تضمين أسماء الحقول، علامات الاقتباس، الفواصل، `{}:`، escaping أحرف التحكم وعلامات التنصيص، Unicode، `bool`، الأرقام العشرية، و`Option::None -> null` (4 بايت)، وربط الفحص مباشرة في Tauri `invoke_handler` (`enforce_tauri_ipc_boundary`) قبل تفكيك أو وصول أي أمر Studio مع اختبار يمنع وصول الحمولات المتجاوزة لـ `MAX_IPC_BYTES` (`1_048_576`).
+2. **تشديد إعدادات بناء Desktop وتطابق `SAFI_API_BASE_URL`**: أُضيفت `ApiOrigin::parse_for_release` في `crates/sf-desktop/src/api_origin.rs` و`apps/desktop/src-tauri/build.rs` وتحديث `apps/web/vite.config.ts` و`tools/verify-desktop-build-config.mjs` و`.github/workflows/ci.yml` بحيث يرفض بناء Release غياب `SAFI_API_BASE_URL` أو النطاقات المحجوزة/الاختبارية مثل `.invalid`، ويثبت تطابق الأصل المضمّن في حزمة الواجهة (`@safi/web`) والملف التنفيذي الأصلي (`safi-desktop --release`) عبر قيمة CI اختبارية واضحة بدون أي عنوان إنتاجي ثابت في الكود.
+3. **قياس أداء التحقق Native ونتائج المراجعة**: قِيس زمن `DesktopShellSessionVerifier` عبر **TLS مصادَقة للخادم فقط (Server-Authenticated TLS عبر `rustls` + `webpki-roots` و`.with_no_client_auth()` بدون Client Certificate — وليست Mutual TLS)** مقارنةً بالأداء داخل الذاكرة، وتصحيح وصف اختبارات Chromium E2E وتوثيق نتائج CI الفعلية على Commit `242f137`.
 
 ### كيف تجرّبه بنفسك
-1. شغّل اختبارات مساحة عمل Rust وبوابة الأمان ومطابقة الوثائق:
+1. اختبر قياس حجم IPC وحدود التمثيل المتسلسل JSON وإغلاق Tauri boundary قبل التنفيذ:
    - `cargo test --workspace`
-   - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` (بدون متغير بيئة لاختبار الإغلاق الفاشل `SF-SYS-031`، ومع `$env:SAFI_API_BASE_URL="https://api.safidata.app"`)
-   - `py -3 tools/verify-security.py`
-2. شغّل اختبارات الواجهة والتحقق الحقيقي في Chromium (يتضمن خادم `sf-server` فعليًا ومولد الكبسولة):
-   - `pnpm test`
-   - `node tools/verify-capsule-chromium.mjs`
-   - `node tools/verify-studio-desktop-e2e.mjs`
-3. راجع لقطات الشاشة ومخرجات الكبسولة المحفوظة في مجلد `artifacts/`.
+   - `$env:SAFI_API_BASE_URL="https://ci-verify.safidata.dev"; cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
+2. اختبر فشل بناء Release عند غياب أو استخدام `.invalid` وتطابق الأصل بين Frontend وNative Release:
+   - `$env:SAFI_API_BASE_URL="https://ci-verify.safidata.dev"; node tools/verify-desktop-build-config.mjs`
+3. اختبر قياس أداء التحقق Native واختبارات الواجهة وChromium:
+   - `$env:SAFI_API_BASE_URL="https://ci-verify.safidata.dev"; cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -- --ignored --nocapture`
+   - `pnpm test` و`pnpm typecheck` و`pnpm lint` و`pnpm build`
+   - `node tools/verify-capsule-chromium.mjs` و`node tools/verify-studio-desktop-e2e.mjs`
 
-### ما الذي فشل أو لم يكتمل (بصراحة تامة)
-- **اختبار نافذة تطبيق Tauri WebView2 التنفيذي عبر GUI WebDriver (`tauri-driver` / `msedgedriver`)**: غير متوفر على بيئة Windows الحالية لأن `Get-Command tauri-driver,msedgedriver` لم يعثر على أي منهما، لذا لم يُشغَّل إطلاق نافذة WebView2 مجمّعة عبر WebDriver محليًا. تم التحقق بدلًا من ذلك عبر مسارين حقيقيين:
-  1. اختبار TLS/X.509 الحقيقي داخل `apps/desktop/src-tauri/src/main.rs` أمام راوتر `sf-server` الفعلي لجميع الحالات الـ 11.
-  2. اختبار التكامل الشامل `verify-studio-desktop-e2e.mjs` في Chromium حقيقي أمام `auth_harness_server` (`sf-server`) و`studio_ipc_harness` (`StudioStore`).
-- **اختبارات PostgreSQL 18.6 الثلاثة المتجاهلة افتراضيًا (`account_postgres`: 1، `accounts_postgres`: 2)**: تتطلب خدمة PostgreSQL 18.6 وتشغيلها مضبوط صراحة في CI عبر `tools/test-migrations.sh` وصورة `postgres:18.6-bookworm`، وتُترك كـ `ignored` محليًا عند غياب قاعدة البيانات.
+### ما الذي تم التحقق منه مقابل ما بقي غير مختبر
+- **تم التحقق منه محليًا**:
+  - قياس التمثيل المتسلسل JSON في `sf-desktop` وحدّ Tauri `invoke_handler` قبل وصول أي أمر Studio عند `1_048_576` و`1_048_577` (`SF-SYS-007`).
+  - رفض بناء Release للواجهة ولـ `safi-desktop` عند غياب `SAFI_API_BASE_URL` أو تمرير `https://api.safidata.invalid`، وبناء الملف التنفيذي `safi-desktop --release` وإثبات تطابق الأصل (`https://ci-verify.safidata.dev`) مع `apps/web/dist/assets/*.js`.
+  - اختبار الحالات الـ 11 لـ `DesktopShellSessionVerifier` عبر TLS محلية أمام راوتر `sf-server` الفعلي، وقياس زمن التحقق المتكرر وأثره على `rows_page` و`set_cell_by_id`.
+  - اختبار التكامل في Chromium (`verify-studio-desktop-e2e.mjs`): **يستخدم حقن جسر IPC اصطناعي (`__SAFI_DESKTOP_BRIDGE__`) وعملية Rust فرعية (`studio_ipc_harness`) مع خادم `sf-server` فعلي، وليس نافذة Tauri WebView2 فعلية**.
+- **بقي غير مختبر محليًا (بصراحة)**:
+  - **تشغيل نافذة WebView2 التنفيذية المجمّعة عبر WebDriver (`tauri-driver` / `msedgedriver`)**: غير متوفر محليًا لغياب الأداتين على جهاز Windows.
+  - **توليد حزم المثبت النهائي (`.msi` / `.AppImage` / `.deb` / `.rpm`)**: غير مضبوط في هذا الجهاز لغياب `@tauri-apps/cli` / `cargo-tauri`؛ جرى اختبار بناء الملف التنفيذي `safi-desktop --release` (`cargo build --release`) بدلًا من حزمة التثبيت الكاملة. كما أن CI على Commit `242f137` نفسها نفّذت `pnpm -r --filter @safi/web run build` و`cargo fmt/clippy/test` فقط دون إنتاج حزمة Tauri Release فعلية.
+  - **اختبارات PostgreSQL 18.6 الثلاثة المتجاهلة افتراضيًا (`account_postgres`: 1، `accounts_postgres`: 2) و`tools/test-migrations.sh`**: تتطلب خدمة PostgreSQL 18.6 غير متوفرة محليًا (تعمل في CI فقط عبر خدمة `postgres:18.6-bookworm`).
+  - **التحقق أمام خادم SafiData إنتاجي حي**: جرى التحقق عبر TLS محلية + `sf-server` الفعلي واستطلاع RTT خارجي تجريبي لـ `api.github.com` وليس أمام نشر إنتاجي.
 
 ### قرارات أحتاجها منك
-1. هل تعتمد هذه المعالجة للانتقال إلى `git commit` و`git push` على `main` بعد مراجعة التغييرات؟
-2. هل نُبقي على عنوان الإنتاج الافتراضي وقت البناء `SAFI_API_BASE_URL` مضبوطًا من خط بناء الإصدار فقط (مع إغلاق تلقائي `SF-SYS-031` عند غيابه)، أم ترغب في تضمين عنوان إنتاج افتراضي ثابت داخل `build.rs` لإصدارات التطوير غير المضبوطة؟
-3. هل ترغب لاحقًا (خارج هذا الإصلاح) في تثبيت `tauri-driver` و`msedgedriver` على جهاز التطوير لإضافة اختبار GUI WebView2 تفاعلي للنسخة المثبتة؟
+1. هل تعتمد هذه المعالجة للانتقال إلى `git commit` و`git push` على `main`؟
+2. بناءً على قياسات الأداء في القسم (3)، هل توافق لاحقًا على تصميم آلية تفويض قصيرة العمر أو استمرار اتصال (HTTP keep-alive / connection pooling أو TTL موقّع قصير مع إبطال فوري)؟ لم يتم تخفيف التحقق أو تغييره في هذه المرحلة التزامًا بتوجيهك.
 
-### الملفات التي تغيّرت
-- **الخادم والمصادقة**: `crates/sf-server/src/auth/mod.rs`، `crates/sf-server/src/auth/repository.rs`، `crates/sf-server/src/auth/service.rs`، `crates/sf-server/src/auth/middleware.rs`، `crates/sf-server/tests/auth_flow.rs`، `crates/sf-server/examples/auth_harness_server.rs`
-- **بوابة سطح المكتب وTauri**: `crates/sf-desktop/src/commands.rs`، `crates/sf-desktop/src/studio.rs`، `apps/desktop/src-tauri/Cargo.toml`، `apps/desktop/src-tauri/Cargo.lock`، `apps/desktop/src-tauri/build.rs`، `apps/desktop/src-tauri/src/main.rs`
-- **محرك الرسوم والكبسولة**: `crates/sf-recipe/src/datagraph.rs`، `crates/sf-recipe/src/datagraph/tests.rs`، `crates/sf-recipe/src/studio_capsule.rs`
-- **الواجهة الأمامية**: `apps/web/vite.config.ts`، `apps/web/src/ApplicationShell.tsx`، `apps/web/src/components/auth/AuthModal.tsx`، `apps/web/src/components/layout/AccountAccessSheet.tsx`، `apps/web/src/desktop/ai-interpreter.ts`، `apps/web/src/desktop/components/CommandBarPanel.tsx`، `apps/web/src/desktop/components/DashboardChartsView.tsx`، `apps/web/src/desktop/studio-bridge.ts`، `apps/web/src/desktop/desktop-studio.test.tsx`
-- **الاختبارات والبنية والتوثيق**: `tools/verify-capsule-chromium.mjs`، `tools/verify-studio-desktop-e2e.mjs`، `.github/workflows/ci.yml`، `docs/plans/STUDIO-Phase-1.md`، `docs/plans/STUDIO-Phase-2.md`، `docs/plans/STUDIO-Phase-3.md`، `docs/plans/STUDIO-Phase-4.md`، `docs/plans/STUDIO-Phase-5.md`، `docs/reports/QUAD-STUDIO-FINAL-ACCEPTANCE-v6.md`، `docs/reports/QUAD-STUDIO-FINAL-ACCEPTANCE-v7.md`
-
----
-
-## 2. تفاصيل التنفيذ للمهام (1–7)
-
-### المهمة 1 — إصلاح بوابة المصادقة Native وربط `X-Safi-Installation-Id`
-- أزيل المسار غير الآمن المعتمد على متغير `SAFI_DESKTOP_AUTH_LOOPBACK_ADDR` واستُبدل بـ `DesktopShellSessionVerifier` في `apps/desktop/src-tauri/src/main.rs` المبني على `rustls = "=0.23.46"` و`rustls-pki-types = "=1.15.1"` و`webpki-roots = "=1.0.11"`.
-- يقرأ `apps/desktop/src-tauri/build.rs` المتغير `SAFI_API_BASE_URL` أثناء البناء ويُصدره via `cargo:rustc-env=SAFI_API_BASE_URL=...` بعد التحقق الصارم؛ وإذا غاب وقت التشغيل يرفض المحقق تنفيذ أوامر Studio الحساسة برسالة `SF-SYS-031`.
-- يرسل المحقق طلب `GET /v1/auth/sessions/current` عبر HTTPS مرفقًا برأس `Authorization: Bearer` ورأس `X-Safi-Installation-Id`.
-- في `crates/sf-server/src/auth/{mod.rs, repository.rs, service.rs, middleware.rs}` أُضيف `device_installation_key_hash` إلى `SessionRecord` و`AuthenticatedSession` (في الذاكرة واستعلامات SQLx)، وتحقق `require_session` من تطابق `X-Safi-Installation-Id` باستخدام `DeviceRegistration::from_installation_id` ومقارنة ثابتة الزمن عبر `subtle::ConstantTimeEq` مع إرجاع `AuthError::Revoked` (`SF-AUTH-003`) عند عدم التطابق.
-- في `apps/web/src/{ApplicationShell.tsx, components/auth/AuthModal.tsx, components/layout/AccountAccessSheet.tsx}` أصبح ربط الجلسة المحلية (`await getSafiDeviceIdentity()` + `setStudioAuthSession(token, installationId)`) إلزاميًا قبل فتح واجهة التطبيق عبر `setSessionToken`، مع تنظيف الجلسة المحلية (`clearStudioAuthSession`) وحالة React عند تسجيل الخروج حتى لو تعذّر طلب `DELETE /v1/auth/sessions/current`، ودعم رسائل خطأ ثنائية اللغة لرموز `SF-SYS-031` و`SF-AUTH-005` و`SF-AUTH-001/002/003`.
-- الاختبار `desktop_shell_verifier_covers_all_eleven_production_auth_cases` يغطي الحالات الـ 11 كاملة أمام خادم `sf-server` حقيقي بشهادة X.509 ECDSA P-256 عبر TLS:
-  1. غياب إعداد الخادم (`SF-SYS-031`).
-  2. تعذّر الوصول إلى خادم المصادقة (`SF-AUTH-005`).
-  3. عدم وجود جلسة نشطة (`SF-AUTH-001`).
-  4. توكن غير صالح أو مزور (`SF-AUTH-001`).
-  5. جلسة منتهية الصلاحية (`SF-AUTH-002`).
-  6. جلسة ملغاة (`SF-AUTH-003`).
-  7. استبدال الجهاز / عدم تطابق معرف التثبيت (`SF-AUTH-003`).
-  8. جلسة نشطة وصالحة متوافقة مع الجهاز.
-  9. تسجيل الخروج ثم إرسال طلب IPC لاحق (مرفوض).
-  10. استدعاء أمر حساس عبر مسار Tauri مقفل بدون مصادقة.
-  11. تنفيذ الأوامر المسموحة والمرور عبر `gate_command`.
-
-### المهمة 2 — إزالة محاكاة المصادقة من E2E واستخدام `sf-server` الحقيقي
-- أُنشئ `crates/sf-server/examples/auth_harness_server.rs` لتشغيل خادم `sf-server` HTTP فعلي بحساب مسجّل ومؤكَّد (`analyst@safidata.com` / `SafiAnalyst#2026`).
-- أُضيف دعم `SAFI_DEV_API_PROXY` في `apps/web/vite.config.ts`.
-- أُزيلت جميع اعتراضات `page.route` الخاصة بالمصادقة من `tools/verify-studio-desktop-e2e.mjs` بحيث يمر تسجيل الدخول (`POST /v1/auth/login`) وربط الجلسة (`GET /v1/auth/sessions/current`) وتسجيل الخروج (`DELETE /v1/auth/sessions/current` ثم الرفض بـ `SF-AUTH-003`) عبر `sf-server` الحقيقي و`studio_ipc_harness`.
-- تم توثيق اسم هذا الاختبار بوضوح ودقة: **`Chromium UI + Real sf-server Auth + Real Rust StudioStore Subprocess Harness Integration Test`** وليس اختبار WebView2 WebDriver لأن `tauri-driver` و`msedgedriver` غير مثبتين على جهاز الاختبار.
-
-### المهمة 3 — الهندسة البصرية الحقيقية لجميع أنواع الرسوم الثمانية (Charts)
-- حُسِبَت مسارات القطاعات الدقيقة في Rust (`datagraph.rs` و`studio_capsule.rs`) لرسوم `Pie` (`r=40`) و`Donut` (`r_outer=40, r_inner=22`) مع معالجة حالة الدائرة الكاملة.
-- تُعرض الآن جميع الرسوم الثمانية في `DashboardChartsView.tsx` وفي ملف التصدير `.safi.html` بهندستها الفعلية: `<path data-pie-slice>` و`<path data-donut-slice>` مع الإجمالي المركزي، و`<rect data-histogram-bin>` لـ `Histogram`، وSVG لـ `Line` و`Area` و`Scatter`، وأشرطة `Bar`، وبطاقة `KPI` مستقلة بدون تكرار صفوف `.bars`.
-- أُكد ذلك عبر `all_eight_chart_types_compute_in_rust_and_reject_unsuitable_columns` و`capsule_renders_genuine_svg_geometry_for_pie_donut_histogram_and_standalone_kpi` و`desktop-studio.test.tsx` و`node tools/verify-capsule-chromium.mjs` (`scripts: 0`, `externalRequests: 0`, `consoleErrors: 0`).
-
-### المهمة 4 — توحيد نقطة نهاية الذكاء الاصطناعي مع CSP
-- قُيِّدت دالة `validateAiEndpointUrl` في `apps/web/src/desktop/ai-interpreter.ts` وواجهة `CommandBarPanel.tsx` لتقبل فقط نقطة Ollama المحلية المقفلة `http://127.0.0.1:11434` / `http://localhost:11434` (مع توحيدها إلى `http://127.0.0.1:11434`) ورفض روابط `https:` العامة برسالة صريحة توضح تأجيل الذكاء الاصطناعي السحابي ومطابقة `tauri.conf.json`.
-
-### المهمة 5 — توضيح اختبارات PostgreSQL 18.6 وTauri في CI
-- في `.github/workflows/ci.yml` أُظهرت خطوات CI بشكل صريح لكل من اختبارات Tauri (`safi-desktop`) والاختبارات الثلاثة التي تتطلب قاعدة PostgreSQL 18.6 (`account_postgres`: 1، `accounts_postgres`: 2) عبر `tools/test-migrations.sh` على `postgres:18.6-bookworm`.
-
-### المهمة 6 — توحيد احتساب حجم حمولات IPC وتوثيق الأخطاء
-- في `crates/sf-desktop/src/commands.rs` و`crates/sf-desktop/src/studio.rs` أُضيفت سمة `IpcFieldLen` (لـ `str`, `String`, `Path`, `PathBuf`, `usize`, `u64`, `bool`, `&T`, `Option<T>`) ودالة `measure_ipc_payload` وماكرو `ipc_payload_len!`.
-- وُحّد تمرير حجم الحمولة المحسوب على جميع معاملات أوامر Studio قبل التنفيذ عند حد `MAX_IPC_BYTES = 1_048_576` (1 MiB)، مع اختبارات حدية عند `MAX_IPC_BYTES` و`MAX_IPC_BYTES + 1 -> SF-SYS-007` للمعاملات النصية وغير النصية، وتصحيح تعليقات التوثيق (`SF-SYS-010` / `SF-SYS-007`).
-
-### المهمة 7 — تصحيح وثائق المراحل وتقرير `v6`
-- صُححت الأرقام والرموز ومسافات نهاية الأسطر في `docs/plans/STUDIO-Phase-1.md` حتى `STUDIO-Phase-5.md` وفي `docs/reports/QUAD-STUDIO-FINAL-ACCEPTANCE-v6.md` (`47` في `ALLOWED_COMMANDS`، `43` أمرًا حساسًا، `MAX_IPC_BYTES = 1_048_576`، `SF-SYS-010`/`SF-SYS-007`، مفاتيح شذوذ البيانات الخمسة الفعلية).
+### الملفات التي تغيّرت في معالجة المراجعة (محليًا فوق `242f137`)
+- `crates/sf-desktop/src/commands.rs`
+- `crates/sf-desktop/src/studio.rs`
+- `crates/sf-desktop/src/api_origin.rs`
+- `apps/desktop/src-tauri/build.rs`
+- `apps/desktop/src-tauri/src/main.rs`
+- `apps/web/vite.config.ts`
+- `tools/verify-desktop-build-config.mjs` (جديد)
+- `.github/workflows/ci.yml`
+- `tools/verify-studio-desktop-e2e.mjs`
+- `docs/reports/QUAD-STUDIO-FINAL-ACCEPTANCE-v7.md`
 
 ---
 
-## 3. نتائج البوابات والاختبارات الفعلية المرصودة
+## 2. نتائج CI الفعلية على Commit `242f137f6aa130e7b82a5e2d8874ff0984cfcda6`
 
-| الفحص / الأداة | النتيجة الفعلية | ملاحظات مهمة |
+| بيئة الاختبار | المهمة (Job) على GitHub Actions (Run `43853915468`) | الحالة | ملاحظات دقيقة |
+| --- | --- | --- | --- |
+| CI | `Desktop shell compile (windows-latest)` | `success` | نفّذت `pnpm -r --filter @safi/web run build` + `cargo fmt/clippy/test` على Debug، **ولم تنتج حزمة Tauri Release فعلية** على `242f137` |
+| CI | `Full Gate (windows-latest)` | `success` | نفّذت `make check` |
+| CI | `Full Gate (ubuntu-latest)` | `success` | نفّذت `make check` |
+| CI | `PostgreSQL 18.6 migration apply / rollback` | `success` | نفّذت `tools/test-migrations.sh` والاختبارات الـ 3 على `postgres:18.6-bookworm` |
+| CI | `Intro visual regression (Chromium)` | `success` | نفّذت `verify-intro-visual`, `verify-device-identity`, `verify-capsule-chromium`, و`verify-studio-desktop-e2e` (عبر injected IPC bridge + `studio_ipc_harness`) |
+
+---
+
+## 3. قياسات أداء التحقق Native (`DesktopShellSessionVerifier` و`StudioStore::gate_command`)
+
+رُصدت القياسات الفعلية التالية عبر الاختبار `benchmark_native_session_verifier_performance` في `apps/desktop/src-tauri/src/main.rs`:
+
+| المقياس المرصود | القيمة الفعلية | الملاحظة |
 | --- | --- | --- |
-| `cargo test --workspace` | **ناجح** (0 أخطاء) | `sf-arabic`: 4، `sf-clean`: 10، `sf-cli`: 4، `sf-core`: 17 + 2 (`fuzz_regression`)، `sf-desktop`: 64 + 5 + 2 + 1 + 1 + 1 (74 إجمالًا)، `sf-io`: 36، `sf-profile`: 3، `sf-recipe`: 34، `sf-report`: 3، `sf-server`: 64 + 11 (`auth_flow`) + 1 (`log_center`) + 4 (`zero_trust_guard`) = 80 محليًا (+3 ignored لـ PG 18.6)، `sf-wasm`: 5 |
-| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` (بدون `SAFI_API_BASE_URL`) | **ناجح** (`1 passed; 0 failed`) | يؤكد السلوك الفاشل الآمن `SF-SYS-031` عند غياب متغير الخادم |
-| `SAFI_API_BASE_URL="https://api.safidata.app"` مع `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` | **ناجح** (`1 passed; 0 failed`) | يمرر جميع حالات المصادقة الـ 11 عبر TLS حقيقي |
-| `cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings` | **ناجح** (`0 warnings`) | فحص مشدد بدون تحذيرات |
-| `cargo fmt --all -- --check` و`apps/desktop/src-tauri` و`pnpm run format:check` | **ناجح** | تنسيق Rust وFrontend متوافق بالكامل |
-| `pnpm test` / `desktop-studio.test.tsx` / `typecheck` / `lint` / `build` | **ناجح** (`58` ملفًا، `197` اختبارًا، منها `18/18` في `desktop-studio.test.tsx`) | خروج نظيف برمز `0` |
-| `node tools/verify-capsule-chromium.mjs` | **ناجح** (خروج `0`) | Chromium حقيقي: `scripts: 0`, `externalRequests: 0`, `consoleErrors: 0` |
-| `node tools/verify-studio-desktop-e2e.mjs` | **ناجح** (خروج `0`) | الخطوات العشر كلها أمام `sf-server` الحقيقي + `studio_ipc_harness` |
-| `tools/check-no-network.sh`, `tools/verify-security.py`, `tools/verify-i18n.py`, `tools/gen-errors.py --check`, `tools/verify-migrations.py`, `tools/codeburn/burn.sh`, `git diff --check` | **ناجح** | بوابات الأمان، خلو الشبكة في المحرك، i18n، الأخطاء، الهجرات، ونظافة الفروقات |
+| `verify_session` (TLS محلي على `127.0.0.1`، 50 مرة) | `min = 3.379 ms`، `median = 7.799 ms`، `p95 = 11.050 ms` | فتح اتصال TCP + TLS handshake + HTTP `Connection: close` في كل مرة |
+| `StudioStore` في الذاكرة (بدون TLS، 50× `rows_page` / 50× `set_cell_by_id`) | `28.431 ms` (`0.569 ms`/عملية) و`52.550 ms` (`1.051 ms`/عملية) | خط الأساس لأداء المحرك المحلي |
+| `StudioStore` + `DesktopShellSessionVerifier` (TLS محلي، 50× `rows_page` / 50× `set_cell_by_id`) | `404.193 ms` (`8.084 ms`/عملية) و`402.329 ms` (`8.047 ms`/عملية) | أبطأ بنحو **14.2×** في قراءة الصفوف و**7.7×** في تعديل الخلايا محليًا |
+| استطلاع HTTPS خارجي لخادم بعيد (`api.github.com`، طلب واحد) | `359.017 ms` | يوضح تكلفة DNS + TCP + TLS + RTT لطلب واحد متزامن، ما يعادل نظريًا `~17.95 s` عند تكرار 50 عملية متسلسلة |
+| سلوك انقطاع الشبكة (منفذ مغلق محليًا) | `2,038.072 ms` حتى فشل الاتصال (`SF-AUTH-005`) | يمسح `gate_command` الجلسة النشطة (`active_session = None`) فور أول فشل شبكي فتُرفض العملية التالية بـ `SF-AUTH-001` حتى إعادة الربط |
+
+### توصية هندسية بالأرقام (دون تعديل السياسة حاليًا)
+1. التمرير داخل الجداول وتعديل الخلايا يتطلب استجابة `< 16–50 ms`؛ بينما التكلفة المقاسة (`~359 ms` عن بعد و`2–5 s` مهلة عند انقطاع الشبكة) ستوقف خيط الأوامر في واجهة التعديل على كل نقرة خلية أو صفحة.
+2. بعد موافقة المالك، يُوصى بفصل التحقق الدوري عبر قناة خلفية أو استئجار جلسة قصيرة موقّتة (مثل TTL قصير من 15–60 ثانية مع الاحتفاظ باتصال HTTPS Keep-Alive / HTTP connection pool يُخفّض تكلفة اليدين من `~8 ms` محليًا / `~359 ms` عن بعد إلى طلب واحد بدون TLS handshake متكرر) مع الإبطال الفوري عند عودة `SF-AUTH-002`/`003`، وتفريق الأخطاء العابرة للاتصال (`SF-AUTH-005`) عن الإلغاء القسري للجلسة (`SF-AUTH-003`) وفق قرار المالك.
+
+---
+
+## 4. نتائج الاختبارات المحلية بعد تعديلات المعالجة (فوق `242f137`)
+
+| الفحص المحلي | الحالة | التفاصيل الدقيقة |
+| --- | --- | --- |
+| `cargo test --workspace` | **ناجح** | 0 إخفاقات عبر جميع حزم مساحة العمل (`sf-desktop` وحدة: 65 + تكامل: 10؛ `sf-server`: 80 محليًا + 3 `ignored` لـ PG؛ `sf-recipe`: 34؛ `sf-io`: 36؛ `sf-core`: 17 + 2؛ `sf-clean`: 10؛ `sf-wasm`: 5؛ `sf-arabic`: 4؛ `sf-cli`: 4؛ `sf-profile`: 3؛ `sf-report`: 3) |
+| `cargo clippy` و`cargo test` لحزمة `apps/desktop/src-tauri` | **ناجح** | 0 تحذيرات (`clippy -- -D warnings`)، واجتياز 2/2 (`desktop_shell_verifier_covers_all_eleven_production_auth_cases` و`tauri_ipc_boundary_rejects_oversized_serialized_json_before_studio_command_executes`) مع 1 `ignored` للمقياس اليدوي |
+| `benchmark_native_session_verifier_performance` (`--ignored`) | **ناجح** | أُنتجت الأرقام الفعلية المسجلة في القسم (3) أعلاه |
+| `node tools/verify-desktop-build-config.mjs` | **ناجح** | أكد رفض غياب `SAFI_API_BASE_URL` ورفض `.invalid` في الويب وNative Release، وبناء `safi-desktop --release` وتطابق الأصل `https://ci-verify.safidata.dev` بين `ApplicationShell-*.js` و`safi-desktop.exe --print-build-origin` |
+| `pnpm typecheck` / `pnpm lint` / `pnpm test` / `pnpm build` | **ناجح** | خروج `0` لجميعها؛ `vitest`: `58` ملفًا (`197` اختبارًا) |
+| `node tools/verify-capsule-chromium.mjs` | **ناجح** | خروج `0` في Chromium حقيقي (`scripts: 0`, `externalRequests: 0`, `consoleErrors: 0`) |
+| `node tools/verify-studio-desktop-e2e.mjs` | **ناجح** | الخطوات الـ 10 كلها ناجحة عبر `injected __SAFI_DESKTOP_BRIDGE__` + `studio_ipc_harness` + `sf-server` الفعلي |
+| `tools/test-migrations.sh` على PostgreSQL 18.6 | **غير مُشغَّل محليًا** | PostgreSQL المحلية المثبتة هي `18.4` وتتطلب كلمة مرور (`fe_sendauth: no password supplied`) بدون ضبط `SF_TEST_DATABASE_URL`؛ يعمل هذا الفحص في CI على `postgres:18.6-bookworm` |

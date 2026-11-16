@@ -303,7 +303,7 @@ mod tests {
             ("unit", Some("ج.م")),
         );
 
-        let serialized = serde_json::to_vec(&serde_json::json!({
+        let serialized = crate::test_result(serde_json::to_vec(&serde_json::json!({
             "project": "p1",
             "path": path.to_string_lossy(),
             "text": text,
@@ -313,19 +313,17 @@ mod tests {
             "optSome": opt_some,
             "optNone": opt_none,
             "unit": Some("ج.م"),
-        }))
-        .unwrap();
+        })));
         assert_eq!(measured, serialized.len());
 
         // Control chars and quotes expand in JSON and count toward the 1 MiB ceiling even when
         // raw Rust byte length is far below MAX_IPC_BYTES.
         // Construct an object of exact MAX_IPC_BYTES serialized length:
         // {"project":"p1","raw":"..."} has fixed overhead 24 bytes -> 1_048_576 - 24 = 1_048_552.
-        let fixed = serde_json::to_vec(&serde_json::json!({
+        let fixed = crate::test_result(serde_json::to_vec(&serde_json::json!({
             "project": "p1",
             "raw": ""
-        }))
-        .unwrap()
+        })))
         .len();
         let filler = "a".repeat(MAX_IPC_BYTES - fixed);
         let exact_len = crate::ipc_payload_len!(("project", "p1"), ("raw", filler.as_str()));
@@ -345,12 +343,11 @@ mod tests {
 
         // Switching Option::None (`null`, 4 bytes) to Option::Some(10000) (`10000`, 5 bytes) pushes
         // an exact boundary payload over by 1 byte -> SF-SYS-007.
-        let base_overhead = serde_json::to_vec(&serde_json::json!({
+        let base_overhead = crate::test_result(serde_json::to_vec(&serde_json::json!({
             "project": "p1",
             "expectedRevision": null,
             "raw": ""
-        }))
-        .unwrap()
+        })))
         .len();
         let base_opt_none = crate::ipc_payload_len!(
             ("project", "p1"),

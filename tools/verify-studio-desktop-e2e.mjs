@@ -153,6 +153,8 @@ const server = spawn(
     stdio: "inherit",
     env: {
       ...process.env,
+      SAFI_API_BASE_URL: "",
+      SAFI_DESKTOP_RELEASE_BUILD: "0",
       SAFI_DEV_API_PROXY: `http://${authAddr}`
     }
   }

@@ -37,6 +37,43 @@ const CHART_TYPE_LABELS: Readonly<
   kpi: { en: "KPI", ar: "بطاقة مؤشر (KPI)" }
 };
 
+const CHART_SLICE_COLORS = [
+  "#2563eb",
+  "#0891b2",
+  "#7c3aed",
+  "#059669",
+  "#d97706",
+  "#db2777"
+] as const;
+
+function computeFallbackSectorPath(
+  startFrac: number,
+  sweepFrac: number,
+  isDonut: boolean
+): string | null {
+  if (sweepFrac <= 0) return null;
+  if (sweepFrac >= 0.999999) {
+    return isDonut
+      ? "M 50.00 10.00 A 40 40 0 1 1 50.00 90.00 A 40 40 0 1 1 50.00 10.00 M 50.00 28.00 A 22 22 0 1 0 50.00 72.00 A 22 22 0 1 0 50.00 28.00 Z"
+      : "M 50.00 10.00 A 40 40 0 1 1 50.00 90.00 A 40 40 0 1 1 50.00 10.00 Z";
+  }
+  const startRad = -Math.PI / 2 + startFrac * Math.PI * 2;
+  const endRad = startRad + sweepFrac * Math.PI * 2;
+  const largeArc = sweepFrac > 0.5 ? 1 : 0;
+  const ox1 = (50 + 40 * Math.cos(startRad)).toFixed(2);
+  const oy1 = (50 + 40 * Math.sin(startRad)).toFixed(2);
+  const ox2 = (50 + 40 * Math.cos(endRad)).toFixed(2);
+  const oy2 = (50 + 40 * Math.sin(endRad)).toFixed(2);
+  if (isDonut) {
+    const ix2 = (50 + 22 * Math.cos(endRad)).toFixed(2);
+    const iy2 = (50 + 22 * Math.sin(endRad)).toFixed(2);
+    const ix1 = (50 + 22 * Math.cos(startRad)).toFixed(2);
+    const iy1 = (50 + 22 * Math.sin(startRad)).toFixed(2);
+    return `M ${ox1} ${oy1} A 40 40 0 ${largeArc} 1 ${ox2} ${oy2} L ${ix2} ${iy2} A 22 22 0 ${largeArc} 0 ${ix1} ${iy1} Z`;
+  }
+  return `M 50.00 50.00 L ${ox1} ${oy1} A 40 40 0 ${largeArc} 1 ${ox2} ${oy2} Z`;
+}
+
 export interface DashboardChartsViewProps {
   readonly language: "en" | "ar";
   readonly project: string;
@@ -45,6 +82,7 @@ export interface DashboardChartsViewProps {
   readonly columns: readonly DesktopColumn[];
   readonly metrics: readonly DesktopMetric[];
   readonly charts: readonly StudioChartArtifact[];
+  readonly initialSeriesByChart?: Readonly<Record<string, DesktopChartSeries>>;
   readonly onUpdateCharts: (next: readonly StudioChartArtifact[]) => void;
   readonly onCrossFilter?: (column: string, label: string) => void;
   readonly onInspectMetric?: (metric: DesktopMetric) => void;
@@ -58,12 +96,15 @@ export function DashboardChartsView({
   columns,
   metrics,
   charts,
+  initialSeriesByChart,
   onUpdateCharts,
   onCrossFilter,
   onInspectMetric
 }: DashboardChartsViewProps): React.ReactElement {
   const isAr = language === "ar";
-  const [seriesByChart, setSeriesByChart] = useState<Record<string, DesktopChartSeries>>({});
+  const [seriesByChart, setSeriesByChart] = useState<Record<string, DesktopChartSeries>>(() => ({
+    ...(initialSeriesByChart ?? {})
+  }));
   const [errorsByChart, setErrorsByChart] = useState<Record<string, string>>({});
   const [title, setTitle] = useState(isAr ? "توزيع الإيرادات" : "Grouped Breakdown");
   const [chartType, setChartType] = useState<StudioChartType>("bar");
@@ -371,7 +412,83 @@ export function DashboardChartsView({
                 {resolvedType === "kpi" && series ? (
                   <div className="studio-kpi-callout" data-testid="chart-kpi-total">
                     <strong>{series.totalOrKpi}</strong>
+                    <span className="studio-muted-note">
+                      {`${chart.function}(${chart.column})`}
+                    </span>
                   </div>
+                ) : null}
+
+                {(resolvedType === "pie" || resolvedType === "donut") && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg studio-chart-svg--circle"
+                    viewBox="0 0 100 100"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    {points.map((pt, pIdx) => {
+                      const d =
+                        pt.svgPath ??
+                        computeFallbackSectorPath(
+                          pt.startPct / 100,
+                          pt.ratioPct / 100,
+                          resolvedType === "donut"
+                        );
+                      if (!d) return null;
+                      const sliceAttr =
+                        resolvedType === "donut"
+                          ? { "data-donut-slice": pIdx }
+                          : { "data-pie-slice": pIdx };
+                      return (
+                        <path
+                          key={`${pt.label}_${pIdx}`}
+                          {...sliceAttr}
+                          d={d}
+                          fill={CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]}
+                        />
+                      );
+                    })}
+                    {resolvedType === "donut" && series ? (
+                      <text
+                        x="50"
+                        y="53"
+                        textAnchor="middle"
+                        fill="currentColor"
+                        fontSize="9"
+                        fontWeight="700"
+                      >
+                        {series.totalOrKpi}
+                      </text>
+                    ) : null}
+                  </svg>
+                ) : null}
+
+                {resolvedType === "histogram" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    {points.map((pt, pIdx) => {
+                      const slotWidth = 84 / Math.max(points.length, 1);
+                      const barWidth = Math.max(slotWidth - 2, 4);
+                      const x = 8 + pIdx * slotWidth;
+                      const height = Math.max((Math.min(pt.ratioPct, 100) * 78) / 100, 2);
+                      const y = 90 - height;
+                      return (
+                        <rect
+                          key={`${pt.label}_${pIdx}`}
+                          data-histogram-bin={pIdx}
+                          x={x.toFixed(2)}
+                          y={y.toFixed(2)}
+                          width={barWidth.toFixed(2)}
+                          height={height.toFixed(2)}
+                          fill="currentColor"
+                        />
+                      );
+                    })}
+                  </svg>
                 ) : null}
 
                 {(resolvedType === "line" ||
@@ -385,6 +502,28 @@ export function DashboardChartsView({
                     role="img"
                     aria-label={chart.title}
                   >
+                    {resolvedType === "scatter" ? (
+                      <>
+                        <line
+                          x1="8"
+                          y1="92"
+                          x2="94"
+                          y2="92"
+                          stroke="currentColor"
+                          strokeOpacity="0.3"
+                          strokeWidth="1"
+                        />
+                        <line
+                          x1="8"
+                          y1="8"
+                          x2="8"
+                          y2="92"
+                          stroke="currentColor"
+                          strokeOpacity="0.3"
+                          strokeWidth="1"
+                        />
+                      </>
+                    ) : null}
                     {resolvedType === "area" && firstPt && lastPt ? (
                       <polygon
                         points={`${firstPt.xPct},90 ${polyPoints} ${lastPt.xPct},90`}
@@ -412,14 +551,9 @@ export function DashboardChartsView({
                   </svg>
                 ) : null}
 
-                <div className="safi-desktop-studio__bars">
-                  {points.map((point, pIdx) => {
-                    const detail = point.sharePct
-                      ? `${point.value} (${point.sharePct}%)`
-                      : point.xValue && point.yValue
-                        ? `(${point.xValue}, ${point.yValue})`
-                        : point.value;
-                    return (
+                {resolvedType === "bar" ? (
+                  <div className="safi-desktop-studio__bars">
+                    {points.map((point, pIdx) => (
                       <button
                         key={`${point.label}_${pIdx}`}
                         type="button"
@@ -441,11 +575,43 @@ export function DashboardChartsView({
                             style={{ width: `${point.ratioPct}%` }}
                           />
                         </div>
-                        <strong>{detail}</strong>
+                        <strong>{point.value}</strong>
                       </button>
-                    );
-                  })}
-                </div>
+                    ))}
+                  </div>
+                ) : resolvedType !== "kpi" && points.length > 0 ? (
+                  <div
+                    className="safi-desktop-studio__bars"
+                    data-testid={`chart-legend-${resolvedType}`}
+                  >
+                    {points.map((point, pIdx) => {
+                      const detail = point.sharePct
+                        ? `${point.value} (${point.sharePct}%)`
+                        : point.xValue && point.yValue
+                          ? `(${point.xValue}, ${point.yValue})`
+                          : point.value;
+                      return (
+                        <button
+                          key={`${point.label}_${pIdx}`}
+                          type="button"
+                          className="safi-desktop-studio__bar studio-bar-btn"
+                          onClick={() => {
+                            setActiveCrossFilter({ col: chart.groupBy, val: point.label });
+                            onCrossFilter?.(chart.groupBy, point.label);
+                          }}
+                          title={
+                            isAr
+                              ? `انقر لتصفية الجدول حسب ${point.label}`
+                              : `Click to cross-filter sheet by ${point.label}`
+                          }
+                        >
+                          <span>{point.label}</span>
+                          <strong>{detail}</strong>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </article>
             );
           })}

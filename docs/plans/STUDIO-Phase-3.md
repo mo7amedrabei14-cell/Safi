@@ -1,6 +1,6 @@
 # خطة STUDIO-Phase-3
 
-**الحالة:** مكتملة ومحصّنة ومختبرة (2026-11-15، مراجعة v6) — المحررات الأربعة داخل `DesktopStudio.tsx` (`DashboardChartsView` بجميع الأنواع الـ 8 المحسوبة في Rust عبر `studio_chart_data`, `KeynoteSlidesView`, `VerifiedDocView`, `FreeFormBuilderView` مع تحكم كامل في العرض والارتفاع `colSpan`/`rowSpan`)، عمليات أعمدة الجدول، وحفظ المشاريع ذرياً ببصمة `BLAKE3`.  
+**الحالة:** مكتملة ومحصّنة ومختبرة (2026-11-16، مراجعة v7) — المحررات الأربعة داخل `DesktopStudio.tsx` (`DashboardChartsView` بجميع الأنواع الـ 8 المحسوبة في Rust والمرسومة هندسياً في SVG، و`KeynoteSlidesView`, `VerifiedDocView`, `FreeFormBuilderView` مع تحكم كامل في العرض والارتفاع `colSpan`/`rowSpan`)، عمليات أعمدة الجدول، وحفظ المشاريع ذرياً ببصمة `BLAKE3`.
 **العقد:** [المهمة](../tasks/STUDIO-Phase-3.md).
 
 ## التصميم

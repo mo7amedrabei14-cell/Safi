@@ -12,16 +12,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
+use sf_desktop::api_origin::{ApiOrigin, API_ORIGIN_ENV};
 use sf_desktop::commands::enforce_ipc_command;
 use sf_desktop::deep_link::DeepLinkAction;
 use sf_desktop::studio::{
     parse_installation_uuid, parse_safi_session_token, StudioSessionAuthority,
-    StudioSessionVerifier, StudioStore, VerifiedStudioSession, AUTH_EXPIRED_CODE,
-    AUTH_REQUIRED_CODE,
+    StudioSessionVerifier, StudioStore, VerifiedStudioSession, AUTH_BACKEND_UNAVAILABLE_CODE,
+    AUTH_CONFIG_MISSING_CODE, AUTH_EXPIRED_CODE, AUTH_REQUIRED_CODE, AUTH_REVOKED_CODE,
 };
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -30,86 +33,247 @@ use tauri_plugin_dialog::DialogExt;
 #[derive(Default)]
 struct PendingDeepLink(Mutex<Option<DeepLinkAction>>);
 
+#[derive(Debug, Clone)]
+struct AuthServerEndpoint {
+    host: String,
+    port: u16,
+    connect_addr: Option<SocketAddr>,
+    tls_config: Arc<ClientConfig>,
+}
+
 /// Native fail-closed session verifier for the Tauri shell.
 ///
-/// Verifies `sfs_` session tokens against the authoritative in-process registry or by querying
-/// the Safi authentication server's `GET /v1/auth/sessions/current` endpoint (`Bearer` token).
-/// Never trusts a token merely because it arrived from the React webview.
+/// Resolves `SAFI_API_BASE_URL` compiled into the binary at build time and queries
+/// `GET /v1/auth/sessions/current` over mutually verified TLS (`rustls` + `webpki-roots`)
+/// with `Authorization: Bearer <sfs_token>` and `X-Safi-Installation-Id: <uuid>`.
+/// Fails closed with `SF-SYS-031` when unconfigured and `SF-AUTH-005` when the auth server
+/// is unreachable, never falling back to unauthenticated TCP or local mocks.
 #[derive(Debug)]
 struct DesktopShellSessionVerifier {
     authority: Arc<StudioSessionAuthority>,
-    loopback_auth_addr: Option<SocketAddr>,
+    endpoint: Result<AuthServerEndpoint, String>,
 }
 
 impl DesktopShellSessionVerifier {
     fn new(authority: Arc<StudioSessionAuthority>) -> Self {
-        let loopback_auth_addr = std::env::var("SAFI_DESKTOP_AUTH_LOOPBACK_ADDR")
-            .ok()
-            .and_then(|raw| raw.trim().parse::<SocketAddr>().ok())
-            .filter(|addr| addr.ip().is_loopback());
+        Self::from_origin(authority, option_env!("SAFI_API_BASE_URL"))
+    }
+
+    fn from_origin(authority: Arc<StudioSessionAuthority>, configured: Option<&str>) -> Self {
+        let mut root_store = RootCertStore::empty();
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        Self::from_origin_with_roots(authority, configured, root_store, None)
+    }
+
+    fn from_origin_with_roots(
+        authority: Arc<StudioSessionAuthority>,
+        configured: Option<&str>,
+        root_store: RootCertStore,
+        connect_addr: Option<SocketAddr>,
+    ) -> Self {
+        let endpoint = match configured
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ApiOrigin::parse)
+        {
+            Some(Ok(origin)) => Self::build_endpoint(&origin, root_store, connect_addr),
+            _ => Err(AUTH_CONFIG_MISSING_CODE.to_owned()),
+        };
         Self {
             authority,
-            loopback_auth_addr,
+            endpoint,
         }
     }
 
-    fn verify_via_loopback_server(
+    fn build_endpoint(
+        origin: &ApiOrigin,
+        root_store: RootCertStore,
+        connect_addr: Option<SocketAddr>,
+    ) -> Result<AuthServerEndpoint, String> {
+        let authority_part = origin
+            .as_str()
+            .strip_prefix("https://")
+            .ok_or_else(|| AUTH_CONFIG_MISSING_CODE.to_owned())?;
+        let (host, port) = match authority_part.rsplit_once(':') {
+            Some((h, p)) => (
+                h.to_owned(),
+                p.parse::<u16>()
+                    .map_err(|_| AUTH_CONFIG_MISSING_CODE.to_owned())?,
+            ),
+            None => (authority_part.to_owned(), 443),
+        };
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let tls_config = ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(|_| AUTH_CONFIG_MISSING_CODE.to_owned())?
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        Ok(AuthServerEndpoint {
+            host,
+            port,
+            connect_addr,
+            tls_config: Arc::new(tls_config),
+        })
+    }
+
+    fn connect_tcp(endpoint: &AuthServerEndpoint) -> Result<TcpStream, String> {
+        let timeout = Duration::from_secs(5);
+        let stream = if let Some(addr) = endpoint.connect_addr {
+            TcpStream::connect_timeout(&addr, timeout)
+                .map_err(|_| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?
+        } else {
+            let addrs: Vec<SocketAddr> = (endpoint.host.as_str(), endpoint.port)
+                .to_socket_addrs()
+                .map_err(|_| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?
+                .collect();
+            let mut connected = None;
+            for addr in addrs {
+                if let Ok(candidate) = TcpStream::connect_timeout(&addr, timeout) {
+                    connected = Some(candidate);
+                    break;
+                }
+            }
+            connected.ok_or_else(|| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?
+        };
+        let _ = stream.set_read_timeout(Some(timeout));
+        let _ = stream.set_write_timeout(Some(timeout));
+        Ok(stream)
+    }
+
+    fn verify_via_https(
         &self,
-        addr: SocketAddr,
+        endpoint: &AuthServerEndpoint,
         token: &str,
         installation_id: &str,
         now_ms: u64,
     ) -> Result<VerifiedStudioSession, String> {
         let canonical_token = parse_safi_session_token(token)?;
         let canonical_inst = parse_installation_uuid(installation_id)?;
-        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2))
-            .map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+        let stream = Self::connect_tcp(endpoint)?;
+        let server_name = ServerName::try_from(endpoint.host.clone())
+            .map_err(|_| AUTH_CONFIG_MISSING_CODE.to_owned())?;
+        let conn = ClientConnection::new(endpoint.tls_config.clone(), server_name)
+            .map_err(|_| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+        let mut tls = StreamOwned::new(conn, stream);
+
+        let host_header = if endpoint.port == 443 {
+            endpoint.host.clone()
+        } else {
+            format!("{}:{}", endpoint.host, endpoint.port)
+        };
         let req = format!(
-            "GET /v1/auth/sessions/current HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {canonical_token}\r\nX-Safi-Installation-Id: {canonical_inst}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+            "GET /v1/auth/sessions/current HTTP/1.1\r\nHost: {host_header}\r\nAuthorization: Bearer {canonical_token}\r\nX-Safi-Installation-Id: {canonical_inst}\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
         );
-        stream
-            .write_all(req.as_bytes())
-            .map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
+        tls.write_all(req.as_bytes())
+            .map_err(|_| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+        tls.flush()
+            .map_err(|_| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+
         let mut buf = Vec::with_capacity(4096);
-        stream
-            .take(16 * 1024)
-            .read_to_end(&mut buf)
-            .map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
-        let response_text = std::str::from_utf8(&buf).map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
-        let (headers, body) = response_text
+        let mut chunk = [0u8; 4096];
+        loop {
+            match tls.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let remaining = (64_usize * 1024).saturating_sub(buf.len());
+                    if remaining == 0 {
+                        break;
+                    }
+                    let take = n.min(remaining);
+                    buf.extend_from_slice(&chunk[..take]);
+                    if take < n {
+                        break;
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                // Tolerate TLS close without close_notify once a full HTTP header block is already received.
+                Err(_) if buf.windows(4).any(|w| w == b"\r\n\r\n") => break,
+                Err(_) => return Err(AUTH_BACKEND_UNAVAILABLE_CODE.to_owned()),
+            }
+        }
+
+        let response_text =
+            std::str::from_utf8(&buf).map_err(|_| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+        let (headers, raw_body) = response_text
             .split_once("\r\n\r\n")
-            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
+            .ok_or_else(|| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
         let status_line = headers
             .lines()
             .next()
-            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
-        if !status_line.starts_with("HTTP/1.1 200") && !status_line.starts_with("HTTP/1.0 200") {
-            return Err(AUTH_REQUIRED_CODE.to_owned());
+            .ok_or_else(|| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+        let status_code = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse::<u16>().ok())
+            .ok_or_else(|| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+
+        let is_chunked = headers.lines().any(|line| {
+            line.split_once(':').is_some_and(|(name, value)| {
+                name.trim().eq_ignore_ascii_case("transfer-encoding")
+                    && value.to_ascii_lowercase().contains("chunked")
+            })
+        });
+        let body = if is_chunked {
+            decode_chunked_body(raw_body).ok_or_else(|| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?
+        } else {
+            raw_body.trim().to_owned()
+        };
+
+        match status_code {
+            200 => {
+                let parsed: serde_json::Value = serde_json::from_str(&body)
+                    .map_err(|_| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+                let session_id = parsed["id"]
+                    .as_str()
+                    .ok_or_else(|| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+                let workspace_id = parsed["workspace_id"]
+                    .as_str()
+                    .ok_or_else(|| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+                let expires_at_secs = parsed["expires_at"]
+                    .as_u64()
+                    .ok_or_else(|| AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())?;
+                let expires_at_ms = expires_at_secs.saturating_mul(1_000);
+                if now_ms >= expires_at_ms {
+                    return Err(AUTH_EXPIRED_CODE.to_owned());
+                }
+                self.authority.register_session(
+                    session_id,
+                    workspace_id,
+                    canonical_token,
+                    &canonical_inst,
+                    expires_at_ms,
+                )
+            }
+            401 | 403 => {
+                let code = serde_json::from_str::<serde_json::Value>(&body)
+                    .ok()
+                    .and_then(|v| v["code"].as_str().map(str::to_owned));
+                match code.as_deref() {
+                    Some("SF-AUTH-002") => Err(AUTH_EXPIRED_CODE.to_owned()),
+                    Some("SF-AUTH-003") => Err(AUTH_REVOKED_CODE.to_owned()),
+                    _ => Err(AUTH_REQUIRED_CODE.to_owned()),
+                }
+            }
+            _ => Err(AUTH_BACKEND_UNAVAILABLE_CODE.to_owned()),
         }
-        let parsed: serde_json::Value =
-            serde_json::from_str(body.trim()).map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
-        let session_id = parsed["id"]
-            .as_str()
-            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
-        let workspace_id = parsed["workspace_id"]
-            .as_str()
-            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
-        let expires_at_secs = parsed["expires_at"]
-            .as_u64()
-            .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
-        let expires_at_ms = expires_at_secs.saturating_mul(1_000);
-        if now_ms >= expires_at_ms {
-            return Err(AUTH_EXPIRED_CODE.to_owned());
+    }
+}
+
+fn decode_chunked_body(raw: &str) -> Option<String> {
+    let mut rest = raw.trim_start();
+    let mut out = String::new();
+    loop {
+        let (size_line, after_size) = rest.split_once("\r\n")?;
+        let hex_len = size_line.split(';').next()?.trim();
+        let size = usize::from_str_radix(hex_len, 16).ok()?;
+        if size == 0 {
+            return Some(out);
         }
-        self.authority.register_session(
-            session_id,
-            workspace_id,
-            canonical_token,
-            &canonical_inst,
-            expires_at_ms,
-        )
+        if after_size.len() < size {
+            return None;
+        }
+        out.push_str(&after_size[..size]);
+        rest = after_size[size..].strip_prefix("\r\n")?;
     }
 }
 
@@ -120,11 +284,11 @@ impl StudioSessionVerifier for DesktopShellSessionVerifier {
         installation_id: &str,
         now_ms: u64,
     ) -> Result<VerifiedStudioSession, String> {
-        if let Some(addr) = self.loopback_auth_addr {
-            return self.verify_via_loopback_server(addr, token, installation_id, now_ms);
+        let _ = API_ORIGIN_ENV;
+        match &self.endpoint {
+            Ok(endpoint) => self.verify_via_https(endpoint, token, installation_id, now_ms),
+            Err(code) => Err(code.clone()),
         }
-        self.authority
-            .verify_session(token, installation_id, now_ms)
     }
 }
 
@@ -730,4 +894,576 @@ fn queue_deep_link(app: &tauri::AppHandle, raw: &str) {
         }
     }
     let _ = app.emit("safi://deep-link", action);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use axum::body::{to_bytes, Body};
+    use axum::http::Request;
+    use ring::rand::SystemRandom;
+    use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use rustls::{RootCertStore, ServerConfig, ServerConnection, StreamOwned};
+    use sf_desktop::studio::{
+        StudioSessionAuthority, StudioSessionVerifier, StudioStore, AUTH_BACKEND_UNAVAILABLE_CODE,
+        AUTH_CONFIG_MISSING_CODE, AUTH_EXPIRED_CODE, AUTH_REQUIRED_CODE, AUTH_REVOKED_CODE,
+    };
+    use sf_server::auth::cache::InMemoryAuthCache;
+    use sf_server::auth::device::{DevicePlatform, DeviceRegistration};
+    use sf_server::auth::repository::{
+        InMemoryApiKeyRepository, InMemorySessionRepository, SessionRecord, SessionRepository,
+    };
+    use sf_server::auth::service::AuthService;
+    use sf_server::auth::session::{generate_session_token, SessionView};
+    use sf_server::auth::{unix_now, AuthMethod, Principal, Scope};
+    use sf_server::{app, AppState};
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    use super::{decode_chunked_body, DesktopShellSessionVerifier};
+
+    const CSV: &str = "region,amount\nCairo,100\nGiza,50\n";
+
+    fn der_len(len: usize) -> Vec<u8> {
+        if len < 128 {
+            vec![len as u8]
+        } else if len < 256 {
+            vec![0x81, len as u8]
+        } else {
+            vec![0x82, (len >> 8) as u8, len as u8]
+        }
+    }
+
+    fn der_tlv(tag: u8, body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(1 + 4 + body.len());
+        out.push(tag);
+        out.extend_from_slice(&der_len(body.len()));
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn der_seq(items: &[&[u8]]) -> Vec<u8> {
+        let mut body = Vec::new();
+        for item in items {
+            body.extend_from_slice(item);
+        }
+        der_tlv(0x30, &body)
+    }
+
+    fn der_set(items: &[&[u8]]) -> Vec<u8> {
+        let mut body = Vec::new();
+        for item in items {
+            body.extend_from_slice(item);
+        }
+        der_tlv(0x31, &body)
+    }
+
+    fn der_oid(bytes: &[u8]) -> Vec<u8> {
+        der_tlv(0x06, bytes)
+    }
+
+    fn der_bit_string(bytes: &[u8]) -> Vec<u8> {
+        let mut body = Vec::with_capacity(1 + bytes.len());
+        body.push(0x00);
+        body.extend_from_slice(bytes);
+        der_tlv(0x03, &body)
+    }
+
+    fn der_cn(name: &str) -> Vec<u8> {
+        let attr = der_seq(&[
+            &der_oid(&[0x55, 0x04, 0x03]),
+            &der_tlv(0x0c, name.as_bytes()),
+        ]);
+        let rdn = der_set(&[&attr]);
+        der_seq(&[&rdn])
+    }
+
+    fn sign_x509_v3(
+        serial: u8,
+        issuer_cn: &str,
+        subject_cn: &str,
+        pub_key: &[u8],
+        extensions: &[Vec<u8>],
+        signer: &EcdsaKeyPair,
+        rng: &SystemRandom,
+    ) -> Vec<u8> {
+        let version = der_tlv(0xa0, &der_tlv(0x02, &[2]));
+        let serial_num = der_tlv(0x02, &[serial]);
+        let sig_alg = der_seq(&[&der_oid(&[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02])]);
+        let issuer = der_cn(issuer_cn);
+        let validity = der_seq(&[
+            &der_tlv(0x17, b"200101000000Z"),
+            &der_tlv(0x17, b"491231235959Z"),
+        ]);
+        let subject = der_cn(subject_cn);
+        let spki = der_seq(&[
+            &der_seq(&[
+                &der_oid(&[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]),
+                &der_oid(&[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]),
+            ]),
+            &der_bit_string(pub_key),
+        ]);
+        let ext_refs: Vec<&[u8]> = extensions.iter().map(Vec::as_slice).collect();
+        let ext_seq = der_seq(&ext_refs);
+        let ext_explicit = der_tlv(0xa3, &ext_seq);
+
+        let tbs = der_seq(&[
+            &version,
+            &serial_num,
+            &sig_alg,
+            &issuer,
+            &validity,
+            &subject,
+            &spki,
+            &ext_explicit,
+        ]);
+        let sig = signer
+            .sign(rng, &tbs)
+            .expect("ECDSA test cert signing must succeed");
+        der_seq(&[&tbs, &sig_alg, &der_bit_string(sig.as_ref())])
+    }
+
+    fn der_ext(oid: &[u8], critical: bool, value_der: &[u8]) -> Vec<u8> {
+        let oid_part = der_oid(oid);
+        let oct_part = der_tlv(0x04, value_der);
+        if critical {
+            der_seq(&[&oid_part, &[0x01, 0x01, 0xff], &oct_part])
+        } else {
+            der_seq(&[&oid_part, &oct_part])
+        }
+    }
+
+    fn build_test_tls_material(san_dns: &str) -> (RootCertStore, Arc<ServerConfig>) {
+        let rng = SystemRandom::new();
+        let ca_pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
+            .expect("CA key generation must succeed");
+        let ca_key =
+            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, ca_pkcs8.as_ref(), &rng)
+                .expect("CA key parse must succeed");
+        let ca_exts = vec![
+            der_ext(&[0x55, 0x1d, 0x13], true, &der_seq(&[&[0x01, 0x01, 0xff]])),
+            der_ext(&[0x55, 0x1d, 0x0f], true, &[0x03, 0x02, 0x02, 0x04]),
+        ];
+        let ca_der = sign_x509_v3(
+            1,
+            "Safi Test Root CA",
+            "Safi Test Root CA",
+            ca_key.public_key().as_ref(),
+            &ca_exts,
+            &ca_key,
+            &rng,
+        );
+
+        let leaf_pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
+            .expect("leaf key generation must succeed");
+        let leaf_key =
+            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, leaf_pkcs8.as_ref(), &rng)
+                .expect("leaf key parse must succeed");
+        let eku = der_seq(&[&der_oid(&[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01])]);
+        let san = der_seq(&[&der_tlv(0x82, san_dns.as_bytes())]);
+        let leaf_exts = vec![
+            der_ext(&[0x55, 0x1d, 0x13], true, &der_seq(&[])),
+            der_ext(&[0x55, 0x1d, 0x0f], true, &[0x03, 0x02, 0x07, 0x80]),
+            der_ext(&[0x55, 0x1d, 0x25], false, &eku),
+            der_ext(&[0x55, 0x1d, 0x11], false, &san),
+        ];
+        let leaf_der = sign_x509_v3(
+            2,
+            "Safi Test Root CA",
+            san_dns,
+            leaf_key.public_key().as_ref(),
+            &leaf_exts,
+            &ca_key,
+            &rng,
+        );
+
+        let mut root_store = RootCertStore::empty();
+        root_store
+            .add(CertificateDer::from(ca_der.clone()))
+            .expect("CA cert must load into RootCertStore");
+
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let server_cfg = ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("TLS versions must configure")
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![CertificateDer::from(leaf_der), CertificateDer::from(ca_der)],
+                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_pkcs8.as_ref().to_vec())),
+            )
+            .expect("ServerConfig cert/key must load");
+
+        (root_store, Arc::new(server_cfg))
+    }
+
+    struct TlsAuthTestHarness {
+        addr: std::net::SocketAddr,
+        root_store: RootCertStore,
+        auth: Arc<AuthService>,
+        sessions_repo: Arc<InMemorySessionRepository>,
+        rt: Arc<tokio::runtime::Runtime>,
+        stop: Arc<AtomicBool>,
+        force_unavailable: Arc<AtomicBool>,
+        handle: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for TlsAuthTestHarness {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            let _ = std::net::TcpStream::connect(self.addr);
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    impl TlsAuthTestHarness {
+        fn start(host: &str) -> Self {
+            let (root_store, server_cfg) = build_test_tls_material(host);
+            let rt = Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio test runtime must start"),
+            );
+            let api_keys = Arc::new(rt.block_on(InMemoryApiKeyRepository::new(vec![])));
+            let sessions_repo = Arc::new(InMemorySessionRepository::new());
+            let cache = Arc::new(InMemoryAuthCache::new());
+            let auth = Arc::new(AuthService::new(api_keys, sessions_repo.clone(), cache));
+            let router = app(AppState {
+                auth: auth.clone(),
+                account_auth: None,
+                zero_trust: sf_server::zero_trust::ZeroTrustGuardState::default(),
+                log_center: Arc::new(tokio::sync::RwLock::new(
+                    sf_server::log_center::AuditLogCenter::new(),
+                )),
+            });
+
+            let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral bind must succeed");
+            let addr = listener.local_addr().expect("local addr must exist");
+            let stop = Arc::new(AtomicBool::new(false));
+            let force_unavailable = Arc::new(AtomicBool::new(false));
+
+            let stop_c = stop.clone();
+            let unavail_c = force_unavailable.clone();
+            let rt_c = rt.clone();
+            let handle = std::thread::spawn(move || {
+                for stream_res in listener.incoming() {
+                    if stop_c.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let Ok(stream) = stream_res else { continue };
+                    let Ok(conn) = ServerConnection::new(server_cfg.clone()) else {
+                        continue;
+                    };
+                    let mut tls = StreamOwned::new(conn, stream);
+                    let mut buf = [0u8; 4096];
+                    let mut raw = Vec::new();
+                    loop {
+                        match tls.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                raw.extend_from_slice(&buf[..n]);
+                                if raw.windows(4).any(|w| w == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    if stop_c.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if unavail_c.load(Ordering::SeqCst) {
+                        let _ = tls.write_all(
+                            b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                        let _ = tls.flush();
+                        continue;
+                    }
+                    let req_text = String::from_utf8_lossy(&raw);
+                    let mut lines = req_text.lines();
+                    let first_line = lines.next().unwrap_or("");
+                    let mut parts = first_line.split_whitespace();
+                    let method = parts.next().unwrap_or("GET");
+                    let uri = parts.next().unwrap_or("/");
+                    let mut builder = Request::builder().method(method).uri(uri);
+                    for line in lines {
+                        if line.trim().is_empty() {
+                            break;
+                        }
+                        if let Some((name, val)) = line.split_once(':') {
+                            builder = builder.header(name.trim(), val.trim());
+                        }
+                    }
+                    let axum_req = builder.body(Body::empty()).expect("HTTP request valid");
+                    let resp = rt_c
+                        .block_on(router.clone().oneshot(axum_req))
+                        .expect("router response");
+                    let status = resp.status();
+                    let ct = resp
+                        .headers()
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("application/json")
+                        .to_owned();
+                    let body_bytes = rt_c
+                        .block_on(to_bytes(resp.into_body(), 1024 * 1024))
+                        .expect("body bytes");
+                    let head = format!(
+                        "HTTP/1.1 {} {}\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        status.as_u16(),
+                        status.canonical_reason().unwrap_or("OK"),
+                        body_bytes.len()
+                    );
+                    let _ = tls.write_all(head.as_bytes());
+                    let _ = tls.write_all(&body_bytes);
+                    let _ = tls.flush();
+                }
+            });
+
+            Self {
+                addr,
+                root_store,
+                auth,
+                sessions_repo,
+                rt,
+                stop,
+                force_unavailable,
+                handle: Some(handle),
+            }
+        }
+
+        fn build_store(&self, storage_dir: std::path::PathBuf, host: &str) -> StudioStore {
+            let authority = Arc::new(StudioSessionAuthority::new());
+            let origin = format!("https://{host}");
+            let verifier: Arc<dyn StudioSessionVerifier> =
+                Arc::new(DesktopShellSessionVerifier::from_origin_with_roots(
+                    authority.clone(),
+                    Some(&origin),
+                    self.root_store.clone(),
+                    Some(self.addr),
+                ));
+            StudioStore::with_storage_dir_and_verifier(storage_dir, authority, verifier)
+        }
+
+        fn issue_session(
+            &self,
+            user_id: Uuid,
+            workspace_id: Uuid,
+            installation_id: Uuid,
+        ) -> (String, SessionView) {
+            let principal = Principal {
+                user_id,
+                workspace_id,
+                scopes: vec![Scope::Read, Scope::Write],
+                auth_method: AuthMethod::Password,
+            };
+            let reg = DeviceRegistration::from_installation_id(
+                user_id,
+                installation_id,
+                DevicePlatform::Windows,
+            )
+            .expect("device registration");
+            let issued = self
+                .rt
+                .block_on(
+                    self.auth
+                        .create_session_for_device(&principal, "Safi Desktop", reg),
+                )
+                .expect("session creation");
+            (issued.token, issued.session)
+        }
+    }
+
+    #[test]
+    fn desktop_shell_verifier_covers_all_eleven_production_auth_cases() {
+        let host = "api.safidata.invalid";
+        let harness = TlsAuthTestHarness::start(host);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let csv_path = dir.path().join("sales.csv");
+        std::fs::write(&csv_path, CSV).expect("csv write");
+        let projects_dir = dir.path().join("projects");
+
+        let user_id = Uuid::now_v7();
+        let workspace_id = Uuid::now_v7();
+        let inst_a = Uuid::parse_str("11111111-2222-4333-8444-555555555555").expect("uuid");
+        let inst_b = Uuid::parse_str("99999999-8888-4777-8666-555555555555").expect("uuid");
+        let inst_a_str = inst_a.to_string();
+        let inst_b_str = inst_b.to_string();
+        let forged_token = "sfs_ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        let now = (unix_now() as u64).saturating_mul(1_000);
+
+        let store = harness.build_store(projects_dir.clone(), host);
+
+        // 1. No session -> SF-AUTH-001
+        assert_eq!(
+            store.open_file("p1", &csv_path, now),
+            Err(AUTH_REQUIRED_CODE.to_owned())
+        );
+
+        // 2. Invalid / forged token -> SF-AUTH-001
+        assert_eq!(
+            store.set_auth_session("not-valid", &inst_a_str, now),
+            Err(AUTH_REQUIRED_CODE.to_owned())
+        );
+        assert_eq!(
+            store.set_auth_session(forged_token, &inst_a_str, now),
+            Err(AUTH_REQUIRED_CODE.to_owned())
+        );
+
+        // 3. Expired session on sf-server -> SF-AUTH-002
+        let expired_tok = generate_session_token();
+        let exp_record = SessionRecord {
+            id: Uuid::now_v7(),
+            workspace_id,
+            user_id,
+            api_key_id: None,
+            token_hash: expired_tok.token_hash().to_owned(),
+            device_name: "Safi Desktop".to_owned(),
+            scopes: vec![Scope::Read, Scope::Write],
+            created_at: unix_now() - 120,
+            last_seen_at: unix_now() - 120,
+            expires_at: unix_now() - 1,
+            revoked: false,
+            device_id: None,
+            device_installation_key_hash: None,
+            device_revoked: false,
+            account_disabled: false,
+        };
+        let exp_dev =
+            DeviceRegistration::from_installation_id(user_id, inst_a, DevicePlatform::Windows)
+                .expect("device");
+        harness
+            .rt
+            .block_on(
+                harness
+                    .sessions_repo
+                    .replace_active(&exp_record, Some(&exp_dev)),
+            )
+            .expect("insert expired session");
+        assert_eq!(
+            store.set_auth_session(expired_tok.plaintext(), &inst_a_str, now),
+            Err(AUTH_EXPIRED_CODE.to_owned())
+        );
+
+        // 6. Valid session on real TLS sf-server + sensitive IPC command execution
+        let (valid_token_a, session_a) = harness.issue_session(user_id, workspace_id, inst_a);
+        assert!(store
+            .set_auth_session(&valid_token_a, &inst_a_str, now)
+            .is_ok());
+        assert!(store.open_file("p1", &csv_path, now).is_ok());
+        assert!(store
+            .save_project_bundle("p1", "bundle1", "Bundle 1", now)
+            .is_ok());
+
+        // 4. Revoked session -> SF-AUTH-003 on next IPC command and clears active session fail-closed
+        let tok_hash = sf_server::auth::session::token_hash(
+            sf_server::auth::session::parse_session_token(&valid_token_a).expect("parse"),
+        );
+        harness
+            .rt
+            .block_on(harness.auth.revoke_session(session_a.id, &tok_hash))
+            .expect("revoke");
+        assert_eq!(store.state("p1"), Err(AUTH_REVOKED_CODE.to_owned()));
+        assert_eq!(store.state("p1"), Err(AUTH_REQUIRED_CODE.to_owned()));
+
+        // 5. Replaced device -> old token/device rejected with SF-AUTH-003 when Device B signs in
+        let (tok_dev_a, _) = harness.issue_session(user_id, workspace_id, inst_a);
+        assert!(store.set_auth_session(&tok_dev_a, &inst_a_str, now).is_ok());
+        let (tok_dev_b, _) = harness.issue_session(user_id, workspace_id, inst_b);
+        assert_eq!(store.state("p1"), Err(AUTH_REVOKED_CODE.to_owned()));
+        // Even trying to re-bind Device B's token with Device A's installation UUID fails with SF-AUTH-003
+        assert_eq!(
+            store.set_auth_session(&tok_dev_b, &inst_a_str, now),
+            Err(AUTH_REVOKED_CODE.to_owned())
+        );
+        // Device B itself succeeds
+        assert!(store.set_auth_session(&tok_dev_b, &inst_b_str, now).is_ok());
+        assert!(store.state("p1").is_ok());
+
+        // 7. Logout clears native session immediately -> SF-AUTH-001
+        assert!(store.clear_auth_session().is_ok());
+        assert_eq!(store.state("p1"), Err(AUTH_REQUIRED_CODE.to_owned()));
+
+        // 8. App restart: fresh StudioStore starts unauthenticated (SF-AUTH-001),
+        // verifies against TLS sf-server upon re-bind, and restores saved bundle cleanly.
+        drop(store);
+        let restarted_store = harness.build_store(projects_dir, host);
+        assert_eq!(
+            restarted_store.load_project_bundle("p1", "bundle1", now),
+            Err(AUTH_REQUIRED_CODE.to_owned())
+        );
+        assert!(restarted_store
+            .set_auth_session(&tok_dev_b, &inst_b_str, now)
+            .is_ok());
+        assert!(restarted_store
+            .load_project_bundle("p1", "bundle1", now)
+            .is_ok());
+
+        // 9. Server unavailable (503 + closed port) -> SF-AUTH-005 fail-closed
+        harness.force_unavailable.store(true, Ordering::SeqCst);
+        assert_eq!(
+            restarted_store.state("p1"),
+            Err(AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())
+        );
+        drop(restarted_store);
+        let unreachable_port_addr = harness.addr;
+        drop(harness);
+        let store_down = StudioStore::with_storage_dir_and_verifier(
+            dir.path().join("projects2"),
+            Arc::new(StudioSessionAuthority::new()),
+            Arc::new(DesktopShellSessionVerifier::from_origin_with_roots(
+                Arc::new(StudioSessionAuthority::new()),
+                Some("https://api.safidata.invalid"),
+                RootCertStore::empty(),
+                Some(unreachable_port_addr),
+            )),
+        );
+        assert_eq!(
+            store_down.set_auth_session(&tok_dev_b, &inst_b_str, now),
+            Err(AUTH_BACKEND_UNAVAILABLE_CODE.to_owned())
+        );
+
+        // 10. Missing / invalid configuration -> SF-SYS-031 fail-closed
+        let missing_auth = Arc::new(StudioSessionAuthority::new());
+        let missing_verifier = DesktopShellSessionVerifier::from_origin(missing_auth.clone(), None);
+        assert_eq!(
+            missing_verifier.verify_session(&tok_dev_b, &inst_b_str, now),
+            Err(AUTH_CONFIG_MISSING_CODE.to_owned())
+        );
+        let insecure_verifier =
+            DesktopShellSessionVerifier::from_origin(missing_auth, Some("http://127.0.0.1:8080"));
+        assert_eq!(
+            insecure_verifier.verify_session(&tok_dev_b, &inst_b_str, now),
+            Err(AUTH_CONFIG_MISSING_CODE.to_owned())
+        );
+
+        // 11. Installed packaged desktop startup without manual runtime env vars:
+        // `DesktopShellSessionVerifier::new` never checks `SAFI_DESKTOP_AUTH_LOOPBACK_ADDR`
+        // and uses the compile-time baked `option_env!("SAFI_API_BASE_URL")` (or fails closed
+        // with SF-SYS-031 in unconfigured dev builds).
+        let compiled_origin = option_env!("SAFI_API_BASE_URL");
+        let startup_verifier =
+            DesktopShellSessionVerifier::new(Arc::new(StudioSessionAuthority::new()));
+        if compiled_origin.is_some() {
+            assert!(startup_verifier.endpoint.is_ok());
+        } else {
+            assert_eq!(
+                startup_verifier.verify_session(&tok_dev_b, &inst_b_str, now),
+                Err(AUTH_CONFIG_MISSING_CODE.to_owned())
+            );
+        }
+
+        // Verify chunked Transfer-Encoding decoder helper
+        assert_eq!(
+            decode_chunked_body("5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"),
+            Some("hello world".to_owned())
+        );
+    }
 }

@@ -113,7 +113,7 @@ impl Principal {
 }
 
 /// Evidence attached to the request after the authentication middleware runs.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AuthenticatedSession {
     pub principal: Principal,
     pub session_id: Uuid,
@@ -121,6 +121,22 @@ pub struct AuthenticatedSession {
     pub expires_at: i64,
     /// Hash of the presented token, used to evict the exact Valkey entry on revoke.
     pub token_hash: String,
+    /// Hex-encoded `BLAKE3` installation key hash bound to the session's device, when issued via `create_session_for_device`.
+    pub device_installation_key_hash: Option<String>,
+}
+
+impl std::fmt::Debug for AuthenticatedSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AuthenticatedSession")
+            .field("principal", &self.principal)
+            .field("session_id", &self.session_id)
+            .field("device_name", &self.device_name)
+            .field("expires_at", &self.expires_at)
+            .field("token_hash", &"[REDACTED]")
+            .field("device_installation_key_hash", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// Current UNIX time in seconds.

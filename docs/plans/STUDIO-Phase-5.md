@@ -1,6 +1,6 @@
 # خطة STUDIO-Phase-5
 
-**الحالة:** مكتملة ومحصّنة ومختبرة (2026-11-15، مراجعة v6) — بوابة المصادقة Native الإلزامية في Tauri على جميع الـ 42 أمراً الحساساً وحدود `MAX_IPC_BYTES`، اختبار الرحلات الثماني عشرة (`studio_phase5_e2e`)، واختبارات Chromium الآلية لسطح المكتب والكبسولة (`tools/verify-studio-desktop-e2e.mjs` و`tools/verify-capsule-chromium.mjs`) المدمجة في CI.  
+**الحالة:** مكتملة ومحصّنة ومختبرة (2026-11-16، مراجعة v7) — بوابة المصادقة Native الإلزامية في Tauri على جميع الـ 43 أمراً الحساساً وحدود `MAX_IPC_BYTES = 1_048_576`، اختبار الرحلات الثماني عشرة (`studio_phase5_e2e`)، واختبارات Chromium UI + `sf-server` + Rust Harness (`tools/verify-studio-desktop-e2e.mjs`) والكبسولة (`tools/verify-capsule-chromium.mjs`) المدمجة في CI.
 **العقد:** [المهمة](../tasks/STUDIO-Phase-5.md).
 
 ## التنفيذ والتحقق

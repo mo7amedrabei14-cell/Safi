@@ -3027,6 +3027,7 @@ impl DataGraph {
                         x_value: None,
                         y_value: None,
                         share_pct: None,
+                        svg_path: None,
                         ratio_pct,
                         start_pct: 0,
                         x_pct,
@@ -3055,15 +3056,23 @@ impl DataGraph {
                 if total <= Decimal::ZERO {
                     return Err(type_mismatch());
                 }
+                let is_donut = matches!(chart_type, ChartType::Donut);
                 let mut cumulative_pct = 0_u32;
+                let mut cumulative_frac = 0.0_f64;
                 let mut points = Vec::with_capacity(groups.len());
                 for (idx, group) in groups.into_iter().enumerate() {
-                    let share = (group.value.checked_div(total).ok_or_else(type_mismatch)?
-                        * Decimal::from(100))
-                    .round_dp(2);
+                    let frac_dec = group.value.checked_div(total).ok_or_else(type_mismatch)?;
+                    let share = (frac_dec * Decimal::from(100)).round_dp(2);
                     let ratio_pct = scale_percentage(group.value, total);
                     let start_pct = cumulative_pct.min(100);
                     cumulative_pct = cumulative_pct.saturating_add(ratio_pct).min(100);
+                    let sweep_frac = frac_dec
+                        .to_string()
+                        .parse::<f64>()
+                        .unwrap_or(0.0)
+                        .clamp(0.0, 1.0);
+                    let svg_path = sector_svg_path(cumulative_frac, sweep_frac, is_donut);
+                    cumulative_frac = (cumulative_frac + sweep_frac).min(1.0);
                     let x_pct = u32::try_from(10 + idx * 15).unwrap_or(50).min(90);
                     points.push(ComputedChartPoint {
                         label: group.label,
@@ -3071,6 +3080,7 @@ impl DataGraph {
                         x_value: None,
                         y_value: None,
                         share_pct: Some(share.normalize().to_string()),
+                        svg_path,
                         ratio_pct,
                         start_pct,
                         x_pct,
@@ -3163,6 +3173,7 @@ impl DataGraph {
                         x_value: Some(x_val.normalize().to_string()),
                         y_value: Some(y_val.normalize().to_string()),
                         share_pct: None,
+                        svg_path: None,
                         ratio_pct: scale_percentage(y_val.abs(), max_y.abs().max(Decimal::ONE)),
                         start_pct: 0,
                         x_pct,
@@ -3218,6 +3229,7 @@ impl DataGraph {
                         x_value: None,
                         y_value: None,
                         share_pct: Some("100".to_owned()),
+                        svg_path: None,
                         ratio_pct: 100,
                         start_pct: 0,
                         x_pct: 50,
@@ -3281,6 +3293,7 @@ impl DataGraph {
                             x_value: None,
                             y_value: None,
                             share_pct: None,
+                            svg_path: None,
                             ratio_pct,
                             start_pct: 0,
                             x_pct,
@@ -3315,6 +3328,7 @@ impl DataGraph {
                             x_value: None,
                             y_value: None,
                             share_pct: None,
+                            svg_path: None,
                             ratio_pct: scale_percentage(group.value, max_val),
                             start_pct: 0,
                             x_pct: 50,
@@ -3329,6 +3343,7 @@ impl DataGraph {
                         x_value: None,
                         y_value: None,
                         share_pct: Some("100".to_owned()),
+                        svg_path: None,
                         ratio_pct: 100,
                         start_pct: 0,
                         x_pct: 50,
@@ -3814,6 +3829,9 @@ pub struct ComputedChartPoint {
     pub y_value: Option<String>,
     /// Optional percentage share string (`0..=100`, for Pie and Donut charts).
     pub share_pct: Option<String>,
+    /// Pre-computed SVG path (`d="..."`) for circular charts (`pie`, `donut`) in a `0..=100` viewBox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub svg_path: Option<String>,
     /// Pre-scaled magnitude percentage (`0..=100`) for bar/histogram/pie widths.
     pub ratio_pct: u32,
     /// Pre-scaled cumulative start percentage (`0..=100`) for pie/donut ring offsets.
@@ -3842,6 +3860,39 @@ pub struct ComputedChartSeries {
     pub total_or_kpi: String,
     /// Pre-computed points/slices/bins/coordinates.
     pub points: Vec<ComputedChartPoint>,
+}
+
+fn sector_svg_path(start_frac: f64, sweep_frac: f64, donut: bool) -> Option<String> {
+    if sweep_frac <= 0.0 {
+        return None;
+    }
+    if sweep_frac >= 0.999_999 {
+        return Some(if donut {
+            "M 50.00 10.00 A 40 40 0 1 1 50.00 90.00 A 40 40 0 1 1 50.00 10.00 M 50.00 28.00 A 22 22 0 1 0 50.00 72.00 A 22 22 0 1 0 50.00 28.00 Z".to_owned()
+        } else {
+            "M 50.00 10.00 A 40 40 0 1 1 50.00 90.00 A 40 40 0 1 1 50.00 10.00 Z".to_owned()
+        });
+    }
+    let start_rad = -std::f64::consts::FRAC_PI_2 + start_frac * std::f64::consts::TAU;
+    let end_rad = start_rad + sweep_frac * std::f64::consts::TAU;
+    let large_arc = if sweep_frac > 0.5 { 1 } else { 0 };
+    let ox1 = 50.0 + 40.0 * start_rad.cos();
+    let oy1 = 50.0 + 40.0 * start_rad.sin();
+    let ox2 = 50.0 + 40.0 * end_rad.cos();
+    let oy2 = 50.0 + 40.0 * end_rad.sin();
+    if donut {
+        let ix2 = 50.0 + 22.0 * end_rad.cos();
+        let iy2 = 50.0 + 22.0 * end_rad.sin();
+        let ix1 = 50.0 + 22.0 * start_rad.cos();
+        let iy1 = 50.0 + 22.0 * start_rad.sin();
+        Some(format!(
+            "M {ox1:.2} {oy1:.2} A 40 40 0 {large_arc} 1 {ox2:.2} {oy2:.2} L {ix2:.2} {iy2:.2} A 22 22 0 {large_arc} 0 {ix1:.2} {iy1:.2} Z"
+        ))
+    } else {
+        Some(format!(
+            "M 50.00 50.00 L {ox1:.2} {oy1:.2} A 40 40 0 {large_arc} 1 {ox2:.2} {oy2:.2} Z"
+        ))
+    }
 }
 
 fn scale_percentage(value: Decimal, maximum: Decimal) -> u32 {

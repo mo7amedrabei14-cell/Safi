@@ -1,3 +1,14 @@
+/**
+ * Chromium UI + Real sf-server Auth + Real Rust StudioStore Subprocess Harness Integration Test.
+ *
+ * Scope & honesty note:
+ * - Spawns real Rust `sf-server` (`auth_harness_server`) for genuine `/v1/auth/login` (Argon2id),
+ *   `/v1/auth/sessions/current` (`X-Safi-Installation-Id`), and `DELETE /v1/auth/sessions/current`.
+ * - Spawns real Rust `sf-desktop` (`studio_ipc_harness`) over stdio JSON-RPC for `DataGraph`,
+ *   `rust_decimal` calculation, atomic bundle persistence, and `.safi.html` export.
+ * - Bridges Chromium's `window.__TAURI_INTERNALS__.invoke` into the subprocess harness rather than
+ *   driving a packaged WebView2/WebKitGTK OS window via Tauri WebDriver.
+ */
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -39,15 +50,44 @@ const csvPath = resolve(e2eWorkDir, "sales-e2e.csv");
 const capsulePath = resolve(e2eWorkDir, "exported-e2e.safi.html");
 await writeFile(csvPath, "region,amount\nCairo,100\nAlex,200\nCairo,50\n", "utf8");
 
-console.log("[0/10] Building Rust Studio IPC harness (sf-desktop example studio_ipc_harness)...");
+console.log(
+  "[0/10] Building Rust Studio IPC harness + real sf-server auth harness (Chromium UI + Real Rust StudioStore Subprocess Harness Integration Test)..."
+);
 execFileSync("cargo", ["build", "-p", "sf-desktop", "--example", "studio_ipc_harness"], {
   stdio: "inherit"
 });
+execFileSync("cargo", ["build", "-p", "sf-server", "--example", "auth_harness_server"], {
+  stdio: "inherit"
+});
 
-const harnessBin = resolve(
-  "target/debug/examples",
-  process.platform === "win32" ? "studio_ipc_harness.exe" : "studio_ipc_harness"
-);
+const binExt = process.platform === "win32" ? ".exe" : "";
+const harnessBin = resolve("target/debug/examples", `studio_ipc_harness${binExt}`);
+const authServerBin = resolve("target/debug/examples", `auth_harness_server${binExt}`);
+
+const authProc = spawn(authServerBin, [], {
+  stdio: ["ignore", "pipe", "inherit"],
+  env: {
+    ...process.env,
+    AUTH_HARNESS_ADDR: "127.0.0.1:0"
+  }
+});
+const authRl = createInterface({ input: authProc.stdout });
+const authAddr = await new Promise((resolveAddr, rejectAddr) => {
+  const timer = setTimeout(() => rejectAddr(new Error("sf-server auth harness timeout")), 15_000);
+  authRl.on("line", (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const msg = JSON.parse(trimmed);
+    if (msg.ready && msg.addr) {
+      clearTimeout(timer);
+      resolveAddr(String(msg.addr));
+    }
+  });
+  authProc.once("exit", (code) => {
+    clearTimeout(timer);
+    rejectAddr(new Error(`sf-server auth harness exited unexpectedly with code ${code}`));
+  });
+});
 
 const rustProc = spawn(harnessBin, [], {
   stdio: ["pipe", "pipe", "inherit"],
@@ -108,7 +148,14 @@ const server = spawn(
     "4175",
     "--strictPort"
   ],
-  { cwd: resolve("apps/web"), stdio: "inherit" }
+  {
+    cwd: resolve("apps/web"),
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      SAFI_DEV_API_PROXY: `http://${authAddr}`
+    }
+  }
 );
 
 async function waitForServer() {
@@ -127,6 +174,28 @@ async function waitForServer() {
   throw new Error("Vite dev server did not become ready within 30 seconds.");
 }
 
+async function verifySessionAgainstRealServer(token, installationId) {
+  const resp = await fetch(`http://${authAddr}/v1/auth/sessions/current`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Safi-Installation-Id": installationId,
+      Accept: "application/json"
+    }
+  });
+  if (!resp.ok) {
+    let code = "SF-AUTH-001";
+    try {
+      const body = await resp.json();
+      if (body && typeof body.code === "string") code = body.code;
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new Error(code);
+  }
+  return await resp.json();
+}
+
 let browser;
 let activeSessionToken = null;
 let activeInstallationId = null;
@@ -141,51 +210,28 @@ try {
   const page = await context.newPage();
 
   await page.exposeFunction("__safiRustInvoke", async (command, args) => {
-    return callRust(command, args ?? {});
+    const safeArgs = args ?? {};
+    if (command === "studio_set_auth_session") {
+      const token = String(safeArgs.token ?? "");
+      const installationId = String(safeArgs.installationId ?? safeArgs.installation_id ?? "");
+      const verified = await verifySessionAgainstRealServer(token, installationId);
+      activeSessionToken = token;
+      activeInstallationId = installationId;
+      await callRust("__harness_register_session", {
+        token,
+        sessionId: String(verified.id),
+        workspaceId: String(verified.workspace_id),
+        installationId,
+        expiresAtMs: Number(verified.expires_at) * 1000
+      });
+    }
+    return callRust(command, safeArgs);
   });
 
   await page.addInitScript(() => {
     window.__TAURI_INTERNALS__ = {
       invoke: (command, args) => window.__safiRustInvoke(command, args ?? {})
     };
-  });
-
-  await page.route("**/v1/auth/login", async (route) => {
-    const body = JSON.parse(route.request().postData() ?? "{}");
-    activeInstallationId = String(body.installation_id ?? "");
-    activeSessionToken = `sfs_${"a1b2".repeat(16)}`;
-    await callRust("__harness_register_session", {
-      token: activeSessionToken,
-      sessionId: "sess-e2e-live-1",
-      workspaceId: "ws-e2e-live-1",
-      installationId: activeInstallationId,
-      expiresAtMs: Date.now() + 3_600_000
-    });
-    const nowSec = Math.floor(Date.now() / 1000);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        token: activeSessionToken,
-        session: {
-          id: "sess-e2e-live-1",
-          workspace_id: "ws-e2e-live-1",
-          device_name: body.device_name ?? "Desktop E2E",
-          expires_at: nowSec + 3600,
-          created_at: nowSec,
-          last_seen_at: nowSec
-        }
-      })
-    });
-  });
-
-  await page.route("**/v1/auth/sessions/current", async (route) => {
-    if (route.request().method() === "DELETE" && activeSessionToken) {
-      await callRust("__harness_revoke_session", { token: activeSessionToken });
-      await route.fulfill({ status: 204, body: "" });
-      return;
-    }
-    await route.fulfill({ status: 401, body: '{"code":"SF-AUTH-001"}' });
   });
 
   // 1. Open app in locked pre-authentication state and verify native Rust auth gate rejects unauthenticated calls
@@ -491,10 +537,27 @@ try {
     `Exported capsule must contain the verified What-If metric value 1000 EGP. Tail: ${exportedHtml.slice(-1200)}`
   );
 
-  // Clear native session (sign-out) and verify immediate rejection
+  // Clear native session (sign-out via real DELETE /v1/auth/sessions/current + native clear) and verify immediate rejection
+  const remoteRevokeResp = await fetch(`http://${authAddr}/v1/auth/sessions/current`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${activeSessionToken}`,
+      "X-Safi-Installation-Id": activeInstallationId
+    }
+  });
+  assert.equal(
+    remoteRevokeResp.status,
+    204,
+    `Expected real sf-server DELETE /v1/auth/sessions/current to return 204, got ${remoteRevokeResp.status}`
+  );
   await page.evaluate(async () => {
     await window.__TAURI_INTERNALS__.invoke("studio_clear_auth_session", {});
   });
+  await assert.rejects(
+    verifySessionAgainstRealServer(activeSessionToken, activeInstallationId),
+    /SF-AUTH-003/,
+    "Expected revoked session on sf-server to fail with SF-AUTH-003"
+  );
   const afterLogoutReject = await page.evaluate(async () => {
     try {
       await window.__TAURI_INTERNALS__.invoke("studio_state", { project: "main" });
@@ -511,10 +574,11 @@ try {
   const screenshotPath = resolve(artifactDir, "studio-desktop-e2e.png");
   await page.screenshot({ path: screenshotPath, fullPage: true });
   console.log(
-    "Quad-Studio full 10-step Desktop E2E passed in Chromium + real Rust StudioStore:",
+    "Chromium UI + Real sf-server Auth + Real Rust StudioStore Subprocess Harness Integration Test passed (10 steps):",
     JSON.stringify({
       preAuthReject: "SF-AUTH-001",
       forgedTokenReject: "SF-AUTH-001",
+      realAuthServerAddr: authAddr,
       initialMetric: "350 EGP",
       afterCellEditMetric: "500 EGP",
       afterWhatIfMetric: "1000 EGP",
@@ -531,4 +595,5 @@ try {
   if (browser) await browser.close();
   server.kill("SIGTERM");
   rustProc.kill("SIGTERM");
+  authProc.kill("SIGTERM");
 }

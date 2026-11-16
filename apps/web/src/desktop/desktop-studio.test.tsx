@@ -26,7 +26,12 @@ import {
   validateAiEndpointUrl,
   validateUntrustedDslPayload
 } from "./ai-interpreter";
-import type { DesktopMetric, DesktopStudioState, StudioChartType } from "./studio-bridge";
+import type {
+  DesktopChartSeries,
+  DesktopMetric,
+  DesktopStudioState,
+  StudioChartType
+} from "./studio-bridge";
 import {
   activateScenario,
   addScenario,
@@ -809,6 +814,57 @@ describe("v6 hardening: native auth gate, 8 chart types, Free-Form rowSpan, Anom
       "kpi"
     ];
 
+    const sampleSeries: Record<string, DesktopChartSeries> = Object.fromEntries(
+      chartTypes.map((ct, idx) => [
+        `chart_${idx + 1}`,
+        {
+          chartType: ct,
+          function: "SUM",
+          column: "amount",
+          groupBy: "region",
+          totalOrKpi: "350.5",
+          points: [
+            {
+              label: "Cairo",
+              value: "250.5",
+              xValue: ct === "scatter" ? "10" : null,
+              yValue: ct === "scatter" ? "250.5" : null,
+              sharePct: ct === "pie" || ct === "donut" ? "71.47" : null,
+              svgPath:
+                ct === "pie"
+                  ? "M 50.00 50.00 L 50.00 10.00 A 40 40 0 1 1 12.00 62.00 Z"
+                  : ct === "donut"
+                    ? "M 50.00 10.00 A 40 40 0 1 1 12.00 62.00 L 29.10 56.60 A 22 22 0 1 0 50.00 28.00 Z"
+                    : null,
+              ratioPct: 71,
+              startPct: 0,
+              xPct: 20,
+              yPct: 30,
+              rowRefs: [1]
+            },
+            {
+              label: "Giza",
+              value: "100",
+              xValue: ct === "scatter" ? "20" : null,
+              yValue: ct === "scatter" ? "100" : null,
+              sharePct: ct === "pie" || ct === "donut" ? "28.53" : null,
+              svgPath:
+                ct === "pie"
+                  ? "M 50.00 50.00 L 12.00 62.00 A 40 40 0 0 1 50.00 10.00 Z"
+                  : ct === "donut"
+                    ? "M 12.00 62.00 A 40 40 0 0 1 50.00 10.00 L 50.00 28.00 A 22 22 0 0 0 29.10 56.60 Z"
+                    : null,
+              ratioPct: 29,
+              startPct: 71,
+              xPct: 80,
+              yPct: 70,
+              rowRefs: [2]
+            }
+          ]
+        }
+      ])
+    );
+
     const dashHtml = renderToString(
       createElement(DashboardChartsView, {
         language: "en",
@@ -825,6 +881,7 @@ describe("v6 hardening: native auth gate, 8 chart types, Free-Form rowSpan, Anom
           column: "amount",
           groupBy: "region"
         })),
+        initialSeriesByChart: sampleSeries,
         onUpdateCharts: vi.fn()
       })
     );
@@ -833,6 +890,15 @@ describe("v6 hardening: native auth gate, 8 chart types, Free-Form rowSpan, Anom
       expect(dashHtml).toContain(`data-chart-type="${ct}"`);
       expect(dashHtml).toContain(`Chart ${ct.toUpperCase()}`);
     }
+    expect(dashHtml).toContain('data-pie-slice="0"');
+    expect(dashHtml).toContain('data-donut-slice="0"');
+    expect(dashHtml).toContain('data-histogram-bin="0"');
+    expect(dashHtml).toContain("<polyline");
+    expect(dashHtml).toContain("<polygon");
+    expect(dashHtml).toContain('data-testid="chart-kpi-total"');
+    const kpiCardHtml =
+      dashHtml.split('data-testid="chart-card-kpi"')[1]?.split("</article>")[0] ?? "";
+    expect(kpiCardHtml).not.toContain("safi-desktop-studio__track");
 
     const freeformHtml = renderToString(
       createElement(FreeFormBuilderView, {
@@ -974,7 +1040,11 @@ describe("v6 hardening: native auth gate, 8 chart types, Free-Form rowSpan, Anom
     expect(JSON.stringify(payload)).not.toContain("sales.csv");
 
     expect(validateAiEndpointUrl("http://127.0.0.1:11434/v1/chat/completions").ok).toBe(true);
-    expect(validateAiEndpointUrl("https://api.example.com/v1/chat/completions").ok).toBe(true);
+    expect(validateAiEndpointUrl("http://localhost:11434/v1/chat/completions")).toMatchObject({
+      ok: true,
+      normalizedUrl: "http://127.0.0.1:11434/v1/chat/completions"
+    });
+    expect(validateAiEndpointUrl("https://api.example.com/v1/chat/completions").ok).toBe(false);
     expect(validateAiEndpointUrl("http://127.0.0.1:9999/v1/chat/completions").ok).toBe(false);
     expect(validateAiEndpointUrl("http://evil.example.com/v1/chat/completions").ok).toBe(false);
 

@@ -182,6 +182,31 @@ export function ApplicationShell({
   const authModalOpen =
     !resetOpen && !verificationSheetOpen && (authenticationRequired || accountOpen);
 
+  const bindSessionAndUnlock = useCallback(
+    async (token: string, email: string, owner: boolean): Promise<void> => {
+      if (isDesktopRuntime()) {
+        const device = await getSafiDeviceIdentity();
+        await setStudioAuthSession(token, device.installationId);
+      }
+      setSessionToken(token);
+      setSessionEmail(email);
+      setOwnerAccount(owner);
+    },
+    []
+  );
+
+  const clearSessionAndLock = useCallback(async (): Promise<void> => {
+    try {
+      if (isDesktopRuntime()) {
+        await clearStudioAuthSession();
+      }
+    } finally {
+      setSessionToken(null);
+      setSessionEmail(null);
+      setOwnerAccount(false);
+    }
+  }, []);
+
   const accountAccessPortal =
     initialVerificationToken === null ? null : (
       <AccountAccessSheet
@@ -190,28 +215,8 @@ export function ApplicationShell({
         lang={lang}
         verificationToken={initialVerificationToken}
         sessionToken={sessionToken}
-        onAuthenticated={(token, email) => {
-          setSessionToken(token);
-          setSessionEmail(email);
-          setOwnerAccount(isOwnerEmail(email));
-          if (isDesktopRuntime()) {
-            void getSafiDeviceIdentity()
-              .then((device) => setStudioAuthSession(token, device.installationId))
-              .catch(() => {
-                setSessionToken(null);
-                setSessionEmail(null);
-                setOwnerAccount(false);
-              });
-          }
-        }}
-        onLoggedOut={() => {
-          if (isDesktopRuntime()) {
-            void clearStudioAuthSession().catch(() => undefined);
-          }
-          setSessionToken(null);
-          setSessionEmail(null);
-          setOwnerAccount(false);
-        }}
+        onAuthenticated={(token, email) => bindSessionAndUnlock(token, email, isOwnerEmail(email))}
+        onLoggedOut={() => clearSessionAndLock()}
       />
     );
 
@@ -224,29 +229,11 @@ export function ApplicationShell({
       theme={theme}
       sessionToken={sessionToken}
       sessionEmail={sessionEmail}
-      onAuthenticated={(session) => {
-        setSessionToken(session.token);
-        setSessionEmail(session.email);
-        setOwnerAccount(session.isOwner);
-        if (isDesktopRuntime()) {
-          void getSafiDeviceIdentity()
-            .then((device) => setStudioAuthSession(session.token, device.installationId))
-            .catch(() => {
-              setSessionToken(null);
-              setSessionEmail(null);
-              setOwnerAccount(false);
-            });
-        }
-      }}
+      onAuthenticated={(session) =>
+        bindSessionAndUnlock(session.token, session.email, session.isOwner)
+      }
       onOwnerDetected={() => setOwnerAccount(true)}
-      onSignedOut={() => {
-        if (isDesktopRuntime()) {
-          void clearStudioAuthSession().catch(() => undefined);
-        }
-        setSessionToken(null);
-        setSessionEmail(null);
-        setOwnerAccount(false);
-      }}
+      onSignedOut={() => clearSessionAndLock()}
       onForgotPassword={() => {
         setAccountOpen(false);
         setResetOpen(true);

@@ -1,6 +1,6 @@
 # خطة STUDIO-Phase-4
 
-**الحالة:** مكتملة ومحصّنة ومختبرة (2026-11-15، مراجعة v6) — القوالب الحية الخمسة (`list_templates`, `instantiate_template`) مع `TemplatesAndProjectsPanel` ومنع الصمت عند غياب الربط (`SF-CAL-006`)، وتصدير الكبسولة `.safi.html` بجميع أنواع الرسوم الـ 8 وكتل اللوح الحر (`data-grid-row-span`) وبـCSP صارم (`style-src 'sha256-...'`) مبرهن آلياً عبر `tools/verify-capsule-chromium.mjs`.  
+**الحالة:** مكتملة ومحصّنة ومختبرة (2026-11-16، مراجعة v7) — القوالب الحية الخمسة (`list_templates`, `instantiate_template`) مع `TemplatesAndProjectsPanel` ومنع الصمت عند غياب الربط (`SF-CAL-006`)، وتصدير الكبسولة `.safi.html` بجميع أنواع الرسوم الـ 8 الحقيقية (SVG Pie/Donut/Histogram/Line/Area/Scatter + بطاقة KPI + أشرطة Bar) وكتل اللوح الحر (`data-grid-row-span`) وبـCSP صارم (`style-src 'sha256-...'`) مبرهن آلياً عبر `tools/verify-capsule-chromium.mjs`.
 **العقد:** [المهمة](../tasks/STUDIO-Phase-4.md).
 
 ## خطوات التنفيذ

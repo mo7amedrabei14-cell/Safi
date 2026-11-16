@@ -45,6 +45,7 @@ fn main() {
         // `generate_context!` runs during this crate's compilation, so the
         // merged configuration must reach rustc, not only this build script.
         println!("cargo:rustc-env=TAURI_CONFIG={serialized}");
+        println!("cargo:rustc-env={API_ORIGIN_ENV}={}", origin.as_str());
         std::env::set_var("TAURI_CONFIG", serialized);
     }
 

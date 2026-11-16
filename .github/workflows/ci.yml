@@ -84,13 +84,14 @@ jobs:
         shell: bash
         run: pnpm -r --filter @safi/web run build
 
-      - name: Check formatting and compile the Tauri 2.2 shell
+      - name: Check formatting, clippy, and unit tests for the Tauri 2.2 shell
         shell: bash
         env:
           SAFI_API_BASE_URL: https://api.safidata.invalid
         run: |
           cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
           cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 
   database-migrations:
     name: PostgreSQL 18.6 migration apply / rollback
@@ -124,7 +125,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Apply, verify, and roll back every migration
+      - name: Apply, verify, rollback migrations and run all 3 ignored PostgreSQL 18.6 tests
         env:
           SF_TEST_DATABASE_URL: postgresql://postgres:safi-ci-only@127.0.0.1:5432/safi_migrations
         run: bash tools/test-migrations.sh
@@ -179,7 +180,7 @@ jobs:
           PLAYWRIGHT_MODULE_URL: file:///tmp/safi-playwright/node_modules/playwright/index.mjs
         run: node tools/verify-capsule-chromium.mjs
 
-      - name: Verify full Quad-Studio Desktop E2E in Chromium + Rust StudioStore
+      - name: Verify Chromium UI + Real sf-server Auth + Real Rust StudioStore Subprocess Harness Integration Test (injected IPC bridge; not packaged WebView2/WebKitGTK GUI WebDriver)
         env:
           PLAYWRIGHT_MODULE_URL: file:///tmp/safi-playwright/node_modules/playwright/index.mjs
         run: node tools/verify-studio-desktop-e2e.mjs

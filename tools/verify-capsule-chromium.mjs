@@ -112,6 +112,17 @@ try {
     const chartTypes = Array.from(document.querySelectorAll("[data-chart-type]")).map((el) =>
       el.getAttribute("data-chart-type")
     );
+    const chartVisualGeometry = {
+      barTracks: document.querySelectorAll('[data-chart-type="bar"] .track').length,
+      linePolylines: document.querySelectorAll('[data-chart-type="line"] polyline').length,
+      areaPolygons: document.querySelectorAll('[data-chart-type="area"] polygon').length,
+      pieSlices: document.querySelectorAll('[data-chart-type="pie"] path[data-pie-slice]').length,
+      donutSlices: document.querySelectorAll('[data-chart-type="donut"] path[data-donut-slice]').length,
+      scatterCircles: document.querySelectorAll('[data-chart-type="scatter"] circle').length,
+      histogramBins: document.querySelectorAll('[data-chart-type="histogram"] rect[data-histogram-bin]').length,
+      kpiValues: document.querySelectorAll('[data-chart-type="kpi"] [data-kpi-value]').length,
+      kpiBars: document.querySelectorAll('[data-chart-type="kpi"] .bars').length
+    };
 
     const freeformRowSpanEl = document.querySelector('[data-grid-row-span="3"]');
     const freeformComputedGridRow = freeformRowSpanEl
@@ -139,6 +150,7 @@ try {
       freeformVisible: isVisible("#canvas"),
       metricsTableVisible: isVisible("#metrics"),
       chartTypes,
+      chartVisualGeometry,
       freeformComputedGridRow,
       freeformComputedGridCol,
       images,
@@ -180,6 +192,15 @@ try {
       `Capsule Dashboard must render chart type '${expectedType}', found: ${JSON.stringify(inspection.chartTypes)}`
     );
   }
+  assert.ok(inspection.chartVisualGeometry.barTracks > 0, "Bar chart must render bar tracks.");
+  assert.ok(inspection.chartVisualGeometry.linePolylines > 0, "Line chart must render SVG polyline.");
+  assert.ok(inspection.chartVisualGeometry.areaPolygons > 0, "Area chart must render SVG polygon.");
+  assert.ok(inspection.chartVisualGeometry.pieSlices > 0, "Pie chart must render SVG sector slices.");
+  assert.ok(inspection.chartVisualGeometry.donutSlices > 0, "Donut chart must render SVG ring slices.");
+  assert.ok(inspection.chartVisualGeometry.scatterCircles > 0, "Scatter chart must render SVG points.");
+  assert.ok(inspection.chartVisualGeometry.histogramBins > 0, "Histogram chart must render SVG bin rectangles.");
+  assert.ok(inspection.chartVisualGeometry.kpiValues > 0, "KPI card must render standalone KPI value.");
+  assert.equal(inspection.chartVisualGeometry.kpiBars, 0, "KPI card must not render redundant .bars rows.");
 
   assert.ok(
     inspection.freeformComputedGridRow.includes("span 3"),

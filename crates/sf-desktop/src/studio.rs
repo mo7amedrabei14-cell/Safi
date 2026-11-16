@@ -49,6 +49,15 @@ pub const AUTH_REQUIRED_CODE: &str = "SF-AUTH-001";
 /// Code returned when the active Studio session has expired.
 pub const AUTH_EXPIRED_CODE: &str = "SF-AUTH-002";
 
+/// Code returned when the active Studio session or device installation has been revoked or replaced.
+pub const AUTH_REVOKED_CODE: &str = "SF-AUTH-003";
+
+/// Code returned when the authentication backend cannot be reached or returns a server error.
+pub const AUTH_BACKEND_UNAVAILABLE_CODE: &str = "SF-AUTH-005";
+
+/// Code returned when the account-service origin (`SAFI_API_BASE_URL`) is missing or invalid.
+pub const AUTH_CONFIG_MISSING_CODE: &str = "SF-SYS-031";
+
 const SESSION_TOKEN_PREFIX: &str = "sfs_";
 const SESSION_RANDOM_HEX_LEN: usize = 64;
 
@@ -329,15 +338,15 @@ impl StudioSessionVerifier for StudioSessionAuthority {
             .get(&token_hash)
             .ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?;
         if record.revoked || record.device_revoked {
-            return Err(AUTH_REQUIRED_CODE.to_owned());
+            return Err(AUTH_REVOKED_CODE.to_owned());
         }
         let caller_inst_hash =
             derive_device_installation_hash(&record.workspace_id, installation_id)?;
         if caller_inst_hash != record.installation_hash {
-            return Err(AUTH_REQUIRED_CODE.to_owned());
+            return Err(AUTH_REVOKED_CODE.to_owned());
         }
         if active_devices.get(&record.workspace_id) != Some(&record.installation_hash) {
-            return Err(AUTH_REQUIRED_CODE.to_owned());
+            return Err(AUTH_REVOKED_CODE.to_owned());
         }
         if now_ms >= record.expires_at_ms {
             return Err(AUTH_EXPIRED_CODE.to_owned());
@@ -689,14 +698,16 @@ impl StudioStore {
     ///
     /// # Errors
     /// Returns [`AUTH_REQUIRED_CODE`] (`SF-AUTH-001`), [`AUTH_EXPIRED_CODE`] (`SF-AUTH-002`),
-    /// or `SF-SYS-013` when the payload exceeds [`crate::commands::MAX_IPC_BYTES`].
+    /// [`AUTH_REVOKED_CODE`] (`SF-AUTH-003`), [`AUTH_BACKEND_UNAVAILABLE_CODE`] (`SF-AUTH-005`),
+    /// [`AUTH_CONFIG_MISSING_CODE`] (`SF-SYS-031`), or `SF-SYS-007` when the payload exceeds
+    /// [`crate::commands::MAX_IPC_BYTES`].
     pub fn set_auth_session(
         &self,
         token: &str,
         installation_id: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = token.len().saturating_add(installation_id.len());
+        let payload_len = crate::ipc_payload_len!(token, installation_id);
         enforce_ipc_command("studio_set_auth_session", payload_len)?;
         let effective_now = self.effective_now_ms(Some(now_ms));
         let verified = match self
@@ -733,9 +744,9 @@ impl StudioStore {
     /// Immediately clears the native authenticated session context on sign-out.
     ///
     /// # Errors
-    /// Returns `SF-SYS-012` or `SF-SYS-001` on internal failure.
+    /// Returns `SF-SYS-010` or `SF-SYS-001` on internal failure.
     pub fn clear_auth_session(&self) -> Result<String, String> {
-        enforce_ipc_command("studio_clear_auth_session", 0)?;
+        enforce_ipc_command("studio_clear_auth_session", crate::ipc_payload_len!())?;
         let mut slot = self
             .active_session
             .lock()
@@ -752,8 +763,9 @@ impl StudioStore {
     /// session + single-device verification before any sensitive command executes.
     ///
     /// # Errors
-    /// Returns `SF-SYS-012`, `SF-SYS-013`, [`AUTH_REQUIRED_CODE`] (`SF-AUTH-001`), or
-    /// [`AUTH_EXPIRED_CODE`] (`SF-AUTH-002`).
+    /// Returns `SF-SYS-010`, `SF-SYS-007`, [`AUTH_REQUIRED_CODE`] (`SF-AUTH-001`),
+    /// [`AUTH_EXPIRED_CODE`] (`SF-AUTH-002`), [`AUTH_REVOKED_CODE`] (`SF-AUTH-003`),
+    /// [`AUTH_BACKEND_UNAVAILABLE_CODE`] (`SF-AUTH-005`), or [`AUTH_CONFIG_MISSING_CODE`] (`SF-SYS-031`).
     pub fn gate_command(
         &self,
         command: &str,
@@ -874,12 +886,8 @@ impl StudioStore {
     /// Returns the `SF-*` code of the first failing step: unauthenticated (`SF-AUTH-001`),
     /// unsupported extension (`SF-IMP-002`), file too large (`SF-IMP-003`), or reader error.
     pub fn open_file(&self, project: &str, path: &Path, now_ms: u64) -> Result<String, String> {
-        let path_len = path.as_os_str().len();
-        self.gate_command(
-            "studio_open_file",
-            project.len().saturating_add(path_len),
-            Some(now_ms),
-        )?;
+        let payload_len = crate::ipc_payload_len!(project, path);
+        self.gate_command("studio_open_file", payload_len, Some(now_ms))?;
         let table = read_table(path)?;
         let source = SourceId::new(project).map_err(|error| code_of(&error))?;
         let graph = DataGraph::new(source, table, now_ms).map_err(|error| code_of(&error))?;
@@ -897,7 +905,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`] or [`UNKNOWN_PROJECT_CODE`] when the project is not open.
     pub fn state(&self, project: &str) -> Result<String, String> {
-        self.gate_command("studio_state", project.len(), None)?;
+        self.gate_command("studio_state", crate::ipc_payload_len!(project), None)?;
         self.state_unlocked(project)
     }
 
@@ -912,10 +920,7 @@ impl StudioStore {
         default_value: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(name.len())
-            .saturating_add(default_value.len());
+        let payload_len = crate::ipc_payload_len!(project, name, default_value);
         self.gate_command("studio_add_source_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| {
             graph
@@ -935,10 +940,7 @@ impl StudioStore {
         new_name: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(old_name.len())
-            .saturating_add(new_name.len());
+        let payload_len = crate::ipc_payload_len!(project, old_name, new_name);
         self.gate_command("studio_rename_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| {
             graph.rename_column(old_name, new_name, now_ms)
@@ -950,7 +952,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], `SF-CAL-001`, or `SF-CAL-002`.
     pub fn delete_column(&self, project: &str, name: &str, now_ms: u64) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(name.len());
+        let payload_len = crate::ipc_payload_len!(project, name);
         self.gate_command("studio_delete_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.delete_column(name, now_ms))
     }
@@ -960,7 +962,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-CAL-001`.
     pub fn trim_column(&self, project: &str, column: &str, now_ms: u64) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(column.len());
+        let payload_len = crate::ipc_payload_len!(project, column);
         self.gate_command("studio_trim_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.trim_column(column, now_ms))
     }
@@ -974,7 +976,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-CAL-002`.
     pub fn set_artifacts(&self, project: &str, artifacts_json: &str) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(artifacts_json.len());
+        let payload_len = crate::ipc_payload_len!(project, artifacts_json);
         self.gate_command("studio_set_artifacts", payload_len, None)?;
         let parsed: StudioWorkspaceArtifacts =
             serde_json::from_str(artifacts_json).map_err(|_| "SF-CAL-002".to_owned())?;
@@ -1010,10 +1012,7 @@ impl StudioStore {
         display_name: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(saved_id.len())
-            .saturating_add(display_name.len());
+        let payload_len = crate::ipc_payload_len!(project, saved_id, display_name);
         self.gate_command("studio_save_project", payload_len, Some(now_ms))?;
         let safe_id = validate_project_id(saved_id)?;
         let snapshot_json = self.snapshot_unlocked(project)?;
@@ -1052,7 +1051,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], `SF-SYS-001`, or [`EXPORT_FAILED_CODE`].
     pub fn list_project_bundles(&self) -> Result<String, String> {
-        self.gate_command("studio_list_projects", 0, None)?;
+        self.gate_command("studio_list_projects", crate::ipc_payload_len!(), None)?;
         self.list_project_bundles_unlocked()
     }
 
@@ -1067,7 +1066,7 @@ impl StudioStore {
         saved_id: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(saved_id.len());
+        let payload_len = crate::ipc_payload_len!(project, saved_id);
         self.gate_command("studio_load_project", payload_len, Some(now_ms))?;
         let safe_id = validate_project_id(saved_id)?;
         let dir = self.resolve_storage_dir()?;
@@ -1111,7 +1110,11 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], `SF-SYS-001`, or [`EXPORT_FAILED_CODE`].
     pub fn delete_project_bundle(&self, saved_id: &str) -> Result<String, String> {
-        self.gate_command("studio_delete_project", saved_id.len(), None)?;
+        self.gate_command(
+            "studio_delete_project",
+            crate::ipc_payload_len!(saved_id),
+            None,
+        )?;
         let safe_id = validate_project_id(saved_id)?;
         let dir = self.resolve_storage_dir()?;
         let path = dir.join(format!("{safe_id}.safi.json"));
@@ -1126,7 +1129,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`] or `SF-SYS-001` on serialization error.
     pub fn list_templates(&self) -> Result<String, String> {
-        self.gate_command("studio_list_templates", 0, None)?;
+        self.gate_command("studio_list_templates", crate::ipc_payload_len!(), None)?;
         let list = TEMPLATES
             .iter()
             .map(|tpl| {
@@ -1160,10 +1163,7 @@ impl StudioStore {
         template_id: &str,
         bindings_json: &str,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(template_id.len())
-            .saturating_add(bindings_json.len());
+        let payload_len = crate::ipc_payload_len!(project, template_id, bindings_json);
         self.gate_command("studio_instantiate_template", payload_len, None)?;
         let tpl = template_by_id(template_id).ok_or_else(|| "SF-SYS-001".to_owned())?;
         let raw_bindings: BTreeMap<String, String> =
@@ -1199,7 +1199,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], `SF-SYS-001` for malformed query JSON, or `SF-CAL-001` for unknown columns.
     pub fn rows_page(&self, project: &str, query_json: &str) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(query_json.len());
+        let payload_len = crate::ipc_payload_len!(project, query_json);
         self.gate_command("studio_rows_page", payload_len, None)?;
         let query: RowQuery = if query_json.trim().is_empty() {
             RowQuery::default()
@@ -1229,10 +1229,7 @@ impl StudioStore {
         raw: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(column.len())
-            .saturating_add(raw.len());
+        let payload_len = crate::ipc_payload_len!(project, row, column, raw);
         self.gate_command("studio_set_cell", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.set_cell(row, column, raw, now_ms))
     }
@@ -1250,10 +1247,7 @@ impl StudioStore {
         expected_revision: Option<u64>,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(column.len())
-            .saturating_add(raw.len());
+        let payload_len = crate::ipc_payload_len!(project, row_id, column, raw, expected_revision);
         self.gate_command("studio_set_cell_by_id", payload_len, Some(now_ms))?;
         self.mutate_at_revision(project, expected_revision, |graph| {
             graph.set_cell_by_id(RowId::from_raw(row_id), column, raw, now_ms)
@@ -1271,7 +1265,7 @@ impl StudioStore {
         ascending: bool,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(column.len());
+        let payload_len = crate::ipc_payload_len!(project, column, ascending);
         self.gate_command("studio_sort_rows", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.sort_rows(column, ascending, now_ms))
     }
@@ -1287,10 +1281,7 @@ impl StudioStore {
         query: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(column.len())
-            .saturating_add(query.len());
+        let payload_len = crate::ipc_payload_len!(project, column, query);
         self.gate_command("studio_filter_rows", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.filter_rows(column, query, now_ms))
     }
@@ -1300,7 +1291,8 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-SYS-001`.
     pub fn delete_row(&self, project: &str, row_id: u64, now_ms: u64) -> Result<String, String> {
-        self.gate_command("studio_delete_row", project.len(), Some(now_ms))?;
+        let payload_len = crate::ipc_payload_len!(project, row_id);
+        self.gate_command("studio_delete_row", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| {
             graph.delete_row(RowId::from_raw(row_id), now_ms)
         })
@@ -1317,7 +1309,7 @@ impl StudioStore {
         values_json: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(values_json.len());
+        let payload_len = crate::ipc_payload_len!(project, after_row_id, values_json);
         self.gate_command("studio_insert_row", payload_len, Some(now_ms))?;
         let values: BTreeMap<String, String> = if values_json.trim().is_empty() {
             BTreeMap::new()
@@ -1343,10 +1335,7 @@ impl StudioStore {
         formula: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(name.len())
-            .saturating_add(formula.len());
+        let payload_len = crate::ipc_payload_len!(project, name, formula);
         self.gate_command("studio_add_calculated_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| {
             graph.add_calculated_column(name, formula, now_ms)
@@ -1364,10 +1353,7 @@ impl StudioStore {
         value_str: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(name.len())
-            .saturating_add(value_str.len());
+        let payload_len = crate::ipc_payload_len!(project, name, value_str);
         self.gate_command("studio_define_parameter", payload_len, Some(now_ms))?;
         let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
         self.mutate_unit(project, None, |graph| {
@@ -1386,10 +1372,7 @@ impl StudioStore {
         value_str: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(name.len())
-            .saturating_add(value_str.len());
+        let payload_len = crate::ipc_payload_len!(project, name, value_str);
         self.gate_command("studio_update_parameter", payload_len, Some(now_ms))?;
         let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
         self.mutate(project, |graph| graph.update_parameter(name, value, now_ms))
@@ -1406,11 +1389,7 @@ impl StudioStore {
         name: &str,
         params_json: &str,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(id.len())
-            .saturating_add(name.len())
-            .saturating_add(params_json.len());
+        let payload_len = crate::ipc_payload_len!(project, id, name, params_json);
         self.gate_command("studio_add_scenario", payload_len, None)?;
         let scenario_id = ScenarioId::new(id).map_err(|error| code_of(&error))?;
         let raw_params: BTreeMap<String, String> = if params_json.trim().is_empty() {
@@ -1438,10 +1417,7 @@ impl StudioStore {
         id: &str,
         new_name: &str,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(id.len())
-            .saturating_add(new_name.len());
+        let payload_len = crate::ipc_payload_len!(project, id, new_name);
         self.gate_command("studio_rename_scenario", payload_len, None)?;
         let scenario_id = ScenarioId::new(id).map_err(|error| code_of(&error))?;
         self.mutate_unit(project, None, |graph| {
@@ -1459,7 +1435,7 @@ impl StudioStore {
         id: Option<&str>,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(id.map_or(0, str::len));
+        let payload_len = crate::ipc_payload_len!(project, id);
         self.gate_command("studio_activate_scenario", payload_len, Some(now_ms))?;
         let scenario_id = match id {
             Some(raw) if !raw.trim().is_empty() => {
@@ -1477,7 +1453,11 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-SYS-001`.
     pub fn reset_scenario(&self, project: &str, now_ms: u64) -> Result<String, String> {
-        self.gate_command("studio_reset_scenario", project.len(), Some(now_ms))?;
+        self.gate_command(
+            "studio_reset_scenario",
+            crate::ipc_payload_len!(project),
+            Some(now_ms),
+        )?;
         self.mutate_unit(project, None, |graph| graph.reset_scenario(now_ms))
     }
 
@@ -1493,11 +1473,7 @@ impl StudioStore {
         value_str: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(scenario_id.len())
-            .saturating_add(parameter.len())
-            .saturating_add(value_str.len());
+        let payload_len = crate::ipc_payload_len!(project, scenario_id, parameter, value_str);
         self.gate_command("studio_set_scenario_parameter", payload_len, Some(now_ms))?;
         let id = ScenarioId::new(scenario_id).map_err(|error| code_of(&error))?;
         let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
@@ -1517,10 +1493,7 @@ impl StudioStore {
         right: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(left.len())
-            .saturating_add(right.len());
+        let payload_len = crate::ipc_payload_len!(project, left, right);
         self.gate_command("studio_compare_scenarios", payload_len, Some(now_ms))?;
         let left_id = ScenarioId::new(left).map_err(|error| code_of(&error))?;
         let right_id = ScenarioId::new(right).map_err(|error| code_of(&error))?;
@@ -1561,12 +1534,7 @@ impl StudioStore {
         formula: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(id.len())
-            .saturating_add(name.len())
-            .saturating_add(unit.map_or(0, str::len))
-            .saturating_add(formula.len());
+        let payload_len = crate::ipc_payload_len!(project, id, name, unit, formula);
         self.gate_command("studio_define_metric", payload_len, Some(now_ms))?;
         let metric = MetricId::new(id).map_err(|error| code_of(&error))?;
         self.mutate(project, |graph| {
@@ -1584,7 +1552,7 @@ impl StudioStore {
         command_json: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(command_json.len());
+        let payload_len = crate::ipc_payload_len!(project, command_json);
         self.gate_command("studio_apply_command", payload_len, Some(now_ms))?;
         let command = parse_command(command_json).map_err(|error| code_of(&error))?;
         self.mutate(project, |graph| apply_command(graph, &command, now_ms))
@@ -1601,7 +1569,7 @@ impl StudioStore {
         expected_revision: Option<u64>,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(fix_json.len());
+        let payload_len = crate::ipc_payload_len!(project, fix_json, expected_revision);
         self.gate_command("studio_apply_anomaly_fix", payload_len, Some(now_ms))?;
         let fix: AnomalyFix =
             serde_json::from_str(fix_json).map_err(|_| "SF-CAL-002".to_owned())?;
@@ -1615,7 +1583,11 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or the engine's own `SF-CAL-*` code.
     pub fn undo(&self, project: &str, now_ms: u64) -> Result<String, String> {
-        self.gate_command("studio_undo", project.len(), Some(now_ms))?;
+        self.gate_command(
+            "studio_undo",
+            crate::ipc_payload_len!(project),
+            Some(now_ms),
+        )?;
         self.mutate(project, |graph| graph.undo(now_ms))
     }
 
@@ -1624,7 +1596,11 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or the engine's own `SF-CAL-*` code.
     pub fn redo(&self, project: &str, now_ms: u64) -> Result<String, String> {
-        self.gate_command("studio_redo", project.len(), Some(now_ms))?;
+        self.gate_command(
+            "studio_redo",
+            crate::ipc_payload_len!(project),
+            Some(now_ms),
+        )?;
         self.mutate(project, |graph| graph.redo(now_ms))
     }
 
@@ -1639,11 +1615,7 @@ impl StudioStore {
         column: &str,
         group_by: &str,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(function.len())
-            .saturating_add(column.len())
-            .saturating_add(group_by.len());
+        let payload_len = crate::ipc_payload_len!(project, function, column, group_by);
         self.gate_command("studio_grouped", payload_len, None)?;
         let function = AggFunc::from_name(function).ok_or_else(|| "SF-CAL-002".to_owned())?;
         let projects = self
@@ -1676,12 +1648,7 @@ impl StudioStore {
         column: &str,
         group_by: &str,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(chart_type.len())
-            .saturating_add(function.len())
-            .saturating_add(column.len())
-            .saturating_add(group_by.len());
+        let payload_len = crate::ipc_payload_len!(project, chart_type, function, column, group_by);
         self.gate_command("studio_chart_data", payload_len, None)?;
         let kind = ChartType::from_name(chart_type).ok_or_else(|| "SF-CAL-002".to_owned())?;
         let agg = AggFunc::from_name(function).ok_or_else(|| "SF-CAL-002".to_owned())?;
@@ -1703,7 +1670,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or the engine's own `SF-CAL-*` code.
     pub fn narrative(&self, project: &str, template: &str) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(template.len());
+        let payload_len = crate::ipc_payload_len!(project, template);
         self.gate_command("studio_narrative", payload_len, None)?;
         let projects = self
             .projects
@@ -1743,7 +1710,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-SYS-001`.
     pub fn snapshot(&self, project: &str) -> Result<String, String> {
-        self.gate_command("studio_snapshot", project.len(), None)?;
+        self.gate_command("studio_snapshot", crate::ipc_payload_len!(project), None)?;
         self.snapshot_unlocked(project)
     }
 
@@ -1758,7 +1725,7 @@ impl StudioStore {
         snapshot_json: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = project.len().saturating_add(snapshot_json.len());
+        let payload_len = crate::ipc_payload_len!(project, snapshot_json);
         self.gate_command("studio_restore", payload_len, Some(now_ms))?;
         let graph = DataGraph::from_json(snapshot_json, now_ms).map_err(|error| code_of(&error))?;
         let mut projects = self
@@ -1783,10 +1750,7 @@ impl StudioStore {
         target: &Path,
         options_json: &str,
     ) -> Result<String, String> {
-        let payload_len = project
-            .len()
-            .saturating_add(target.as_os_str().len())
-            .saturating_add(options_json.len());
+        let payload_len = crate::ipc_payload_len!(project, target, options_json);
         self.gate_command("studio_export_capsule", payload_len, None)?;
         let options: CapsuleInput =
             serde_json::from_str(options_json).map_err(|_| "SF-CAL-002".to_owned())?;
@@ -2800,10 +2764,10 @@ mod tests {
             INSTALLATION_ID,
             10_000,
         ));
-        // Wrong device installation ID must be rejected
+        // Wrong device installation ID must be rejected with SF-AUTH-003 (AUTH_REVOKED_CODE)
         assert_eq!(
             store.set_auth_session(VALID_TOKEN, OTHER_INSTALLATION_ID, 1_000),
-            Err(AUTH_REQUIRED_CODE.to_owned())
+            Err(AUTH_REVOKED_CODE.to_owned())
         );
         // Correct token + device succeeds
         let auth_json = json(&test_result(store.set_auth_session(
@@ -2821,14 +2785,47 @@ mod tests {
         test_result(store.open_file("p1", &csv_path, 1_500));
         test_result(store.define_metric("p1", "m1", "Total", None, "SUM(amount)", 1_600));
 
-        // 5. Payload exceeding MAX_IPC_BYTES is rejected with SF-SYS-007
-        let oversized = "x".repeat(MAX_IPC_BYTES + 1);
+        // 5. Exact MAX_IPC_BYTES (1_048_576) succeeds, while MAX_IPC_BYTES + 1 (1_048_577) fails with SF-SYS-007
+        let exact_narrative = "x".repeat(MAX_IPC_BYTES - "p1".len());
+        test_result(store.narrative("p1", &exact_narrative));
+        let oversized = "x".repeat(MAX_IPC_BYTES - "p1".len() + 1);
         assert_eq!(
             store.narrative("p1", &oversized),
             Err("SF-SYS-007".to_owned())
         );
+        // Verify non-string parameters (row: usize, row_id: u64, expected_revision: Option<u64>, ascending: bool)
+        // are counted toward MAX_IPC_BYTES:
+        let set_cell_filler =
+            "1".repeat(MAX_IPC_BYTES - "p1".len() - "amount".len() - std::mem::size_of::<usize>());
+        assert_ne!(
+            store.set_cell("p1", 0, "amount", &set_cell_filler, 1_650),
+            Err("SF-SYS-007".to_owned())
+        );
+        let set_cell_over = format!("{set_cell_filler}0");
+        assert_eq!(
+            store.set_cell("p1", 0, "amount", &set_cell_over, 1_650),
+            Err("SF-SYS-007".to_owned())
+        );
+        let set_cell_by_id_over = "1".repeat(
+            MAX_IPC_BYTES
+                - "p1".len()
+                - "amount".len()
+                - std::mem::size_of::<u64>()
+                - std::mem::size_of::<u64>()
+                + 1,
+        );
+        assert_eq!(
+            store.set_cell_by_id("p1", 1, "amount", &set_cell_by_id_over, Some(1), 1_650),
+            Err("SF-SYS-007".to_owned())
+        );
+        let sort_col_over =
+            "c".repeat(MAX_IPC_BYTES - "p1".len() - std::mem::size_of::<bool>() + 1);
+        assert_eq!(
+            store.sort_rows("p1", &sort_col_over, true, 1_650),
+            Err("SF-SYS-007".to_owned())
+        );
 
-        // 6. Session expiration (clock >= 10_000) -> all 43 sensitive commands fail with SF-AUTH-002
+        // 6. Session expiration (clock >= 10_000) -> first call fails with SF-AUTH-002 and clears session fail-closed
         store.set_clock_ms(Some(10_000));
         assert_eq!(store.state("p1"), Err(AUTH_EXPIRED_CODE.to_owned()));
         // Once expired, active_session was cleared fail-closed -> subsequent calls return SF-AUTH-001
@@ -2839,7 +2836,7 @@ mod tests {
             AUTH_REQUIRED_CODE,
         );
 
-        // 7. Re-register and test server-side session revocation
+        // 7. Re-register and test server-side session revocation -> SF-AUTH-003 then fail-closed SF-AUTH-001
         store.set_clock_ms(Some(2_000));
         test_result(store.session_authority().register_session(
             "sess_2",
@@ -2851,6 +2848,7 @@ mod tests {
         test_result(store.set_auth_session(VALID_TOKEN, INSTALLATION_ID, 2_000));
         test_result(store.state("p1"));
         store.session_authority().revoke_session("sess_2");
+        assert_eq!(store.state("p1"), Err(AUTH_REVOKED_CODE.to_owned()));
         assert_all_sensitive_commands_fail_with(
             &store,
             &csv_path,
@@ -2858,7 +2856,7 @@ mod tests {
             AUTH_REQUIRED_CODE,
         );
 
-        // 8. Re-register and test single-device replacement / device revocation
+        // 8. Re-register and test single-device replacement / device revocation -> SF-AUTH-003 then fail-closed SF-AUTH-001
         test_result(store.session_authority().register_session(
             "sess_3",
             "ws_alpha",
@@ -2876,6 +2874,7 @@ mod tests {
             OTHER_INSTALLATION_ID,
             50_000,
         ));
+        assert_eq!(store.state("p1"), Err(AUTH_REVOKED_CODE.to_owned()));
         assert_all_sensitive_commands_fail_with(
             &store,
             &csv_path,

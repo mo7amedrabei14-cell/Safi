@@ -212,6 +212,9 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 .track{flex:1;background:#1b2740;border-radius:999px;height:12px;overflow:hidden}
 .fill{height:100%;background:linear-gradient(90deg,#2563eb,#22d3ee)}
 .chart-svg{width:100%;height:140px;display:block;margin:8px 0;background:#0e1726;border-radius:10px}
+.chart-svg-circle{max-width:180px;height:160px;margin:8px auto}
+.legend{display:grid;gap:4px;margin:8px 0;padding:0;list-style:none;font-size:12px}
+.legend li{display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-radius:6px;background:#0e1726}
 .filters{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
 .filters input{position:absolute;opacity:0;pointer-events:none}
 .filters label{cursor:pointer;padding:4px 10px;border-radius:999px;border:1px solid #2b3b58;font-size:12px}
@@ -238,6 +241,166 @@ fn filter_rules(chart_index: usize, points: &[ComputedChartPoint]) -> String {
         ));
     }
     rules
+}
+
+const SLICE_PALETTE: [&str; 6] = [
+    "#2563eb", "#0891b2", "#7c3aed", "#059669", "#d97706", "#db2777",
+];
+
+fn render_chart_body(
+    body: &mut String,
+    dynamic_css: &mut String,
+    chart_index: usize,
+    chart: &CapsuleChart,
+    series: &crate::datagraph::ComputedChartSeries,
+) {
+    match chart.chart_type {
+        ChartType::Kpi => {
+            body.push_str(&format!(
+                "<p class=\"value\" data-kpi-value>{}</p>\n",
+                escape_html(&series.total_or_kpi)
+            ));
+        }
+        ChartType::Pie | ChartType::Donut => {
+            let is_donut = matches!(chart.chart_type, ChartType::Donut);
+            let slice_attr = if is_donut {
+                "data-donut-slice"
+            } else {
+                "data-pie-slice"
+            };
+            body.push_str(
+                "<svg class=\"chart-svg chart-svg-circle\" viewBox=\"0 0 100 100\" role=\"img\">\n",
+            );
+            for (idx, point) in series.points.iter().enumerate() {
+                if let Some(d) = &point.svg_path {
+                    let color = SLICE_PALETTE[idx % SLICE_PALETTE.len()];
+                    body.push_str(&format!(
+                        "<path {slice_attr}=\"{idx}\" d=\"{}\" fill=\"{color}\"></path>\n",
+                        escape_html(d)
+                    ));
+                }
+            }
+            if is_donut {
+                body.push_str(&format!(
+                    "<text x=\"50\" y=\"53\" text-anchor=\"middle\" fill=\"#e8eefc\" font-size=\"9\" font-weight=\"700\">{}</text>\n",
+                    escape_html(&series.total_or_kpi)
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let share = point.share_pct.as_deref().unwrap_or("0");
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} ({}%)</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(share)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Line | ChartType::Area | ChartType::Scatter => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            if matches!(chart.chart_type, ChartType::Scatter) {
+                body.push_str("<line x1=\"8\" y1=\"92\" x2=\"94\" y2=\"92\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+                body.push_str("<line x1=\"8\" y1=\"8\" x2=\"8\" y2=\"92\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+            }
+            if matches!(chart.chart_type, ChartType::Line | ChartType::Area)
+                && !series.points.is_empty()
+            {
+                let poly = series
+                    .points
+                    .iter()
+                    .map(|p| format!("{},{}", p.x_pct, p.y_pct))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if matches!(chart.chart_type, ChartType::Area)
+                    && let (Some(first), Some(last)) = (series.points.first(), series.points.last())
+                {
+                    body.push_str(&format!(
+                        "<polygon points=\"{},90 {} {},90\" fill=\"#1d4ed8\" fill-opacity=\"0.35\"></polygon>\n",
+                        first.x_pct, poly, last.x_pct
+                    ));
+                }
+                body.push_str(&format!(
+                    "<polyline points=\"{poly}\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\"></polyline>\n"
+                ));
+            }
+            for point in &series.points {
+                body.push_str(&format!(
+                    "<circle cx=\"{}\" cy=\"{}\" r=\"2.5\" fill=\"#22d3ee\"></circle>\n",
+                    point.x_pct, point.y_pct
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let detail = match (&point.x_value, &point.y_value) {
+                    (Some(x), Some(y)) => format!("({x}, {y})"),
+                    _ => point.value.clone(),
+                };
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{}</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&detail),
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Histogram => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            let count = series.points.len().max(1);
+            let slot_width = 84.0 / (count as f64);
+            let bar_width = (slot_width - 2.0).max(4.0);
+            for (idx, point) in series.points.iter().enumerate() {
+                let x = 8.0 + (idx as f64) * slot_width;
+                let h = ((f64::from(point.ratio_pct.min(100)) * 78.0) / 100.0).max(2.0);
+                let y = 90.0 - h;
+                body.push_str(&format!(
+                    "<rect data-histogram-bin=\"{idx}\" x=\"{x:.2}\" y=\"{y:.2}\" width=\"{bar_width:.2}\" height=\"{h:.2}\" fill=\"#38bdf8\"></rect>\n"
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{}</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Bar => {
+            if series.points.len() > 1 {
+                body.push_str("<div class=\"filters\">\n");
+                body.push_str(&format!("<label for=\"c{chart_index}-all\">All</label>\n"));
+                for (group_index, point) in series.points.iter().enumerate() {
+                    body.push_str(&format!(
+                        "<label for=\"c{chart_index}-{group_index}\">{}</label>\n",
+                        escape_html(&point.label)
+                    ));
+                }
+                body.push_str("</div>\n");
+                body.push_str(&format!(
+                    "<input type=\"radio\" name=\"f{chart_index}\" id=\"c{chart_index}-all\" checked>\n"
+                ));
+                for (group_index, _) in series.points.iter().enumerate() {
+                    body.push_str(&format!(
+                        "<input type=\"radio\" name=\"f{chart_index}\" id=\"c{chart_index}-{group_index}\">\n"
+                    ));
+                }
+                dynamic_css.push_str(&filter_rules(chart_index, &series.points));
+            }
+            body.push_str("<div class=\"bars\">\n");
+            for (group_index, point) in series.points.iter().enumerate() {
+                let pct = point.ratio_pct.min(100);
+                body.push_str(&format!(
+                    "<div class=\"bar g{group_index}\"><span>{}</span><div class=\"track\"><div class=\"fill w{pct}\"></div></div><span class=\"provenance\">{}</span></div>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                ));
+            }
+            body.push_str("</div>\n");
+        }
+    }
 }
 
 /// Renders the self-contained capsule document without `unsafe-inline` or JavaScript.
@@ -300,81 +463,7 @@ pub fn export_capsule(graph: &DataGraph, options: &CapsuleOptions) -> Result<Str
             escape_html(&chart.title),
             escape_html(chart.chart_type.as_str())
         ));
-        if matches!(chart.chart_type, ChartType::Kpi) {
-            body.push_str(&format!(
-                "<p class=\"value\">{}</p>\n",
-                escape_html(&series.total_or_kpi)
-            ));
-        }
-        if matches!(
-            chart.chart_type,
-            ChartType::Line | ChartType::Area | ChartType::Scatter
-        ) {
-            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
-            if matches!(chart.chart_type, ChartType::Line | ChartType::Area)
-                && !series.points.is_empty()
-            {
-                let poly = series
-                    .points
-                    .iter()
-                    .map(|p| format!("{},{}", p.x_pct, p.y_pct))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if matches!(chart.chart_type, ChartType::Area)
-                    && let (Some(first), Some(last)) = (series.points.first(), series.points.last())
-                {
-                    body.push_str(&format!(
-                        "<polygon points=\"{},90 {} {},90\" fill=\"#1d4ed8\" fill-opacity=\"0.35\"></polygon>\n",
-                        first.x_pct, poly, last.x_pct
-                    ));
-                }
-                body.push_str(&format!(
-                    "<polyline points=\"{poly}\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\"></polyline>\n"
-                ));
-            }
-            for point in &series.points {
-                body.push_str(&format!(
-                    "<circle cx=\"{}\" cy=\"{}\" r=\"2.5\" fill=\"#22d3ee\"></circle>\n",
-                    point.x_pct, point.y_pct
-                ));
-            }
-            body.push_str("</svg>\n");
-        }
-        if series.points.len() > 1 {
-            body.push_str("<div class=\"filters\">\n");
-            body.push_str(&format!("<label for=\"c{chart_index}-all\">All</label>\n"));
-            for (group_index, point) in series.points.iter().enumerate() {
-                body.push_str(&format!(
-                    "<label for=\"c{chart_index}-{group_index}\">{}</label>\n",
-                    escape_html(&point.label)
-                ));
-            }
-            body.push_str("</div>\n");
-            body.push_str(&format!(
-                "<input type=\"radio\" name=\"f{chart_index}\" id=\"c{chart_index}-all\" checked>\n"
-            ));
-            for (group_index, _) in series.points.iter().enumerate() {
-                body.push_str(&format!(
-                    "<input type=\"radio\" name=\"f{chart_index}\" id=\"c{chart_index}-{group_index}\">\n"
-                ));
-            }
-            dynamic_css.push_str(&filter_rules(chart_index, &series.points));
-        }
-        body.push_str("<div class=\"bars\">\n");
-        for (group_index, point) in series.points.iter().enumerate() {
-            let pct = point.ratio_pct.min(100);
-            let detail = match (&point.share_pct, &point.x_value, &point.y_value) {
-                (Some(share), _, _) => format!("{} ({share}%)", point.value),
-                (_, Some(x), Some(y)) => format!("({x}, {y})"),
-                _ => point.value.clone(),
-            };
-            body.push_str(&format!(
-                "<div class=\"bar g{group_index}\"><span>{}</span><div class=\"track\"><div class=\"fill w{pct}\"></div></div><span class=\"provenance\">{}</span></div>\n",
-                escape_html(&point.label),
-                escape_html(&detail),
-            ));
-        }
-        body.push_str("</div>\n");
+        render_chart_body(&mut body, &mut dynamic_css, chart_index, chart, &series);
         body.push_str(&format!(
             "<p class=\"provenance\">{} · {} of {} grouped by {}</p>\n",
             escape_html(chart.chart_type.as_str()),
@@ -722,6 +811,81 @@ mod tests {
             export_capsule(&graph, &bad_asset).err().map(|e| e.code()),
             Some(ErrorCode::SF_CAL_002)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn capsule_renders_genuine_svg_geometry_for_pie_donut_histogram_and_standalone_kpi()
+    -> Result<(), SafiError> {
+        let mut g = graph()?;
+        let qty = Column::new(
+            ColumnSchema::new(2, "qty", ColumnType::Unknown, ConfidenceScore::ONE),
+            ["2", "4", "1"]
+                .into_iter()
+                .map(CellValue::from_raw)
+                .collect(),
+        );
+        let mut cols = g.working().columns().to_vec();
+        cols.push(qty);
+        let table = Table::new("tbl_sales", "sales", cols)?;
+        g = DataGraph::new(SourceId::new("sales")?, table, 10)?;
+
+        let opts = CapsuleOptions {
+            title: "All 8 Visuals".to_owned(),
+            created_at: "2026-11-16T00:00:00Z".to_owned(),
+            charts: vec![
+                CapsuleChart {
+                    title: "Bar".to_owned(),
+                    chart_type: ChartType::Bar,
+                    function: AggFunc::Sum,
+                    column: "amount".to_owned(),
+                    group_by: "region".to_owned(),
+                },
+                CapsuleChart {
+                    title: "Pie".to_owned(),
+                    chart_type: ChartType::Pie,
+                    function: AggFunc::Sum,
+                    column: "amount".to_owned(),
+                    group_by: "region".to_owned(),
+                },
+                CapsuleChart {
+                    title: "Donut".to_owned(),
+                    chart_type: ChartType::Donut,
+                    function: AggFunc::Sum,
+                    column: "amount".to_owned(),
+                    group_by: "region".to_owned(),
+                },
+                CapsuleChart {
+                    title: "Histogram".to_owned(),
+                    chart_type: ChartType::Histogram,
+                    function: AggFunc::Count,
+                    column: "amount".to_owned(),
+                    group_by: "region".to_owned(),
+                },
+                CapsuleChart {
+                    title: "KPI".to_owned(),
+                    chart_type: ChartType::Kpi,
+                    function: AggFunc::Sum,
+                    column: "amount".to_owned(),
+                    group_by: "region".to_owned(),
+                },
+            ],
+            ..CapsuleOptions::default()
+        };
+        let html = export_capsule(&g, &opts)?;
+        assert!(html.contains("data-pie-slice=\"0\""));
+        assert!(html.contains("data-donut-slice=\"0\""));
+        assert!(html.contains("data-histogram-bin=\"0\""));
+        assert!(html.contains("<rect data-histogram-bin="));
+        assert!(html.contains("<p class=\"value\" data-kpi-value>350</p>"));
+        // KPI card section must not render .bars rows
+        let kpi_section = html
+            .split("data-chart-type=\"kpi\"")
+            .nth(1)
+            .and_then(|s| s.split("</section>").next())
+            .unwrap_or("");
+        assert!(!kpi_section.contains("class=\"bars\""));
+        assert!(!kpi_section.contains("class=\"track\""));
         Ok(())
     }
 }

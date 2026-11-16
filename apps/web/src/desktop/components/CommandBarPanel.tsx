@@ -193,12 +193,18 @@ export function CommandBarPanel({
                     : "Unconfigured (Offline Default)"}
                 </option>
                 <option value="openai_compatible">
-                  {isAr ? "خادم محلي/معتمد متوافق مع OpenAI" : "Local/Approved OpenAI-Compatible"}
+                  {isAr
+                    ? "خادم Ollama المحلي فقط (http://127.0.0.1:11434 — السحابي مؤجل)"
+                    : "Local Ollama Loopback Only (http://127.0.0.1:11434 — Cloud AI deferred)"}
                 </option>
               </select>
             </label>
             <label>
-              <span>{isAr ? "عنوان الخادم" : "Endpoint URL"}</span>
+              <span>
+                {isAr
+                  ? "عنوان الخادم المحلي (Ollama Loopback)"
+                  : "Local Ollama Endpoint URL (127.0.0.1:11434)"}
+              </span>
               <input
                 type="url"
                 value={provider.endpointUrl}

@@ -87,7 +87,7 @@ pub fn validate_ipc_payload_len(len: usize) -> Result<(), DesktopError> {
     }
 }
 
-/// Enforces both [`authorize_command`] (`SF-SYS-012`) and [`validate_ipc_payload_len`] (`SF-SYS-013`)
+/// Enforces both [`authorize_command`] (`SF-SYS-010`) and [`validate_ipc_payload_len`] (`SF-SYS-007`)
 /// for an incoming Tauri IPC invocation.
 ///
 /// # Errors
@@ -98,6 +98,85 @@ pub fn enforce_ipc_command(command: &str, payload_len: usize) -> Result<(), Stri
     authorize_command(command).map_err(|err| err.code().as_str().to_owned())?;
     validate_ipc_payload_len(payload_len).map_err(|err| err.code().as_str().to_owned())?;
     Ok(())
+}
+
+/// Uniform byte-size accounting for a single IPC command parameter.
+pub trait IpcFieldLen {
+    /// Byte contribution of this parameter toward [`MAX_IPC_BYTES`].
+    fn ipc_field_len(&self) -> usize;
+}
+
+impl IpcFieldLen for str {
+    fn ipc_field_len(&self) -> usize {
+        self.len()
+    }
+}
+
+impl IpcFieldLen for String {
+    fn ipc_field_len(&self) -> usize {
+        self.len()
+    }
+}
+
+impl IpcFieldLen for std::path::Path {
+    fn ipc_field_len(&self) -> usize {
+        self.as_os_str().len()
+    }
+}
+
+impl IpcFieldLen for std::path::PathBuf {
+    fn ipc_field_len(&self) -> usize {
+        self.as_os_str().len()
+    }
+}
+
+impl IpcFieldLen for usize {
+    fn ipc_field_len(&self) -> usize {
+        std::mem::size_of::<usize>()
+    }
+}
+
+impl IpcFieldLen for u64 {
+    fn ipc_field_len(&self) -> usize {
+        std::mem::size_of::<u64>()
+    }
+}
+
+impl IpcFieldLen for bool {
+    fn ipc_field_len(&self) -> usize {
+        std::mem::size_of::<bool>()
+    }
+}
+
+impl<T: IpcFieldLen + ?Sized> IpcFieldLen for &T {
+    fn ipc_field_len(&self) -> usize {
+        (**self).ipc_field_len()
+    }
+}
+
+impl<T: IpcFieldLen> IpcFieldLen for Option<T> {
+    fn ipc_field_len(&self) -> usize {
+        self.as_ref().map_or(0, IpcFieldLen::ipc_field_len)
+    }
+}
+
+/// Saturating sum of IPC parameter lengths.
+#[must_use]
+pub fn measure_ipc_payload(lengths: &[usize]) -> usize {
+    lengths.iter().copied().fold(0usize, usize::saturating_add)
+}
+
+/// Computes the total IPC payload byte length across all arguments of a command.
+#[macro_export]
+macro_rules! ipc_payload_len {
+    () => {
+        0usize
+    };
+    ($($field:expr),+ $(,)?) => {
+        $crate::commands::measure_ipc_payload(&[
+            $($crate::commands::IpcFieldLen::ipc_field_len(&$field)),+
+        ])
+    };
 }
 
 #[cfg(test)]
@@ -125,6 +204,10 @@ mod tests {
                 Err(DesktopErrorCode::CommandDenied),
                 "expected command to be denied: {command:?}"
             );
+            assert_eq!(
+                enforce_ipc_command(command, 0),
+                Err("SF-SYS-010".to_owned())
+            );
         }
     }
 
@@ -135,6 +218,49 @@ mod tests {
         assert_eq!(
             validate_ipc_payload_len(MAX_IPC_BYTES + 1).map_err(DesktopError::code),
             Err(DesktopErrorCode::PayloadTooLarge)
+        );
+        assert_eq!(enforce_ipc_command("app_info", MAX_IPC_BYTES), Ok(()));
+        assert_eq!(
+            enforce_ipc_command("app_info", MAX_IPC_BYTES + 1),
+            Err("SF-SYS-007".to_owned())
+        );
+    }
+
+    #[test]
+    fn measures_all_ipc_parameter_types_and_enforces_exact_boundary() {
+        let path = std::path::Path::new("input.csv");
+        let opt_some: Option<u64> = Some(42);
+        let opt_none: Option<u64> = None;
+        let measured = crate::ipc_payload_len!(
+            "p1",
+            path,
+            3usize,
+            99u64,
+            true,
+            opt_some,
+            opt_none,
+            Some("EGP")
+        );
+        assert_eq!(
+            measured,
+            2 + "input.csv".len()
+                + std::mem::size_of::<usize>()
+                + std::mem::size_of::<u64>()
+                + std::mem::size_of::<bool>()
+                + std::mem::size_of::<u64>()
+                + 3
+        );
+
+        let exact_filler = "a".repeat(MAX_IPC_BYTES - std::mem::size_of::<u64>());
+        let exact_len = crate::ipc_payload_len!(exact_filler.as_str(), 1u64);
+        assert_eq!(exact_len, MAX_IPC_BYTES);
+        assert_eq!(enforce_ipc_command("studio_delete_row", exact_len), Ok(()));
+
+        let over_len = crate::ipc_payload_len!(exact_filler.as_str(), 1u64, true);
+        assert_eq!(over_len, MAX_IPC_BYTES + 1);
+        assert_eq!(
+            enforce_ipc_command("studio_sort_rows", over_len),
+            Err("SF-SYS-007".to_owned())
         );
     }
 }

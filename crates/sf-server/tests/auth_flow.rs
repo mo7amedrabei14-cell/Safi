@@ -427,3 +427,77 @@ async fn a_new_device_session_revokes_the_previous_session_on_its_next_request()
         "الجهاز الثاني"
     );
 }
+
+#[tokio::test]
+async fn session_current_enforces_x_safi_installation_id_binding() {
+    use sf_server::auth::device::{DevicePlatform, DeviceRegistration};
+    use sf_server::auth::{AuthMethod, Principal};
+
+    let workspace_id = Uuid::now_v7();
+    let user_id = Uuid::now_v7();
+    let inst_a = Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap();
+    let inst_b = Uuid::parse_str("99999999-8888-4777-8666-555555555555").unwrap();
+
+    let api_keys = Arc::new(InMemoryApiKeyRepository::new(vec![]).await);
+    let sessions = Arc::new(InMemorySessionRepository::new());
+    let cache = Arc::new(InMemoryAuthCache::new());
+    let auth = AuthService::new(api_keys, sessions, cache);
+
+    let principal = Principal {
+        user_id,
+        workspace_id,
+        scopes: vec![Scope::Read, Scope::Write],
+        auth_method: AuthMethod::Password,
+    };
+    let reg_a =
+        DeviceRegistration::from_installation_id(user_id, inst_a, DevicePlatform::Windows).unwrap();
+    let issued_a = auth
+        .create_session_for_device(&principal, "Safi Desktop A", reg_a)
+        .await
+        .unwrap();
+
+    let router = app(AppState::new(auth));
+
+    // 1. Matching X-Safi-Installation-Id succeeds
+    let mut ok_req = request(
+        "GET",
+        "/v1/auth/sessions/current",
+        Some(&issued_a.token),
+        None,
+    );
+    ok_req.headers_mut().insert(
+        "x-safi-installation-id",
+        inst_a.to_string().parse().unwrap(),
+    );
+    let ok_resp = send(&router, ok_req).await;
+    assert_eq!(ok_resp.status(), StatusCode::OK);
+
+    // 2. Mismatched X-Safi-Installation-Id fails with SF-AUTH-003 (Revoked/Replaced device)
+    let mut wrong_dev_req = request(
+        "GET",
+        "/v1/auth/sessions/current",
+        Some(&issued_a.token),
+        None,
+    );
+    wrong_dev_req.headers_mut().insert(
+        "x-safi-installation-id",
+        inst_b.to_string().parse().unwrap(),
+    );
+    let wrong_dev_resp = send(&router, wrong_dev_req).await;
+    assert_eq!(wrong_dev_resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(json_body(wrong_dev_resp).await["code"], "SF-AUTH-003");
+
+    // 3. Malformed X-Safi-Installation-Id fails with SF-AUTH-001
+    let mut bad_hdr_req = request(
+        "GET",
+        "/v1/auth/sessions/current",
+        Some(&issued_a.token),
+        None,
+    );
+    bad_hdr_req
+        .headers_mut()
+        .insert("x-safi-installation-id", "not-a-uuid".parse().unwrap());
+    let bad_hdr_resp = send(&router, bad_hdr_req).await;
+    assert_eq!(bad_hdr_resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(json_body(bad_hdr_resp).await["code"], "SF-AUTH-001");
+}

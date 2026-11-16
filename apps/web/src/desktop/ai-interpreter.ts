@@ -311,9 +311,12 @@ export function buildOutboundAiPayload(
 }
 
 /**
- * Validates that the configured AI endpoint complies with the desktop CSP:
- * - Local plaintext HTTP is permitted ONLY on the pinned loopback origin `http://127.0.0.1:11434`.
- * - Remote endpoints must use `https://`.
+ * Validates that the configured AI endpoint matches the pinned local Ollama loopback origin
+ * allowed by the desktop CSP (`http://127.0.0.1:11434` or `http://localhost:11434`, normalized to
+ * `http://127.0.0.1:11434`).
+ *
+ * Remote HTTPS cloud AI endpoints are intentionally disabled in this phase and deferred to a
+ * dedicated cloud-AI phase with explicit CSP & key-management policies.
  */
 export function validateAiEndpointUrl(
   rawUrl: string
@@ -330,16 +333,20 @@ export function validateAiEndpointUrl(
   } catch {
     return { ok: false, reason: "AI endpoint URL is not a valid URL." };
   }
-  if (parsed.protocol === "https:") {
-    return { ok: true, normalizedUrl: parsed.toString() };
-  }
-  if (parsed.protocol === "http:" && parsed.origin === "http://127.0.0.1:11434") {
-    return { ok: true, normalizedUrl: parsed.toString() };
+  if (
+    parsed.protocol === "http:" &&
+    (parsed.origin === "http://127.0.0.1:11434" || parsed.origin === "http://localhost:11434")
+  ) {
+    const normalized = new URL(
+      parsed.pathname + parsed.search + parsed.hash,
+      "http://127.0.0.1:11434"
+    );
+    return { ok: true, normalizedUrl: normalized.toString() };
   }
   return {
     ok: false,
     reason:
-      "Desktop CSP permits only the pinned local loopback AI origin (http://127.0.0.1:11434) or HTTPS endpoints."
+      "Desktop CSP in this phase permits ONLY the local Ollama loopback origin (http://127.0.0.1:11434). Optional remote cloud AI is deferred to a separate phase."
   };
 }
 
@@ -372,7 +379,7 @@ export async function interpretPromptWithRealAi(
       ok: false,
       code: "SF-AIX-001",
       blockerDetail:
-        "No local LLM weights, runtime daemon (e.g., local OpenAI-compatible server on http://127.0.0.1:11434), or approved HTTPS API provider is configured in this offline desktop environment. Enter or edit a structured DSL command below to execute verified actions safely."
+        "No local LLM weights or local Ollama daemon (http://127.0.0.1:11434) is configured in this offline desktop environment (optional cloud AI is deferred to a separate phase). Enter or edit a structured DSL command below to execute verified actions safely."
     };
   }
 

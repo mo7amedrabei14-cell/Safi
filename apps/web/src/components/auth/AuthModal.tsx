@@ -69,13 +69,13 @@ export interface AuthModalProps {
   readonly theme?: SafiThemeId;
   readonly initialMode?: AuthMode;
   readonly onClose: () => void;
-  readonly onAuthenticated?: (session: AuthPortalSession) => void;
+  readonly onAuthenticated?: (session: AuthPortalSession) => void | Promise<void>;
   readonly onOwnerDetected?: (email: string) => void;
   readonly onOAuth?: (provider: (typeof OAUTH_PROVIDERS)[number]) => void;
   readonly existingAccounts?: readonly ExistingAccountIdentity[];
   readonly sessionToken?: string | null;
   readonly sessionEmail?: string | null;
-  readonly onSignedOut?: () => void;
+  readonly onSignedOut?: () => void | Promise<void>;
   readonly onForgotPassword?: () => void;
 }
 
@@ -335,10 +335,10 @@ export function AuthModal({
           platform: device.platform
         });
         const owner = isOwnerEmail(normalizedEmail);
+        await onAuthenticated?.({ token: result.token, email: normalizedEmail, isOwner: owner });
         setOwnerRecognized(owner);
         setPassword("");
         if (owner) onOwnerDetected?.(normalizedEmail);
-        onAuthenticated?.({ token: result.token, email: normalizedEmail, isOwner: owner });
         setFeedback({
           kind: "success",
           message: owner
@@ -375,6 +375,32 @@ export function AuthModal({
           kind: "error",
           message: isAr ? PASSWORD_TOO_SHORT_MESSAGE_AR : PASSWORD_TOO_SHORT_MESSAGE_EN
         });
+      } else if (error instanceof Error && error.message.includes("SF-SYS-031")) {
+        setFeedback({
+          kind: "error",
+          message: isAr
+            ? "فشل التحقق المحلي: عنوان خدمة المصادقة غير مهيأ (SF-SYS-031)."
+            : "Native verification failed: account service address is not configured (SF-SYS-031)."
+        });
+      } else if (error instanceof Error && error.message.includes("SF-AUTH-005")) {
+        setFeedback({
+          kind: "error",
+          message: isAr
+            ? "تعذّر على النواة التحقق من الجلسة مع خادم المصادقة (SF-AUTH-005)."
+            : "Native core could not reach the authentication server to verify the session (SF-AUTH-005)."
+        });
+      } else if (
+        error instanceof Error &&
+        (error.message.includes("SF-AUTH-001") ||
+          error.message.includes("SF-AUTH-002") ||
+          error.message.includes("SF-AUTH-003"))
+      ) {
+        setFeedback({
+          kind: "error",
+          message: isAr
+            ? `تعذّر ربط الجلسة بنواة سطح المكتب (${error.message}).`
+            : `Could not verify and bind the session in native desktop core (${error.message}).`
+        });
       } else {
         setFeedback({
           kind: "error",
@@ -391,17 +417,23 @@ export function AuthModal({
   const signOut = async (): Promise<void> => {
     if (sessionToken === null || busy) return;
     setBusy(true);
+    let remoteRevoked = true;
     try {
-      await deleteSafiAuth("/sessions/current", sessionToken);
-      onSignedOut?.();
+      try {
+        await deleteSafiAuth("/sessions/current", sessionToken);
+      } catch {
+        remoteRevoked = false;
+      }
+      await onSignedOut?.();
       setFeedback({
         kind: "success",
-        message: isAr ? "تم تسجيل الخروج." : "You have signed out."
-      });
-    } catch {
-      setFeedback({
-        kind: "error",
-        message: isAr ? "تعذّر تسجيل الخروج الآن." : "We could not sign out right now."
+        message: remoteRevoked
+          ? isAr
+            ? "تم تسجيل الخروج."
+            : "You have signed out."
+          : isAr
+            ? "تم مسح الجلسة محليًا (تعذّر الوصول للخادم لإلغائها عن بُعد)."
+            : "Signed out locally (could not reach the server to revoke remotely)."
       });
     } finally {
       setBusy(false);

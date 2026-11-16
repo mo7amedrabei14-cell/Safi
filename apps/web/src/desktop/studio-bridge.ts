@@ -118,6 +118,7 @@ export interface DesktopChartPoint {
   readonly xValue?: string | null;
   readonly yValue?: string | null;
   readonly sharePct?: string | null;
+  readonly svgPath?: string | null;
   readonly ratioPct: number;
   readonly startPct: number;
   readonly xPct: number;

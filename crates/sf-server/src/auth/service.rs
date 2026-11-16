@@ -154,6 +154,7 @@ impl AuthService {
             expires_at: now + self.session_ttl.as_secs() as i64,
             revoked: false,
             device_id: None,
+            device_installation_key_hash: None,
             device_revoked: false,
             account_disabled: false,
         };
@@ -212,6 +213,7 @@ impl AuthService {
             device_name: record.device_name,
             expires_at: record.expires_at,
             token_hash: hash,
+            device_installation_key_hash: record.device_installation_key_hash,
         })
     }
 
@@ -457,6 +459,7 @@ mod tests {
             expires_at: now - 1,
             revoked: false,
             device_id: None,
+            device_installation_key_hash: None,
             device_revoked: false,
             account_disabled: false,
         };

@@ -660,6 +660,14 @@ fn all_eight_chart_types_compute_in_rust_and_reject_unsuitable_columns() -> Resu
         assert_eq!(series.chart_type, kind.as_str());
         assert_eq!(series.total_or_kpi, "500");
         assert!(!series.points.is_empty());
+        if matches!(kind, ChartType::Pie | ChartType::Donut) {
+            for point in &series.points {
+                assert!(
+                    point.svg_path.as_deref().is_some_and(|p| p.contains(" A ")),
+                    "pie/donut point must carry Rust-computed SVG arc path"
+                );
+            }
+        }
     }
 
     let scatter =

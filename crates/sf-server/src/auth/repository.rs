@@ -71,6 +71,8 @@ pub struct SessionRecord {
     #[serde(default)]
     pub device_id: Option<Uuid>,
     #[serde(default)]
+    pub device_installation_key_hash: Option<String>,
+    #[serde(default)]
     pub device_revoked: bool,
     #[serde(default)]
     pub account_disabled: bool,
@@ -89,6 +91,7 @@ impl std::fmt::Debug for SessionRecord {
             .field("expires_at", &self.expires_at)
             .field("revoked", &self.revoked)
             .field("device_id", &self.device_id)
+            .field("device_installation_key_hash", &"[REDACTED]")
             .field("device_revoked", &self.device_revoked)
             .field("account_disabled", &self.account_disabled)
             .finish()
@@ -263,6 +266,8 @@ impl SessionRepository for InMemorySessionRepository {
 
         let mut next = record.clone();
         next.device_id = device_id;
+        next.device_installation_key_hash =
+            device.map(|registration| hex::encode(registration.installation_key_hash));
         next.device_revoked = false;
         next.account_disabled = false;
         state.records.push(next);
@@ -279,11 +284,10 @@ impl SessionRepository for InMemorySessionRepository {
 
         if let Some(record) = found.as_mut() {
             if let Some(device_id) = record.device_id {
-                record.device_revoked = state
-                    .devices
-                    .iter()
-                    .find(|device| device.id == device_id)
-                    .is_none_or(|device| device.revoked);
+                let device = state.devices.iter().find(|device| device.id == device_id);
+                record.device_revoked = device.is_none_or(|device| device.revoked);
+                record.device_installation_key_hash =
+                    device.map(|device| hex::encode(device.installation_key_hash));
             }
         }
         Ok(found)
@@ -593,6 +597,7 @@ impl SessionRepository for SqlxSessionRepository {
                    sessions.user_id,
                    sessions.api_key_id,
                    sessions.device_id,
+                   encode(devices.installation_key_hash, 'hex') AS device_installation_key_hash,
                    (
                        sessions.device_id IS NOT NULL
                        AND (devices.id IS NULL OR devices.revoked_at IS NOT NULL)
@@ -623,6 +628,9 @@ impl SessionRepository for SqlxSessionRepository {
                 user_id: row.try_get("user_id").map_err(|_| backend_error())?,
                 api_key_id: row.try_get("api_key_id").map_err(|_| backend_error())?,
                 device_id: row.try_get("device_id").map_err(|_| backend_error())?,
+                device_installation_key_hash: row
+                    .try_get("device_installation_key_hash")
+                    .map_err(|_| backend_error())?,
                 device_revoked: row.try_get("device_revoked").map_err(|_| backend_error())?,
                 account_disabled: row
                     .try_get("account_disabled")

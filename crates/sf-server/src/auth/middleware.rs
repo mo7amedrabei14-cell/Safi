@@ -52,6 +52,10 @@ pub async fn require_api_key(
 }
 
 /// Authenticate a session token, enforce its scope, and expose the session.
+///
+/// When the caller supplies an optional `X-Safi-Installation-Id` header (used by the native
+/// desktop shell), `require_session` derives the user-scoped installation key hash and verifies
+/// in constant time that the active session belongs to that exact device installation.
 pub async fn require_session(
     State(guard): State<SessionGuard>,
     mut request: Request,
@@ -62,6 +66,33 @@ pub async fn require_session(
         return Err(AuthError::InvalidCredentials);
     }
     let session = guard.auth.authenticate_session(token).await?;
+    if let Some(raw_header) = request.headers().get("x-safi-installation-id") {
+        let raw_inst = raw_header
+            .to_str()
+            .map_err(|_| AuthError::InvalidCredentials)?
+            .trim();
+        let installation_id =
+            uuid::Uuid::parse_str(raw_inst).map_err(|_| AuthError::InvalidCredentials)?;
+        let derived = super::device::DeviceRegistration::from_installation_id(
+            session.principal.user_id,
+            installation_id,
+            super::device::DevicePlatform::Web,
+        )
+        .map_err(|_| AuthError::InvalidCredentials)?;
+        let derived_hex = hex::encode(derived.installation_key_hash);
+        let Some(bound_hex) = session.device_installation_key_hash.as_deref() else {
+            return Err(AuthError::Revoked);
+        };
+        use subtle::ConstantTimeEq;
+        if derived_hex
+            .as_bytes()
+            .ct_eq(bound_hex.as_bytes())
+            .unwrap_u8()
+            != 1
+        {
+            return Err(AuthError::Revoked);
+        }
+    }
     enforce_scope(&session.principal, guard.required_scope)?;
     request.extensions_mut().insert(session);
     Ok(next.run(request).await)

@@ -17,8 +17,8 @@ export interface AccountAccessSheetProps {
   readonly lang?: "ar" | "en";
   readonly verificationToken?: string | null;
   readonly sessionToken?: string | null;
-  readonly onAuthenticated: (token: string, email: string) => void;
-  readonly onLoggedOut: () => void;
+  readonly onAuthenticated: (token: string, email: string) => void | Promise<void>;
+  readonly onLoggedOut: () => void | Promise<void>;
 }
 
 function getRequestError(error: unknown, isAr: boolean): string {
@@ -52,6 +52,29 @@ function getRequestError(error: unknown, isAr: boolean): string {
         ? "راجع البريد الإلكتروني والاسم الظاهر وكلمة المرور. يجب ألا تقل كلمة المرور عن 8 خانات."
         : "Check the email address, display name, and password. Passwords must contain at least 8 characters.";
     }
+  }
+
+  if (error instanceof Error && error.message.includes("SF-SYS-031")) {
+    return isAr
+      ? "فشل التحقق المحلي: عنوان خدمة المصادقة غير مهيأ (SF-SYS-031)."
+      : "Native verification failed: account service address is not configured (SF-SYS-031).";
+  }
+
+  if (error instanceof Error && error.message.includes("SF-AUTH-005")) {
+    return isAr
+      ? "تعذّر على النواة التحقق من الجلسة مع خادم المصادقة (SF-AUTH-005)."
+      : "Native core could not reach the authentication server to verify the session (SF-AUTH-005).";
+  }
+
+  if (
+    error instanceof Error &&
+    (error.message.includes("SF-AUTH-001") ||
+      error.message.includes("SF-AUTH-002") ||
+      error.message.includes("SF-AUTH-003"))
+  ) {
+    return isAr
+      ? `تعذّر ربط الجلسة بنواة سطح المكتب (${error.message}).`
+      : `Could not verify and bind the session in native desktop core (${error.message}).`;
   }
 
   return isAr ? "حدث خطأ غير متوقع. حاول مرة أخرى." : "Something went wrong. Please try again.";
@@ -174,7 +197,7 @@ export function AccountAccessSheet({
           installation_id: device.installationId,
           platform: device.platform
         });
-        onAuthenticated(result.token, normalizedEmail);
+        await onAuthenticated(result.token, normalizedEmail);
         setPassword("");
         setFeedback({
           kind: "success",
@@ -198,17 +221,23 @@ export function AccountAccessSheet({
 
     setBusy(true);
     setFeedback(null);
+    let remoteRevoked = true;
     try {
-      await deleteSafiAuth("/sessions/current", sessionToken);
-      onLoggedOut();
+      try {
+        await deleteSafiAuth("/sessions/current", sessionToken);
+      } catch {
+        remoteRevoked = false;
+      }
+      await onLoggedOut();
       setFeedback({
         kind: "success",
-        message: isAr ? "تم تسجيل الخروج." : "You have signed out."
-      });
-    } catch (error) {
-      setFeedback({
-        kind: "error",
-        message: getRequestError(error, isAr)
+        message: remoteRevoked
+          ? isAr
+            ? "تم تسجيل الخروج."
+            : "You have signed out."
+          : isAr
+            ? "تم مسح الجلسة محليًا (تعذّر الوصول للخادم)."
+            : "Signed out locally (server unreachable)."
       });
     } finally {
       setBusy(false);

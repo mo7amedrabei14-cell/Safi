@@ -100,81 +100,138 @@ pub fn enforce_ipc_command(command: &str, payload_len: usize) -> Result<(), Stri
     Ok(())
 }
 
-/// Uniform byte-size accounting for a single IPC command parameter.
-pub trait IpcFieldLen {
-    /// Byte contribution of this parameter toward [`MAX_IPC_BYTES`].
-    fn ipc_field_len(&self) -> usize;
+/// Zero-allocation byte counter implementing [`std::io::Write`] for `serde_json`.
+#[derive(Default)]
+struct JsonByteCounter {
+    bytes: usize,
 }
 
-impl IpcFieldLen for str {
-    fn ipc_field_len(&self) -> usize {
-        self.len()
+impl std::io::Write for JsonByteCounter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.bytes = self.bytes.saturating_add(buf.len());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
-impl IpcFieldLen for String {
-    fn ipc_field_len(&self) -> usize {
-        self.len()
-    }
-}
-
-impl IpcFieldLen for std::path::Path {
-    fn ipc_field_len(&self) -> usize {
-        self.as_os_str().len()
-    }
-}
-
-impl IpcFieldLen for std::path::PathBuf {
-    fn ipc_field_len(&self) -> usize {
-        self.as_os_str().len()
-    }
-}
-
-impl IpcFieldLen for usize {
-    fn ipc_field_len(&self) -> usize {
-        std::mem::size_of::<usize>()
-    }
-}
-
-impl IpcFieldLen for u64 {
-    fn ipc_field_len(&self) -> usize {
-        std::mem::size_of::<u64>()
-    }
-}
-
-impl IpcFieldLen for bool {
-    fn ipc_field_len(&self) -> usize {
-        std::mem::size_of::<bool>()
-    }
-}
-
-impl<T: IpcFieldLen + ?Sized> IpcFieldLen for &T {
-    fn ipc_field_len(&self) -> usize {
-        (**self).ipc_field_len()
-    }
-}
-
-impl<T: IpcFieldLen> IpcFieldLen for Option<T> {
-    fn ipc_field_len(&self) -> usize {
-        self.as_ref().map_or(0, IpcFieldLen::ipc_field_len)
-    }
-}
-
-/// Saturating sum of IPC parameter lengths.
+/// Computes the serialized JSON byte length of `value` without heap allocation.
+///
+/// Fails closed to `usize::MAX` if serialization ever fails so malformed values can never bypass
+/// [`MAX_IPC_BYTES`].
 #[must_use]
-pub fn measure_ipc_payload(lengths: &[usize]) -> usize {
-    lengths.iter().copied().fold(0usize, usize::saturating_add)
+pub fn json_serialized_len<T: serde::Serialize + ?Sized>(value: &T) -> usize {
+    let mut counter = JsonByteCounter::default();
+    match serde_json::to_writer(&mut counter, value) {
+        Ok(()) => counter.bytes,
+        Err(_) => usize::MAX,
+    }
 }
 
-/// Computes the total IPC payload byte length across all arguments of a command.
+/// Serialized JSON byte length (or conservative upper bound for non-UTF-8 OS paths) of an IPC
+/// parameter toward [`MAX_IPC_BYTES`].
+pub trait IpcJsonValueLen {
+    /// Serialized JSON byte length of this parameter, including quotes, escapes, literals (`null`,
+    /// `true`, `false`), and decimal numeric formatting.
+    fn ipc_json_value_len(&self) -> usize;
+}
+
+impl IpcJsonValueLen for str {
+    fn ipc_json_value_len(&self) -> usize {
+        json_serialized_len(self)
+    }
+}
+
+impl IpcJsonValueLen for String {
+    fn ipc_json_value_len(&self) -> usize {
+        json_serialized_len(self)
+    }
+}
+
+impl IpcJsonValueLen for std::path::Path {
+    fn ipc_json_value_len(&self) -> usize {
+        match self.to_str() {
+            Some(utf8) => json_serialized_len(utf8),
+            None => {
+                // Non-UTF-8 OS path: fail conservatively above any escaped `\u00XX` expansion.
+                let lossy_len = json_serialized_len(&*self.to_string_lossy());
+                let upper_bound = self.as_os_str().len().saturating_mul(6).saturating_add(2);
+                lossy_len.max(upper_bound)
+            }
+        }
+    }
+}
+
+impl IpcJsonValueLen for std::path::PathBuf {
+    fn ipc_json_value_len(&self) -> usize {
+        self.as_path().ipc_json_value_len()
+    }
+}
+
+impl IpcJsonValueLen for usize {
+    fn ipc_json_value_len(&self) -> usize {
+        json_serialized_len(self)
+    }
+}
+
+impl IpcJsonValueLen for u64 {
+    fn ipc_json_value_len(&self) -> usize {
+        json_serialized_len(self)
+    }
+}
+
+impl IpcJsonValueLen for bool {
+    fn ipc_json_value_len(&self) -> usize {
+        json_serialized_len(self)
+    }
+}
+
+impl<T: IpcJsonValueLen + ?Sized> IpcJsonValueLen for &T {
+    fn ipc_json_value_len(&self) -> usize {
+        (**self).ipc_json_value_len()
+    }
+}
+
+impl<T: IpcJsonValueLen> IpcJsonValueLen for Option<T> {
+    fn ipc_json_value_len(&self) -> usize {
+        match self {
+            Some(value) => value.ipc_json_value_len(),
+            None => json_serialized_len(&None::<()>),
+        }
+    }
+}
+
+/// Computes the serialized JSON object byte length `{"k1":v1,"k2":v2}` for `fields`, where each
+/// entry supplies `(field_name, serialized_value_len)`.
+///
+/// Accounts for `{`, `}`, quoted & escaped field names, `:`, separating `,`, and each serialized
+/// value size. Returns `2` (`{}`) when `fields` is empty.
+#[must_use]
+pub fn measure_ipc_json_object(fields: &[(&str, usize)]) -> usize {
+    if fields.is_empty() {
+        return 2;
+    }
+    let mut total = 2usize.saturating_add(fields.len().saturating_sub(1));
+    for (key, value_len) in fields {
+        let entry = json_serialized_len(key)
+            .saturating_add(1)
+            .saturating_add(*value_len);
+        total = total.saturating_add(entry);
+    }
+    total
+}
+
+/// Computes the serialized JSON object byte size across all named IPC parameters of a command.
 #[macro_export]
 macro_rules! ipc_payload_len {
     () => {
-        0usize
+        $crate::commands::measure_ipc_json_object(&[])
     };
-    ($($field:expr),+ $(,)?) => {
-        $crate::commands::measure_ipc_payload(&[
-            $($crate::commands::IpcFieldLen::ipc_field_len(&$field)),+
+    ($(($name:literal, $field:expr)),+ $(,)?) => {
+        $crate::commands::measure_ipc_json_object(&[
+            $(($name, $crate::commands::IpcJsonValueLen::ipc_json_value_len(&$field))),+
         ])
     };
 }
@@ -227,39 +284,89 @@ mod tests {
     }
 
     #[test]
-    fn measures_all_ipc_parameter_types_and_enforces_exact_boundary() {
-        let path = std::path::Path::new("input.csv");
-        let opt_some: Option<u64> = Some(42);
+    fn matches_serialized_json_bytes_across_unicode_escapes_numbers_bools_and_optionals() {
+        assert_eq!(crate::ipc_payload_len!(), b"{}".len());
+
+        let path = std::path::Path::new("C:\\Users\\Safi\\صافي.csv");
+        let text = "صافي \"quote\"\n\u{0000}\u{001f}\\tail 📊";
+        let opt_some: Option<u64> = Some(18_446_744_073_709_551_615);
         let opt_none: Option<u64> = None;
         let measured = crate::ipc_payload_len!(
-            "p1",
-            path,
-            3usize,
-            99u64,
-            true,
-            opt_some,
-            opt_none,
-            Some("EGP")
-        );
-        assert_eq!(
-            measured,
-            2 + "input.csv".len()
-                + std::mem::size_of::<usize>()
-                + std::mem::size_of::<u64>()
-                + std::mem::size_of::<bool>()
-                + std::mem::size_of::<u64>()
-                + 3
+            ("project", "p1"),
+            ("path", path),
+            ("text", text),
+            ("row", 12_345usize),
+            ("rowId", 99u64),
+            ("ascending", false),
+            ("optSome", opt_some),
+            ("optNone", opt_none),
+            ("unit", Some("ج.م")),
         );
 
-        let exact_filler = "a".repeat(MAX_IPC_BYTES - std::mem::size_of::<u64>());
-        let exact_len = crate::ipc_payload_len!(exact_filler.as_str(), 1u64);
+        let serialized = serde_json::to_vec(&serde_json::json!({
+            "project": "p1",
+            "path": path.to_string_lossy(),
+            "text": text,
+            "row": 12_345usize,
+            "rowId": 99u64,
+            "ascending": false,
+            "optSome": opt_some,
+            "optNone": opt_none,
+            "unit": Some("ج.م"),
+        }))
+        .unwrap();
+        assert_eq!(measured, serialized.len());
+
+        // Control chars and quotes expand in JSON and count toward the 1 MiB ceiling even when
+        // raw Rust byte length is far below MAX_IPC_BYTES.
+        // Construct an object of exact MAX_IPC_BYTES serialized length:
+        // {"project":"p1","raw":"..."} has fixed overhead 24 bytes -> 1_048_576 - 24 = 1_048_552.
+        let fixed = serde_json::to_vec(&serde_json::json!({
+            "project": "p1",
+            "raw": ""
+        }))
+        .unwrap()
+        .len();
+        let filler = "a".repeat(MAX_IPC_BYTES - fixed);
+        let exact_len = crate::ipc_payload_len!(("project", "p1"), ("raw", filler.as_str()));
         assert_eq!(exact_len, MAX_IPC_BYTES);
-        assert_eq!(enforce_ipc_command("studio_delete_row", exact_len), Ok(()));
+        assert_eq!(enforce_ipc_command("studio_state", exact_len), Ok(()));
 
-        let over_len = crate::ipc_payload_len!(exact_filler.as_str(), 1u64, true);
-        assert_eq!(over_len, MAX_IPC_BYTES + 1);
+        // Escaping one ASCII byte with `"` adds 1 byte (`\"` = 2 bytes) -> MAX_IPC_BYTES + 1
+        let escaped_over = format!("{}\"", "a".repeat(MAX_IPC_BYTES - fixed - 1));
+        let escaped_len =
+            crate::ipc_payload_len!(("project", "p1"), ("raw", escaped_over.as_str()));
+        assert_eq!(escaped_over.len(), MAX_IPC_BYTES - fixed); // raw Rust len did not change!
+        assert_eq!(escaped_len, MAX_IPC_BYTES + 1);
         assert_eq!(
-            enforce_ipc_command("studio_sort_rows", over_len),
+            enforce_ipc_command("studio_sort_rows", escaped_len),
+            Err("SF-SYS-007".to_owned())
+        );
+
+        // Switching Option::None (`null`, 4 bytes) to Option::Some(10000) (`10000`, 5 bytes) pushes
+        // an exact boundary payload over by 1 byte -> SF-SYS-007.
+        let base_overhead = serde_json::to_vec(&serde_json::json!({
+            "project": "p1",
+            "expectedRevision": null,
+            "raw": ""
+        }))
+        .unwrap()
+        .len();
+        let base_opt_none = crate::ipc_payload_len!(
+            ("project", "p1"),
+            ("expectedRevision", None::<u64>),
+            ("raw", "a".repeat(MAX_IPC_BYTES - base_overhead))
+        );
+        assert_eq!(base_opt_none, MAX_IPC_BYTES);
+
+        let over_opt_some = crate::ipc_payload_len!(
+            ("project", "p1"),
+            ("expectedRevision", Some(10_000u64)),
+            ("raw", "a".repeat(MAX_IPC_BYTES - base_overhead))
+        );
+        assert_eq!(over_opt_some, MAX_IPC_BYTES + 1);
+        assert_eq!(
+            enforce_ipc_command("studio_set_cell_by_id", over_opt_some),
             Err("SF-SYS-007".to_owned())
         );
     }

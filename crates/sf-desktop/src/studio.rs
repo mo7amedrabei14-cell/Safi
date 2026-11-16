@@ -707,7 +707,8 @@ impl StudioStore {
         installation_id: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(token, installation_id);
+        let payload_len =
+            crate::ipc_payload_len!(("token", token), ("installationId", installation_id));
         enforce_ipc_command("studio_set_auth_session", payload_len)?;
         let effective_now = self.effective_now_ms(Some(now_ms));
         let verified = match self
@@ -886,7 +887,7 @@ impl StudioStore {
     /// Returns the `SF-*` code of the first failing step: unauthenticated (`SF-AUTH-001`),
     /// unsupported extension (`SF-IMP-002`), file too large (`SF-IMP-003`), or reader error.
     pub fn open_file(&self, project: &str, path: &Path, now_ms: u64) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, path);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("path", path));
         self.gate_command("studio_open_file", payload_len, Some(now_ms))?;
         let table = read_table(path)?;
         let source = SourceId::new(project).map_err(|error| code_of(&error))?;
@@ -905,7 +906,11 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`] or [`UNKNOWN_PROJECT_CODE`] when the project is not open.
     pub fn state(&self, project: &str) -> Result<String, String> {
-        self.gate_command("studio_state", crate::ipc_payload_len!(project), None)?;
+        self.gate_command(
+            "studio_state",
+            crate::ipc_payload_len!(("project", project)),
+            None,
+        )?;
         self.state_unlocked(project)
     }
 
@@ -920,7 +925,11 @@ impl StudioStore {
         default_value: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, name, default_value);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("name", name),
+            ("defaultValue", default_value),
+        );
         self.gate_command("studio_add_source_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| {
             graph
@@ -940,7 +949,11 @@ impl StudioStore {
         new_name: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, old_name, new_name);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("oldName", old_name),
+            ("newName", new_name),
+        );
         self.gate_command("studio_rename_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| {
             graph.rename_column(old_name, new_name, now_ms)
@@ -952,7 +965,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], `SF-CAL-001`, or `SF-CAL-002`.
     pub fn delete_column(&self, project: &str, name: &str, now_ms: u64) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, name);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("name", name));
         self.gate_command("studio_delete_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.delete_column(name, now_ms))
     }
@@ -962,7 +975,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-CAL-001`.
     pub fn trim_column(&self, project: &str, column: &str, now_ms: u64) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, column);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("column", column));
         self.gate_command("studio_trim_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.trim_column(column, now_ms))
     }
@@ -976,7 +989,8 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-CAL-002`.
     pub fn set_artifacts(&self, project: &str, artifacts_json: &str) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, artifacts_json);
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("artifacts", artifacts_json));
         self.gate_command("studio_set_artifacts", payload_len, None)?;
         let parsed: StudioWorkspaceArtifacts =
             serde_json::from_str(artifacts_json).map_err(|_| "SF-CAL-002".to_owned())?;
@@ -1012,7 +1026,11 @@ impl StudioStore {
         display_name: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, saved_id, display_name);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("savedId", saved_id),
+            ("displayName", display_name),
+        );
         self.gate_command("studio_save_project", payload_len, Some(now_ms))?;
         let safe_id = validate_project_id(saved_id)?;
         let snapshot_json = self.snapshot_unlocked(project)?;
@@ -1066,7 +1084,7 @@ impl StudioStore {
         saved_id: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, saved_id);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("savedId", saved_id));
         self.gate_command("studio_load_project", payload_len, Some(now_ms))?;
         let safe_id = validate_project_id(saved_id)?;
         let dir = self.resolve_storage_dir()?;
@@ -1112,7 +1130,7 @@ impl StudioStore {
     pub fn delete_project_bundle(&self, saved_id: &str) -> Result<String, String> {
         self.gate_command(
             "studio_delete_project",
-            crate::ipc_payload_len!(saved_id),
+            crate::ipc_payload_len!(("savedId", saved_id)),
             None,
         )?;
         let safe_id = validate_project_id(saved_id)?;
@@ -1163,7 +1181,11 @@ impl StudioStore {
         template_id: &str,
         bindings_json: &str,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, template_id, bindings_json);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("templateId", template_id),
+            ("bindings", bindings_json),
+        );
         self.gate_command("studio_instantiate_template", payload_len, None)?;
         let tpl = template_by_id(template_id).ok_or_else(|| "SF-SYS-001".to_owned())?;
         let raw_bindings: BTreeMap<String, String> =
@@ -1199,7 +1221,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], `SF-SYS-001` for malformed query JSON, or `SF-CAL-001` for unknown columns.
     pub fn rows_page(&self, project: &str, query_json: &str) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, query_json);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("query", query_json));
         self.gate_command("studio_rows_page", payload_len, None)?;
         let query: RowQuery = if query_json.trim().is_empty() {
             RowQuery::default()
@@ -1229,7 +1251,12 @@ impl StudioStore {
         raw: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, row, column, raw);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("row", row),
+            ("column", column),
+            ("value", raw),
+        );
         self.gate_command("studio_set_cell", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.set_cell(row, column, raw, now_ms))
     }
@@ -1247,7 +1274,13 @@ impl StudioStore {
         expected_revision: Option<u64>,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, row_id, column, raw, expected_revision);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("rowId", row_id),
+            ("column", column),
+            ("value", raw),
+            ("expectedRevision", expected_revision),
+        );
         self.gate_command("studio_set_cell_by_id", payload_len, Some(now_ms))?;
         self.mutate_at_revision(project, expected_revision, |graph| {
             graph.set_cell_by_id(RowId::from_raw(row_id), column, raw, now_ms)
@@ -1265,7 +1298,11 @@ impl StudioStore {
         ascending: bool,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, column, ascending);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("column", column),
+            ("ascending", ascending),
+        );
         self.gate_command("studio_sort_rows", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.sort_rows(column, ascending, now_ms))
     }
@@ -1281,7 +1318,8 @@ impl StudioStore {
         query: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, column, query);
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("column", column), ("query", query),);
         self.gate_command("studio_filter_rows", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| graph.filter_rows(column, query, now_ms))
     }
@@ -1291,7 +1329,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-SYS-001`.
     pub fn delete_row(&self, project: &str, row_id: u64, now_ms: u64) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, row_id);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("rowId", row_id));
         self.gate_command("studio_delete_row", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| {
             graph.delete_row(RowId::from_raw(row_id), now_ms)
@@ -1309,7 +1347,11 @@ impl StudioStore {
         values_json: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, after_row_id, values_json);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("afterRowId", after_row_id),
+            ("values", values_json),
+        );
         self.gate_command("studio_insert_row", payload_len, Some(now_ms))?;
         let values: BTreeMap<String, String> = if values_json.trim().is_empty() {
             BTreeMap::new()
@@ -1335,7 +1377,8 @@ impl StudioStore {
         formula: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, name, formula);
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("name", name), ("formula", formula),);
         self.gate_command("studio_add_calculated_column", payload_len, Some(now_ms))?;
         self.mutate(project, |graph| {
             graph.add_calculated_column(name, formula, now_ms)
@@ -1353,7 +1396,8 @@ impl StudioStore {
         value_str: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, name, value_str);
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("name", name), ("value", value_str),);
         self.gate_command("studio_define_parameter", payload_len, Some(now_ms))?;
         let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
         self.mutate_unit(project, None, |graph| {
@@ -1372,7 +1416,8 @@ impl StudioStore {
         value_str: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, name, value_str);
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("name", name), ("value", value_str),);
         self.gate_command("studio_update_parameter", payload_len, Some(now_ms))?;
         let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
         self.mutate(project, |graph| graph.update_parameter(name, value, now_ms))
@@ -1389,7 +1434,12 @@ impl StudioStore {
         name: &str,
         params_json: &str,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, id, name, params_json);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("id", id),
+            ("name", name),
+            ("parameters", params_json),
+        );
         self.gate_command("studio_add_scenario", payload_len, None)?;
         let scenario_id = ScenarioId::new(id).map_err(|error| code_of(&error))?;
         let raw_params: BTreeMap<String, String> = if params_json.trim().is_empty() {
@@ -1417,7 +1467,8 @@ impl StudioStore {
         id: &str,
         new_name: &str,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, id, new_name);
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("id", id), ("newName", new_name),);
         self.gate_command("studio_rename_scenario", payload_len, None)?;
         let scenario_id = ScenarioId::new(id).map_err(|error| code_of(&error))?;
         self.mutate_unit(project, None, |graph| {
@@ -1435,7 +1486,7 @@ impl StudioStore {
         id: Option<&str>,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, id);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("id", id));
         self.gate_command("studio_activate_scenario", payload_len, Some(now_ms))?;
         let scenario_id = match id {
             Some(raw) if !raw.trim().is_empty() => {
@@ -1455,7 +1506,7 @@ impl StudioStore {
     pub fn reset_scenario(&self, project: &str, now_ms: u64) -> Result<String, String> {
         self.gate_command(
             "studio_reset_scenario",
-            crate::ipc_payload_len!(project),
+            crate::ipc_payload_len!(("project", project)),
             Some(now_ms),
         )?;
         self.mutate_unit(project, None, |graph| graph.reset_scenario(now_ms))
@@ -1473,7 +1524,12 @@ impl StudioStore {
         value_str: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, scenario_id, parameter, value_str);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("scenarioId", scenario_id),
+            ("parameter", parameter),
+            ("value", value_str),
+        );
         self.gate_command("studio_set_scenario_parameter", payload_len, Some(now_ms))?;
         let id = ScenarioId::new(scenario_id).map_err(|error| code_of(&error))?;
         let value = Decimal::from_str(value_str.trim()).map_err(|_| "SF-CAL-002".to_owned())?;
@@ -1493,7 +1549,8 @@ impl StudioStore {
         right: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, left, right);
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("left", left), ("right", right));
         self.gate_command("studio_compare_scenarios", payload_len, Some(now_ms))?;
         let left_id = ScenarioId::new(left).map_err(|error| code_of(&error))?;
         let right_id = ScenarioId::new(right).map_err(|error| code_of(&error))?;
@@ -1534,7 +1591,13 @@ impl StudioStore {
         formula: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, id, name, unit, formula);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("id", id),
+            ("name", name),
+            ("unit", unit),
+            ("formula", formula),
+        );
         self.gate_command("studio_define_metric", payload_len, Some(now_ms))?;
         let metric = MetricId::new(id).map_err(|error| code_of(&error))?;
         self.mutate(project, |graph| {
@@ -1552,7 +1615,7 @@ impl StudioStore {
         command_json: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, command_json);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("command", command_json));
         self.gate_command("studio_apply_command", payload_len, Some(now_ms))?;
         let command = parse_command(command_json).map_err(|error| code_of(&error))?;
         self.mutate(project, |graph| apply_command(graph, &command, now_ms))
@@ -1569,7 +1632,11 @@ impl StudioStore {
         expected_revision: Option<u64>,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, fix_json, expected_revision);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("fix", fix_json),
+            ("expectedRevision", expected_revision),
+        );
         self.gate_command("studio_apply_anomaly_fix", payload_len, Some(now_ms))?;
         let fix: AnomalyFix =
             serde_json::from_str(fix_json).map_err(|_| "SF-CAL-002".to_owned())?;
@@ -1585,7 +1652,7 @@ impl StudioStore {
     pub fn undo(&self, project: &str, now_ms: u64) -> Result<String, String> {
         self.gate_command(
             "studio_undo",
-            crate::ipc_payload_len!(project),
+            crate::ipc_payload_len!(("project", project)),
             Some(now_ms),
         )?;
         self.mutate(project, |graph| graph.undo(now_ms))
@@ -1598,7 +1665,7 @@ impl StudioStore {
     pub fn redo(&self, project: &str, now_ms: u64) -> Result<String, String> {
         self.gate_command(
             "studio_redo",
-            crate::ipc_payload_len!(project),
+            crate::ipc_payload_len!(("project", project)),
             Some(now_ms),
         )?;
         self.mutate(project, |graph| graph.redo(now_ms))
@@ -1615,7 +1682,12 @@ impl StudioStore {
         column: &str,
         group_by: &str,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, function, column, group_by);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("function", function),
+            ("column", column),
+            ("groupBy", group_by),
+        );
         self.gate_command("studio_grouped", payload_len, None)?;
         let function = AggFunc::from_name(function).ok_or_else(|| "SF-CAL-002".to_owned())?;
         let projects = self
@@ -1648,7 +1720,13 @@ impl StudioStore {
         column: &str,
         group_by: &str,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, chart_type, function, column, group_by);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("chartType", chart_type),
+            ("function", function),
+            ("column", column),
+            ("groupBy", group_by),
+        );
         self.gate_command("studio_chart_data", payload_len, None)?;
         let kind = ChartType::from_name(chart_type).ok_or_else(|| "SF-CAL-002".to_owned())?;
         let agg = AggFunc::from_name(function).ok_or_else(|| "SF-CAL-002".to_owned())?;
@@ -1670,7 +1748,7 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or the engine's own `SF-CAL-*` code.
     pub fn narrative(&self, project: &str, template: &str) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, template);
+        let payload_len = crate::ipc_payload_len!(("project", project), ("template", template));
         self.gate_command("studio_narrative", payload_len, None)?;
         let projects = self
             .projects
@@ -1710,7 +1788,11 @@ impl StudioStore {
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-SYS-001`.
     pub fn snapshot(&self, project: &str) -> Result<String, String> {
-        self.gate_command("studio_snapshot", crate::ipc_payload_len!(project), None)?;
+        self.gate_command(
+            "studio_snapshot",
+            crate::ipc_payload_len!(("project", project)),
+            None,
+        )?;
         self.snapshot_unlocked(project)
     }
 
@@ -1725,7 +1807,8 @@ impl StudioStore {
         snapshot_json: &str,
         now_ms: u64,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, snapshot_json);
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("snapshot", snapshot_json));
         self.gate_command("studio_restore", payload_len, Some(now_ms))?;
         let graph = DataGraph::from_json(snapshot_json, now_ms).map_err(|error| code_of(&error))?;
         let mut projects = self
@@ -1750,7 +1833,11 @@ impl StudioStore {
         target: &Path,
         options_json: &str,
     ) -> Result<String, String> {
-        let payload_len = crate::ipc_payload_len!(project, target, options_json);
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("target", target),
+            ("options", options_json),
+        );
         self.gate_command("studio_export_capsule", payload_len, None)?;
         let options: CapsuleInput =
             serde_json::from_str(options_json).map_err(|_| "SF-CAL-002".to_owned())?;
@@ -2785,18 +2872,34 @@ mod tests {
         test_result(store.open_file("p1", &csv_path, 1_500));
         test_result(store.define_metric("p1", "m1", "Total", None, "SUM(amount)", 1_600));
 
-        // 5. Exact MAX_IPC_BYTES (1_048_576) succeeds, while MAX_IPC_BYTES + 1 (1_048_577) fails with SF-SYS-007
-        let exact_narrative = "x".repeat(MAX_IPC_BYTES - "p1".len());
+        // 5. Exact MAX_IPC_BYTES (1_048_576) serialized JSON succeeds, while MAX_IPC_BYTES + 1
+        // (1_048_577) fails with SF-SYS-007 without modifying dataset state or revision.
+        let narrative_overhead = serde_json::to_vec(&serde_json::json!({
+            "project": "p1",
+            "template": ""
+        }))
+        .unwrap()
+        .len();
+        let exact_narrative = "x".repeat(MAX_IPC_BYTES - narrative_overhead);
         test_result(store.narrative("p1", &exact_narrative));
-        let oversized = "x".repeat(MAX_IPC_BYTES - "p1".len() + 1);
+        let oversized = "x".repeat(MAX_IPC_BYTES - narrative_overhead + 1);
         assert_eq!(
             store.narrative("p1", &oversized),
             Err("SF-SYS-007".to_owned())
         );
-        // Verify non-string parameters (row: usize, row_id: u64, expected_revision: Option<u64>, ascending: bool)
-        // are counted toward MAX_IPC_BYTES:
-        let set_cell_filler =
-            "1".repeat(MAX_IPC_BYTES - "p1".len() - "amount".len() - std::mem::size_of::<usize>());
+
+        let rev_before = state(&store)["revision"].as_u64().unwrap();
+        // Verify JSON-serialized accounting across non-string parameters (row: usize, rowId: u64,
+        // expectedRevision: Option<u64>, ascending: bool), quotes/control-char escapes, and Unicode:
+        let set_cell_overhead = serde_json::to_vec(&serde_json::json!({
+            "project": "p1",
+            "row": 0usize,
+            "column": "amount",
+            "value": ""
+        }))
+        .unwrap()
+        .len();
+        let set_cell_filler = "1".repeat(MAX_IPC_BYTES - set_cell_overhead);
         assert_ne!(
             store.set_cell("p1", 0, "amount", &set_cell_filler, 1_650),
             Err("SF-SYS-007".to_owned())
@@ -2806,22 +2909,65 @@ mod tests {
             store.set_cell("p1", 0, "amount", &set_cell_over, 1_650),
             Err("SF-SYS-007".to_owned())
         );
-        let set_cell_by_id_over = "1".repeat(
-            MAX_IPC_BYTES
-                - "p1".len()
-                - "amount".len()
-                - std::mem::size_of::<u64>()
-                - std::mem::size_of::<u64>()
-                + 1,
+        // Raw `.len()` smaller than filler, but control char `\u{0000}` expands to `\u0000` (6 bytes in JSON):
+        let rev_before_escape_reject = state(&store)["revision"].as_u64().unwrap();
+        let escaped_value = format!(
+            "{}\u{0000}",
+            "1".repeat(MAX_IPC_BYTES - set_cell_overhead - 5)
         );
+        assert!(escaped_value.len() < MAX_IPC_BYTES - set_cell_overhead);
         assert_eq!(
-            store.set_cell_by_id("p1", 1, "amount", &set_cell_by_id_over, Some(1), 1_650),
+            store.set_cell("p1", 0, "amount", &escaped_value, 1_651),
             Err("SF-SYS-007".to_owned())
         );
-        let sort_col_over =
-            "c".repeat(MAX_IPC_BYTES - "p1".len() - std::mem::size_of::<bool>() + 1);
+        // Must reject before mutating dataset revision or cell value:
         assert_eq!(
-            store.sort_rows("p1", &sort_col_over, true, 1_650),
+            state(&store)["revision"].as_u64().unwrap(),
+            rev_before_escape_reject
+        );
+        assert_ne!(rev_before, 0);
+
+        let set_cell_by_id_overhead_none = serde_json::to_vec(&serde_json::json!({
+            "project": "p1",
+            "rowId": 1u64,
+            "column": "amount",
+            "value": "",
+            "expectedRevision": None::<u64>
+        }))
+        .unwrap()
+        .len();
+        let set_cell_by_id_over_none = "1".repeat(MAX_IPC_BYTES - set_cell_by_id_overhead_none + 1);
+        assert_eq!(
+            store.set_cell_by_id("p1", 1, "amount", &set_cell_by_id_over_none, None, 1_650),
+            Err("SF-SYS-007".to_owned())
+        );
+
+        // Switching Option::None (`null`, 4 bytes) to Option::Some(10000) (`10000`, 5 bytes) pushes exact payload over:
+        let exact_with_none = "1".repeat(MAX_IPC_BYTES - set_cell_by_id_overhead_none);
+        assert_eq!(
+            store.set_cell_by_id("p1", 1, "amount", &exact_with_none, Some(10_000), 1_650),
+            Err("SF-SYS-007".to_owned())
+        );
+        assert_eq!(
+            state(&store)["revision"].as_u64().unwrap(),
+            rev_before_escape_reject
+        );
+
+        let sort_overhead_true = serde_json::to_vec(&serde_json::json!({
+            "project": "p1",
+            "column": "",
+            "ascending": true
+        }))
+        .unwrap()
+        .len();
+        let sort_col_exact = "c".repeat(MAX_IPC_BYTES - sort_overhead_true);
+        assert_ne!(
+            store.sort_rows("p1", &sort_col_exact, true, 1_650),
+            Err("SF-SYS-007".to_owned())
+        );
+        // Changing `true` (4 bytes) -> `false` (5 bytes) exceeds MAX_IPC_BYTES by 1 byte:
+        assert_eq!(
+            store.sort_rows("p1", &sort_col_exact, false, 1_650),
             Err("SF-SYS-007".to_owned())
         );
 

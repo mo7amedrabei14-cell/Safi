@@ -19,6 +19,14 @@ fn main() {
         .filter(|value| !value.is_empty());
 
     let origin = match configured {
+        Some(value) if profile == "release" => Some(
+            ApiOrigin::parse_for_release(&value).unwrap_or_else(|error| {
+                panic!(
+                    "{API_ORIGIN_ENV} is invalid for release builds: {}",
+                    error.message()
+                );
+            }),
+        ),
         Some(value) => Some(ApiOrigin::parse(&value).unwrap_or_else(|error| {
             panic!("{API_ORIGIN_ENV} is invalid: {}", error.message());
         })),

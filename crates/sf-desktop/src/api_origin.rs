@@ -50,6 +50,8 @@ pub enum ApiOriginError {
     Localhost,
     /// The port was not a number in `1..=65535`.
     InvalidPort,
+    /// The host uses a reserved/placeholder domain disallowed in release desktop builds.
+    ReservedReleaseHost,
 }
 
 impl ApiOriginError {
@@ -66,6 +68,9 @@ impl ApiOriginError {
             Self::IpAddress => "the API origin must not be an IP address",
             Self::Localhost => "the API origin must not point at localhost",
             Self::InvalidPort => "the API origin port must be between 1 and 65535",
+            Self::ReservedReleaseHost => {
+                "the release API origin must not use a reserved placeholder domain (.invalid, .test, .example, .local, .internal, .arpa, example.*)"
+            }
         }
     }
 }
@@ -147,6 +152,46 @@ impl ApiOrigin {
             None => format!("https://{host}"),
         };
         Ok(Self { origin })
+    }
+
+    /// Returns `true` when the origin uses a reserved placeholder, testing, or local-network domain
+    /// disallowed in release desktop bundles.
+    #[must_use]
+    pub fn is_reserved_release_host(&self) -> bool {
+        let authority = self
+            .origin
+            .strip_prefix(HTTPS_SCHEME)
+            .unwrap_or(&self.origin);
+        let host = authority.split(':').next().unwrap_or(authority);
+        matches!(
+            host,
+            "invalid"
+                | "test"
+                | "example"
+                | "local"
+                | "internal"
+                | "example.com"
+                | "example.org"
+                | "example.net"
+        ) || host.ends_with(".invalid")
+            || host.ends_with(".test")
+            || host.ends_with(".example")
+            || host.ends_with(".local")
+            || host.ends_with(".internal")
+            || host.ends_with(".arpa")
+            || host.ends_with(".example.com")
+            || host.ends_with(".example.org")
+            || host.ends_with(".example.net")
+    }
+
+    /// Parses and validates an origin strictly for a release desktop bundle, forbidding reserved
+    /// placeholder domains such as `.invalid`.
+    pub fn parse_for_release(raw: &str) -> Result<Self, ApiOriginError> {
+        let origin = Self::parse(raw)?;
+        if origin.is_reserved_release_host() {
+            return Err(ApiOriginError::ReservedReleaseHost);
+        }
+        Ok(origin)
     }
 
     /// The normalized origin, without a trailing slash.
@@ -365,5 +410,39 @@ mod tests {
         assert!(validate_local_ai_origin("http://127.0.0.1:8080").is_err());
         assert!(validate_local_ai_origin("http://192.168.1.5:11434").is_err());
         assert!(validate_local_ai_origin("https://api.openai.com").is_err());
+    }
+
+    #[test]
+    fn rejects_reserved_and_placeholder_domains_for_release_builds() {
+        for forbidden in [
+            "https://api.safidata.invalid",
+            "https://invalid",
+            "https://api.safidata.test",
+            "https://api.safidata.example",
+            "https://example.com",
+            "https://sub.example.org",
+            "https://api.safidata.local",
+            "https://api.internal",
+            "https://localhost",
+            "https://127.0.0.1",
+            "",
+        ] {
+            assert!(
+                ApiOrigin::parse_for_release(forbidden).is_err(),
+                "expected release validation to reject {forbidden:?}"
+            );
+        }
+
+        assert_eq!(
+            ApiOrigin::parse_for_release("https://api.safidata.invalid"),
+            Err(ApiOriginError::ReservedReleaseHost)
+        );
+        assert_eq!(
+            test_result(ApiOrigin::parse_for_release(
+                "https://staging-api.safidata.dev"
+            ))
+            .as_str(),
+            "https://staging-api.safidata.dev"
+        );
     }
 }

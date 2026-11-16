@@ -19,7 +19,7 @@ use std::time::Duration;
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use sf_desktop::api_origin::{ApiOrigin, API_ORIGIN_ENV};
-use sf_desktop::commands::enforce_ipc_command;
+use sf_desktop::commands::{enforce_ipc_command, json_serialized_len};
 use sf_desktop::deep_link::DeepLinkAction;
 use sf_desktop::studio::{
     parse_installation_uuid, parse_safi_session_token, StudioSessionAuthority,
@@ -44,8 +44,9 @@ struct AuthServerEndpoint {
 /// Native fail-closed session verifier for the Tauri shell.
 ///
 /// Resolves `SAFI_API_BASE_URL` compiled into the binary at build time and queries
-/// `GET /v1/auth/sessions/current` over mutually verified TLS (`rustls` + `webpki-roots`)
-/// with `Authorization: Bearer <sfs_token>` and `X-Safi-Installation-Id: <uuid>`.
+/// `GET /v1/auth/sessions/current` over server-authenticated TLS (`rustls` + `webpki-roots`,
+/// without client certificates) with `Authorization: Bearer <sfs_token>` and
+/// `X-Safi-Installation-Id: <uuid>`.
 /// Fails closed with `SF-SYS-031` when unconfigured and `SF-AUTH-005` when the auth server
 /// is unreachable, never falling back to unauthenticated TCP or local mocks.
 #[derive(Debug)]
@@ -292,10 +293,39 @@ impl StudioSessionVerifier for DesktopShellSessionVerifier {
     }
 }
 
+/// Measures the serialized JSON byte size (or raw byte length) of an incoming Tauri IPC payload at
+/// the native boundary before any command deserializes or executes.
+fn measure_tauri_invoke_body(body: &tauri::ipc::InvokeBody) -> usize {
+    match body {
+        tauri::ipc::InvokeBody::Json(value) => json_serialized_len(value),
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.len(),
+    }
+}
+
+/// Enforces the native IPC allowlist and serialized payload ceiling at the Tauri dispatch boundary.
+fn enforce_tauri_ipc_boundary(command: &str, body: &tauri::ipc::InvokeBody) -> Result<(), String> {
+    enforce_ipc_command(command, measure_tauri_invoke_body(body))
+}
+
+/// Rejects unknown commands (`SF-SYS-010`) or oversized serialized payloads (`SF-SYS-007`) before
+/// dispatching to any command closure in tests.
+#[cfg(test)]
+fn dispatch_tauri_invoke_with_guard<F>(
+    command: &str,
+    body: &tauri::ipc::InvokeBody,
+    dispatcher: F,
+) -> Result<bool, String>
+where
+    F: FnOnce() -> bool,
+{
+    enforce_tauri_ipc_boundary(command, body)?;
+    Ok(dispatcher())
+}
+
 /// Non-sensitive build information for the about screen.
 #[tauri::command]
 fn app_info() -> Result<serde_json::Value, String> {
-    enforce_ipc_command("app_info", 0)?;
+    enforce_ipc_command("app_info", sf_desktop::ipc_payload_len!())?;
     Ok(serde_json::json!({
         "product": "SafiData",
         "version": env!("CARGO_PKG_VERSION"),
@@ -308,7 +338,7 @@ fn app_info() -> Result<serde_json::Value, String> {
 fn take_pending_deep_link(
     state: tauri::State<'_, PendingDeepLink>,
 ) -> Result<Option<DeepLinkAction>, String> {
-    enforce_ipc_command("take_pending_deep_link", 0)?;
+    enforce_ipc_command("take_pending_deep_link", sf_desktop::ipc_payload_len!())?;
     Ok(state.0.lock().ok().and_then(|mut slot| slot.take()))
 }
 
@@ -318,7 +348,11 @@ async fn pick_input_file(
     app: tauri::AppHandle,
     store: tauri::State<'_, StudioStore>,
 ) -> Result<Option<String>, String> {
-    store.gate_command("pick_input_file", 0, Some(now_ms()))?;
+    store.gate_command(
+        "pick_input_file",
+        sf_desktop::ipc_payload_len!(),
+        Some(now_ms()),
+    )?;
     tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -337,7 +371,11 @@ async fn pick_output_file(
     app: tauri::AppHandle,
     store: tauri::State<'_, StudioStore>,
 ) -> Result<Option<String>, String> {
-    store.gate_command("pick_output_file", 0, Some(now_ms()))?;
+    store.gate_command(
+        "pick_output_file",
+        sf_desktop::ipc_payload_len!(),
+        Some(now_ms()),
+    )?;
     tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -357,7 +395,11 @@ async fn pick_capsule_output_file(
     app: tauri::AppHandle,
     store: tauri::State<'_, StudioStore>,
 ) -> Result<Option<String>, String> {
-    store.gate_command("pick_capsule_output_file", 0, Some(now_ms()))?;
+    store.gate_command(
+        "pick_capsule_output_file",
+        sf_desktop::ipc_payload_len!(),
+        Some(now_ms()),
+    )?;
     tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -772,7 +814,70 @@ fn studio_export_capsule(
     store.export_capsule(&project, std::path::Path::new(&target), &options)
 }
 
+fn studio_generated_handler(
+) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        app_info,
+        take_pending_deep_link,
+        pick_input_file,
+        pick_output_file,
+        pick_capsule_output_file,
+        studio_set_auth_session,
+        studio_clear_auth_session,
+        studio_open_file,
+        studio_state,
+        studio_rows_page,
+        studio_set_cell,
+        studio_set_cell_by_id,
+        studio_sort_rows,
+        studio_filter_rows,
+        studio_delete_row,
+        studio_insert_row,
+        studio_define_metric,
+        studio_add_calculated_column,
+        studio_define_parameter,
+        studio_update_parameter,
+        studio_add_scenario,
+        studio_rename_scenario,
+        studio_activate_scenario,
+        studio_reset_scenario,
+        studio_set_scenario_parameter,
+        studio_compare_scenarios,
+        studio_apply_command,
+        studio_apply_anomaly_fix,
+        studio_undo,
+        studio_redo,
+        studio_grouped,
+        studio_chart_data,
+        studio_narrative,
+        studio_snapshot,
+        studio_restore,
+        studio_add_source_column,
+        studio_rename_column,
+        studio_delete_column,
+        studio_trim_column,
+        studio_set_artifacts,
+        studio_save_project,
+        studio_list_projects,
+        studio_load_project,
+        studio_delete_project,
+        studio_list_templates,
+        studio_instantiate_template,
+        studio_export_capsule
+    ]
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--print-build-origin") {
+        let payload = serde_json::json!({
+            "apiOrigin": option_env!("SAFI_API_BASE_URL").unwrap_or("")
+        });
+        println!("{payload}");
+        return;
+    }
+
+    let generated_handler = studio_generated_handler();
+
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             focus_main_window(app);
@@ -782,55 +887,15 @@ fn main() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![
-            app_info,
-            take_pending_deep_link,
-            pick_input_file,
-            pick_output_file,
-            pick_capsule_output_file,
-            studio_set_auth_session,
-            studio_clear_auth_session,
-            studio_open_file,
-            studio_state,
-            studio_rows_page,
-            studio_set_cell,
-            studio_set_cell_by_id,
-            studio_sort_rows,
-            studio_filter_rows,
-            studio_delete_row,
-            studio_insert_row,
-            studio_define_metric,
-            studio_add_calculated_column,
-            studio_define_parameter,
-            studio_update_parameter,
-            studio_add_scenario,
-            studio_rename_scenario,
-            studio_activate_scenario,
-            studio_reset_scenario,
-            studio_set_scenario_parameter,
-            studio_compare_scenarios,
-            studio_apply_command,
-            studio_apply_anomaly_fix,
-            studio_undo,
-            studio_redo,
-            studio_grouped,
-            studio_chart_data,
-            studio_narrative,
-            studio_snapshot,
-            studio_restore,
-            studio_add_source_column,
-            studio_rename_column,
-            studio_delete_column,
-            studio_trim_column,
-            studio_set_artifacts,
-            studio_save_project,
-            studio_list_projects,
-            studio_load_project,
-            studio_delete_project,
-            studio_list_templates,
-            studio_instantiate_template,
-            studio_export_capsule
-        ])
+        .invoke_handler(move |invoke: tauri::ipc::Invoke<tauri::Wry>| -> bool {
+            if let Err(code) =
+                enforce_tauri_ipc_boundary(invoke.message.command(), invoke.message.payload())
+            {
+                invoke.resolver.reject(code);
+                return true;
+            }
+            generated_handler(invoke)
+        })
         .setup(|app| {
             app.manage(PendingDeepLink::default());
             let storage_dir = app
@@ -1465,5 +1530,267 @@ mod tests {
             decode_chunked_body("5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"),
             Some("hello world".to_owned())
         );
+    }
+
+    #[test]
+    fn tauri_ipc_boundary_rejects_oversized_serialized_json_before_studio_command_executes() {
+        use std::sync::atomic::AtomicBool;
+        use tauri::ipc::InvokeBody;
+
+        use super::{dispatch_tauri_invoke_with_guard, measure_tauri_invoke_body};
+        use sf_desktop::commands::MAX_IPC_BYTES;
+
+        // 1. Unknown command never reaches handler
+        let called = Arc::new(AtomicBool::new(false));
+        let called_c = called.clone();
+        let unknown_res = dispatch_tauri_invoke_with_guard(
+            "shell_exec",
+            &InvokeBody::Json(serde_json::json!({})),
+            move || {
+                called_c.store(true, Ordering::SeqCst);
+                true
+            },
+        );
+        assert_eq!(unknown_res, Err("SF-SYS-010".to_owned()));
+        assert!(!called.load(Ordering::SeqCst));
+
+        // 2. JSON object whose raw string chars are below MAX_IPC_BYTES, but JSON keys, quotes,
+        // boolean/numeric literals, null, and escaped control chars push serialized payload to
+        // MAX_IPC_BYTES + 1 -> rejected with SF-SYS-007 BEFORE command handler executes.
+        let template_obj = serde_json::json!({
+            "project": "p1",
+            "row": 42usize,
+            "column": "amount",
+            "ascending": false,
+            "expectedRevision": serde_json::Value::Null,
+            "value": ""
+        });
+        let base_len = serde_json::to_vec(&template_obj).unwrap().len();
+        let exact_filler = "a".repeat(MAX_IPC_BYTES - base_len);
+        let exact_body = InvokeBody::Json(serde_json::json!({
+            "project": "p1",
+            "row": 42usize,
+            "column": "amount",
+            "ascending": false,
+            "expectedRevision": serde_json::Value::Null,
+            "value": exact_filler
+        }));
+        assert_eq!(measure_tauri_invoke_body(&exact_body), MAX_IPC_BYTES);
+
+        let dispatched_exact = Arc::new(AtomicBool::new(false));
+        let dispatched_exact_c = dispatched_exact.clone();
+        assert_eq!(
+            dispatch_tauri_invoke_with_guard("studio_set_cell", &exact_body, move || {
+                dispatched_exact_c.store(true, Ordering::SeqCst);
+                true
+            }),
+            Ok(true)
+        );
+        assert!(dispatched_exact.load(Ordering::SeqCst));
+
+        // Escaping one quote `"` adds 1 extra serialized byte (`\"`) without changing field count.
+        let over_by_escape = format!("{}\"", "a".repeat(MAX_IPC_BYTES - base_len - 1));
+        let over_body = InvokeBody::Json(serde_json::json!({
+            "project": "p1",
+            "row": 42usize,
+            "column": "amount",
+            "ascending": false,
+            "expectedRevision": serde_json::Value::Null,
+            "value": over_by_escape
+        }));
+        assert_eq!(measure_tauri_invoke_body(&over_body), MAX_IPC_BYTES + 1);
+
+        let dispatched_over = Arc::new(AtomicBool::new(false));
+        let dispatched_over_c = dispatched_over.clone();
+        let over_res = dispatch_tauri_invoke_with_guard("studio_set_cell", &over_body, move || {
+            dispatched_over_c.store(true, Ordering::SeqCst);
+            true
+        });
+        assert_eq!(over_res, Err("SF-SYS-007".to_owned()));
+        assert!(!dispatched_over.load(Ordering::SeqCst));
+
+        // 3. Raw binary body > MAX_IPC_BYTES is also rejected before dispatch
+        let dispatched_raw = Arc::new(AtomicBool::new(false));
+        let dispatched_raw_c = dispatched_raw.clone();
+        let raw_over = dispatch_tauri_invoke_with_guard(
+            "studio_state",
+            &InvokeBody::Raw(vec![b'x'; MAX_IPC_BYTES + 1]),
+            move || {
+                dispatched_raw_c.store(true, Ordering::SeqCst);
+                true
+            },
+        );
+        assert_eq!(raw_over, Err("SF-SYS-007".to_owned()));
+        assert!(!dispatched_raw.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    #[ignore = "Manual performance benchmark for native TLS verification (run with --ignored --nocapture)"]
+    fn benchmark_native_session_verifier_performance() {
+        use std::time::Instant;
+
+        let harness = TlsAuthTestHarness::start("api.safidata.invalid");
+        let now_ms = u64::try_from(unix_now()).unwrap_or(1_700_000_000) * 1_000;
+        let user_id = Uuid::new_v4();
+        let workspace_id = Uuid::new_v4();
+        let inst = Uuid::new_v4();
+        let inst_str = inst.to_string();
+        let (tok, session) = harness.issue_session(user_id, workspace_id, inst);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let csv_path = dir.path().join("bench.csv");
+        let mut csv = String::from("region,amount\n");
+        for i in 0..100 {
+            csv.push_str(&format!("Cairo,{}\n", 100 + i));
+        }
+        std::fs::write(&csv_path, csv).expect("csv write");
+
+        // 1. In-memory baseline StudioStore (no per-command TLS roundtrip)
+        let baseline_store = StudioStore::with_storage_dir(dir.path().join("baseline_projects"));
+        baseline_store.set_clock_ms(Some(now_ms));
+        baseline_store
+            .session_authority()
+            .register_session(
+                &session.id.to_string(),
+                &workspace_id.to_string(),
+                &tok,
+                &inst_str,
+                session.expires_at as u64 * 1_000,
+            )
+            .unwrap();
+        baseline_store
+            .set_auth_session(&tok, &inst_str, now_ms)
+            .unwrap();
+        baseline_store
+            .open_file("p_base", &csv_path, now_ms)
+            .unwrap();
+
+        let t0 = Instant::now();
+        for _ in 0..50 {
+            baseline_store
+                .rows_page("p_base", r#"{"offset":0,"limit":25}"#)
+                .unwrap();
+        }
+        let baseline_rows_50 = t0.elapsed();
+
+        let base_rev =
+            serde_json::from_str::<serde_json::Value>(&baseline_store.state("p_base").unwrap())
+                .unwrap()["revision"]
+                .as_u64()
+                .unwrap();
+        let t1 = Instant::now();
+        for i in 0..50u64 {
+            baseline_store
+                .set_cell_by_id(
+                    "p_base",
+                    1,
+                    "amount",
+                    &format!("{}", 200 + i),
+                    Some(base_rev + i),
+                    now_ms,
+                )
+                .unwrap();
+        }
+        let baseline_edit_50 = t1.elapsed();
+
+        // 2. Native DesktopShellSessionVerifier over localhost TLS (full TCP+TLS handshake + HTTP Close per command)
+        let authority = Arc::new(StudioSessionAuthority::new());
+        let verifier = Arc::new(DesktopShellSessionVerifier::from_origin_with_roots(
+            authority.clone(),
+            Some("https://api.safidata.invalid"),
+            harness.root_store.clone(),
+            Some(harness.addr),
+        ));
+        let tls_store = StudioStore::with_storage_dir_and_verifier(
+            dir.path().join("tls_projects"),
+            authority,
+            verifier.clone(),
+        );
+        tls_store.set_clock_ms(Some(now_ms));
+        tls_store.set_auth_session(&tok, &inst_str, now_ms).unwrap();
+        tls_store.open_file("p_tls", &csv_path, now_ms).unwrap();
+
+        let mut verify_samples_us = Vec::with_capacity(50);
+        for _ in 0..50 {
+            let s = Instant::now();
+            verifier.verify_session(&tok, &inst_str, now_ms).unwrap();
+            verify_samples_us.push(s.elapsed().as_micros());
+        }
+        verify_samples_us.sort_unstable();
+
+        let t2 = Instant::now();
+        for _ in 0..50 {
+            tls_store
+                .rows_page("p_tls", r#"{"offset":0,"limit":25}"#)
+                .unwrap();
+        }
+        let tls_rows_50 = t2.elapsed();
+
+        let tls_rev = serde_json::from_str::<serde_json::Value>(&tls_store.state("p_tls").unwrap())
+            .unwrap()["revision"]
+            .as_u64()
+            .unwrap();
+        let t3 = Instant::now();
+        for i in 0..50u64 {
+            tls_store
+                .set_cell_by_id(
+                    "p_tls",
+                    1,
+                    "amount",
+                    &format!("{}", 200 + i),
+                    Some(tls_rev + i),
+                    now_ms,
+                )
+                .unwrap();
+        }
+        let tls_edit_50 = t3.elapsed();
+
+        // 3. Remote HTTPS endpoint RTT measurement (real public TLS endpoint -> DNS+TCP+TLS+HTTP round-trip)
+        let mut system_roots = RootCertStore::empty();
+        system_roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let remote_verifier = DesktopShellSessionVerifier::from_origin_with_roots(
+            Arc::new(StudioSessionAuthority::new()),
+            Some("https://api.github.com"),
+            system_roots,
+            None,
+        );
+        let t_remote = Instant::now();
+        let remote_res = remote_verifier.verify_session(&tok, &inst_str, now_ms);
+        let remote_elapsed = t_remote.elapsed();
+
+        // 4. Offline / network interruption behavior
+        drop(harness);
+        let t_drop = Instant::now();
+        let drop_res = tls_store.rows_page("p_tls", r#"{"offset":0,"limit":25}"#);
+        let drop_elapsed = t_drop.elapsed();
+        let post_drop_res = tls_store.state("p_tls");
+
+        println!("=== NATIVE VERIFIER BENCHMARK REPORT ===");
+        println!("verify_session_local_50_min_us={}", verify_samples_us[0]);
+        println!(
+            "verify_session_local_50_median_us={}",
+            verify_samples_us[25]
+        );
+        println!("verify_session_local_50_p95_us={}", verify_samples_us[47]);
+        println!(
+            "baseline_rows_page_50_ms={:.3} baseline_set_cell_50_ms={:.3}",
+            baseline_rows_50.as_secs_f64() * 1000.0,
+            baseline_edit_50.as_secs_f64() * 1000.0
+        );
+        println!(
+            "local_tls_rows_page_50_ms={:.3} local_tls_set_cell_50_ms={:.3}",
+            tls_rows_50.as_secs_f64() * 1000.0,
+            tls_edit_50.as_secs_f64() * 1000.0
+        );
+        println!(
+            "remote_https_probe_host=api.github.com elapsed_ms={:.3} result={remote_res:?}",
+            remote_elapsed.as_secs_f64() * 1000.0
+        );
+        println!(
+            "network_drop_elapsed_ms={:.3} first_call={drop_res:?} subsequent_call={post_drop_res:?}",
+            drop_elapsed.as_secs_f64() * 1000.0
+        );
+        assert_eq!(drop_res, Err(AUTH_BACKEND_UNAVAILABLE_CODE.to_owned()));
+        assert_eq!(post_drop_res, Err(AUTH_REQUIRED_CODE.to_owned()));
     }
 }

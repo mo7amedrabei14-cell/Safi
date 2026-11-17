@@ -1,12 +1,22 @@
-//! IPC command allowlist and payload ceiling for the desktop bridge (section 8.6).
+//! IPC command allowlist and serialized JSON payload ceiling for the desktop bridge (section 8.6).
 //!
-//! Every message between the webview and the native core is checked by name and
-//! size before it runs. Anything not listed here is refused; the list grows only
-//! when a later task adds a command with strict input types.
+//! Every command invocation reaching the native boundary is checked by command name and by the
+//! serialized size of its parsed JSON arguments (or raw `InvokeBody::Raw` buffer) **after** Tauri
+//! parses the incoming IPC payload into `InvokeBody` (`serde_json::Value`) and **before** typed
+//! command handler execution or `StudioStore` state mutation.
+//!
+//! **Scope & explicit non-claims**:
+//! - **Protected**: Prevents oversized parsed JSON argument objects (including field names, quotes,
+//!   separators, JSON string escapes, Unicode, numbers, booleans, and `null`) from reaching
+//!   Studio command handlers or mutating dataset/project state.
+//! - **Not protected / not claimed**: Does **not** bound raw wire transport bytes before Tauri
+//!   parses the incoming WebView IPC message into `InvokeBody::Json(serde_json::Value)`.
 
 use crate::error::{DesktopError, DesktopErrorCode};
 
-/// Largest IPC payload the shell accepts (1 MiB).
+/// Largest re-serialized JSON argument payload (or `InvokeBody::Raw` length) accepted by the
+/// native command boundary (1 MiB, enforced after Tauri parses JSON into `serde_json::Value` and
+/// before command execution/state mutation).
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.

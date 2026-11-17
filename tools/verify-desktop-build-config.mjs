@@ -53,22 +53,45 @@ function runStep(cmd, args, extraEnv, allowFailure = false) {
   return res;
 }
 
-console.log("[desktop-build-verify] Step 1: Reject missing/reserved SAFI_API_BASE_URL in Web release build");
-const webMissing = runStep(
+function expectFailureWithDiagnostic(stepName, cmd, args, extraEnv, expectedDiagnostics) {
+  const res = runStep(cmd, args, extraEnv, true);
+  assert.notEqual(res.status, 0, `${stepName}: expected non-zero exit code`);
+  const combined = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
+  for (const snippet of expectedDiagnostics) {
+    assert(
+      combined.includes(snippet),
+      `${stepName}: expected diagnostic substring ${JSON.stringify(snippet)} in output, got:\n${combined}`
+    );
+  }
+  console.log(
+    `[desktop-build-verify] Confirmed expected rejection (${stepName}, exit=${res.status}): ${expectedDiagnostics[expectedDiagnostics.length - 1]}`
+  );
+}
+
+console.log("[desktop-build-verify] Step 1: Reject missing, reserved, and non-HTTPS SAFI_API_BASE_URL in Web release build");
+expectFailureWithDiagnostic(
+  "web-release-missing-origin",
   "pnpm",
   ["-r", "--filter", "@safi/web", "run", "build"],
   { SAFI_DESKTOP_RELEASE_BUILD: "1", SAFI_API_BASE_URL: "" },
-  true
+  ["SAFI_API_BASE_URL is required when SAFI_DESKTOP_RELEASE_BUILD=1"]
 );
-assert.notEqual(webMissing.status, 0, "Expected Web release build without SAFI_API_BASE_URL to fail");
 
-const webInvalid = runStep(
+expectFailureWithDiagnostic(
+  "web-release-invalid-domain",
   "pnpm",
   ["-r", "--filter", "@safi/web", "run", "build"],
   { SAFI_DESKTOP_RELEASE_BUILD: "1", SAFI_API_BASE_URL: "https://api.safidata.invalid" },
-  true
+  ["SAFI_API_BASE_URL host is disallowed for release desktop builds: api.safidata.invalid"]
 );
-assert.notEqual(webInvalid.status, 0, "Expected Web release build with .invalid to fail");
+
+expectFailureWithDiagnostic(
+  "web-release-non-https",
+  "pnpm",
+  ["-r", "--filter", "@safi/web", "run", "build"],
+  { SAFI_DESKTOP_RELEASE_BUILD: "1", SAFI_API_BASE_URL: "http://api.safidata.dev" },
+  ["SAFI_API_BASE_URL must be an https:// origin without path/query/credentials"]
+);
 
 console.log("[desktop-build-verify] Step 2: Build @safi/web with SAFI_API_BASE_URL=" + targetOrigin);
 runStep("pnpm", ["-r", "--filter", "@safi/web", "run", "build"], {
@@ -89,22 +112,32 @@ console.log(
   `[desktop-build-verify] Confirmed frontend bundle embeds ${targetOrigin} in: ${frontendMatches.join(", ")}`
 );
 
-console.log("[desktop-build-verify] Step 3: Reject missing/reserved SAFI_API_BASE_URL in Tauri Release build");
-const cargoMissing = runStep(
+console.log("[desktop-build-verify] Step 3: Reject missing, reserved, and non-HTTPS SAFI_API_BASE_URL in Tauri Release build");
+expectFailureWithDiagnostic(
+  "native-release-missing-origin",
   "cargo",
   ["build", "--manifest-path", TAURI_MANIFEST, "--release"],
   { SAFI_API_BASE_URL: undefined },
-  true
+  ["SAFI_API_BASE_URL is required for release desktop builds"]
 );
-assert.notEqual(cargoMissing.status, 0, "Expected Release build without SAFI_API_BASE_URL to fail");
 
-const cargoInvalid = runStep(
+expectFailureWithDiagnostic(
+  "native-release-invalid-domain",
   "cargo",
   ["build", "--manifest-path", TAURI_MANIFEST, "--release"],
   { SAFI_API_BASE_URL: "https://api.safidata.invalid" },
-  true
+  [
+    "SAFI_API_BASE_URL is invalid for release builds: the release API origin must not use a reserved placeholder domain"
+  ]
 );
-assert.notEqual(cargoInvalid.status, 0, "Expected Release build with .invalid to fail");
+
+expectFailureWithDiagnostic(
+  "native-release-non-https",
+  "cargo",
+  ["build", "--manifest-path", TAURI_MANIFEST, "--release"],
+  { SAFI_API_BASE_URL: "http://api.safidata.dev" },
+  ["SAFI_API_BASE_URL is invalid for release builds: the API origin must start with https://"]
+);
 
 console.log("[desktop-build-verify] Step 4: Compile Tauri Release binary with shared SAFI_API_BASE_URL");
 runStep("cargo", ["build", "--manifest-path", TAURI_MANIFEST, "--release"], {

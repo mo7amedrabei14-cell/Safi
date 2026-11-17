@@ -760,8 +760,10 @@ impl StudioStore {
         .map_err(|_| "SF-SYS-001".to_owned())
     }
 
-    /// Enforces the native command allowlist, `MAX_IPC_BYTES` payload limit, and fail-closed
-    /// session + single-device verification before any sensitive command executes.
+    /// Enforces the native command allowlist, `MAX_IPC_BYTES` canonical serialized-JSON argument
+    /// ceiling (1 MiB checked prior to state mutation; does not cap pre-parse raw wire bytes inside
+    /// WebView2/Tauri), and fail-closed session + single-device verification before any sensitive
+    /// command executes.
     ///
     /// # Errors
     /// Returns `SF-SYS-010`, `SF-SYS-007`, [`AUTH_REQUIRED_CODE`] (`SF-AUTH-001`),

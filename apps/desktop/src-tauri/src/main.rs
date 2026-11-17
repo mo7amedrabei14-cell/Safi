@@ -293,8 +293,12 @@ impl StudioSessionVerifier for DesktopShellSessionVerifier {
     }
 }
 
-/// Measures the serialized JSON byte size (or raw byte length) of an incoming Tauri IPC payload at
-/// the native boundary before any command deserializes or executes.
+/// Measures the serialized byte size of an incoming `InvokeBody` after Tauri has parsed JSON into
+/// `InvokeBody::Json(serde_json::Value)` (or the byte slice length of `InvokeBody::Raw`), prior to
+/// command handler deserialization/execution and state mutation.
+///
+/// Note: Because Tauri parses incoming JSON before `invoke_handler` receives `InvokeBody`, this
+/// guards command handlers and `StudioStore` state rather than raw pre-parse wire transport bytes.
 fn measure_tauri_invoke_body(body: &tauri::ipc::InvokeBody) -> usize {
     match body {
         tauri::ipc::InvokeBody::Json(value) => json_serialized_len(value),
@@ -302,7 +306,8 @@ fn measure_tauri_invoke_body(body: &tauri::ipc::InvokeBody) -> usize {
     }
 }
 
-/// Enforces the native IPC allowlist and serialized payload ceiling at the Tauri dispatch boundary.
+/// Enforces the native IPC command allowlist and `MAX_IPC_BYTES` ceiling on the parsed
+/// `InvokeBody` at the Tauri `invoke_handler` boundary before any command handler runs.
 fn enforce_tauri_ipc_boundary(command: &str, body: &tauri::ipc::InvokeBody) -> Result<(), String> {
     enforce_ipc_command(command, measure_tauri_invoke_body(body))
 }
@@ -1554,9 +1559,10 @@ mod tests {
         assert_eq!(unknown_res, Err("SF-SYS-010".to_owned()));
         assert!(!called.load(Ordering::SeqCst));
 
-        // 2. JSON object whose raw string chars are below MAX_IPC_BYTES, but JSON keys, quotes,
-        // boolean/numeric literals, null, and escaped control chars push serialized payload to
-        // MAX_IPC_BYTES + 1 -> rejected with SF-SYS-007 BEFORE command handler executes.
+        // 2. Parsed `InvokeBody::Json(serde_json::Value)` whose raw string chars are below MAX_IPC_BYTES,
+        // but JSON keys, quotes, boolean/numeric literals, null, and escaped control chars push the
+        // re-serialized JSON size to MAX_IPC_BYTES + 1 -> rejected with SF-SYS-007 BEFORE command
+        // handler deserialization/execution or state mutation (not a raw pre-parse wire transport cap).
         let template_obj = serde_json::json!({
             "project": "p1",
             "row": 42usize,

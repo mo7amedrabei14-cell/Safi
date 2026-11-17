@@ -1,8 +1,8 @@
 # تقرير الإنجاز والقبول النهائي — Quad-Studio v7
 
-- **الفرع**: `main` (متزامن مع `origin/main` على GitHub قبل التعديلات المحلية الحالية).
-- **آخر Commit منشور على GitHub**: `c173c7ab1a22358efe8f6d3436b5dc08dce10416` (`c173c7a`, الأب: `6e1c9208d12972946fc56a3dee12a42966f1b4e5`، وما قبله `242f137f6aa130e7b82a5e2d8874ff0984cfcda6`).
-- **التعديلات الحالية بعد `c173c7a`**: معالجات المراجعة النهائية (تشديد فحص أسباب الرفض في `tools/verify-desktop-build-config.mjs` وتصحيح التوثيق الفني لحدود IPC وقياس الأداء وتقرير القبول) مضافة **محليًا على `main` بدون `git commit` وبدون `git push`** لمراجعتك أولًا، ودون بدء `P0.06` أو أي Deployment.
+- **الفرع**: `main`.
+- **آخر Commit منشور على GitHub**: `4ccd59f26a3922dbcc65427e4de305aba435671b` (`4ccd59f`، الأب: `c173c7ab1a22358efe8f6d3436b5dc08dce10416`، وما قبله `6e1c9208d12972946fc56a3dee12a42966f1b4e5` و`242f137f6aa130e7b82a5e2d8874ff0984cfcda6`).
+- **التعديلات الحالية بعد `4ccd59f`**: استرجاع الملفات الثلاثة المتغيرة زمنيًا في `artifacts/intro-visual/` إلى حالتها عند `c173c7a`، وتحديث هذا التقرير مضافان **محليًا على `main` بدون `git commit` وبدون `git push`** لمراجعتك أولًا، ودون بدء `P0.06` أو أي Deployment.
 
 ---
 
@@ -12,7 +12,7 @@
 1. **إغلاق فجوة اختبارات الحالات السلبية في Desktop Build Config (`tools/verify-desktop-build-config.mjs`)**: لا تكتفي اختبارات الرفض بالتحقق من خروج غير صفري فقط، بل تتحقق من فشل البناء (`exit != 0`) ونص رسالة الخطأ الفعلية الصادرة عن منطق التحقق نفسه (دون الاعتماد على صياغات Cargo الداخلية غير المستقرة) عند غياب `SAFI_API_BASE_URL` أو تمرير نطاق محجوز (`https://api.safidata.invalid`) أو بروتوكول غير HTTPS (`http://api.safidata.dev`) في كلٍّ من بناء الواجهة الأمامية وبناء `safi-desktop --release`، مع الإبقاء على إثبات تطابق API Origin (`https://ci-verify.safidata.dev`) بين `apps/web/dist/assets/*.js` و`safi-desktop.exe --print-build-origin`.
 2. **التوثيق الدقيق لحدّ IPC (`MAX_IPC_BYTES = 1 MiB`) في الكود والتقرير**: صُحّح التوصيف في `crates/sf-desktop/src/commands.rs` و`crates/sf-desktop/src/studio.rs` و`apps/desktop/src-tauri/src/main.rs` ليوضح أن الفحص يقيس الحجم التسلسلي لـ JSON **بعد** تحليل Tauri للطلب الوارد إلى `serde_json::Value` (`InvokeBody::Json`, أو `InvokeBody::Raw`) داخل `invoke_handler` و**قبل** تفكيك المعاملات أو تنفيذ الأمر وتعديل الحالة، وأنه **ليس** حماية على حجم البيانات الخام على مستوى النقل قبل التحليل.
 3. **التوثيق الصريح لقياس الأداء وظروفه**: فُصلت قياسات `localhost TLS` المحلية عن استطلاع `api.github.com` الفردي (المُنفّذ بعنوان خارجي وبيانات اختبار اصطناعية)، مع التأكيد على أنه ليس Benchmark لخادم SafiData الإنتاجي، وشرح الأثر الفعلي للتحقق المتزامن وانقطاع الشبكة.
-4. **مواءمة تقرير القبول النهائي مع حالة GitHub Actions الفعلية**: توثيق نجاح CI Run `43911902496` على `c173c7a` بجميع وظائفه الخمس، وتجاوز Run `43898824144` السابق بإصلاحات لاحقة، وتوضيح حدود بناء Release executable مقابل MSI Installer وحدود Chromium injected IPC harness مقابل WebView2.
+4. **مواءمة تقرير القبول النهائي مع حالة GitHub Actions الفعلية**: توثيق نجاح CI #276 (Run `44071214612` على `4ccd59f`) بجميع وظائفه الخمس، بعد Run `43911902496` على `c173c7a` وتجاوز Run `43898824144` السابق بإصلاحات لاحقة، وتوضيح حدود بناء Release executable مقابل MSI Installer وحدود Chromium injected IPC harness مقابل WebView2.
 
 ### ما الذي تحميه آلية IPC وما لا تدّعي حمايته
 - **ما تحميه الآلية فعليًا**:
@@ -30,17 +30,17 @@
 
 ## 2. حالة GitHub Actions الفعلية
 
-- **أحدث CI Run لـ `HEAD` (`c173c7ab1a22358efe8f6d3436b5dc08dce10416`)**:
-  - Workflow: `SafiData CI Gate (v5.0 Gold Master)` — Run **`43911902496`** — الحالة: **`completed` / `success`** (بالإضافة إلى `One-time repository formatting repair` — Run `43911902464` — `success`).
-  - تم تجاوز إخفاق Run `43898824144` السابق على Commit `6e1c920` (الذي كان بسبب `clippy::unwrap-used` في اختبارات `sf-desktop`) وإصلاحه في `c173c7a`.
+- **أحدث CI Run على GitHub (`4ccd59f26a3922dbcc65427e4de305aba435671b`)**:
+  - Workflow: `SafiData CI Gate (v5.0 Gold Master)` — Run **`44071214612`** (#276) — الحالة: **`completed` / `success`**.
+  - (سبق ذلك نجاح Run `43911902496` على `c173c7a`، وتجاوز إخفاق Run `43898824144` على `6e1c920`).
 
-| الوظيفة (Job) في CI Run `43911902496` | الحالة | النتيجة الفعلية |
+| الوظيفة (Job) في CI #276 (Run `44071214612`) | الحالة | النتيجة الفعلية |
 | --- | --- | --- |
 | `Desktop shell compile (windows-latest)` | `completed` | `success` |
-| `Full Gate (ubuntu-latest)` | `completed` | `success` |
-| `Full Gate (windows-latest)` | `completed` | `success` |
 | `Intro visual regression (Chromium)` | `completed` | `success` |
 | `PostgreSQL 18.6 migration apply / rollback` | `completed` | `success` |
+| `Full Gate (ubuntu-latest)` | `completed` | `success` |
+| `Full Gate (windows-latest)` | `completed` | `success` |
 
 ---
 
@@ -61,17 +61,27 @@
 
 ---
 
-## 4. نتائج التحقق المحلية بعد آخر تعديل (فوق `c173c7a`)
+## 4. نتائج الاختبارات والفحوصات المحلية
 
-| الفحص المحلي | الحالة | التفاصيل الدقيقة |
+### أ. فحوصات أُجريت على التعديلات البرمجية المضمّنة في `4ccd59f` (قبل استرجاع Artifacts)
+*ملاحظة الصدق: أُجريت هذه المجموعة قبل استرجاع ملفات `artifacts/` الثلاثة؛ ولم يُعد تشغيل `verify-studio-desktop-e2e.mjs` بعد تنظيفها عمدًا حتى لا يعيد توليدها بالـ timestamps.*
+
+| الفحص المحلي (على شيفرة `4ccd59f`) | الحالة | التفاصيل الدقيقة |
 | --- | --- | --- |
 | `node tools/verify-desktop-build-config.mjs` | **ناجح** | تحقق من الخروج غير الصفري ونص رسالة الخطأ المحددة لحالات الرفض الست (غياب، `.invalid`، `http://` في Web وNative Release) دون الاعتماد على صياغات Cargo الداخلية + تطابق `https://ci-verify.safidata.dev` بين `ApplicationShell-*.js` و`safi-desktop.exe --print-build-origin` |
-| `cargo fmt --all -- --check` و`apps/desktop/src-tauri` | **ناجح** | خروج `0` |
 | `cargo clippy --workspace --all-targets -- -D warnings` | **ناجح** | خروج `0` |
 | `cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings` | **ناجح** | خروج `0` |
 | `cargo test --workspace` | **ناجح** | 0 إخفاقات (`sf-desktop`: 65 + 10؛ `sf-server`: 80 محليًا + 3 `ignored` لـ PG؛ `sf-io`: 36؛ `sf-recipe`: 34؛ `sf-core`: 17 + 2؛ `sf-clean`: 10؛ `sf-wasm`: 5؛ `sf-arabic`: 4؛ `sf-cli`: 4؛ `sf-profile`: 3؛ `sf-report`: 3) |
 | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` | **ناجح** | `2 passed; 0 failed; 1 ignored` |
-| `pnpm run format:check` / `typecheck` / `lint` / `test` / `build` | **ناجح** | `vitest`: `58` ملفًا (`197` اختبارًا)، خروج `0` |
+| `pnpm typecheck` / `lint` / `test` / `build` | **ناجح** | `vitest`: `58` ملفًا (`197` اختبارًا)، خروج `0` |
 | `node tools/verify-capsule-chromium.mjs` | **ناجح** | خروج `0` (`scripts: 0`, `externalRequests: 0`, `consoleErrors: 0`) |
 | `node tools/verify-studio-desktop-e2e.mjs` | **ناجح** | الخطوات الـ 10 ناجحة عبر injected IPC bridge + `studio_ipc_harness` + `sf-server` الفعلي |
-| `git diff --check` | **ناجح** | خروج `0` |
+
+### ب. فحوصات أُعيد تشغيلها مباشرة بعد تنظيف Artifacts وتحديث هذا التقرير (فوق `4ccd59f`)
+| الفحص المحلي (بعد استرجاع Artifacts وتحديث التقرير) | الحالة |
+| --- | --- |
+| `git diff --check` | **ناجح** |
+| `py -3 tools/verify-security.py` | **ناجح** |
+| `cargo fmt --all -- --check` | **ناجح** |
+| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check` | **ناجح** |
+| `pnpm run format:check` | **ناجح** |

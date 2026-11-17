@@ -64,6 +64,31 @@ describe("UI-Phase-4 floating glass dock", () => {
     expect(arabic).toContain(">English</span>");
   });
 
+  it("renders localized 2-mode Light Mode / Dark Mode controls backed by vision-glass and google-gemini", () => {
+    const english = renderToString(
+      createElement(FloatingGlassDock, { activeTab: "home", onSelect: () => undefined, lang: "en" })
+    );
+    const arabic = renderToString(
+      createElement(FloatingGlassDock, {
+        activeTab: "home",
+        onSelect: () => undefined,
+        lang: "ar",
+        theme: "google-gemini"
+      })
+    );
+
+    expect(english).toContain('data-theme-current="vision-glass"');
+    expect(english).toContain("Light Mode");
+    expect(english).toContain("Dark Mode");
+    expect(english).not.toContain("Vision Glass");
+    expect(english).not.toContain("Gemini Dark");
+    expect(english).not.toContain("Apple Light");
+
+    expect(arabic).toContain('data-theme-current="google-gemini"');
+    expect(arabic).toContain("الوضع الفاتح");
+    expect(arabic).toContain("الوضع الداكن");
+  });
+
   it("keeps every dock control at the 44px touch target", () => {
     const html = renderToString(
       createElement(FloatingGlassDock, { activeTab: "home", onSelect: () => undefined })

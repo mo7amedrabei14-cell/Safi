@@ -4,13 +4,17 @@
  */
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { HardDrive, MonitorSmartphone, ShieldCheck, WifiOff, X } from "lucide-react";
+import { HardDrive, MonitorSmartphone, Moon, ShieldCheck, Sun, WifiOff, X } from "lucide-react";
+import { translateLang } from "@safi/i18n";
 import { SAFI_APP_VERSION, SAFI_BUILD_CHANNEL } from "../../lib/app-meta";
+import { SAFI_DEFAULT_THEME, getThemeDisplayLabel, type SafiThemeId } from "../../lib/theme";
 
 export interface SettingsSheetProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly lang?: "ar" | "en";
+  readonly theme?: SafiThemeId;
+  readonly onSelectTheme?: (theme: SafiThemeId) => void;
 }
 
 const SETTINGS_FACTS = [
@@ -61,7 +65,13 @@ const HIGHLIGHTS = [
   { id: "signed", labelAr: "تحديثات موقّعة", labelEn: "Signed updates" }
 ] as const;
 
-export function SettingsSheet({ open, onClose, lang = "en" }: SettingsSheetProps): ReactNode {
+export function SettingsSheet({
+  open,
+  onClose,
+  lang = "en",
+  theme = SAFI_DEFAULT_THEME,
+  onSelectTheme
+}: SettingsSheetProps): ReactNode {
   const isAr = lang === "ar";
   const closeRef = useRef<HTMLButtonElement | null>(null);
 
@@ -127,6 +137,48 @@ export function SettingsSheet({ open, onClose, lang = "en" }: SettingsSheetProps
         </div>
 
         <dl className="safi-settings-list">
+          <div className="safi-settings-row" data-settings-fact="theme">
+            <dt>{translateLang(lang, "theme.modeGroupAria")}</dt>
+            <dd>
+              {onSelectTheme ? (
+                <div
+                  className="safi-theme-switch"
+                  role="group"
+                  aria-label={translateLang(lang, "theme.modeGroupAria")}
+                >
+                  <button
+                    type="button"
+                    className="safi-theme-switch__btn"
+                    data-active={theme === "vision-glass" ? "true" : "false"}
+                    aria-pressed={theme === "vision-glass"}
+                    onClick={() => onSelectTheme("vision-glass")}
+                  >
+                    <Sun size={14} aria-hidden="true" />
+                    <span>{translateLang(lang, "theme.lightMode")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="safi-theme-switch__btn"
+                    data-active={theme === "google-gemini" ? "true" : "false"}
+                    aria-pressed={theme === "google-gemini"}
+                    onClick={() => onSelectTheme("google-gemini")}
+                  >
+                    <Moon size={14} aria-hidden="true" />
+                    <span>{translateLang(lang, "theme.darkMode")}</span>
+                  </button>
+                </div>
+              ) : (
+                getThemeDisplayLabel(theme, lang)
+              )}
+              {theme === "apple-light" ? (
+                <span className="safi-settings-legacy-note">
+                  {translateLang(lang, "theme.currentStatus", {
+                    theme: getThemeDisplayLabel(theme, lang)
+                  })}
+                </span>
+              ) : null}
+            </dd>
+          </div>
           {SETTINGS_FACTS.map((fact) => (
             <div key={fact.id} className="safi-settings-row" data-settings-fact={fact.id}>
               <dt>{isAr ? fact.labelAr : fact.labelEn}</dt>

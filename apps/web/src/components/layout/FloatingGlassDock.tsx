@@ -18,7 +18,6 @@ import {
   LayoutDashboard,
   Library,
   ListChecks,
-  Monitor,
   Moon,
   ShieldCheck,
   Sparkles,
@@ -26,8 +25,12 @@ import {
   UserRound
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { translateLang } from "@safi/i18n";
 import { SafiPrismLogo } from "../brand/SafiPrismLogo";
 import { DynamicStatusIsland } from "../brand/DynamicStatusIsland";
+import { SAFI_DEFAULT_THEME, type SafiThemeId } from "../../lib/theme";
+
+export type { SafiThemeId };
 
 export type SafiDockTabId =
   | "home"
@@ -37,8 +40,6 @@ export type SafiDockTabId =
   | "studio"
   | "library"
   | "owner";
-
-export type SafiThemeId = "apple-light" | "google-gemini" | "vision-glass";
 
 export type SafiLang = "ar" | "en";
 
@@ -83,14 +84,6 @@ export interface FloatingGlassDockProps {
   readonly ownerAccount?: boolean;
 }
 
-const THEME_ORDER: readonly SafiThemeId[] = ["apple-light", "google-gemini", "vision-glass"];
-
-const THEME_LABELS: Record<SafiThemeId, { ar: string; en: string }> = {
-  "apple-light": { ar: "Apple الفاتح", en: "Apple Light" },
-  "google-gemini": { ar: "Gemini الداكن", en: "Gemini Dark" },
-  "vision-glass": { ar: "Vision الزجاجي", en: "Vision Glass" }
-};
-
 const WEBSITE_SECTIONS: ReadonlyArray<{
   readonly href: string;
   readonly ar: string;
@@ -109,7 +102,7 @@ export function FloatingGlassDock({
   onSelect,
   onOpenCommandPalette,
   onOpenSettings,
-  theme = "apple-light",
+  theme = SAFI_DEFAULT_THEME,
   onSelectTheme,
   lang = "en",
   onToggleLang,
@@ -117,19 +110,10 @@ export function FloatingGlassDock({
   authenticated = false,
   ownerAccount = false
 }: FloatingGlassDockProps): ReactNode {
-  const isDark = theme === "google-gemini";
-  const isVision = theme === "vision-glass";
-  const currentThemeLabel = lang === "ar" ? THEME_LABELS[theme].ar : THEME_LABELS[theme].en;
   const [activeNavIdx, setActiveNavIdx] = useState<number>(0);
   const [hoveredNavIdx, setHoveredNavIdx] = useState<number | null>(null);
   const [stripExpanded, setStripExpanded] = useState<boolean>(false);
   const leaveTimerRef = useRef<number | null>(null);
-
-  const handleCycleTheme = (): void => {
-    const currentIndex = THEME_ORDER.indexOf(theme);
-    const nextTheme = THEME_ORDER[(currentIndex + 1) % THEME_ORDER.length] ?? "apple-light";
-    onSelectTheme?.(nextTheme);
-  };
 
   const handleEnterStrip = (): void => {
     if (leaveTimerRef.current !== null && typeof window !== "undefined") {
@@ -255,28 +239,40 @@ export function FloatingGlassDock({
             <span>{lang === "ar" ? "English" : "العربية"}</span>
           </button>
 
-          {/* 2. Three Global Themes Switcher (Apple Light / Gemini Dark / Vision Glass) */}
-          <button
-            type="button"
-            onClick={handleCycleTheme}
-            className="safi-topbar-btn"
-            aria-label={
-              lang === "ar"
-                ? `تبديل المظهر — الحالي: ${currentThemeLabel}`
-                : `Switch appearance — current: ${currentThemeLabel}`
-            }
+          {/* 2. Primary 2-Mode Theme Switcher (Light Mode -> Vision Glass / Dark Mode -> Gemini Dark) */}
+          <div
+            className="safi-theme-switch"
+            role="group"
+            aria-label={translateLang(lang, "theme.modeGroupAria")}
             data-theme-current={theme}
-            style={{ minHeight: "44px", height: "38px" }}
           >
-            {isDark ? (
-              <Moon size={15} aria-hidden="true" />
-            ) : isVision ? (
-              <Monitor size={15} aria-hidden="true" />
-            ) : (
-              <Sun size={15} aria-hidden="true" />
-            )}
-            <span>{currentThemeLabel}</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => onSelectTheme?.("vision-glass")}
+              className="safi-theme-switch__btn"
+              data-theme-option="vision-glass"
+              data-active={theme === "vision-glass" ? "true" : "false"}
+              aria-pressed={theme === "vision-glass"}
+              aria-label={translateLang(lang, "theme.switchToLight")}
+              style={{ minHeight: "44px" }}
+            >
+              <Sun size={14} aria-hidden="true" />
+              <span>{translateLang(lang, "theme.lightMode")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTheme?.("google-gemini")}
+              className="safi-theme-switch__btn"
+              data-theme-option="google-gemini"
+              data-active={theme === "google-gemini" ? "true" : "false"}
+              aria-pressed={theme === "google-gemini"}
+              aria-label={translateLang(lang, "theme.switchToDark")}
+              style={{ minHeight: "44px" }}
+            >
+              <Moon size={14} aria-hidden="true" />
+              <span>{translateLang(lang, "theme.darkMode")}</span>
+            </button>
+          </div>
 
           {tabs.some((tab) => tab.id === "studio") ? (
             <button

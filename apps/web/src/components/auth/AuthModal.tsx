@@ -10,7 +10,7 @@
  * - Owner recognition for `mo7amed.rabei14@gmail.com`.
  */
 import type { FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import {
   ArrowRight,
@@ -145,6 +145,30 @@ function ProviderMark({ provider }: { readonly provider: string }): ReactNode {
   return <GithubMark />;
 }
 
+function buildSanitizedExitGhost(formEl: HTMLElement): HTMLElement {
+  const clone = formEl.cloneNode(true) as HTMLElement;
+  clone.className = "safi-auth-form safi-auth-form-exit-ghost";
+  clone.setAttribute("aria-hidden", "true");
+
+  const sourceInputs = formEl.querySelectorAll("input");
+  const clonedInputs = clone.querySelectorAll("input");
+  sourceInputs.forEach((input, index) => {
+    const copy = clonedInputs[index];
+    if (copy !== undefined) {
+      copy.value = input.value;
+    }
+  });
+
+  clone.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+  clone.querySelectorAll("[name]").forEach((el) => el.removeAttribute("name"));
+  clone.querySelectorAll("[for]").forEach((el) => el.removeAttribute("for"));
+  clone.querySelectorAll("button, input").forEach((el) => {
+    el.setAttribute("tabindex", "-1");
+    el.setAttribute("disabled", "true");
+  });
+  return clone;
+}
+
 export function AuthModal({
   open,
   mandatory = false,
@@ -171,18 +195,38 @@ export function AuthModal({
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [ownerRecognized, setOwnerRecognized] = useState(() => isOwnerEmail(email));
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
   const fieldsRef = useRef<HTMLDivElement | null>(null);
+  const tablistRef = useRef<HTMLDivElement | null>(null);
+  const tabIndicatorRef = useRef<HTMLSpanElement | null>(null);
+  const signinTabRef = useRef<HTMLButtonElement | null>(null);
+  const signupTabRef = useRef<HTMLButtonElement | null>(null);
+  const formStageRef = useRef<HTMLDivElement | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const prevModeRef = useRef<AuthMode>(mode);
+  const didMountTabRef = useRef(false);
+  const transitionDirRef = useRef<1 | -1>(1);
+  const prevHeightRef = useRef<number | null>(null);
+  const exitGhostRef = useRef<HTMLElement | null>(null);
 
   const passwordReady = meetsMinPasswordLength(password);
 
   useEffect(() => {
-    if (!open) return;
-    if (mandatory) {
-      emailInputRef.current?.focus();
-    } else {
-      closeRef.current?.focus();
+    if (!open) {
+      wasOpenRef.current = false;
+      didMountTabRef.current = false;
+      return;
+    }
+    if (!wasOpenRef.current) {
+      wasOpenRef.current = true;
+      if (mandatory) {
+        emailInputRef.current?.focus();
+      } else {
+        closeRef.current?.focus();
+      }
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape" && !busy && !mandatory) onClose();
@@ -212,63 +256,252 @@ export function AuthModal({
     };
   }, [open]);
 
+  const updateTabIndicator = useCallback(
+    (animate: boolean): void => {
+      const indicator = tabIndicatorRef.current;
+      const activeBtn = mode === "signin" ? signinTabRef.current : signupTabRef.current;
+      if (indicator === null || activeBtn === null) return;
+      const targetX = activeBtn.offsetLeft;
+      const targetY = activeBtn.offsetTop;
+      const targetWidth = activeBtn.offsetWidth;
+      const targetHeight = activeBtn.offsetHeight;
+      if (targetWidth <= 0 || targetHeight <= 0) return;
+
+      indicator.style.opacity = "1";
+      if (!animate || !canAnimate()) {
+        gsap.killTweensOf(indicator);
+        indicator.style.left = `${targetX}px`;
+        indicator.style.top = `${targetY}px`;
+        indicator.style.width = `${targetWidth}px`;
+        indicator.style.height = `${targetHeight}px`;
+        return;
+      }
+      gsap.to(indicator, {
+        left: targetX,
+        top: targetY,
+        width: targetWidth,
+        height: targetHeight,
+        duration: 0.36,
+        ease: "back.out(1.25)",
+        overwrite: "auto"
+      });
+    },
+    [mode]
+  );
+
+  useLayoutEffect(() => {
+    if (!open || sessionToken !== null) {
+      didMountTabRef.current = false;
+      return;
+    }
+    updateTabIndicator(didMountTabRef.current);
+    didMountTabRef.current = true;
+  }, [open, sessionToken, mode, isAr, updateTabIndicator]);
+
+  useEffect(() => {
+    if (!open || sessionToken !== null) return;
+    const tablist = tablistRef.current;
+    if (tablist === null || typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(() => updateTabIndicator(false));
+    observer.observe(tablist);
+    if (signinTabRef.current !== null) observer.observe(signinTabRef.current);
+    if (signupTabRef.current !== null) observer.observe(signupTabRef.current);
+    return () => observer.disconnect();
+  }, [open, sessionToken, updateTabIndicator]);
+
   useEffect(() => {
     if (!open) return;
-    const fields = fieldsRef.current;
-    if (fields === null || !canAnimate()) return;
-    const targets = fields.querySelectorAll<HTMLElement>("[data-auth-stagger]");
+    const providers = fieldsRef.current;
+    if (providers === null || !canAnimate()) return;
+    const targets = providers.querySelectorAll<HTMLElement>("[data-auth-stagger]");
     const tween = gsap.fromTo(
       targets,
-      { opacity: 0, y: 14, filter: "blur(6px)" },
+      { opacity: 0, y: 10 },
       {
         opacity: 1,
         y: 0,
-        filter: "blur(0px)",
-        duration: 0.38,
-        stagger: 0.045,
+        duration: 0.34,
+        stagger: 0.04,
         ease: "power3.out",
-        clearProps: "transform,opacity,filter"
+        clearProps: "transform,opacity"
       }
     );
     return () => {
       tween.kill();
     };
-  }, [open, mode]);
+  }, [open]);
+
+  useLayoutEffect(() => {
+    const previousMode = prevModeRef.current;
+    prevModeRef.current = mode;
+
+    const stage = formStageRef.current;
+    const formEl = formRef.current;
+    const ghost = exitGhostRef.current;
+    const prevHeight = prevHeightRef.current;
+    exitGhostRef.current = null;
+    prevHeightRef.current = null;
+
+    if (!open || previousMode === mode || stage === null || formEl === null || !canAnimate()) {
+      ghost?.remove();
+      return;
+    }
+
+    const axisSign = (isAr ? -1 : 1) * transitionDirRef.current;
+    const nextHeight = stage.getBoundingClientRect().height;
+    const tweens: gsap.core.Tween[] = [];
+
+    if (prevHeight !== null && Math.abs(nextHeight - prevHeight) > 1) {
+      tweens.push(
+        gsap.fromTo(
+          stage,
+          { height: prevHeight, overflow: "hidden" },
+          {
+            height: nextHeight,
+            duration: 0.34,
+            ease: "power3.out",
+            clearProps: "height,overflow"
+          }
+        )
+      );
+    }
+
+    if (ghost !== null) {
+      stage.appendChild(ghost);
+      tweens.push(
+        gsap.fromTo(
+          ghost,
+          { opacity: 0.9, x: 0, scale: 1 },
+          {
+            opacity: 0,
+            x: -axisSign * 16,
+            scale: 0.985,
+            duration: 0.12,
+            ease: "power2.in",
+            onComplete: () => ghost.remove()
+          }
+        )
+      );
+    }
+
+    tweens.push(
+      gsap.fromTo(
+        formEl,
+        { opacity: 0, x: axisSign * 16, scale: 0.988 },
+        {
+          opacity: 1,
+          x: 0,
+          scale: 1,
+          duration: 0.28,
+          delay: ghost !== null ? 0.07 : 0,
+          ease: "power3.out",
+          clearProps: "transform,opacity"
+        }
+      )
+    );
+
+    const staggerTargets = formEl.querySelectorAll<HTMLElement>(
+      '[data-auth-stagger="field"], [data-auth-stagger="meta"], [data-auth-stagger="submit"]'
+    );
+    if (staggerTargets.length > 0) {
+      tweens.push(
+        gsap.fromTo(
+          staggerTargets,
+          { opacity: 0.25, y: 6 },
+          {
+            opacity: 1,
+            y: 0,
+            duration: 0.24,
+            delay: ghost !== null ? 0.08 : 0,
+            stagger: 0.028,
+            ease: "power2.out",
+            clearProps: "transform,opacity"
+          }
+        )
+      );
+    }
+
+    if (headerRef.current !== null) {
+      const headingNodes =
+        headerRef.current.querySelectorAll<HTMLElement>("h2, .safi-auth-subtitle");
+      tweens.push(
+        gsap.fromTo(
+          headingNodes,
+          { opacity: 0.6, y: 4 },
+          {
+            opacity: 1,
+            y: 0,
+            duration: 0.24,
+            stagger: 0.03,
+            ease: "power2.out",
+            clearProps: "transform,opacity"
+          }
+        )
+      );
+    }
+
+    return () => {
+      for (const tween of tweens) {
+        tween.kill();
+      }
+      ghost?.remove();
+      gsap.set(stage, { clearProps: "height,overflow" });
+      gsap.set(formEl, { clearProps: "transform,opacity" });
+      if (staggerTargets.length > 0) {
+        gsap.set(staggerTargets, { clearProps: "transform,opacity" });
+      }
+    };
+  }, [open, mode, isAr]);
 
   const magnetize = (event: ReactPointerEvent<HTMLElement>): void => {
-    if (!canAnimate()) return;
     const element = event.currentTarget;
+    if (!canAnimate() || event.pointerType !== "mouse") return;
+    if (element instanceof HTMLButtonElement && element.disabled) return;
     const rect = element.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
+    const relX = ((event.clientX - rect.left) / rect.width) * 100;
+    const relY = ((event.clientY - rect.top) / rect.height) * 100;
+    element.style.setProperty("--glare-x", `${relX.toFixed(1)}%`);
+    element.style.setProperty("--glare-y", `${relY.toFixed(1)}%`);
+
     const dx = (event.clientX - (rect.left + rect.width / 2)) / rect.width;
     const dy = (event.clientY - (rect.top + rect.height / 2)) / rect.height;
-    gsap.to(element, { x: dx * 8, y: dy * 4, duration: 0.25, ease: "power2.out" });
+    const maxShiftX = element.classList.contains("safi-auth-submit") ? 5 : 8;
+    gsap.to(element, {
+      x: dx * maxShiftX,
+      y: dy * 4,
+      duration: 0.25,
+      ease: "power2.out",
+      overwrite: "auto"
+    });
   };
 
   const demagnetize = (event: ReactPointerEvent<HTMLElement>): void => {
-    if (!canAnimate()) return;
-    gsap.to(event.currentTarget, { x: 0, y: 0, duration: 0.5, ease: "elastic.out(1, 0.45)" });
+    if (!canAnimate() || event.pointerType !== "mouse") return;
+    gsap.to(event.currentTarget, {
+      x: 0,
+      y: 0,
+      duration: 0.45,
+      ease: "elastic.out(1, 0.5)",
+      overwrite: "auto",
+      clearProps: "transform"
+    });
   };
 
   const switchMode = (next: AuthMode): void => {
     if (next === mode) return;
+    transitionDirRef.current = next === "signup" ? 1 : -1;
+
+    const stage = formStageRef.current;
+    const formEl = formRef.current;
+    if (stage !== null && formEl !== null && canAnimate()) {
+      stage.querySelectorAll(".safi-auth-form-exit-ghost").forEach((el) => el.remove());
+      prevHeightRef.current = stage.getBoundingClientRect().height;
+      exitGhostRef.current = buildSanitizedExitGhost(formEl);
+    }
+
     setMode(next);
     setFeedback(null);
-    const panel = panelRef.current;
-    if (panel !== null && canAnimate()) {
-      gsap.fromTo(
-        panel,
-        { opacity: 0.55, x: next === "signup" ? 22 : -22, filter: "blur(5px)" },
-        {
-          opacity: 1,
-          x: 0,
-          filter: "blur(0px)",
-          duration: 0.4,
-          ease: "power3.out",
-          clearProps: "x,opacity,filter"
-        }
-      );
-    }
   };
 
   const showDuplicate = (): void => {
@@ -454,6 +687,7 @@ export function AuthModal({
       <div
         ref={panelRef}
         className="safi-auth-modal"
+        data-safi-own-scrollbar="true"
         role="dialog"
         aria-modal="true"
         aria-labelledby="safi-auth-title"
@@ -471,7 +705,7 @@ export function AuthModal({
           </button>
         ) : null}
 
-        <header className="safi-auth-header">
+        <header ref={headerRef} className="safi-auth-header">
           <span className="safi-auth-eyebrow">
             <ShieldCheck size={14} aria-hidden="true" />
             {isAr ? "هوية صافي البيانات" : "SAFIDATA IDENTITY"}
@@ -533,11 +767,13 @@ export function AuthModal({
         ) : (
           <>
             <div
+              ref={tablistRef}
               className="safi-auth-tabs"
               role="tablist"
               aria-label={isAr ? "نوع الحساب" : "Account action"}
             >
               <button
+                ref={signinTabRef}
                 type="button"
                 role="tab"
                 aria-selected={mode === "signin"}
@@ -548,6 +784,7 @@ export function AuthModal({
                 {isAr ? "تسجيل الدخول (Sign In)" : "Sign In"}
               </button>
               <button
+                ref={signupTabRef}
                 type="button"
                 role="tab"
                 aria-selected={mode === "signup"}
@@ -559,6 +796,7 @@ export function AuthModal({
                   ? `إنشاء حساب جديد — تجربة مجانية ${TRIAL_DAYS} أيام (Sign Up)`
                   : `Create account — free ${TRIAL_DAYS}-day trial (Sign Up)`}
               </button>
+              <span ref={tabIndicatorRef} className="safi-auth-tabs-indicator" aria-hidden="true" />
             </div>
 
             <div className="safi-auth-providers" ref={fieldsRef}>
@@ -594,196 +832,211 @@ export function AuthModal({
               <span>{isAr ? "أو بالبريد الإلكتروني" : "or with email"}</span>
             </div>
 
-            <form className="safi-auth-form" onSubmit={(event) => void submit(event)}>
-              <label className="safi-auth-field" data-auth-stagger="field">
-                <span>{isAr ? "البريد الإلكتروني" : "Email address"}</span>
-                <span className="safi-auth-input-wrap">
-                  <Mail size={15} aria-hidden="true" />
-                  <input
-                    ref={emailInputRef}
-                    type="email"
-                    name="email"
-                    autoComplete="email"
-                    maxLength={254}
-                    required
-                    value={email}
-                    onChange={(event) => {
-                      const next = event.currentTarget.value;
-                      setEmail(next);
-                      setOwnerRecognized(isOwnerEmail(next));
-                    }}
-                    placeholder="name@example.com"
-                    disabled={busy}
-                    dir="ltr"
-                  />
-                  {ownerRecognized ? (
-                    <span className="safi-auth-owner-hint" role="status">
-                      👑 {isAr ? "حساب المالك" : "Owner"}
-                    </span>
-                  ) : null}
-                </span>
-              </label>
-
-              {mode === "signup" ? (
-                <>
-                  <label className="safi-auth-field" data-auth-stagger="field">
-                    <span>{isAr ? "الاسم الظاهر" : "Display name"}</span>
+            <div ref={formStageRef} className="safi-auth-form-stage" data-auth-mode={mode}>
+              <form
+                ref={formRef}
+                className="safi-auth-form"
+                onSubmit={(event) => void submit(event)}
+              >
+                <label className="safi-auth-field" data-auth-stagger="field">
+                  <span>{isAr ? "البريد الإلكتروني" : "Email address"}</span>
+                  <span className="safi-auth-input-wrap">
+                    <Mail size={15} aria-hidden="true" />
                     <input
-                      type="text"
-                      name="display_name"
-                      autoComplete="name"
-                      maxLength={80}
+                      ref={emailInputRef}
+                      type="email"
+                      name="email"
+                      autoComplete="email"
+                      maxLength={254}
                       required
-                      value={displayName}
-                      onChange={(event) => setDisplayName(event.currentTarget.value)}
-                      disabled={busy}
-                    />
-                  </label>
-                  <label className="safi-auth-field" data-auth-stagger="field">
-                    <span>
-                      {isAr ? "رقم الهاتف (اختياري للتحقق)" : "Phone (optional verification)"}
-                    </span>
-                    <input
-                      type="tel"
-                      name="phone"
-                      autoComplete="tel"
-                      maxLength={20}
-                      value={phone}
-                      onChange={(event) => setPhone(event.currentTarget.value)}
-                      placeholder="+20 100 000 0000"
+                      value={email}
+                      onChange={(event) => {
+                        const next = event.currentTarget.value;
+                        setEmail(next);
+                        setOwnerRecognized(isOwnerEmail(next));
+                      }}
+                      placeholder="name@example.com"
                       disabled={busy}
                       dir="ltr"
                     />
-                  </label>
-                </>
-              ) : null}
-
-              <label className="safi-auth-field" data-auth-stagger="field">
-                <span>{isAr ? "كلمة المرور" : "Password"}</span>
-                <span className="safi-auth-input-wrap">
-                  <LockKeyhole size={15} aria-hidden="true" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    name="password"
-                    autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                    minLength={mode === "signup" ? MIN_PASSWORD_LENGTH : undefined}
-                    maxLength={128}
-                    required
-                    value={password}
-                    onChange={(event) => setPassword(event.currentTarget.value)}
-                    disabled={busy}
-                    dir="ltr"
-                  />
-                  <button
-                    type="button"
-                    className="safi-auth-eye"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={
-                      showPassword
-                        ? isAr
-                          ? "إخفاء كلمة المرور"
-                          : "Hide password"
-                        : isAr
-                          ? "إظهار كلمة المرور"
-                          : "Show password"
-                    }
-                    aria-pressed={showPassword}
-                    title={
-                      showPassword
-                        ? isAr
-                          ? "إخفاء كلمة المرور"
-                          : "Hide password"
-                        : isAr
-                          ? "إظهار كلمة المرور"
-                          : "Show password"
-                    }
-                  >
-                    {showPassword ? (
-                      <EyeOff size={17} aria-hidden="true" />
-                    ) : (
-                      <Eye size={17} aria-hidden="true" />
-                    )}
-                  </button>
-                </span>
-              </label>
-
-              {mode === "signin" && onForgotPassword !== undefined ? (
-                <button
-                  type="button"
-                  className="safi-auth-forgot"
-                  onClick={onForgotPassword}
-                  disabled={busy}
-                >
-                  {isAr ? "نسيت كلمة المرور؟" : "Forgot password?"}
-                </button>
-              ) : null}
-
-              {mode === "signup" ? (
-                <div
-                  className={`safi-auth-password-meter ${passwordReady ? "is-ready" : ""}`}
-                  role="status"
-                  aria-live="polite"
-                >
-                  <span className="safi-auth-meter-dot">
-                    {passwordReady ? <Check size={13} aria-hidden="true" /> : null}
+                    {ownerRecognized ? (
+                      <span className="safi-auth-owner-hint" role="status">
+                        👑 {isAr ? "حساب المالك" : "Owner"}
+                      </span>
+                    ) : null}
                   </span>
-                  <span>
-                    {passwordReady
-                      ? isAr
-                        ? "✓ كلمة المرور مستوفية (8 خانات على الأقل)"
-                        : "✓ Password meets the 8-character minimum"
-                      : isAr
-                        ? `8 خانات كحد أدنى — أدخلت ${Array.from(password).length}`
-                        : `At least 8 characters — ${Array.from(password).length} entered`}
-                  </span>
-                </div>
-              ) : null}
+                </label>
 
-              {feedback !== null ? (
-                <div
-                  className={`safi-auth-feedback safi-auth-feedback--${feedback.kind}`}
-                  role={feedback.kind === "success" ? "status" : "alert"}
-                >
-                  <span>{feedback.message}</span>
-                  {feedback.kind === "duplicate" ? (
+                {mode === "signup" ? (
+                  <div className="safi-auth-signup-row" data-auth-stagger="field">
+                    <label className="safi-auth-field">
+                      <span>{isAr ? "الاسم الظاهر" : "Display name"}</span>
+                      <input
+                        type="text"
+                        name="display_name"
+                        autoComplete="name"
+                        maxLength={80}
+                        required
+                        value={displayName}
+                        onChange={(event) => setDisplayName(event.currentTarget.value)}
+                        disabled={busy}
+                      />
+                    </label>
+                    <label className="safi-auth-field">
+                      <span>
+                        {isAr ? "رقم الهاتف (اختياري للتحقق)" : "Phone (optional verification)"}
+                      </span>
+                      <input
+                        type="tel"
+                        name="phone"
+                        autoComplete="tel"
+                        maxLength={20}
+                        value={phone}
+                        onChange={(event) => setPhone(event.currentTarget.value)}
+                        placeholder="+20 100 000 0000"
+                        disabled={busy}
+                        dir="ltr"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+
+                <label className="safi-auth-field" data-auth-stagger="field">
+                  <span>{isAr ? "كلمة المرور" : "Password"}</span>
+                  <span className="safi-auth-input-wrap">
+                    <LockKeyhole size={15} aria-hidden="true" />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      name="password"
+                      autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                      minLength={mode === "signup" ? MIN_PASSWORD_LENGTH : undefined}
+                      maxLength={128}
+                      required
+                      value={password}
+                      onChange={(event) => setPassword(event.currentTarget.value)}
+                      disabled={busy}
+                      dir="ltr"
+                    />
                     <button
                       type="button"
-                      className="safi-auth-switch"
-                      onClick={() => switchMode("signin")}
+                      className="safi-auth-eye"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={
+                        showPassword
+                          ? isAr
+                            ? "إخفاء كلمة المرور"
+                            : "Hide password"
+                          : isAr
+                            ? "إظهار كلمة المرور"
+                            : "Show password"
+                      }
+                      aria-pressed={showPassword}
+                      title={
+                        showPassword
+                          ? isAr
+                            ? "إخفاء كلمة المرور"
+                            : "Hide password"
+                          : isAr
+                            ? "إظهار كلمة المرور"
+                            : "Show password"
+                      }
                     >
-                      {isAr ? "الانتقال إلى تسجيل الدخول" : "Go to sign in"}
-                      <ArrowRight size={14} aria-hidden="true" />
+                      <span
+                        className="safi-auth-eye-icon"
+                        data-visible={showPassword ? "true" : "false"}
+                      >
+                        {showPassword ? (
+                          <EyeOff size={17} aria-hidden="true" />
+                        ) : (
+                          <Eye size={17} aria-hidden="true" />
+                        )}
+                      </span>
                     </button>
-                  ) : null}
-                </div>
-              ) : null}
+                  </span>
+                </label>
 
-              <button
-                type="submit"
-                className="safi-btn safi-btn-primary safi-auth-submit"
-                disabled={busy || (mode === "signup" && !passwordReady)}
-                data-auth-stagger="submit"
-              >
-                {busy ? (
-                  <LoaderCircle size={16} className="safi-auth-spinner" aria-hidden="true" />
-                ) : mode === "signup" ? (
-                  <Sparkles size={16} aria-hidden="true" />
-                ) : (
-                  <LogIn size={16} aria-hidden="true" />
-                )}
-                {busy
-                  ? isAr
-                    ? "جارٍ المعالجة..."
-                    : "Working…"
-                  : mode === "signup"
+                {mode === "signin" && onForgotPassword !== undefined ? (
+                  <button
+                    type="button"
+                    className="safi-auth-forgot"
+                    data-auth-stagger="meta"
+                    onClick={onForgotPassword}
+                    disabled={busy}
+                  >
+                    {isAr ? "نسيت كلمة المرور؟" : "Forgot password?"}
+                  </button>
+                ) : null}
+
+                {mode === "signup" ? (
+                  <div
+                    className={`safi-auth-password-meter ${passwordReady ? "is-ready" : ""}`}
+                    data-auth-stagger="meta"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="safi-auth-meter-dot">
+                      {passwordReady ? <Check size={13} aria-hidden="true" /> : null}
+                    </span>
+                    <span>
+                      {passwordReady
+                        ? isAr
+                          ? "✓ كلمة المرور مستوفية (8 خانات على الأقل)"
+                          : "✓ Password meets the 8-character minimum"
+                        : isAr
+                          ? `8 خانات كحد أدنى — أدخلت ${Array.from(password).length}`
+                          : `At least 8 characters — ${Array.from(password).length} entered`}
+                    </span>
+                  </div>
+                ) : null}
+
+                {feedback !== null ? (
+                  <div
+                    className={`safi-auth-feedback safi-auth-feedback--${feedback.kind}`}
+                    role={feedback.kind === "success" ? "status" : "alert"}
+                  >
+                    <span>{feedback.message}</span>
+                    {feedback.kind === "duplicate" ? (
+                      <button
+                        type="button"
+                        className="safi-auth-switch"
+                        onClick={() => switchMode("signin")}
+                      >
+                        {isAr ? "الانتقال إلى تسجيل الدخول" : "Go to sign in"}
+                        <ArrowRight size={14} aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <button
+                  type="submit"
+                  className="safi-btn safi-btn-primary safi-auth-submit"
+                  disabled={busy || (mode === "signup" && !passwordReady)}
+                  onPointerMove={magnetize}
+                  onPointerLeave={demagnetize}
+                  data-auth-stagger="submit"
+                >
+                  {busy ? (
+                    <LoaderCircle size={16} className="safi-auth-spinner" aria-hidden="true" />
+                  ) : mode === "signup" ? (
+                    <Sparkles size={16} aria-hidden="true" />
+                  ) : (
+                    <LogIn size={16} aria-hidden="true" />
+                  )}
+                  {busy
                     ? isAr
-                      ? "إنشاء الحساب وبدء التجربة"
-                      : "Create account and start trial"
-                    : isAr
-                      ? "تسجيل الدخول"
-                      : "Sign in"}
-              </button>
-            </form>
+                      ? "جارٍ المعالجة..."
+                      : "Working…"
+                    : mode === "signup"
+                      ? isAr
+                        ? "إنشاء الحساب وبدء التجربة"
+                        : "Create account and start trial"
+                      : isAr
+                        ? "تسجيل الدخول"
+                        : "Sign in"}
+                </button>
+              </form>
+            </div>
 
             <p className="safi-auth-legal">
               {isAr

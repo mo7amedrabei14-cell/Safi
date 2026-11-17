@@ -1,20 +1,36 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "safi.locale";
+  const LOCALE_STORAGE_KEY = "safi.locale";
+  const THEME_STORAGE_KEY = "safi.theme";
   let locale = "en";
+  let theme = "vision-glass";
 
   try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === "ar" || stored === "en") locale = stored;
+    const storedLocale = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (storedLocale === "ar" || storedLocale === "en") locale = storedLocale;
   } catch {
     // English is the safe first-run default when storage is unavailable.
+  }
+
+  try {
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (storedTheme === "vision-glass" || storedTheme === "google-gemini" || storedTheme === "apple-light") {
+      theme = storedTheme;
+    } else if (storedTheme === "dark") {
+      theme = "google-gemini";
+    } else if (storedTheme === "light") {
+      theme = "vision-glass";
+    }
+  } catch {
+    // Vision Glass is the safe first-run Light Mode default when storage is unavailable.
   }
 
   const root = document.documentElement;
   root.dataset.safiLocale = locale;
   root.lang = locale === "ar" ? "ar-EG" : "en";
   root.dir = locale === "ar" ? "rtl" : "ltr";
+  root.setAttribute("data-theme", theme);
 
   const manifestLink = document.querySelector("#safi-manifest");
   if (manifestLink) {

@@ -15,5 +15,16 @@
   "export.downloadExcel": "Download New Excel File",
   "export.downloadPdf": "Download Quality Report (PDF)",
   "error.generic": "An unexpected error occurred",
-  "error.action": "Please retry or contact support."
+  "error.action": "Please retry or contact support.",
+  "theme.lightMode": "Light Mode",
+  "theme.darkMode": "Dark Mode",
+  "theme.legacyAppleLight": "Classic Light",
+  "theme.switchToLight": "Switch to Light Mode",
+  "theme.switchToDark": "Switch to Dark Mode",
+  "theme.modeGroupAria": "Color mode",
+  "theme.currentStatus": "Current theme: {theme}",
+  "scrollbar.label": "Page scrollbar",
+  "scrollbar.scrollUp": "Scroll up",
+  "scrollbar.scrollDown": "Scroll down",
+  "scrollbar.percent": "{percent} percent"
 }

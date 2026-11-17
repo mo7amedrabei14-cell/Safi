@@ -12,7 +12,7 @@ import { gsap } from "gsap";
 import { AmbientBackground } from "./components/motion/AmbientBackground";
 import { SmoothScrollProvider } from "./components/motion/SmoothScrollProvider";
 import { DOCK_TABS, FloatingGlassDock, STUDIO_TAB } from "./components/layout/FloatingGlassDock";
-import type { SafiDockTabId, SafiLang, SafiThemeId } from "./components/layout/FloatingGlassDock";
+import type { SafiDockTabId, SafiLang } from "./components/layout/FloatingGlassDock";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { SettingsSheet } from "./components/layout/SettingsSheet";
 import { AccountAccessSheet } from "./components/layout/AccountAccessSheet";
@@ -31,6 +31,7 @@ import { canAnimate } from "./components/ui/motion-preference";
 import { clearStudioAuthSession, setStudioAuthSession } from "./desktop/studio-bridge";
 import { getSafiDeviceIdentity } from "./lib/device-identity";
 import { applySafiLang, getInitialSafiLang } from "./lib/locale";
+import { applySafiTheme, getInitialSafiTheme, syncDomTheme, type SafiThemeId } from "./lib/theme";
 import { isOwnerEmail } from "./lib/auth-rules";
 
 export const SHELL_TABS: readonly SafiDockTabId[] = DOCK_TABS.map((tab) => tab.id);
@@ -74,18 +75,20 @@ export function renderStudio(
 
 export interface ApplicationShellProps {
   readonly onReady?: (() => void) | undefined;
+  readonly introComplete?: boolean | undefined;
   readonly initialVerificationToken?: string | null;
   readonly initialResetToken?: string | null;
 }
 
 export function ApplicationShell({
   onReady,
+  introComplete = true,
   initialVerificationToken = null,
   initialResetToken = null
 }: ApplicationShellProps): ReactNode {
   const [activeTab, setActiveTab] = useState<SafiDockTabId>("home");
   const [desktopRuntime, setDesktopRuntime] = useState(false);
-  const [theme, setTheme] = useState<SafiThemeId>("apple-light");
+  const [theme, setTheme] = useState<SafiThemeId>(getInitialSafiTheme);
   const [lang, setLang] = useState<SafiLang>(getInitialSafiLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -113,6 +116,7 @@ export function ApplicationShell({
   }, []);
 
   const selectTheme = useCallback((nextTheme: SafiThemeId): void => {
+    applySafiTheme(nextTheme);
     setTheme(nextTheme);
   }, []);
 
@@ -125,9 +129,7 @@ export function ApplicationShell({
   }, []);
 
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("data-theme", theme);
-    }
+    syncDomTheme(theme);
   }, [theme]);
 
   useEffect(() => {
@@ -250,6 +252,10 @@ export function ApplicationShell({
     />
   );
 
+  if (!introComplete) {
+    return null;
+  }
+
   if (authenticationRequired) {
     return (
       <>
@@ -296,7 +302,13 @@ export function ApplicationShell({
             lang={lang}
           />
 
-          <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} lang={lang} />
+          <SettingsSheet
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            lang={lang}
+            theme={theme}
+            onSelectTheme={selectTheme}
+          />
           {accountAccessPortal ?? authPortal}
           {passwordResetPortal}
         </div>

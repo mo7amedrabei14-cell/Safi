@@ -15,5 +15,16 @@
   "export.downloadExcel": "تحميل ملف Excel جديد",
   "export.downloadPdf": "تحميل تقرير الجودة (PDF)",
   "error.generic": "حدث خطأ غير متوقع",
-  "error.action": "أعد المحاولة أو تواصل مع الدعم الفني."
+  "error.action": "أعد المحاولة أو تواصل مع الدعم الفني.",
+  "theme.lightMode": "الوضع الفاتح",
+  "theme.darkMode": "الوضع الداكن",
+  "theme.legacyAppleLight": "الفاتح الكلاسيكي",
+  "theme.switchToLight": "التبديل إلى الوضع الفاتح",
+  "theme.switchToDark": "التبديل إلى الوضع الداكن",
+  "theme.modeGroupAria": "وضع الألوان",
+  "theme.currentStatus": "المظهر الحالي: {theme}",
+  "scrollbar.label": "شريط تمرير الصفحة",
+  "scrollbar.scrollUp": "تمرير للأعلى",
+  "scrollbar.scrollDown": "تمرير للأسفل",
+  "scrollbar.percent": "{percent} بالمئة"
 }

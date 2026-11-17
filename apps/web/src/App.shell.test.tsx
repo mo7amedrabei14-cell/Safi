@@ -22,7 +22,15 @@ describe("SafiData startup and application shell", () => {
     expect(html).not.toContain("data-safi-word");
   });
 
-  it("keeps the mandatory account gate in place after the intro handoff", () => {
+  it("keeps ApplicationShell empty until introComplete becomes true", () => {
+    const gated = renderToString(
+      createElement(ApplicationShell, { onReady: noop, introComplete: false })
+    );
+    expect(gated).toBe("");
+    expect(gated).not.toContain("safi-auth-modal");
+    expect(gated).not.toContain("Sign In");
+    expect(gated).not.toContain("safi-shell");
+
     const html = renderToString(createElement(ApplicationShell, { onReady: noop }));
 
     expect(SHELL_TABS).toEqual(["home", "cleaning", "recipes", "charts", "library", "owner"]);

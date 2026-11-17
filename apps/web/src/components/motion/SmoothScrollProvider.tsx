@@ -32,6 +32,32 @@ function prefersReducedMotion(): boolean {
   return isBrowserEnvironment() && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+let activeRootLenis: Lenis | null = null;
+
+/**
+ * Scroll the root document through Lenis when active so custom scrollbar arrows
+ * and thumb drags stay synchronized with smooth scrolling instead of fighting it.
+ */
+export function scrollDocumentSmoothAware(
+  top: number,
+  options: { readonly immediate?: boolean } = {}
+): void {
+  if (typeof window === "undefined") return;
+  const maxScroll = Math.max((document.documentElement?.scrollHeight ?? 0) - window.innerHeight, 0);
+  const clampedTop = Math.min(Math.max(Math.round(top), 0), maxScroll);
+  if (activeRootLenis !== null) {
+    activeRootLenis.scrollTo(
+      clampedTop,
+      options.immediate ? { immediate: true } : { duration: 0.24 }
+    );
+    return;
+  }
+  window.scrollTo({
+    top: clampedTop,
+    behavior: options.immediate ? "instant" : "smooth"
+  });
+}
+
 /** Exported for tests: the provider must stay inert outside a real browser. */
 export function shouldEnableSmoothScroll(): boolean {
   return isBrowserEnvironment() && !prefersReducedMotion();
@@ -47,6 +73,7 @@ export function SmoothScrollProvider({
     }
 
     const lenis = new Lenis({ lerp, smoothWheel: true });
+    activeRootLenis = lenis;
 
     const onTick = (time: number): void => {
       // GSAP reports elapsed time in seconds; Lenis expects milliseconds.
@@ -58,6 +85,9 @@ export function SmoothScrollProvider({
 
     return () => {
       gsap.ticker.remove(onTick);
+      if (activeRootLenis === lenis) {
+        activeRootLenis = null;
+      }
       lenis.destroy();
     };
   }, [lerp]);

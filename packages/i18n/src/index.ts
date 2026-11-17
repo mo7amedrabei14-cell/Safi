@@ -25,6 +25,37 @@ const dictionaries: Record<Locale, Record<string, string>> = {
   "en-US": enDict
 };
 
+/**
+ * Translate an ICU message key for an explicit locale (`"ar-EG"` or `"en-US"`).
+ * Shared by `I18nProvider` and stateless UI components so no strings are duplicated.
+ */
+export function translate(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>
+): string {
+  const dict = dictionaries[locale];
+  let template = dict[key] ?? key;
+
+  if (params) {
+    for (const [paramKey, paramVal] of Object.entries(params)) {
+      template = template.replace(new RegExp(`\\{${paramKey}\\}`, "g"), String(paramVal));
+    }
+  }
+  return template;
+}
+
+/**
+ * Resolve short `"ar"` | `"en"` app language codes into ICU dictionary translations.
+ */
+export function translateLang(
+  lang: "ar" | "en",
+  key: string,
+  params?: Record<string, string | number>
+): string {
+  return translate(lang === "ar" ? "ar-EG" : "en-US", key, params);
+}
+
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
 export interface I18nProviderProps {
@@ -88,17 +119,8 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
     }
   }, [locale]);
 
-  const t = (key: string, params?: Record<string, string | number>): string => {
-    const dict = dictionaries[locale];
-    let template = dict[key] ?? key;
-
-    if (params) {
-      for (const [paramKey, paramVal] of Object.entries(params)) {
-        template = template.replace(new RegExp(`\\{${paramKey}\\}`, "g"), String(paramVal));
-      }
-    }
-    return template;
-  };
+  const t = (key: string, params?: Record<string, string | number>): string =>
+    translate(locale, key, params);
 
   const expandText40Pct = (text: string): string => {
     // Specification Section 6.7: UI layout resilience testing by expanding text length by ~40%

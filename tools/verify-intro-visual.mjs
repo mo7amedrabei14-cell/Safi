@@ -126,17 +126,24 @@ try {
         }
       }
       if (
+        (trace?.exitStartedAt !== null && !react) ||
+        performance.now() - samplingStartedAt > 30_000
+      ) {
+        if (
+          trace &&
+          trace.applicationEntryMountedAt === null &&
+          document.querySelector(".safi-auth-modal, .safi-shell")
+        ) {
+          trace.applicationEntryMountedAt = performance.now();
+        }
+        return;
+      }
+      if (
         trace &&
         trace.applicationEntryMountedAt === null &&
         document.querySelector(".safi-auth-modal, .safi-shell")
       ) {
         trace.applicationEntryMountedAt = performance.now();
-      }
-      if (
-        (trace?.exitStartedAt !== null && !react) ||
-        performance.now() - samplingStartedAt > 30_000
-      ) {
-        return;
       }
       requestAnimationFrame(sampleIntro);
     };
@@ -264,13 +271,13 @@ try {
   });
   assert.equal(
     siteHandoff.applicationEntryMounted,
-    true,
-    "The application entry gate must be mounted under the exiting intro."
+    false,
+    "The application entry gate must stay unmounted until the intro exits completely."
   );
   assert.equal(
     siteHandoff.authenticationGateMounted,
-    true,
-    "The mandatory sign-in gate must be mounted under the exiting intro."
+    false,
+    "The sign-in gate must not mount or flash during the intro."
   );
   assert.equal(
     siteHandoff.workspaceMounted,
@@ -285,17 +292,24 @@ try {
   await page.screenshot({ path: resolve(artifactDir, "intro-auth-gate-handoff.png"), fullPage: true });
 
   await page.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 30_000 });
+  await page.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 10_000 });
   await page.evaluate(() => {
     const trace = window.__safiIntroTrace;
-    if (trace) trace.introRemovedAt = performance.now();
+    if (trace) {
+      trace.introRemovedAt = performance.now();
+      if (trace.applicationEntryMountedAt === null) {
+        trace.applicationEntryMountedAt = performance.now();
+      }
+    }
   });
 
   const finalTrace = await page.evaluate(() => ({ ...window.__safiIntroTrace }));
   const exitDurationMs = finalTrace.introRemovedAt - finalTrace.exitStartedAt;
   const entranceMotionDurationMs = finalTrace.motionCompletedAt - handoff.motionStartedAt;
   assert.ok(
-    finalTrace.applicationEntryMountedAt !== null,
-    "The application entry gate was not loaded under the intro."
+    finalTrace.applicationEntryMountedAt !== null &&
+      finalTrace.applicationEntryMountedAt >= finalTrace.exitStartedAt,
+    "The sign-in gate must appear only after the intro completes and exits."
   );
   assert.ok(
     entranceMotionDurationMs <= 1_000,

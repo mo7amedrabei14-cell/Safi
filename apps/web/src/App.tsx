@@ -3,7 +3,7 @@
  *
  * The product application is requested immediately and loads under the short intro.
  */
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { SafiIntroSplash } from "./components/brand/SafiIntroSplash";
 import { SafiCustomScrollbar } from "./components/layout/SafiCustomScrollbar";
@@ -68,6 +68,19 @@ export function App(): ReactNode {
     setIntroMounted(false);
   }, []);
 
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    if (introMounted) {
+      root.dataset.safiIntroActive = "true";
+    } else {
+      delete root.dataset.safiIntroActive;
+    }
+    return () => {
+      delete root.dataset.safiIntroActive;
+    };
+  }, [introMounted]);
+
   return (
     <>
       <SafiIntroSplash
@@ -80,6 +93,7 @@ export function App(): ReactNode {
       <Suspense fallback={null}>
         <ApplicationShell
           onReady={markApplicationReady}
+          introComplete={!introMounted}
           initialVerificationToken={verificationToken}
           initialResetToken={resetToken}
         />

@@ -58,6 +58,20 @@ describe("SafiData motion auth portal", () => {
     expect(html).toContain("Verified Owner — Mohamed Rabea");
     expect(html).not.toContain("sfs_owner_session");
   });
+  it("isolates its bespoke thin scrollbar and renders animated tabs, form stage, and pointer-only magnet/glare layers", () => {
+    const source = readFileSync(new URL("./AuthModal.tsx", import.meta.url), "utf8");
+    const css = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+    const html = renderToString(createElement(AuthModal, { open: true, onClose: noop }));
+
+    expect(html).toContain('data-safi-own-scrollbar="true"');
+    expect(html).toContain('class="safi-auth-tabs-indicator"');
+    expect(html).toContain('class="safi-auth-form-stage"');
+    expect(source).toContain('event.pointerType !== "mouse"');
+    expect(source).toContain("buildSanitizedExitGhost");
+    expect(css).toContain(".safi-auth-modal::-webkit-scrollbar");
+    expect(css).toContain("width: 5px");
+  });
+
   it("renders a mandatory sign-in gate without any close control", () => {
     const html = renderToString(
       createElement(AuthModal, {

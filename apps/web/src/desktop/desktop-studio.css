@@ -789,6 +789,192 @@
   background: color-mix(in srgb, #b58900 12%, transparent);
 }
 
+.studio-badge-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.studio-sheet-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 10px;
+}
+
+.studio-sheet-detail-card,
+.studio-question-card,
+.studio-insight-card {
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 10px;
+  padding: 12px;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  display: grid;
+  gap: 8px;
+}
+
+.studio-sheet-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.studio-table-regions-list,
+.studio-cards-list,
+.studio-intelligence-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.studio-region-card {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.studio-region-card.is-active,
+.studio-chip-btn.is-active {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font-weight: 600;
+}
+
+.studio-insight-warning {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-inline-start: 3px solid #d97706;
+  background: color-mix(in srgb, #d97706 10%, transparent);
+  font-size: 13px;
+}
+
+.studio-inline-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.studio-inline-input-row input,
+.studio-stacked-field select,
+.studio-stacked-field input {
+  flex: 1 1 220px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.studio-stacked-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.studio-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.studio-presenter-notes {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, currentColor 25%, transparent);
+  font-size: 13px;
+}
+
+.studio-tooltip-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.studio-tooltip-trigger {
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.studio-tooltip-popover {
+  position: absolute;
+  inset-block-start: calc(100% + 6px);
+  inset-inline-start: 0;
+  z-index: 40;
+  width: min(280px, 75vw);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.studio-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.56);
+}
+
+.studio-modal-card {
+  width: min(520px, 96vw);
+  max-height: 85dvh;
+  overflow-y: auto;
+  border-radius: 14px;
+  padding: 18px;
+  background: var(--safi-bg, #ffffff);
+  color: var(--safi-text, #0f172a);
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  display: grid;
+  gap: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.studio-mini-table-wrap {
+  overflow-x: auto;
+  margin-block: 6px;
+}
+
+.studio-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.studio-mini-table th,
+.studio-mini-table td {
+  padding: 5px 8px;
+  text-align: start;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .safi-desktop-studio *,
   .studio-panel * {

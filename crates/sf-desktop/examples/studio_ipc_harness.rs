@@ -106,6 +106,24 @@ fn dispatch(
             store.gate_command("pick_capsule_output_file", 0, Some(ts))?;
             serde_json::to_string(&capsule_path).map_err(|_| "SF-SYS-001".to_owned())
         }
+        "pick_deliverable_file" => {
+            store.gate_command("pick_deliverable_file", 0, Some(ts))?;
+            let ext = str_arg(args, "extension", "default_extension");
+            let ext_clean = if ext.is_empty() { "xlsx" } else { ext };
+            let out_path = Path::new(capsule_path)
+                .parent()
+                .map_or_else(std::env::temp_dir, Path::to_path_buf)
+                .join(format!("safi_deliverable.{ext_clean}"));
+            serde_json::to_string(&out_path.display().to_string())
+                .map_err(|_| "SF-SYS-001".to_owned())
+        }
+        "studio_select_region" => store.select_region(
+            str_arg(args, "project", "project"),
+            str_arg(args, "sheetName", "sheet_name"),
+            str_arg(args, "tableId", "table_id"),
+            ts,
+        ),
+        "studio_workbook_details" => store.workbook_details(str_arg(args, "project", "project")),
         "studio_set_auth_session" => store.set_auth_session(
             str_arg(args, "token", "token"),
             str_arg(args, "installationId", "installation_id"),
@@ -305,6 +323,15 @@ fn dispatch(
             str_arg(args, "project", "project"),
             Path::new(str_arg(args, "target", "target")),
             str_arg(args, "options", "options"),
+        ),
+        "studio_export_deliverable" => store.export_deliverable(
+            str_arg(args, "project", "project"),
+            Path::new(str_arg(args, "target", "target")),
+            args.get("isBase64")
+                .or_else(|| args.get("is_base64"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            str_arg(args, "payload", "payload"),
         ),
         other => store
             .gate_command(other, 0, Some(ts))

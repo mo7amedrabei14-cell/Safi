@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { ArrowDown, ArrowUp, Copy, FileText, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, FileText, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { DesktopMetric, StudioDocBlockArtifact } from "../studio-bridge";
 import { NarrativeTextRenderer, listMissingMetricRefs } from "./NarrativeTextRenderer";
 
@@ -9,6 +9,7 @@ export interface VerifiedDocViewProps {
   readonly docBlocks: readonly StudioDocBlockArtifact[];
   readonly onUpdateDocBlocks: (next: readonly StudioDocBlockArtifact[]) => void;
   readonly onInspectMetric?: (metric: DesktopMetric) => void;
+  readonly onAutoGenerateReport?: () => void;
 }
 
 const BLOCK_KINDS: ReadonlyArray<{ kind: string; labelEn: string; labelAr: string }> = [
@@ -23,7 +24,8 @@ export function VerifiedDocView({
   metrics,
   docBlocks,
   onUpdateDocBlocks,
-  onInspectMetric
+  onInspectMetric,
+  onAutoGenerateReport
 }: VerifiedDocViewProps): React.ReactElement {
   const isAr = language === "ar";
   const metricsById = useMemo(() => new Map(metrics.map((m) => [m.id, m])), [metrics]);
@@ -111,6 +113,17 @@ export function VerifiedDocView({
               <Plus size={13} aria-hidden="true" /> {isAr ? entry.labelAr : entry.labelEn}
             </button>
           ))}
+          {onAutoGenerateReport ? (
+            <button
+              type="button"
+              className="studio-chip-btn"
+              data-testid="auto-generate-doc-btn"
+              onClick={onAutoGenerateReport}
+            >
+              <Sparkles size={13} aria-hidden="true" />{" "}
+              {isAr ? "توليد 13 قسمًا" : "Auto-Build 13 Sections"}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -238,6 +251,19 @@ export function VerifiedDocView({
                 onChange={(e) => updateBlock(block.id, { content: e.target.value })}
                 aria-label={isAr ? "محتوى الكتلة" : "Block content"}
               />
+
+              <label className="studio-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={Boolean(block.pageBreakBefore)}
+                  onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+                />
+                <span>
+                  {isAr
+                    ? "فاصل صفحة قبل هذا القسم (PDF / Word)"
+                    : "Start new page before section (PDF / DOCX)"}
+                </span>
+              </label>
 
               <div className="studio-preview-box">
                 <NarrativeTextRenderer

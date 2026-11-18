@@ -96,17 +96,22 @@ describe("Export utilities & Genuine Multi-Format Exporters (Phase 9 & A11)", ()
     expect(docxEntries).toContain("[Content_Types].xml");
     expect(docxEntries).toContain("word/document.xml");
     expect(docxEntries).toContain("word/styles.xml");
+    expect(docxEntries).toContain("word/header1.xml");
+    expect(docxEntries).toContain("word/footer1.xml");
     expect(docx.content).toContain("<w:bidi/>");
 
-    // 3. Genuine PDF (%PDF-1.4)
-    const pdf = exportStudioDeliverable({ format: "pdf", model, dashboard });
-    expect(pdf.filename).toBe("safi-export.pdf");
-    expect(pdf.content.startsWith("%PDF-1.4")).toBe(true);
+    // 3. Genuine multi-page PDF 1.7 with non-zero byte-offset startxref
+    const pdf = exportStudioDeliverable({ format: "pdf", model, document, rtl: true });
+    expect(pdf.filename).toBe("safi-report.pdf");
+    expect(pdf.content.startsWith("%PDF-1.7")).toBe(true);
     expect(pdf.content.trim().endsWith("%%EOF")).toBe(true);
+    const startxrefMatch = /startxref\s+(\d+)/.exec(pdf.content);
+    expect(Number(startxrefMatch?.[1] ?? 0)).toBeGreaterThan(100);
+    expect(pdf.content).toContain("Page 1 of ");
 
-    // 4. Genuine PNG (\x89PNG\r\n\x1a\n)
+    // 4. Genuine multi-color chart-rendered PNG (\x89PNG\r\n\x1a\n)
     const png = exportStudioDeliverable({ format: "png", model, dashboard });
-    expect(png.filename).toBe("safi-export.png");
+    expect(png.filename).toBe("safi-chart.png");
     expect(Array.from(png.binaryBytes.slice(0, 8))).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
     ]);
@@ -114,9 +119,9 @@ describe("Export utilities & Genuine Multi-Format Exporters (Phase 9 & A11)", ()
     expect(png.content).toContain("IDAT");
     expect(png.content).toContain("IEND");
 
-    // 5. Genuine SVG
+    // 5. Genuine SVG (with distinct chart visual kind)
     const svg = exportStudioDeliverable({ format: "svg", model, dashboard });
-    expect(svg.filename).toBe("safi-export.svg");
+    expect(svg.filename).toBe("safi-chart.svg");
     expect(svg.content).toContain("<svg");
 
     // 6. Genuine Interactive HTML (.safi.html)
@@ -125,16 +130,57 @@ describe("Export utilities & Genuine Multi-Format Exporters (Phase 9 & A11)", ()
     expect(html.content).toContain("<!DOCTYPE html>");
     expect(html.content).toContain('data-safi-presentation-player="true"');
 
-    // 7. Genuine Power BI Export Bundle (.pbids + model.bim + CSV)
+    // 7. Genuine Power BI Export Bundle (.pbids + model.bim + multi-table CSVs)
     const pbi = exportStudioDeliverable({ format: "powerbi", model });
     expect(pbi.filename).toBe("safi-powerbi-package.zip");
     const pbiEntries = listZipEntryPaths(pbi.binaryBytes);
-    expect(pbiEntries).toEqual([
-      "safi-datasource.pbids",
-      "model.bim",
-      "safi-cleaned-data.csv",
-      "README-POWERBI.md"
-    ]);
+    expect(pbiEntries).toContain("safi-datasource.pbids");
+    expect(pbiEntries).toContain("model.bim");
+    expect(pbiEntries).toContain("README-POWERBI.md");
+    expect(pbiEntries.some((p) => p.startsWith("data/") && p.endsWith(".csv"))).toBe(true);
     expect(pbi.content).toContain('"compatibilityLevel": 1550');
+
+    // 8. Multi-sheet & multi-table XLSX never truncates to sheet 0 table 0
+    const multiIngest = ingestWorkbookStructure([
+      {
+        name: "Sales",
+        grid: [
+          ["Region", "Revenue"],
+          ["Cairo", "1000"]
+        ]
+      },
+      {
+        name: "Costs",
+        grid: [
+          ["Region", "Cost"],
+          ["Cairo", "400"]
+        ]
+      },
+      {
+        name: "Secret",
+        visibility: "Hidden",
+        grid: [
+          ["Param", "Rate"],
+          ["Tax", "0.14"]
+        ]
+      }
+    ]);
+    const multiModel = buildSemanticWorkbookModel(multiIngest);
+    const xlsxVisibleOnly = exportStudioDeliverable({ format: "xlsx", model: multiModel });
+    const xlsxVisEntries = listZipEntryPaths(xlsxVisibleOnly.binaryBytes);
+    expect(xlsxVisEntries).toContain("xl/worksheets/sheet1.xml");
+    expect(xlsxVisEntries).toContain("xl/worksheets/sheet2.xml");
+    expect(xlsxVisibleOnly.content).toContain("Sales");
+    expect(xlsxVisibleOnly.content).toContain("Costs");
+    expect(xlsxVisibleOnly.content).toContain("Secret (Hidden)");
+
+    const xlsxWithHidden = exportStudioDeliverable({
+      format: "xlsx",
+      model: multiModel,
+      includeHiddenSheets: true
+    });
+    expect(listZipEntryPaths(xlsxWithHidden.binaryBytes).length).toBeGreaterThan(
+      xlsxVisEntries.length
+    );
   });
 });

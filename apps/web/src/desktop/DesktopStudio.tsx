@@ -12,11 +12,14 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownUp,
+  Ban,
   BarChart3,
+  BrainCircuit,
   Download,
   FileSpreadsheet,
   FileText,
   FolderOpen,
+  HelpCircle,
   Layers,
   LayoutTemplate,
   Plus,
@@ -31,14 +34,26 @@ import {
 } from "lucide-react";
 import "./desktop-studio.css";
 import type { SafiLang } from "../components/layout/FloatingGlassDock";
+import type { ExportOptions } from "../utils/export";
+import { exportStudioDeliverable } from "../utils/export";
+import type { DesktopIntelligenceSnapshot } from "./desktop-intelligence-bridge";
+import {
+  buildDesktopIntelligenceSnapshotAsync,
+  buildExportDashboardState,
+  buildExportDocumentReport,
+  buildExportPresentationDeck
+} from "./desktop-intelligence-bridge";
 import type {
   DesktopGroup,
   DesktopRowPage,
   DesktopStudioState,
+  DesktopWorkbookDetails,
   StudioAssetArtifact,
   StudioChartArtifact,
   StudioDocBlockArtifact,
   StudioFreeFormBlockArtifact,
+  StudioPrivacySettingsArtifact,
+  StudioQuestionResolutionArtifact,
   StudioSlideArtifact,
   StudioTemplateConfigArtifact,
   StudioWorkspaceArtifacts
@@ -57,6 +72,7 @@ import {
   deleteColumn,
   deleteRow,
   exportCapsule,
+  exportDeliverable,
   fetchRowsPage,
   grouped,
   insertRow,
@@ -65,6 +81,7 @@ import {
   loadProjectBundle,
   openProject,
   pickCapsuleOutputFile,
+  pickDeliverableFile,
   pickInputFile,
   projectState,
   redo,
@@ -73,6 +90,7 @@ import {
   resetScenario,
   restoreProject,
   saveProjectBundle,
+  selectRegion,
   setArtifacts,
   setCellById,
   setScenarioParameter,
@@ -80,36 +98,68 @@ import {
   sortRows,
   trimColumn,
   undo,
-  updateParameter
+  updateParameter,
+  workbookDetails
 } from "./studio-bridge";
 import { AnomalyPanel } from "./components/AnomalyPanel";
 import { CommandBarPanel } from "./components/CommandBarPanel";
 import { DashboardChartsView } from "./components/DashboardChartsView";
+import {
+  DeliverableExportModal,
+  InteractiveTutorialOverlay,
+  UnifiedTooltipBadge
+} from "./components/DesktopTutorialAndExport";
 import { FreeFormBuilderView } from "./components/FreeFormBuilderView";
+import { IntelligenceAndAssistantPanel } from "./components/IntelligenceAndAssistantPanel";
 import { KeynoteSlidesView } from "./components/KeynoteSlidesView";
 import { listMissingMetricRefs } from "./components/NarrativeTextRenderer";
 import { TemplatesAndProjectsPanel } from "./components/TemplatesAndProjectsPanel";
 import { VerifiedDocView } from "./components/VerifiedDocView";
 import { VerifiedNumberChip } from "./components/VerifiedNumberChip";
 import { WhatIfPanel } from "./components/WhatIfPanel";
+import { WorkbookIntelligenceDrawer } from "./components/WorkbookIntelligenceDrawer";
 
-type StudioMode = "sheet" | "dashboard" | "slides" | "doc" | "freeform" | "templates";
+type StudioMode =
+  | "sheet"
+  | "intelligence"
+  | "dashboard"
+  | "slides"
+  | "doc"
+  | "freeform"
+  | "templates";
 const STUDIO_MODES: readonly StudioMode[] = [
   "sheet",
+  "intelligence",
   "dashboard",
   "slides",
   "doc",
   "freeform",
   "templates"
 ];
+const DEFAULT_PRIVACY: StudioPrivacySettingsArtifact = {
+  externalAiConsentGranted: false,
+  maskPiiOnCloud: true,
+  consentTimestampMs: null
+};
 const EMPTY_ARTIFACTS: StudioWorkspaceArtifacts = {
   charts: [],
   slides: [],
   docBlocks: [],
   freeformBlocks: [],
   assets: [],
-  templateConfig: null
+  templateConfig: null,
+  questionResolutions: [],
+  privacySettings: DEFAULT_PRIVACY
 };
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 8192;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
 
 const PROJECT = "main";
 const SAVED_KEY = "safi.desktop.studio.snapshot.v1";
@@ -155,6 +205,15 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
   const [renameSource, setRenameSource] = useState("");
   const [renameTarget, setRenameTarget] = useState("");
   const [trimTarget, setTrimTarget] = useState("");
+  const [wbDetails, setWbDetails] = useState<DesktopWorkbookDetails | null>(null);
+  const [intelSnapshot, setIntelSnapshot] = useState<DesktopIntelligenceSnapshot | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState<{ pct: number; phase: string } | null>(
+    null
+  );
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
 
   const stateRef = useRef<DesktopStudioState | null>(null);
   stateRef.current = state;
@@ -260,6 +319,88 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
     }
   }, [state, state?.revision, loadChart]);
 
+  // Fetch workbook intelligence metadata & run cooperative cancellable semantic/verified pipeline.
+  useEffect(() => {
+    if (!desktop || state === null) {
+      return;
+    }
+    const controller = new AbortController();
+    analysisAbortRef.current?.abort();
+    analysisAbortRef.current = controller;
+
+    void (async () => {
+      try {
+        setAnalysisProgress({ pct: 10, phase: "Reading workbook intelligence" });
+        const det = await workbookDetails(PROJECT).catch(() => null);
+        if (controller.signal.aborted) return;
+        setWbDetails(det);
+        const snap = await buildDesktopIntelligenceSnapshotAsync({
+          state,
+          details: det,
+          page: rowPage,
+          savedResolutions: state.artifacts?.questionResolutions ?? [],
+          signal: controller.signal,
+          onProgress: (pct, phase) => {
+            if (!controller.signal.aborted) {
+              setAnalysisProgress({ pct, phase });
+            }
+          }
+        });
+        if (!controller.signal.aborted) {
+          setIntelSnapshot(snap);
+          setAnalysisProgress(null);
+        }
+      } catch (cause) {
+        if (cause instanceof DOMException && cause.name === "AbortError") {
+          setAnalysisProgress(null);
+          return;
+        }
+        setAnalysisProgress(null);
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [desktop, state, state?.revision, rowPage]);
+
+  const handleSelectRegion = useCallback(
+    async (sheetName: string, tableId: string): Promise<void> => {
+      const seq = stateTracker.current.next();
+      setBusy(true);
+      setRecalculating(true);
+      try {
+        const next = await selectRegion(PROJECT, sheetName, tableId);
+        if (!stateTracker.current.isCurrent(seq)) {
+          return;
+        }
+        // Switching regions starts a fresh DataGraph at revision 1, so bypass
+        // isNewerOrEqualRevision (which would otherwise drop lower revisions).
+        setState(next);
+        setRowPage(null);
+        setPageOffset(0);
+        setSortColumn(null);
+        setSearchQuery("");
+        setFilterValue("");
+        setGroups([]);
+        const first = next.columns[0]?.name ?? "";
+        setGroupBy(first);
+        setValueColumn(next.columns[1]?.name ?? first);
+        setError(null);
+      } catch (cause) {
+        if (stateTracker.current.isCurrent(seq)) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        if (stateTracker.current.isCurrent(seq)) {
+          setBusy(false);
+          setRecalculating(false);
+        }
+      }
+    },
+    []
+  );
+
   const openFile = useCallback(async (): Promise<void> => {
     const seq = stateTracker.current.next();
     setBusy(true);
@@ -274,6 +415,7 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
         return;
       }
       setState(next);
+      setRowPage(null);
       setPageOffset(0);
       setSortColumn(null);
       setSearchQuery("");
@@ -414,6 +556,80 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
     }
   }, [L, aggregate, artifacts, groupBy, metricName, metricsById, valueColumn]);
 
+  const handleExportDeliverable = useCallback(
+    async (format: ExportOptions["format"], includeHidden: boolean): Promise<void> => {
+      if (!state) return;
+      if (format === "safi.html" && (!artifacts.slides || artifacts.slides.length === 0)) {
+        await writeCapsule();
+        setExportStatus(
+          L(
+            "تم تصدير الكبسولة التفاعلية الموثقة عبر محرك Rust.",
+            "Verified .safi.html capsule written atomically via Rust."
+          )
+        );
+        return;
+      }
+
+      if (!intelSnapshot) {
+        setError(
+          L(
+            "الرجاء الانتظار لحين اكتمال بناء النموذج الدلالي.",
+            "Please wait for semantic workbook analysis to complete."
+          )
+        );
+        return;
+      }
+
+      setBusy(true);
+      try {
+        const dashState = buildExportDashboardState(
+          intelSnapshot.semanticModel,
+          intelSnapshot.verifiedReport,
+          state
+        );
+        const presState = buildExportPresentationDeck(
+          intelSnapshot.semanticModel,
+          intelSnapshot.verifiedReport,
+          artifacts.slides
+        );
+        const docState = buildExportDocumentReport(
+          intelSnapshot.semanticModel,
+          intelSnapshot.verifiedReport,
+          artifacts.docBlocks
+        );
+        const result = exportStudioDeliverable({
+          format,
+          model: intelSnapshot.semanticModel,
+          dashboard: dashState,
+          presentation: presState,
+          document: docState,
+          rtl: lang === "ar",
+          includeHiddenSheets: includeHidden
+        });
+        const ext = format === "powerbi" ? "zip" : format;
+        const target = await pickDeliverableFile(result.filename, ext);
+        if (!target) {
+          return;
+        }
+        const isBinary = format !== "csv" && format !== "svg" && format !== "safi.html";
+        const payload = isBinary ? uint8ToBase64(result.binaryBytes) : result.content;
+        const writtenPath = await exportDeliverable(PROJECT, target, isBinary, payload);
+        setExportStatus(
+          L(
+            `تم الحفظ الذري في: ${writtenPath} (${result.sizeBytes.toLocaleString("en-US")} بايت)`,
+            `Written atomically to: ${writtenPath} (${result.sizeBytes.toLocaleString("en-US")} bytes)`
+          )
+        );
+        setError(null);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [L, artifacts.docBlocks, artifacts.slides, intelSnapshot, lang, state, writeCapsule]
+  );
+
   if (!desktop) {
     return (
       <section className="safi-desktop-studio safi-desktop-studio--locked" role="note">
@@ -442,10 +658,22 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
       </header>
 
       <div className="safi-desktop-studio__toolbar">
-        <button type="button" onClick={() => void openFile()} disabled={busy}>
+        <button
+          type="button"
+          onClick={() => void openFile()}
+          disabled={busy}
+          data-tutorial-target="open-workbook"
+        >
           <FileSpreadsheet size={16} aria-hidden="true" />
           {L("افتح ملفاً", "Open a file")}
         </button>
+        <UnifiedTooltipBadge
+          tooltipId="tip_open_workbook"
+          text={L(
+            "يستورد ملفات .xlsx/.xlsm/.xls/.ods/.csv/.tsv محليًا ويحلل الأوراق الظاهرة والمخفية.",
+            "Imports .xlsx/.xlsm/.xls/.ods/.csv/.tsv locally and audits visible & hidden sheets."
+          )}
+        />
         <button type="button" onClick={() => void save()} disabled={state === null}>
           <Save size={16} aria-hidden="true" /> {L("حفظ", "Save")}
         </button>
@@ -470,6 +698,30 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
           <Download size={16} aria-hidden="true" />
           {L("تصدير كبسولة (.safi.html)", "Export capsule (.safi.html)")}
         </button>
+        <button
+          type="button"
+          onClick={() => setExportModalOpen(true)}
+          disabled={state === null || busy}
+          data-testid="open-export-deliverable-btn"
+          data-tutorial-target="export-deliverable-btn"
+        >
+          <Download size={16} aria-hidden="true" />
+          {L("تصدير المخرجات (XLSX / PDF / PPTX / DOCX)", "Export Deliverables")}
+        </button>
+        <button type="button" onClick={() => setTutorialOpen(true)} data-testid="open-tutorial-btn">
+          <HelpCircle size={16} aria-hidden="true" /> {L("الجولة التعليمية", "Tutorial")}
+        </button>
+        {analysisProgress ? (
+          <button
+            type="button"
+            className="studio-chip-btn"
+            data-testid="cancel-analysis-btn"
+            onClick={() => analysisAbortRef.current?.abort()}
+          >
+            <Ban size={14} aria-hidden="true" /> {analysisProgress.phase} ({analysisProgress.pct}%)
+            · {L("إلغاء", "Cancel")}
+          </button>
+        ) : null}
         {state !== null ? (
           <button
             type="button"
@@ -480,6 +732,22 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
           </button>
         ) : null}
       </div>
+
+      <InteractiveTutorialOverlay
+        language={lang}
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
+      />
+
+      <DeliverableExportModal
+        language={lang}
+        open={exportModalOpen}
+        busy={busy}
+        hiddenSheetCount={wbDetails?.hiddenSheets ?? 0}
+        lastStatus={exportStatus}
+        onClose={() => setExportModalOpen(false)}
+        onExportFormat={handleExportDeliverable}
+      />
 
       {recalculating ? (
         <p className="safi-desktop-studio__note" role="status" aria-live="polite">
@@ -629,11 +897,19 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             onCompareScenarios={(left, right) => compareScenarios(PROJECT, left, right)}
           />
 
+          <WorkbookIntelligenceDrawer
+            language={lang}
+            details={wbDetails}
+            busy={busy}
+            onSelectRegion={handleSelectRegion}
+          />
+
           <div
             className="studio-tabs"
             role="tablist"
             aria-label={L("أوضاع الاستوديو الرباعي", "Quad-Studio workspaces")}
             onKeyDown={handleTabKeyDown}
+            data-tutorial-target="slides-doc-tabs"
           >
             <button
               type="button"
@@ -647,8 +923,21 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             <button
               type="button"
               role="tab"
+              aria-selected={mode === "intelligence"}
+              className="studio-tab-btn"
+              data-testid="tab-intelligence"
+              onClick={() => setMode("intelligence")}
+            >
+              <BrainCircuit size={15} aria-hidden="true" />{" "}
+              {L("الذكاء والتحقق", "Intelligence & Q&A")} (
+              {intelSnapshot?.questions.filter((q) => q.status === "Pending").length ?? 0})
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={mode === "dashboard"}
               className="studio-tab-btn"
+              data-tutorial-target="dashboard-tab"
               onClick={() => setMode("dashboard")}
             >
               <BarChart3 size={15} aria-hidden="true" /> {L("اللوحة", "Dashboard")} (
@@ -696,6 +985,26 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             </button>
           </div>
 
+          {mode === "intelligence" ? (
+            <div role="tabpanel" aria-label={L("الذكاء والتحقق", "Intelligence & Q&A")}>
+              <IntelligenceAndAssistantPanel
+                language={lang}
+                model={intelSnapshot?.semanticModel ?? null}
+                report={intelSnapshot?.verifiedReport ?? null}
+                questions={intelSnapshot?.questions ?? []}
+                privacySettings={artifacts.privacySettings ?? DEFAULT_PRIVACY}
+                onResolveQuestion={(res: StudioQuestionResolutionArtifact) => {
+                  const prev = artifacts.questionResolutions ?? [];
+                  const next = [...prev.filter((r) => r.questionId !== res.questionId), res];
+                  void persistArtifacts({ ...artifacts, questionResolutions: next });
+                }}
+                onUpdatePrivacy={(nextPrivacy) => {
+                  void persistArtifacts({ ...artifacts, privacySettings: nextPrivacy });
+                }}
+              />
+            </div>
+          ) : null}
+
           {mode === "dashboard" ? (
             <div role="tabpanel" aria-label={L("اللوحة", "Dashboard")}>
               <DashboardChartsView
@@ -728,6 +1037,24 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
                 onUpdateSlides={(nextSlides: readonly StudioSlideArtifact[]) => {
                   void persistArtifacts({ ...artifacts, slides: nextSlides });
                 }}
+                onAutoGenerateDeck={() => {
+                  if (!intelSnapshot) return;
+                  const deck = buildExportPresentationDeck(
+                    intelSnapshot.semanticModel,
+                    intelSnapshot.verifiedReport,
+                    []
+                  );
+                  const generated: StudioSlideArtifact[] = deck.slides.map((s) => ({
+                    id: s.slideId,
+                    title: s.title,
+                    body: [...s.bullets, s.subtitle].filter(Boolean).join("\n"),
+                    metricId: state.metrics[0]?.id ?? null,
+                    chartIndex: null,
+                    layout: "kpi_split",
+                    presenterNotes: s.presenterNotes
+                  }));
+                  void persistArtifacts({ ...artifacts, slides: generated });
+                }}
               />
             </div>
           ) : null}
@@ -740,6 +1067,28 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
                 docBlocks={artifacts.docBlocks}
                 onUpdateDocBlocks={(nextBlocks: readonly StudioDocBlockArtifact[]) => {
                   void persistArtifacts({ ...artifacts, docBlocks: nextBlocks });
+                }}
+                onAutoGenerateReport={() => {
+                  if (!intelSnapshot) return;
+                  const docRep = buildExportDocumentReport(
+                    intelSnapshot.semanticModel,
+                    intelSnapshot.verifiedReport,
+                    []
+                  );
+                  const generated: StudioDocBlockArtifact[] = docRep.sections.map((sec) => ({
+                    id: sec.sectionId,
+                    kind: sec.kind === "KeyFindings" ? "callout" : "paragraph",
+                    title: sec.heading,
+                    content: [...sec.paragraphs, ...sec.bulletItems.map((b) => `• ${b}`)].join(
+                      "\n"
+                    ),
+                    metricId: state.metrics[0]?.id ?? null,
+                    authoredBy: "user",
+                    pageBreakBefore: sec.pageBreakBefore,
+                    headerText: docRep.headerText,
+                    footerText: docRep.footerText
+                  }));
+                  void persistArtifacts({ ...artifacts, docBlocks: generated });
                 }}
               />
             </div>

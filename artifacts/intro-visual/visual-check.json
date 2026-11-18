@@ -1,0 +1,54 @@
+{
+  "viewport": "1440x900",
+  "cacheDisabled": true,
+  "networkProfile": "3G throttled (150ms latency, 200KB/s download)",
+  "cpuThrottleRate": 4,
+  "handoff": {
+    "bootFrame": {
+      "orb": {
+        "x": 622,
+        "y": 238.296875,
+        "width": 196,
+        "height": 196
+      },
+      "ringAnimation": "safiIntroBootHalo",
+      "orbitAnimation": "safiIntroOrbit",
+      "visibleDataDots": 9,
+      "visibleBars": 0
+    },
+    "reactFrame": {
+      "orb": {
+        "x": 622,
+        "y": 238.296875,
+        "width": 196,
+        "height": 196
+      },
+      "ringAnimation": "safiIntroBootHalo",
+      "orbitAnimation": "safiIntroOrbit",
+      "visibleDataDots": 9,
+      "visibleBars": 0
+    },
+    "reactMountedAt": 1785.6000000238419,
+    "motionStartedAt": 1785.6000000238419,
+    "motionCompletedAt": null,
+    "applicationEntryMountedAt": null
+  },
+  "motionStartDelayMs": 0,
+  "entranceMotionDurationMs": 398.80000001192093,
+  "applicationEntryMountedAt": 4015.100000023842,
+  "siteHandoff": {
+    "authenticationGateMounted": false,
+    "workspaceMounted": false,
+    "applicationEntryMounted": false,
+    "motionCompletedAt": 2184.400000035763,
+    "introOpacity": 1,
+    "introClipPath": "circle(1718.03px at 1416px 639.688px)",
+    "arrowPath": "M 789.703125 639.6875 H 1416",
+    "arrowDasharray": 626.297,
+    "arrowDashoffset": 0,
+    "exitStartedAt": 3193.900000035763
+  },
+  "exitDurationMs": 821.1999999880791,
+  "reducedMotionPassed": true,
+  "pageErrors": []
+}

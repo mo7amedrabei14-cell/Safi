@@ -29,32 +29,33 @@ describe("Universal Data Intelligence Engine & Canonical Semantic Model (Phase 2
     const model = buildSemanticWorkbookModel(ingestion);
     expect(model.tables).toHaveLength(2);
 
-    const salesTable = model.tables[0]!;
-    const empIdCol = salesTable.columns.find((c) => c.headerName === "Employee_ID")!;
-    expect(empIdCol.analyticalRole).toBe("Identifier");
-    expect(empIdCol.isIdentifier).toBe(true);
-    expect(empIdCol.aggregationAllowed).toBe(false);
-    expect(empIdCol.numericStats).toBeUndefined();
+    const salesTable = model.tables[0];
+    expect(salesTable).toBeDefined();
+    const empIdCol = salesTable?.columns.find((c) => c.headerName === "Employee_ID");
+    expect(empIdCol?.analyticalRole).toBe("Identifier");
+    expect(empIdCol?.isIdentifier).toBe(true);
+    expect(empIdCol?.aggregationAllowed).toBe(false);
+    expect(empIdCol?.numericStats).toBeUndefined();
 
-    const phoneCol = salesTable.columns.find((c) => c.headerName === "Phone")!;
-    expect(phoneCol.analyticalRole).toBe("Identifier");
-    expect(phoneCol.piiSensitivity).toBe("PersonalContact");
-    expect(phoneCol.aggregationAllowed).toBe(false);
+    const phoneCol = salesTable?.columns.find((c) => c.headerName === "Phone");
+    expect(phoneCol?.analyticalRole).toBe("Identifier");
+    expect(phoneCol?.piiSensitivity).toBe("PersonalContact");
+    expect(phoneCol?.aggregationAllowed).toBe(false);
 
-    const dateCol = salesTable.columns.find((c) => c.headerName === "Sale_Date")!;
-    expect(dateCol.analyticalRole).toBe("Temporal");
-    expect(dateCol.dateStats?.minDateIso).toBe("2026-01-05");
-    expect(dateCol.dateStats?.maxDateIso).toBe("2026-02-02");
-    expect(dateCol.dateStats?.granularity).toBe("Weekly");
+    const dateCol = salesTable?.columns.find((c) => c.headerName === "Sale_Date");
+    expect(dateCol?.analyticalRole).toBe("Temporal");
+    expect(dateCol?.dateStats?.minDateIso).toBe("2026-01-05");
+    expect(dateCol?.dateStats?.maxDateIso).toBe("2026-02-02");
+    expect(dateCol?.dateStats?.granularity).toBe("Weekly");
 
-    const revCol = salesTable.columns.find((c) => c.headerName === "Revenue_EGP")!;
-    expect(revCol.analyticalRole).toBe("Measure");
-    expect(revCol.semanticType).toBe("CurrencyAmount");
-    expect(revCol.currencyCode).toBe("EGP");
-    expect(revCol.numericStats?.sum).toBe(13600);
-    expect(revCol.numericStats?.median).toBe(1200);
-    expect(revCol.numericStats?.outlierCount).toBe(1);
-    expect(revCol.numericStats?.outlierValues).toEqual([9000]);
+    const revCol = salesTable?.columns.find((c) => c.headerName === "Revenue_EGP");
+    expect(revCol?.analyticalRole).toBe("Measure");
+    expect(revCol?.semanticType).toBe("CurrencyAmount");
+    expect(revCol?.currencyCode).toBe("EGP");
+    expect(revCol?.numericStats?.sum).toBe(13600);
+    expect(revCol?.numericStats?.median).toBe(1200);
+    expect(revCol?.numericStats?.outlierCount).toBe(1);
+    expect(revCol?.numericStats?.outlierValues).toEqual([9000]);
 
     // Cross-sheet relationship discovered (Sales_Ledger.Branch_Code -> Branches_Master.Branch_Code = N:1)
     expect(model.relationships).toHaveLength(1);

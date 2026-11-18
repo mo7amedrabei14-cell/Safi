@@ -15,26 +15,52 @@ import { VerifiedNumberChip } from "./VerifiedNumberChip";
 const AGGREGATES = ["SUM", "AVG", "COUNT", "MIN", "MAX"] as const;
 export const CHART_TYPES: readonly StudioChartType[] = [
   "bar",
+  "column",
   "line",
   "area",
+  "stacked",
+  "combo",
   "pie",
   "donut",
   "scatter",
+  "bubble",
   "histogram",
-  "kpi"
+  "boxplot",
+  "heatmap",
+  "treemap",
+  "waterfall",
+  "funnel",
+  "gauge",
+  "kpi",
+  "table",
+  "pivotsummary",
+  "geographic"
 ];
 
 const CHART_TYPE_LABELS: Readonly<
   Record<StudioChartType, { readonly en: string; readonly ar: string }>
 > = {
-  bar: { en: "Bar", ar: "أعمدة (Bar)" },
+  bar: { en: "Bar", ar: "شريطي أفقي (Bar)" },
+  column: { en: "Column", ar: "أعمدة عمودية (Column)" },
   line: { en: "Line", ar: "خطي (Line)" },
   area: { en: "Area", ar: "مساحي (Area)" },
+  stacked: { en: "Stacked", ar: "مكدّس (Stacked)" },
+  combo: { en: "Combo", ar: "مركّب (Combo)" },
   pie: { en: "Pie", ar: "دائري (Pie)" },
   donut: { en: "Donut", ar: "حلقي (Donut)" },
   scatter: { en: "Scatter", ar: "انتشار (Scatter)" },
+  bubble: { en: "Bubble", ar: "فقاعي (Bubble)" },
   histogram: { en: "Histogram", ar: "مدرج تكراري (Histogram)" },
-  kpi: { en: "KPI", ar: "بطاقة مؤشر (KPI)" }
+  boxplot: { en: "Box Plot", ar: "صندوقي (BoxPlot)" },
+  heatmap: { en: "Heatmap", ar: "خريطة حرارية (Heatmap)" },
+  treemap: { en: "Treemap", ar: "خريطة شجرية (Treemap)" },
+  waterfall: { en: "Waterfall", ar: "شلالي (Waterfall)" },
+  funnel: { en: "Funnel", ar: "قمعي (Funnel)" },
+  gauge: { en: "Gauge", ar: "مؤشر قياس (Gauge)" },
+  kpi: { en: "KPI", ar: "بطاقة مؤشر (KPI)" },
+  table: { en: "Table", ar: "جدول ملخص (Table)" },
+  pivotsummary: { en: "Pivot Summary", ar: "جدول محوري (Pivot)" },
+  geographic: { en: "Geographic", ar: "جغرافي (Geographic)" }
 };
 
 const CHART_SLICE_COLORS = [
@@ -239,8 +265,8 @@ export function DashboardChartsView({
           <h3>{isAr ? "لوحة المؤشرات والرسوم التفاعلية" : "CodeMotion Reactive Dashboard"}</h3>
           <p className="studio-muted-note">
             {isAr
-              ? "كل المؤشرات والرسوم الـ 8 تُحسب في محرك Rust وتتحدث تلقائيًا فور تعديل البيانات أو السيناريو."
-              : "Every KPI and all 8 chart types are computed in Rust and update automatically on edits or What-If scenarios."}
+              ? "كل المؤشرات والرسوم الـ 21 تُحسب في محرك Rust وتتحدث تلقائيًا فور تعديل البيانات أو السيناريو."
+              : "Every KPI and all 21 chart types are computed in Rust and update automatically on edits or What-If scenarios."}
           </p>
         </div>
         {activeCrossFilter ? (
@@ -493,7 +519,8 @@ export function DashboardChartsView({
 
                 {(resolvedType === "line" ||
                   resolvedType === "area" ||
-                  resolvedType === "scatter") &&
+                  resolvedType === "scatter" ||
+                  resolvedType === "bubble") &&
                 points.length > 0 ? (
                   <svg
                     className="studio-chart-svg"
@@ -502,7 +529,7 @@ export function DashboardChartsView({
                     role="img"
                     aria-label={chart.title}
                   >
-                    {resolvedType === "scatter" ? (
+                    {resolvedType === "scatter" || resolvedType === "bubble" ? (
                       <>
                         <line
                           x1="8"
@@ -542,13 +569,430 @@ export function DashboardChartsView({
                     {points.map((pt, pIdx) => (
                       <circle
                         key={`${pt.label}_${pIdx}`}
+                        data-bubble-point={resolvedType === "bubble" ? pIdx : undefined}
+                        data-scatter-point={resolvedType === "scatter" ? pIdx : undefined}
                         cx={pt.xPct}
                         cy={pt.yPct}
-                        r="3"
-                        fill="currentColor"
+                        r={resolvedType === "bubble" ? Number(pt.sharePct ?? 4.5) : 3}
+                        fill={
+                          resolvedType === "bubble"
+                            ? CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]
+                            : "currentColor"
+                        }
+                        fillOpacity={resolvedType === "bubble" ? 0.72 : 1}
                       />
                     ))}
                   </svg>
+                ) : null}
+
+                {resolvedType === "column" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    <line
+                      x1="8"
+                      y1="90"
+                      x2="94"
+                      y2="90"
+                      stroke="currentColor"
+                      strokeOpacity="0.35"
+                      strokeWidth="1"
+                    />
+                    {points.map((pt, pIdx) => {
+                      const slotW = 80 / Math.max(points.length, 1);
+                      const barW = Math.max(slotW * 0.65, 5);
+                      const x = 10 + pIdx * slotW + (slotW - barW) * 0.5;
+                      const topY = Math.max(
+                        12,
+                        Math.min(90, pt.startPct || 90 - (pt.ratioPct * 76) / 100)
+                      );
+                      const h = Math.max(2, 90 - topY);
+                      return (
+                        <rect
+                          key={`${pt.label}_${pIdx}`}
+                          data-column-bar={pIdx}
+                          x={x.toFixed(2)}
+                          y={topY.toFixed(2)}
+                          width={barW.toFixed(2)}
+                          height={h.toFixed(2)}
+                          rx="1.5"
+                          fill={CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]}
+                        />
+                      );
+                    })}
+                  </svg>
+                ) : null}
+
+                {resolvedType === "stacked" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 44"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    {points.map((pt, pIdx) => (
+                      <rect
+                        key={`${pt.label}_${pIdx}`}
+                        data-stacked-segment={pIdx}
+                        x={(4 + Math.min(100, pt.startPct) * 0.92).toFixed(2)}
+                        y="12"
+                        width={Math.max(1.5, Math.min(100, pt.ratioPct) * 0.92).toFixed(2)}
+                        height="20"
+                        fill={CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]}
+                      />
+                    ))}
+                  </svg>
+                ) : null}
+
+                {resolvedType === "combo" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    <line
+                      x1="8"
+                      y1="90"
+                      x2="94"
+                      y2="90"
+                      stroke="currentColor"
+                      strokeOpacity="0.3"
+                      strokeWidth="1"
+                    />
+                    {points.map((pt, pIdx) => {
+                      const slotW = 76 / Math.max(points.length, 1);
+                      const barW = Math.max(slotW * 0.55, 4);
+                      const x = 12 + pIdx * slotW + (slotW - barW) * 0.5;
+                      const topY = Math.max(
+                        12,
+                        Math.min(90, pt.startPct || 90 - (pt.ratioPct * 76) / 100)
+                      );
+                      return (
+                        <rect
+                          key={`${pt.label}_${pIdx}`}
+                          data-combo-bar={pIdx}
+                          x={x.toFixed(2)}
+                          y={topY.toFixed(2)}
+                          width={barW.toFixed(2)}
+                          height={Math.max(2, 90 - topY).toFixed(2)}
+                          fill="#2563eb"
+                          fillOpacity="0.78"
+                        />
+                      );
+                    })}
+                    <polyline
+                      data-combo-line="1"
+                      points={polyPoints}
+                      fill="none"
+                      stroke="#f59e0b"
+                      strokeWidth="2.4"
+                    />
+                  </svg>
+                ) : null}
+
+                {resolvedType === "gauge" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg studio-chart-svg--circle"
+                    viewBox="0 0 100 80"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    <path
+                      data-gauge-track="1"
+                      d="M 15.00 68.00 A 35 35 0 0 1 85.00 68.00"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeOpacity="0.18"
+                      strokeWidth="10"
+                      strokeLinecap="round"
+                    />
+                    {points[0]?.svgPath ? (
+                      <path
+                        data-gauge-arc="1"
+                        d={points[0].svgPath}
+                        fill="none"
+                        stroke="#22d3ee"
+                        strokeWidth="10"
+                        strokeLinecap="round"
+                      />
+                    ) : null}
+                    <text
+                      x="50"
+                      y="64"
+                      textAnchor="middle"
+                      fill="currentColor"
+                      fontSize="11"
+                      fontWeight="700"
+                    >
+                      {`${points[0]?.ratioPct ?? 0}%`}
+                    </text>
+                  </svg>
+                ) : null}
+
+                {resolvedType === "boxplot" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    <line
+                      x1="8"
+                      y1="92"
+                      x2="94"
+                      y2="92"
+                      stroke="currentColor"
+                      strokeOpacity="0.3"
+                      strokeWidth="1"
+                    />
+                    {points.map((pt, pIdx) =>
+                      pt.svgPath ? (
+                        <path
+                          key={`${pt.label}_${pIdx}`}
+                          data-boxplot-whisker={pIdx}
+                          d={pt.svgPath}
+                          fill="#1d4ed8"
+                          fillOpacity="0.4"
+                          stroke="#38bdf8"
+                          strokeWidth="1.5"
+                        />
+                      ) : null
+                    )}
+                  </svg>
+                ) : null}
+
+                {resolvedType === "heatmap" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    {points.map((pt, pIdx) => {
+                      const cols = Math.max(2, points[0]?.startPct ?? 2);
+                      const rows = Math.max(1, Math.ceil(points.length / cols));
+                      const cw = 84 / cols;
+                      const ch = 76 / rows;
+                      const c = pIdx % cols;
+                      const r = Math.floor(pIdx / cols);
+                      const opacity = Math.min(
+                        0.98,
+                        0.2 + (Math.min(100, pt.ratioPct) / 100) * 0.78
+                      );
+                      return (
+                        <rect
+                          key={`${pt.label}_${pIdx}`}
+                          data-heatmap-cell={pIdx}
+                          x={(8 + c * cw + 1).toFixed(2)}
+                          y={(12 + r * ch + 1).toFixed(2)}
+                          width={Math.max(4, cw - 2).toFixed(2)}
+                          height={Math.max(4, ch - 2).toFixed(2)}
+                          rx="2"
+                          fill="#06b6d4"
+                          fillOpacity={opacity.toFixed(2)}
+                        />
+                      );
+                    })}
+                  </svg>
+                ) : null}
+
+                {resolvedType === "treemap" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    {points.map((pt, pIdx) =>
+                      pt.svgPath ? (
+                        <g key={`${pt.label}_${pIdx}`}>
+                          <path
+                            data-treemap-tile={pIdx}
+                            d={pt.svgPath}
+                            fill={CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]}
+                            fillOpacity="0.85"
+                            stroke="currentColor"
+                            strokeOpacity="0.25"
+                            strokeWidth="1"
+                          />
+                          <text
+                            x={pt.xPct}
+                            y={pt.yPct}
+                            textAnchor="middle"
+                            fill="#ffffff"
+                            fontSize="5.5"
+                          >
+                            {pt.label}
+                          </text>
+                        </g>
+                      ) : null
+                    )}
+                  </svg>
+                ) : null}
+
+                {resolvedType === "waterfall" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    <line
+                      x1="8"
+                      y1="90"
+                      x2="94"
+                      y2="90"
+                      stroke="currentColor"
+                      strokeOpacity="0.3"
+                      strokeWidth="1"
+                    />
+                    {points.map((pt, pIdx) => {
+                      const slotW = 80 / Math.max(points.length, 1);
+                      const barW = Math.max(4, slotW * 0.65);
+                      const x = 10 + pIdx * slotW;
+                      const top = Math.min(90, pt.ratioPct);
+                      const bottom = Math.min(92, pt.startPct);
+                      const h = Math.max(3, Math.abs(bottom - top));
+                      const fill =
+                        pIdx + 1 === points.length
+                          ? "#2563eb"
+                          : pt.value.startsWith("-")
+                            ? "#ef4444"
+                            : "#10b981";
+                      return (
+                        <rect
+                          key={`${pt.label}_${pIdx}`}
+                          data-waterfall-step={pIdx}
+                          x={x.toFixed(2)}
+                          y={top.toFixed(2)}
+                          width={barW.toFixed(2)}
+                          height={h.toFixed(2)}
+                          fill={fill}
+                        />
+                      );
+                    })}
+                  </svg>
+                ) : null}
+
+                {resolvedType === "funnel" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    {points.map((pt, pIdx) => {
+                      const rowH = 80 / Math.max(points.length, 1);
+                      const y1 = 10 + pIdx * rowH;
+                      const y2 = y1 + Math.max(4, rowH - 2);
+                      const wTop = Math.max(12, Math.min(100, pt.ratioPct)) * 0.84;
+                      const wBot =
+                        Math.max(10, Math.min(100, pt.startPct || pt.ratioPct * 0.75)) * 0.84;
+                      const pts = `${50 - wTop / 2},${y1} ${50 + wTop / 2},${y1} ${50 + wBot / 2},${y2} ${50 - wBot / 2},${y2}`;
+                      return (
+                        <polygon
+                          key={`${pt.label}_${pIdx}`}
+                          data-funnel-stage={pIdx}
+                          points={pts}
+                          fill={CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]}
+                          fillOpacity="0.88"
+                        />
+                      );
+                    })}
+                  </svg>
+                ) : null}
+
+                {resolvedType === "geographic" && points.length > 0 ? (
+                  <svg
+                    className="studio-chart-svg"
+                    viewBox="0 0 100 100"
+                    role="img"
+                    aria-label={chart.title}
+                  >
+                    <path
+                      data-geo-backdrop="1"
+                      d="M 12 18 L 78 14 L 88 45 L 74 88 L 18 86 L 14 48 Z"
+                      fill="currentColor"
+                      fillOpacity="0.06"
+                      stroke="currentColor"
+                      strokeOpacity="0.25"
+                      strokeWidth="1.2"
+                    />
+                    <path
+                      d="M 46 20 Q 52 38 50 56 T 56 84"
+                      fill="none"
+                      stroke="#2563eb"
+                      strokeOpacity="0.45"
+                      strokeWidth="2"
+                    />
+                    {points.map((pt, pIdx) => (
+                      <circle
+                        key={`${pt.label}_${pIdx}`}
+                        data-geo-marker={pIdx}
+                        cx={pt.xPct}
+                        cy={pt.yPct}
+                        r={2.5 + (Math.min(100, pt.ratioPct) / 100) * 6}
+                        fill={CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]}
+                        fillOpacity="0.82"
+                      />
+                    ))}
+                  </svg>
+                ) : null}
+
+                {(resolvedType === "table" || resolvedType === "pivotsummary") &&
+                points.length > 0 ? (
+                  <div className="studio-mini-table-wrap">
+                    <table className="studio-mini-table" data-chart-table={resolvedType}>
+                      <thead>
+                        <tr>
+                          <th>
+                            {resolvedType === "pivotsummary"
+                              ? isAr
+                                ? "المجموعة"
+                                : "Group"
+                              : isAr
+                                ? "الفئة"
+                                : "Category"}
+                          </th>
+                          <th>{isAr ? "القيمة" : "Value"}</th>
+                          <th>
+                            {resolvedType === "pivotsummary"
+                              ? isAr
+                                ? "التفاصيل"
+                                : "Stats"
+                              : isAr
+                                ? "الحصة"
+                                : "Share"}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {points.map((pt, pIdx) => (
+                          <tr key={`${pt.label}_${pIdx}`}>
+                            <td>{pt.label}</td>
+                            <td>{pt.value}</td>
+                            <td>
+                              {resolvedType === "pivotsummary"
+                                ? `${pt.xValue ?? ""} (${pt.sharePct ?? 0}%)`
+                                : `${pt.sharePct ?? 0}%`}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : null}
 
                 {resolvedType === "bar" ? (

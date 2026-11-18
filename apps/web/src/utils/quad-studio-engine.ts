@@ -10,13 +10,8 @@
  *   and Portable JSON Import/Export across all Studios)
  */
 
-import type {
-  CanonicalKpiMetric,
-  SemanticWorkbookModel
-} from "./semantic-intelligence";
-import type {
-  VerifiedAnalysisReport
-} from "./verified-analysis-engine";
+import type { CanonicalKpiMetric, SemanticWorkbookModel } from "./semantic-intelligence";
+import type { VerifiedAnalysisReport } from "./verified-analysis-engine";
 
 // ============================================================================
 // PHASE 8: SHARED TEMPLATE & DESIGN SYSTEM
@@ -144,7 +139,10 @@ export const BUILTIN_UNIFIED_TEMPLATES: readonly UnifiedStudioTemplate[] = [
  * Safely migrates a legacy v1 or partial template payload to canonical `UnifiedStudioTemplate` (`schemaVersion: 2`).
  */
 export function migrateAndValidateTemplate(raw: unknown): UnifiedStudioTemplate {
-  const fallback = BUILTIN_UNIFIED_TEMPLATES[0]!;
+  const fallback = BUILTIN_UNIFIED_TEMPLATES[0];
+  if (!fallback) {
+    throw new Error("SF-SYS-001: Missing default studio template.");
+  }
   if (typeof raw !== "object" || raw === null) {
     return fallback;
   }
@@ -247,8 +245,7 @@ export function migrateAndValidateTemplate(raw: unknown): UnifiedStudioTemplate 
           ? rawTokens.pageMarginMm
           : fallback.tokens.pageMarginMm
     },
-    createdAtIso:
-      typeof obj.createdAtIso === "string" ? obj.createdAtIso : fallback.createdAtIso
+    createdAtIso: typeof obj.createdAtIso === "string" ? obj.createdAtIso : fallback.createdAtIso
   };
 }
 
@@ -362,11 +359,13 @@ export interface DashboardStudioState {
   readonly title: string;
   readonly templateId: string;
   readonly globalFilters: readonly DashboardFilterCondition[];
-  readonly crossFilterSelection?: {
-    readonly sourceWidgetId: string;
-    readonly dimensionColumn: string;
-    readonly selectedValue: string;
-  } | undefined;
+  readonly crossFilterSelection?:
+    | {
+        readonly sourceWidgetId: string;
+        readonly dimensionColumn: string;
+        readonly selectedValue: string;
+      }
+    | undefined;
   readonly calculatedMetrics: readonly CalculatedMetricDefinition[];
   readonly widgets: readonly DashboardWidget[];
   readonly undoStack: readonly (readonly DashboardWidget[])[];
@@ -401,14 +400,16 @@ export function computeWidgetDataPoints(
     | "aggregation"
     | "sortMode"
     | "localFilters"
-  >,
+  > & { readonly sheetName?: string | undefined },
   globalFilters: readonly DashboardFilterCondition[] = [],
   crossFilter?: DashboardStudioState["crossFilterSelection"],
   calculatedMetrics: readonly CalculatedMetricDefinition[] = []
 ): ChartDataPoint[] {
   const rawRegion = model.ingestionReport.worksheets
     .flatMap((w) => w.tables)
-    .find((t) => t.tableId === widget.tableId);
+    .find(
+      (t) => t.tableId === widget.tableId && (!widget.sheetName || t.sheetName === widget.sheetName)
+    );
   if (!rawRegion || rawRegion.dataRows.length === 0) return [];
 
   const headerIndex = new Map<string, number>();
@@ -426,10 +427,7 @@ export function computeWidgetDataPoints(
     ? headerIndex.get(widget.secondaryMeasureColumn)
     : undefined;
 
-  const allFilters: DashboardFilterCondition[] = [
-    ...globalFilters,
-    ...widget.localFilters
-  ];
+  const allFilters: DashboardFilterCondition[] = [...globalFilters, ...widget.localFilters];
   if (crossFilter && crossFilter.dimensionColumn) {
     allFilters.push({
       columnName: crossFilter.dimensionColumn,
@@ -745,8 +743,8 @@ export function applyDashboardEdit(
     });
 
   if (action.type === "UNDO") {
-    if (state.undoStack.length === 0) return state;
-    const previous = state.undoStack[state.undoStack.length - 1]!;
+    const previous = state.undoStack[state.undoStack.length - 1];
+    if (!previous) return state;
     return {
       ...state,
       widgets: recomputeAll(
@@ -761,8 +759,8 @@ export function applyDashboardEdit(
   }
 
   if (action.type === "REDO") {
-    if (state.redoStack.length === 0) return state;
-    const next = state.redoStack[state.redoStack.length - 1]!;
+    const next = state.redoStack[state.redoStack.length - 1];
+    if (!next) return state;
     return {
       ...state,
       widgets: recomputeAll(
@@ -823,8 +821,8 @@ export function applyDashboardEdit(
     nextWidgets = nextWidgets.filter((w) => w.widgetId !== action.widgetId);
   } else if (action.type === "DUPLICATE_WIDGET") {
     const idx = nextWidgets.findIndex((w) => w.widgetId === action.widgetId);
-    if (idx >= 0) {
-      const orig = nextWidgets[idx]!;
+    const orig = idx >= 0 ? nextWidgets[idx] : undefined;
+    if (orig) {
       const copy: DashboardWidget = {
         ...orig,
         widgetId: `${orig.widgetId}_copy_${nextWidgets.length + 1}`,
@@ -859,7 +857,7 @@ export function applyDashboardEdit(
 }
 
 /**
- * Renders any of the 21 supported `DashboardChartType` visuals as a clean, self-contained SVG string.
+ * Renders any of the 21 supported `DashboardChartType` visuals as a clean, genuinely distinct SVG visual.
  */
 export function renderChartSvg(
   chartType: DashboardChartType,
@@ -868,76 +866,326 @@ export function renderChartSvg(
   primaryColor = "#0284c7"
 ): string {
   const esc = (s: string): string =>
-    s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+  const palette = ["#0284c7", "#0d9488", "#6366f1", "#f59e0b", "#ec4899", "#10b981"];
   const safePoints = points.length > 0 ? points.slice(0, 12) : [{ label: "N/A", value: 0 }];
   const maxVal = Math.max(1, ...safePoints.map((p) => Math.abs(p.value)));
+  const minVal = Math.min(...safePoints.map((p) => p.value));
+  const span = Math.max(1, maxVal - Math.min(0, minVal));
+  const totalAbs = Math.max(
+    1,
+    safePoints.reduce((acc, p) => acc + Math.max(0, p.value), 0)
+  );
+  const header = `<rect width="420" height="210" rx="10" fill="#ffffff" stroke="#e2e8f0"/><text x="18" y="26" font-size="13.5" font-weight="600" fill="#0f172a">${esc(title)} (${chartType})</text>`;
 
-  if (chartType === "Pie" || chartType === "Donut" || chartType === "Gauge") {
-    const palette = ["#0284c7", "#0d9488", "#6366f1", "#f59e0b", "#ec4899", "#10b981"];
-    const total = Math.max(
-      1,
-      safePoints.reduce((acc, p) => acc + Math.max(0, p.value), 0)
-    );
-    let cumulative = 0;
-    const slices = safePoints
-      .map((p, i) => {
-        const frac = Math.max(0, p.value) / total;
-        const dash = `${(frac * 251.2).toFixed(2)} 251.2`;
-        const offset = (-cumulative * 251.2).toFixed(2);
-        cumulative += frac;
-        const color = palette[i % palette.length] ?? primaryColor;
-        return `<circle r="40" cx="110" cy="115" fill="transparent" stroke="${color}" stroke-width="${chartType === "Pie" ? 80 : 24}" stroke-dasharray="${dash}" stroke-dashoffset="${offset}" />`;
-      })
-      .join("");
-    const legend = safePoints
-      .slice(0, 5)
-      .map(
-        (p, i) =>
-          `<text x="210" y="${70 + i * 24}" font-size="12" fill="#334155">${esc(p.label)}: ${p.value.toLocaleString("en-US")}</text>`
-      )
-      .join("");
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 210" data-chart-type="${chartType}"><rect width="420" height="210" rx="10" fill="#ffffff"/><text x="18" y="28" font-size="14" font-weight="600" fill="#0f172a">${esc(title)} (${chartType})</text>${slices}${legend}</svg>`;
-  }
-
-  if (chartType === "Line" || chartType === "Area" || chartType === "Combo") {
-    const coords = safePoints.map((p, idx) => {
-      const x = 45 + (idx * 330) / Math.max(1, safePoints.length - 1);
-      const y = 165 - (Math.max(0, p.value) / maxVal) * 110;
-      return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)), label: p.label, val: p.value };
-    });
-    const polyPoints = coords.map((c) => `${c.x},${c.y}`).join(" ");
-    const firstX = coords[0]?.x ?? 45;
-    const lastX = coords[coords.length - 1]?.x ?? 375;
-    const areaPath =
-      chartType === "Area"
-        ? `<polygon points="${firstX},165 ${polyPoints} ${lastX},165" fill="${primaryColor}" fill-opacity="0.18"/>`
+  switch (chartType) {
+    case "Pie":
+    case "Donut": {
+      const isDonut = chartType === "Donut";
+      let cumulative = 0;
+      const slices = safePoints
+        .map((p, i) => {
+          const frac = Math.max(0, p.value) / totalAbs;
+          const dash = `${(frac * 251.2).toFixed(2)} 251.2`;
+          const offset = (-cumulative * 251.2).toFixed(2);
+          cumulative += frac;
+          const color = palette[i % palette.length] ?? primaryColor;
+          return `<circle r="40" cx="110" cy="115" fill="transparent" stroke="${color}" stroke-width="${isDonut ? 24 : 80}" stroke-dasharray="${dash}" stroke-dashoffset="${offset}" />`;
+        })
+        .join("");
+      const centerText = isDonut
+        ? `<text x="110" y="119" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a">${totalAbs.toLocaleString("en-US")}</text>`
         : "";
-    const dots = coords
-      .map(
-        (c) =>
-          `<circle cx="${c.x}" cy="${c.y}" r="4" fill="${primaryColor}"/><text x="${c.x}" y="185" font-size="10" text-anchor="middle" fill="#475569">${esc(c.label.slice(0, 8))}</text>`
-      )
-      .join("");
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 210" data-chart-type="${chartType}"><rect width="420" height="210" rx="10" fill="#ffffff"/><text x="18" y="28" font-size="14" font-weight="600" fill="#0f172a">${esc(title)} (${chartType})</text>${areaPath}<polyline fill="none" stroke="${primaryColor}" stroke-width="2.5" points="${polyPoints}"/>${dots}</svg>`;
+      const legend = safePoints
+        .slice(0, 5)
+        .map(
+          (p, i) =>
+            `<rect x="200" y="${61 + i * 24}" width="10" height="10" rx="2" fill="${palette[i % palette.length] ?? primaryColor}"/><text x="216" y="${70 + i * 24}" font-size="11.5" fill="#334155">${esc(p.label.slice(0, 14))}: ${p.value.toLocaleString("en-US")}</text>`
+        )
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="${chartType}" data-visual-kind="${chartType.toLowerCase()}">${header}${slices}${centerText}${legend}</svg>`;
+    }
+
+    case "Gauge": {
+      const lead = Math.max(0, safePoints[0]?.value ?? 0);
+      const pct = Math.min(100, Math.round((lead / totalAbs) * 100));
+      const angleRad = Math.PI - (pct / 100) * Math.PI;
+      const nx = (210 + 62 * Math.cos(angleRad)).toFixed(1);
+      const ny = (148 - 62 * Math.sin(angleRad)).toFixed(1);
+      const arcLen = 235.6;
+      const filled = ((pct / 100) * arcLen).toFixed(1);
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="${chartType}" data-visual-kind="gauge">${header}<path d="M 135 148 A 75 75 0 0 1 285 148" fill="none" stroke="#e2e8f0" stroke-width="18" stroke-linecap="round"/><path d="M 135 148 A 75 75 0 0 1 285 148" fill="none" stroke="${primaryColor}" stroke-width="18" stroke-linecap="round" stroke-dasharray="${filled} ${arcLen}"/><line x1="210" y1="148" x2="${nx}" y2="${ny}" stroke="#0f172a" stroke-width="3" stroke-linecap="round"/><circle cx="210" cy="148" r="6" fill="#0f172a"/><text x="210" y="182" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">${pct}% (${lead.toLocaleString("en-US")})</text></svg>`;
+    }
+
+    case "KPI": {
+      const top = safePoints[0];
+      const topVal = top ? top.value.toLocaleString("en-US") : totalAbs.toLocaleString("en-US");
+      const sub = top
+        ? `${esc(top.label)} • Total: ${totalAbs.toLocaleString("en-US")}`
+        : "Verified Total";
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="${chartType}" data-visual-kind="kpi">${header}<rect x="28" y="48" width="364" height="132" rx="12" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1.5"/><text x="210" y="114" text-anchor="middle" font-size="34" font-weight="700" fill="${primaryColor}">${esc(topVal)}</text><text x="210" y="148" text-anchor="middle" font-size="13" fill="#334155">${sub}</text></svg>`;
+    }
+
+    case "Line":
+    case "Area": {
+      const coords = safePoints.map((p, idx) => {
+        const x = 45 + (idx * 330) / Math.max(1, safePoints.length - 1);
+        const y = 165 - (Math.max(0, p.value) / maxVal) * 110;
+        return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)), label: p.label, val: p.value };
+      });
+      const polyPoints = coords.map((c) => `${c.x},${c.y}`).join(" ");
+      const firstX = coords[0]?.x ?? 45;
+      const lastX = coords[coords.length - 1]?.x ?? 375;
+      const areaPath =
+        chartType === "Area"
+          ? `<polygon points="${firstX},165 ${polyPoints} ${lastX},165" fill="${primaryColor}" fill-opacity="0.22"/>`
+          : "";
+      const dots = coords
+        .map(
+          (c) =>
+            `<circle cx="${c.x}" cy="${c.y}" r="4.2" fill="${primaryColor}"/><text x="${c.x}" y="185" font-size="10" text-anchor="middle" fill="#475569">${esc(c.label.slice(0, 8))}</text>`
+        )
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="${chartType}" data-visual-kind="${chartType.toLowerCase()}">${header}<line x1="36" y1="165" x2="386" y2="165" stroke="#cbd5e1"/>${areaPath}<polyline fill="none" stroke="${primaryColor}" stroke-width="2.5" points="${polyPoints}"/>${dots}</svg>`;
+    }
+
+    case "Combo": {
+      const barW = Math.max(14, Math.floor(310 / safePoints.length) - 8);
+      let running = 0;
+      const cumCoords: string[] = [];
+      const bars = safePoints
+        .map((p, idx) => {
+          const x = 42 + idx * (barW + 8);
+          const h = Math.max(6, Math.round((Math.abs(p.value) / maxVal) * 105));
+          const y = 165 - h;
+          running += Math.max(0, p.value);
+          const ly = Number((165 - (running / totalAbs) * 110).toFixed(1));
+          cumCoords.push(`${(x + barW / 2).toFixed(1)},${ly}`);
+          return `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" fill="${primaryColor}" fill-opacity="0.72"/><text x="${x + barW / 2}" y="185" font-size="9.5" text-anchor="middle" fill="#475569">${esc(p.label.slice(0, 7))}</text>`;
+        })
+        .join("");
+      const line = `<polyline fill="none" stroke="#f59e0b" stroke-width="2.5" points="${cumCoords.join(" ")}"/>`;
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Combo" data-visual-kind="combo">${header}<line x1="36" y1="165" x2="388" y2="165" stroke="#cbd5e1"/>${bars}${line}</svg>`;
+    }
+
+    case "Bar": {
+      const topN = safePoints.slice(0, 6);
+      const rowH = Math.max(16, Math.floor(132 / Math.max(1, topN.length)) - 6);
+      const rowsSvg = topN
+        .map((p, i) => {
+          const y = 44 + i * (rowH + 6);
+          const w = Math.max(8, Math.round((Math.abs(p.value) / maxVal) * 210));
+          return `<text x="108" y="${y + rowH * 0.72}" text-anchor="end" font-size="11" fill="#334155">${esc(p.label.slice(0, 12))}</text><rect x="116" y="${y}" width="${w}" height="${rowH}" rx="4" fill="${palette[i % palette.length] ?? primaryColor}"/><text x="${122 + w}" y="${y + rowH * 0.72}" font-size="10.5" fill="#0f172a">${p.value.toLocaleString("en-US")}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Bar" data-visual-kind="bar">${header}${rowsSvg}</svg>`;
+    }
+
+    case "Stacked": {
+      let curX = 24;
+      const trackW = 372;
+      const segs = safePoints
+        .map((p, i) => {
+          const w = Math.max(6, (Math.max(0, p.value) / totalAbs) * trackW);
+          const rect = `<rect x="${curX.toFixed(1)}" y="68" width="${w.toFixed(1)}" height="36" fill="${palette[i % palette.length] ?? primaryColor}"/>`;
+          curX += w;
+          return rect;
+        })
+        .join("");
+      const legend = safePoints
+        .slice(0, 6)
+        .map(
+          (p, i) =>
+            `<rect x="${24 + (i % 3) * 126}" y="${124 + Math.floor(i / 3) * 24}" width="10" height="10" fill="${palette[i % palette.length] ?? primaryColor}"/><text x="${38 + (i % 3) * 126}" y="${133 + Math.floor(i / 3) * 24}" font-size="10.5" fill="#334155">${esc(p.label.slice(0, 10))} (${p.sharePct ?? 0}%)</text>`
+        )
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Stacked" data-visual-kind="stacked">${header}${segs}${legend}</svg>`;
+    }
+
+    case "Scatter":
+    case "Bubble": {
+      const isBubble = chartType === "Bubble";
+      const dots = safePoints
+        .map((p, i) => {
+          const xBase = p.secondaryValue !== undefined ? p.secondaryValue : i + 1;
+          const maxSec = Math.max(1, ...safePoints.map((q, qi) => q.secondaryValue ?? qi + 1));
+          const cx = 48 + (xBase / maxSec) * 330;
+          const cy = 160 - (Math.abs(p.value) / maxVal) * 105;
+          const r = isBubble
+            ? Math.max(5, Math.min(20, Math.sqrt(Math.abs(p.value) / maxVal) * 18))
+            : 5;
+          const color = palette[i % palette.length] ?? primaryColor;
+          return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${color}" fill-opacity="${isBubble ? "0.6" : "0.9"}" stroke="#ffffff" stroke-width="1"/><text x="${cx.toFixed(1)}" y="${(cy - r - 3).toFixed(1)}" text-anchor="middle" font-size="9" fill="#475569">${esc(p.label.slice(0, 8))}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="${chartType}" data-visual-kind="${chartType.toLowerCase()}">${header}<line x1="40" y1="45" x2="40" y2="165" stroke="#94a3b8"/><line x1="40" y1="165" x2="390" y2="165" stroke="#94a3b8"/>${dots}</svg>`;
+    }
+
+    case "Histogram": {
+      const binW = Math.floor(336 / safePoints.length);
+      const bins = safePoints
+        .map((p, idx) => {
+          const x = 42 + idx * binW;
+          const h = Math.max(6, Math.round((Math.abs(p.value) / maxVal) * 112));
+          return `<rect x="${x}" y="${165 - h}" width="${Math.max(8, binW - 1)}" height="${h}" fill="#0ea5e9" stroke="#ffffff" stroke-width="1"/><text x="${x + binW / 2}" y="183" font-size="9.5" text-anchor="middle" fill="#475569">${esc(p.label.slice(0, 8))}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Histogram" data-visual-kind="histogram">${header}<line x1="38" y1="165" x2="388" y2="165" stroke="#94a3b8"/>${bins}</svg>`;
+    }
+
+    case "BoxPlot": {
+      const slotW = Math.floor(330 / safePoints.length);
+      const boxes = safePoints
+        .map((p, idx) => {
+          const cx = 48 + idx * slotW + slotW / 2;
+          const medY = 160 - (Math.abs(p.value) / maxVal) * 100;
+          const q1Y = Math.min(165, medY + 14);
+          const q3Y = Math.max(46, medY - 14);
+          const minY = Math.min(170, q1Y + 12);
+          const maxY = Math.max(42, q3Y - 12);
+          return `<line x1="${cx}" y1="${maxY}" x2="${cx}" y2="${minY}" stroke="#475569" stroke-width="1.5"/><rect x="${cx - 10}" y="${q3Y}" width="20" height="${Math.max(8, q1Y - q3Y)}" fill="#bae6fd" stroke="${primaryColor}" stroke-width="1.5"/><line x1="${cx - 10}" y1="${medY}" x2="${cx + 10}" y2="${medY}" stroke="#0f172a" stroke-width="2"/><text x="${cx}" y="188" font-size="9.5" text-anchor="middle" fill="#475569">${esc(p.label.slice(0, 7))}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="BoxPlot" data-visual-kind="boxplot">${header}${boxes}</svg>`;
+    }
+
+    case "Heatmap": {
+      const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(safePoints.length))));
+      const rows = Math.max(1, Math.ceil(safePoints.length / cols));
+      const cw = Math.floor(360 / cols) - 6;
+      const ch = Math.floor(132 / rows) - 6;
+      const cells = safePoints
+        .map((p, i) => {
+          const r = Math.floor(i / cols);
+          const c = i % cols;
+          const x = 28 + c * (cw + 6);
+          const y = 46 + r * (ch + 6);
+          const alpha = (0.2 + (Math.abs(p.value) / maxVal) * 0.78).toFixed(2);
+          return `<rect x="${x}" y="${y}" width="${cw}" height="${ch}" rx="4" fill="#0d9488" fill-opacity="${alpha}" stroke="#99f6e4"/><text x="${x + cw / 2}" y="${y + ch / 2 + 4}" text-anchor="middle" font-size="10.5" fill="#0f172a">${esc(p.label.slice(0, 9))}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Heatmap" data-visual-kind="heatmap">${header}${cells}</svg>`;
+    }
+
+    case "Treemap": {
+      const sorted = [...safePoints].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+      let rx = 24;
+      let ry = 44;
+      let rw = 372;
+      let rh = 148;
+      let rem = sorted.reduce((a, b) => a + Math.abs(b.value), 0) || 1;
+      const tiles = sorted
+        .map((p, i) => {
+          const frac =
+            i === sorted.length - 1 ? 1 : Math.max(0.08, Math.min(0.92, Math.abs(p.value) / rem));
+          rem = Math.max(1e-6, rem - Math.abs(p.value));
+          const tx = rx;
+          const ty = ry;
+          let tw = rw;
+          let th = rh;
+          if (i % 2 === 0) {
+            tw = rw * frac;
+            rx += tw;
+            rw = Math.max(8, rw - tw);
+          } else {
+            th = rh * frac;
+            ry += th;
+            rh = Math.max(8, rh - th);
+          }
+          const color = palette[i % palette.length] ?? primaryColor;
+          return `<rect x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" width="${tw.toFixed(1)}" height="${th.toFixed(1)}" rx="3" fill="${color}" fill-opacity="0.86" stroke="#ffffff" stroke-width="1.5"/><text x="${(tx + 6).toFixed(1)}" y="${(ty + 16).toFixed(1)}" font-size="10" font-weight="600" fill="#ffffff">${esc(p.label.slice(0, 10))}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Treemap" data-visual-kind="treemap">${header}${tiles}</svg>`;
+    }
+
+    case "Waterfall": {
+      const count = safePoints.length + 1;
+      const bw = Math.max(14, Math.floor(320 / count) - 6);
+      let running = 0;
+      const steps: string[] = [];
+      safePoints.forEach((p, idx) => {
+        const start = running;
+        running += p.value;
+        const y1 = 160 - ((Math.max(0, start) - Math.min(0, minVal)) / span) * 105;
+        const y2 = 160 - ((Math.max(0, running) - Math.min(0, minVal)) / span) * 105;
+        const x = 36 + idx * (bw + 6);
+        const top = Math.min(y1, y2);
+        const h = Math.max(4, Math.abs(y2 - y1));
+        const fill = p.value >= 0 ? "#10b981" : "#ef4444";
+        steps.push(
+          `<rect x="${x}" y="${top.toFixed(1)}" width="${bw}" height="${h.toFixed(1)}" rx="2" fill="${fill}"/><text x="${x + bw / 2}" y="183" font-size="9.5" text-anchor="middle" fill="#475569">${esc(p.label.slice(0, 6))}</text>`
+        );
+      });
+      const totalH = Math.max(8, Math.min(115, Math.round((Math.abs(running) / span) * 105)));
+      const tx = 36 + safePoints.length * (bw + 6);
+      steps.push(
+        `<rect x="${tx}" y="${160 - totalH}" width="${bw}" height="${totalH}" rx="2" fill="${primaryColor}"/><text x="${tx + bw / 2}" y="183" font-size="9.5" text-anchor="middle" font-weight="700" fill="#0f172a">Net</text>`
+      );
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Waterfall" data-visual-kind="waterfall">${header}<line x1="30" y1="160" x2="395" y2="160" stroke="#94a3b8"/>${steps.join("")}</svg>`;
+    }
+
+    case "Funnel": {
+      const stages = safePoints.slice(0, 6);
+      const rowH = Math.floor(136 / Math.max(1, stages.length));
+      const shapes = stages
+        .map((p, idx) => {
+          const nextV = stages[idx + 1]?.value ?? p.value * 0.72;
+          const w1 = Math.max(40, (Math.abs(p.value) / maxVal) * 320);
+          const w2 = Math.max(30, (Math.abs(nextV) / maxVal) * 320);
+          const y1 = 44 + idx * rowH;
+          const y2 = y1 + Math.max(10, rowH - 4);
+          const color = palette[idx % palette.length] ?? primaryColor;
+          const pts = `${210 - w1 / 2},${y1} ${210 + w1 / 2},${y1} ${210 + w2 / 2},${y2} ${210 - w2 / 2},${y2}`;
+          return `<polygon points="${pts}" fill="${color}" fill-opacity="0.9"/><text x="210" y="${(y1 + y2) / 2 + 4}" text-anchor="middle" font-size="10.5" font-weight="600" fill="#ffffff">${esc(p.label.slice(0, 14))}: ${p.value.toLocaleString("en-US")}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Funnel" data-visual-kind="funnel">${header}${shapes}</svg>`;
+    }
+
+    case "Table":
+    case "PivotSummary": {
+      const rows = safePoints.slice(0, 5);
+      const head = `<rect x="20" y="42" width="380" height="24" rx="4" fill="#0f172a"/><text x="32" y="58" font-size="11" font-weight="600" fill="#ffffff">${chartType === "PivotSummary" ? "Group / Pivot" : "Category"}</text><text x="240" y="58" font-size="11" font-weight="600" fill="#ffffff">Measure</text><text x="340" y="58" font-size="11" font-weight="600" fill="#ffffff">Share</text>`;
+      const body = rows
+        .map((p, i) => {
+          const y = 70 + i * 24;
+          const bg = i % 2 === 0 ? "#f8fafc" : "#ffffff";
+          return `<rect x="20" y="${y}" width="380" height="22" fill="${bg}"/><text x="32" y="${y + 15}" font-size="11" fill="#0f172a">${esc(p.label.slice(0, 22))}</text><text x="240" y="${y + 15}" font-size="11" fill="#0f172a">${p.value.toLocaleString("en-US")}</text><text x="340" y="${y + 15}" font-size="11" fill="#475569">${p.sharePct ?? 0}%</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="${chartType}" data-visual-kind="${chartType.toLowerCase()}">${header}${head}${body}</svg>`;
+    }
+
+    case "Geographic": {
+      const pins = safePoints
+        .slice(0, 8)
+        .map((p, i) => {
+          const cx = 64 + ((i * 53) % 290);
+          const cy = 62 + ((i * 37) % 102);
+          const r = Math.max(6, Math.min(18, Math.round((Math.abs(p.value) / maxVal) * 16)));
+          const color = palette[i % palette.length] ?? primaryColor;
+          return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" fill-opacity="0.78" stroke="#ffffff" stroke-width="1.5"/><text x="${cx}" y="${cy + r + 11}" text-anchor="middle" font-size="9.5" fill="#0f172a">${esc(p.label.slice(0, 10))}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Geographic" data-visual-kind="geographic">${header}<path d="M 38 48 L 368 42 L 386 112 L 332 184 L 62 180 L 42 108 Z" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/><path d="M 190 48 Q 214 95 206 135 T 222 180" fill="none" stroke="#93c5fd" stroke-width="3"/>${pins}</svg>`;
+    }
+
+    case "Column":
+    default: {
+      const barWidth = Math.max(16, Math.floor(320 / safePoints.length) - 8);
+      const bars = safePoints
+        .map((p, idx) => {
+          const x = 42 + idx * (barWidth + 8);
+          const h = Math.max(4, Math.round((Math.abs(p.value) / maxVal) * 110));
+          const y = 165 - h;
+          return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" rx="4" fill="${primaryColor}"/><text x="${x + barWidth / 2}" y="${y - 5}" font-size="10" text-anchor="middle" fill="#0f172a">${p.value.toLocaleString("en-US")}</text><text x="${x + barWidth / 2}" y="184" font-size="10" text-anchor="middle" fill="#475569">${esc(p.label.slice(0, 8))}</text>`;
+        })
+        .join("");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Column" data-visual-kind="column">${header}<line x1="36" y1="165" x2="388" y2="165" stroke="#cbd5e1"/>${bars}</svg>`;
+    }
   }
-
-  // Default bar/column/waterfall/funnel/treemap/heatmap/boxplot/scatter/bubble/histogram/table/geographic representation
-  const barWidth = Math.max(16, Math.floor(320 / safePoints.length) - 8);
-  const bars = safePoints
-    .map((p, idx) => {
-      const x = 42 + idx * (barWidth + 8);
-      const h = Math.max(4, Math.round((Math.abs(p.value) / maxVal) * 110));
-      const y = 165 - h;
-      return `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" rx="4" fill="${primaryColor}"/><text x="${x + barWidth / 2}" y="${y - 5}" font-size="10" text-anchor="middle" fill="#0f172a">${p.value.toLocaleString("en-US")}</text><text x="${x + barWidth / 2}" y="184" font-size="10" text-anchor="middle" fill="#475569">${esc(p.label.slice(0, 8))}</text>`;
-    })
-    .join("");
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 210" data-chart-type="${chartType}"><rect width="420" height="210" rx="10" fill="#ffffff"/><text x="18" y="28" font-size="14" font-weight="600" fill="#0f172a">${esc(title)} (${chartType})</text>${bars}</svg>`;
 }
 
 // ============================================================================
@@ -1057,7 +1305,9 @@ export function generatePresentationDeck(
       sectionRole: "KeyMetrics",
       title: "Key Performance Indicators (KPIs)",
       subtitle: "Canonical Aggregations Excluding Identifier Codes & Subtotal Rows",
-      bullets: model.canonicalKpis.map((k) => `${k.label}: ${k.formattedValue} (${k.formulaTrace})`),
+      bullets: model.canonicalKpis.map(
+        (k) => `${k.label}: ${k.formattedValue} (${k.formulaTrace})`
+      ),
       kpis: model.canonicalKpis,
       presenterNotes: "Emphasize that IDs and subtotal rows were excluded from KPI summation."
     },
@@ -1107,8 +1357,7 @@ export function generatePresentationDeck(
         )
       ],
       kpis: [],
-      calloutNote:
-        analysis.insightsByEpistemicCategory.UnsupportedConclusion[0]?.statement,
+      calloutNote: analysis.insightsByEpistemicCategory.UnsupportedConclusion[0]?.statement,
       presenterNotes: "Clarify which findings are direct observations vs hypotheses."
     },
     {
@@ -1133,12 +1382,10 @@ export function generatePresentationDeck(
       title: "Data-Grounded Recommendations & Next Steps",
       subtitle: "Actionable Steps Based on Verified Findings & Quality Audit",
       bullets: [
-        ...model.qualityFindings
-          .filter((f) => f.suggestedAction !== undefined)
-          .map(
-            (f) =>
-              `Data Hygiene: ${f.suggestedAction!.label} (${f.suggestedAction!.previewSummary})`
-          ),
+        ...model.qualityFindings.flatMap((f) => {
+          const act = f.suggestedAction;
+          return act ? [`Data Hygiene: ${act.label} (${act.previewSummary})`] : [];
+        }),
         ...analysis.questions
           .filter((q) => q.status !== "Answered")
           .map((q) => `Clarification Needed: ${q.prompt}`),
@@ -1204,8 +1451,8 @@ export function applyPresentationEdit(
     return { ...deck, slides: renumber(filtered) };
   } else if (action.type === "DUPLICATE_SLIDE") {
     const idx = next.findIndex((s) => s.slideId === action.slideId);
-    if (idx >= 0) {
-      const orig = next[idx]!;
+    const orig = idx >= 0 ? next[idx] : undefined;
+    if (orig) {
       next.splice(idx + 1, 0, {
         ...orig,
         slideId: `${orig.slideId}_copy_${next.length + 1}`,
@@ -1239,11 +1486,7 @@ export function buildInteractiveHtmlPresentation(
   dir: "ltr" | "rtl" = "ltr"
 ): string {
   const esc = (s: string): string =>
-    s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
   const slidesHtml = deck.slides
     .map((slide, idx) => {
@@ -1462,12 +1705,13 @@ export function generateDocumentReport(
         "Statistical distribution parameters (mean, median, standard deviation, quartiles Q1/Q2/Q3, and IQR fences) for each quantitative measure:"
       ],
       bulletItems: model.tables.flatMap((t) =>
-        t.columns
-          .filter((c) => c.numericStats !== undefined)
-          .map(
-            (c) =>
-              `${t.sheetName}.${c.headerName}: Sum=${c.numericStats!.sum}, Mean=${c.numericStats!.mean}, Median=${c.numericStats!.median}, StdDev=${c.numericStats!.stdDev}, Q1=${c.numericStats!.q1}, Q3=${c.numericStats!.q3}, Outliers=${c.numericStats!.outlierCount}`
-          )
+        t.columns.flatMap((c) => {
+          const ns = c.numericStats;
+          if (!ns) return [];
+          return [
+            `${t.sheetName}.${c.headerName}: Sum=${ns.sum}, Mean=${ns.mean}, Median=${ns.median}, StdDev=${ns.stdDev}, Q1=${ns.q1}, Q3=${ns.q3}, Outliers=${ns.outlierCount}`
+          ];
+        })
       ),
       pageBreakBefore: true
     },
@@ -1529,12 +1773,10 @@ export function generateDocumentReport(
       heading: "10. Actionable Recommendations",
       paragraphs: ["Recommended data hygiene and analytical follow-ups:"],
       bulletItems: [
-        ...model.qualityFindings
-          .filter((f) => f.suggestedAction !== undefined)
-          .map(
-            (f) =>
-              `${f.suggestedAction!.label}: ${f.suggestedAction!.previewSummary} (Reversible)`
-          ),
+        ...model.qualityFindings.flatMap((f) => {
+          const act = f.suggestedAction;
+          return act ? [`${act.label}: ${act.previewSummary} (Reversible)`] : [];
+        }),
         ...analysis.questions
           .filter((q) => q.status !== "Answered")
           .map((q) => `Resolve Clarification: ${q.prompt}`)

@@ -260,6 +260,17 @@ fn render_chart_body(
                 "<p class=\"value\" data-kpi-value>{}</p>\n",
                 escape_html(&series.total_or_kpi)
             ));
+            if series.points.len() > 1 {
+                body.push_str("<ul class=\"legend\">\n");
+                for point in &series.points {
+                    body.push_str(&format!(
+                        "<li><span>{}</span><span class=\"provenance\">{}</span></li>\n",
+                        escape_html(&point.label),
+                        escape_html(&point.value)
+                    ));
+                }
+                body.push_str("</ul>\n");
+            }
         }
         ChartType::Pie | ChartType::Donut => {
             let is_donut = matches!(chart.chart_type, ChartType::Donut);
@@ -298,15 +309,41 @@ fn render_chart_body(
             }
             body.push_str("</ul>\n");
         }
-        ChartType::Line | ChartType::Area | ChartType::Scatter => {
-            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
-            if matches!(chart.chart_type, ChartType::Scatter) {
-                body.push_str("<line x1=\"8\" y1=\"92\" x2=\"94\" y2=\"92\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
-                body.push_str("<line x1=\"8\" y1=\"8\" x2=\"8\" y2=\"92\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+        ChartType::Gauge => {
+            body.push_str(
+                "<svg class=\"chart-svg chart-svg-circle\" viewBox=\"0 0 100 80\" role=\"img\">\n",
+            );
+            body.push_str("<path data-gauge-track=\"1\" d=\"M 15.00 68.00 A 35 35 0 0 1 85.00 68.00\" fill=\"none\" stroke=\"#1f2b42\" stroke-width=\"10\" stroke-linecap=\"round\"></path>\n");
+            let first = series.points.first();
+            let pct = first.map_or(0, |p| p.ratio_pct.min(100));
+            if let Some(d) = first.and_then(|p| p.svg_path.as_deref()) {
+                body.push_str(&format!(
+                    "<path data-gauge-arc=\"1\" d=\"{}\" fill=\"none\" stroke=\"#22d3ee\" stroke-width=\"10\" stroke-linecap=\"round\"></path>\n",
+                    escape_html(d)
+                ));
             }
-            if matches!(chart.chart_type, ChartType::Line | ChartType::Area)
-                && !series.points.is_empty()
-            {
+            body.push_str(&format!(
+                "<text data-gauge-pct x=\"50\" y=\"62\" text-anchor=\"middle\" fill=\"#e8eefc\" font-size=\"11\" font-weight=\"700\">{pct}%</text>\n"
+            ));
+            body.push_str(&format!(
+                "<text x=\"50\" y=\"75\" text-anchor=\"middle\" fill=\"#9fb0c9\" font-size=\"6.5\">{}</text>\n",
+                escape_html(&series.total_or_kpi)
+            ));
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} ({}%)</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    point.ratio_pct
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Line | ChartType::Area => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            body.push_str("<line x1=\"8\" y1=\"92\" x2=\"94\" y2=\"92\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+            if !series.points.is_empty() {
                 let poly = series
                     .points
                     .iter()
@@ -317,17 +354,51 @@ fn render_chart_body(
                     && let (Some(first), Some(last)) = (series.points.first(), series.points.last())
                 {
                     body.push_str(&format!(
-                        "<polygon points=\"{},90 {} {},90\" fill=\"#1d4ed8\" fill-opacity=\"0.35\"></polygon>\n",
+                        "<polygon data-area-fill=\"1\" points=\"{},90 {} {},90\" fill=\"#1d4ed8\" fill-opacity=\"0.35\"></polygon>\n",
                         first.x_pct, poly, last.x_pct
                     ));
                 }
                 body.push_str(&format!(
-                    "<polyline points=\"{poly}\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\"></polyline>\n"
+                    "<polyline data-line-series=\"1\" points=\"{poly}\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2.5\"></polyline>\n"
                 ));
             }
             for point in &series.points {
                 body.push_str(&format!(
                     "<circle cx=\"{}\" cy=\"{}\" r=\"2.5\" fill=\"#22d3ee\"></circle>\n",
+                    point.x_pct, point.y_pct
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{}</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Scatter | ChartType::Bubble => {
+            let is_bubble = matches!(chart.chart_type, ChartType::Bubble);
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            body.push_str("<line x1=\"8\" y1=\"92\" x2=\"94\" y2=\"92\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+            body.push_str("<line x1=\"8\" y1=\"8\" x2=\"8\" y2=\"92\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+            for (idx, point) in series.points.iter().enumerate() {
+                let r = if is_bubble {
+                    point.share_pct.as_deref().unwrap_or("4.5")
+                } else {
+                    "2.5"
+                };
+                let color = SLICE_PALETTE[idx % SLICE_PALETTE.len()];
+                let attr = if is_bubble {
+                    format!(
+                        "data-bubble-point=\"{idx}\" fill-opacity=\"0.72\" stroke=\"#e2e8f0\" stroke-width=\"0.6\""
+                    )
+                } else {
+                    format!("data-scatter-point=\"{idx}\"")
+                };
+                body.push_str(&format!(
+                    "<circle {attr} cx=\"{}\" cy=\"{}\" r=\"{r}\" fill=\"{color}\"></circle>\n",
                     point.x_pct, point.y_pct
                 ));
             }
@@ -364,6 +435,298 @@ fn render_chart_body(
                     "<li><span>{}</span><span class=\"provenance\">{}</span></li>\n",
                     escape_html(&point.label),
                     escape_html(&point.value)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Column => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            body.push_str("<line x1=\"8\" y1=\"90\" x2=\"94\" y2=\"90\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+            let count = series.points.len().max(1);
+            let slot_width = 80.0 / (count as f64);
+            let bar_w = (slot_width * 0.65).max(5.0);
+            for (idx, point) in series.points.iter().enumerate() {
+                let x = 10.0 + (idx as f64) * slot_width + (slot_width - bar_w) * 0.5;
+                let top_y = f64::from(point.start_pct.clamp(12, 90));
+                let h = (90.0 - top_y).max(2.0);
+                let color = SLICE_PALETTE[idx % SLICE_PALETTE.len()];
+                body.push_str(&format!(
+                    "<rect data-column-bar=\"{idx}\" x=\"{x:.2}\" y=\"{top_y:.2}\" width=\"{bar_w:.2}\" height=\"{h:.2}\" rx=\"1.5\" fill=\"{color}\"></rect>\n"
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{}</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Stacked => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 44\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            for (idx, point) in series.points.iter().enumerate() {
+                let x = 4.0 + (f64::from(point.start_pct.min(100)) * 0.92);
+                let w = (f64::from(point.ratio_pct.min(100)) * 0.92).max(1.5);
+                let color = SLICE_PALETTE[idx % SLICE_PALETTE.len()];
+                body.push_str(&format!(
+                    "<rect data-stacked-segment=\"{idx}\" x=\"{x:.2}\" y=\"12\" width=\"{w:.2}\" height=\"20\" fill=\"{color}\"></rect>\n"
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let share = point.share_pct.as_deref().unwrap_or("0");
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} ({}%)</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(share)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Combo => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            body.push_str("<line x1=\"8\" y1=\"90\" x2=\"94\" y2=\"90\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+            let count = series.points.len().max(1);
+            let slot_width = 76.0 / (count as f64);
+            let bar_w = (slot_width * 0.55).max(4.0);
+            for (idx, point) in series.points.iter().enumerate() {
+                let x = 12.0 + (idx as f64) * slot_width + (slot_width - bar_w) * 0.5;
+                let top_y = f64::from(point.start_pct.clamp(12, 90));
+                let h = (90.0 - top_y).max(2.0);
+                body.push_str(&format!(
+                    "<rect data-combo-bar=\"{idx}\" x=\"{x:.2}\" y=\"{top_y:.2}\" width=\"{bar_w:.2}\" height=\"{h:.2}\" fill=\"#2563eb\" fill-opacity=\"0.78\"></rect>\n"
+                ));
+            }
+            let poly = series
+                .points
+                .iter()
+                .map(|p| format!("{},{}", p.x_pct, p.y_pct))
+                .collect::<Vec<_>>()
+                .join(" ");
+            body.push_str(&format!(
+                "<polyline data-combo-line=\"1\" points=\"{poly}\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"2.2\"></polyline>\n"
+            ));
+            for point in &series.points {
+                body.push_str(&format!(
+                    "<circle cx=\"{}\" cy=\"{}\" r=\"2.2\" fill=\"#fbbf24\"></circle>\n",
+                    point.x_pct, point.y_pct
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let cum = point.share_pct.as_deref().unwrap_or("0");
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} (cum {}%)</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(cum)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::BoxPlot => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            body.push_str("<line x1=\"8\" y1=\"92\" x2=\"94\" y2=\"92\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+            for (idx, point) in series.points.iter().enumerate() {
+                if let Some(d) = &point.svg_path {
+                    body.push_str(&format!(
+                        "<path data-boxplot-whisker=\"{idx}\" d=\"{}\" fill=\"#1d4ed8\" fill-opacity=\"0.45\" stroke=\"#38bdf8\" stroke-width=\"1.4\"></path>\n",
+                        escape_html(d)
+                    ));
+                }
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let range_str = point.x_value.as_deref().unwrap_or("");
+                let iqr_str = point.y_value.as_deref().unwrap_or("");
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">med {} | Q1..Q3 {} | {}</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(iqr_str),
+                    escape_html(range_str),
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Heatmap => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            let cols = series.points.first().map_or(2, |p| p.start_pct.max(1)) as usize;
+            let rows = series.points.len().div_ceil(cols).max(1);
+            let cell_w = 84.0 / (cols as f64);
+            let cell_h = 76.0 / (rows as f64);
+            for (idx, point) in series.points.iter().enumerate() {
+                let c = idx % cols;
+                let r = idx / cols;
+                let x = 8.0 + (c as f64) * cell_w + 1.0;
+                let y = 12.0 + (r as f64) * cell_h + 1.0;
+                let opacity =
+                    (0.2 + (f64::from(point.ratio_pct.min(100)) / 100.0) * 0.78).min(0.98);
+                body.push_str(&format!(
+                    "<rect data-heatmap-cell=\"{idx}\" x=\"{x:.2}\" y=\"{y:.2}\" width=\"{:.2}\" height=\"{:.2}\" rx=\"2\" fill=\"#06b6d4\" fill-opacity=\"{opacity:.2}\"></rect>\n",
+                    (cell_w - 2.0).max(4.0),
+                    (cell_h - 2.0).max(4.0),
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} ({}%)</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    point.ratio_pct
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Treemap => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            for (idx, point) in series.points.iter().enumerate() {
+                if let Some(d) = &point.svg_path {
+                    let color = SLICE_PALETTE[idx % SLICE_PALETTE.len()];
+                    body.push_str(&format!(
+                        "<path data-treemap-tile=\"{idx}\" d=\"{}\" fill=\"{color}\" fill-opacity=\"0.85\" stroke=\"#0b1220\" stroke-width=\"1.2\"></path>\n",
+                        escape_html(d)
+                    ));
+                    body.push_str(&format!(
+                        "<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" fill=\"#f8fafc\" font-size=\"5.5\">{}</text>\n",
+                        point.x_pct,
+                        point.y_pct,
+                        escape_html(&point.label)
+                    ));
+                }
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let share = point.share_pct.as_deref().unwrap_or("0");
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} ({}%)</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(share)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Waterfall => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            body.push_str("<line x1=\"8\" y1=\"90\" x2=\"94\" y2=\"90\" stroke=\"#334155\" stroke-width=\"1\"></line>\n");
+            let count = series.points.len().max(1);
+            let slot_w = 80.0 / (count as f64);
+            let bar_w = (slot_w * 0.65).max(4.0);
+            for (idx, point) in series.points.iter().enumerate() {
+                let x = 10.0 + (idx as f64) * slot_w;
+                let top = f64::from(point.ratio_pct.min(90));
+                let bottom = f64::from(point.start_pct.min(92));
+                let h = (bottom - top).abs().max(3.0);
+                let fill = if idx + 1 == count {
+                    "#2563eb"
+                } else if point.value.starts_with('-') {
+                    "#ef4444"
+                } else {
+                    "#10b981"
+                };
+                body.push_str(&format!(
+                    "<rect data-waterfall-step=\"{idx}\" x=\"{x:.2}\" y=\"{top:.2}\" width=\"{bar_w:.2}\" height=\"{h:.2}\" fill=\"{fill}\"></rect>\n"
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let delta = point.share_pct.as_deref().unwrap_or("");
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} ({})</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(delta)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Funnel => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" role=\"img\">\n");
+            let count = series.points.len().max(1);
+            let row_h = 80.0 / (count as f64);
+            for (idx, point) in series.points.iter().enumerate() {
+                let y1 = 10.0 + (idx as f64) * row_h;
+                let y2 = y1 + (row_h - 2.0).max(4.0);
+                let w_top = f64::from(point.ratio_pct.clamp(12, 100)) * 0.84;
+                let w_bot = f64::from(point.start_pct.clamp(10, 100)) * 0.84;
+                let x1_l = 50.0 - w_top * 0.5;
+                let x1_r = 50.0 + w_top * 0.5;
+                let x2_r = 50.0 + w_bot * 0.5;
+                let x2_l = 50.0 - w_bot * 0.5;
+                let color = SLICE_PALETTE[idx % SLICE_PALETTE.len()];
+                body.push_str(&format!(
+                    "<polygon data-funnel-stage=\"{idx}\" points=\"{x1_l:.1},{y1:.1} {x1_r:.1},{y1:.1} {x2_r:.1},{y2:.1} {x2_l:.1},{y2:.1}\" fill=\"{color}\" fill-opacity=\"0.88\"></polygon>\n"
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let share = point.share_pct.as_deref().unwrap_or("0");
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} ({}%)</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(share)
+                ));
+            }
+            body.push_str("</ul>\n");
+        }
+        ChartType::Table => {
+            body.push_str("<table class=\"data-table\" data-chart-table><thead><tr><th>#</th><th>Category</th><th>Value</th><th>Share</th></tr></thead><tbody>\n");
+            for point in &series.points {
+                let rank = point.x_value.as_deref().unwrap_or("");
+                let share = point.share_pct.as_deref().unwrap_or("0");
+                body.push_str(&format!(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}%</td></tr>\n",
+                    escape_html(rank),
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(share)
+                ));
+            }
+            body.push_str("</tbody></table>\n");
+        }
+        ChartType::PivotSummary => {
+            body.push_str("<table class=\"data-table\" data-pivot-table><thead><tr><th>Group</th><th>Primary</th><th>Stats</th><th>Min..Max</th><th>Share</th></tr></thead><tbody>\n");
+            for point in &series.points {
+                let stats = point.x_value.as_deref().unwrap_or("");
+                let bounds = point.y_value.as_deref().unwrap_or("");
+                let share = point.share_pct.as_deref().unwrap_or("0");
+                body.push_str(&format!(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}%</td></tr>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(stats),
+                    escape_html(bounds),
+                    escape_html(share)
+                ));
+            }
+            body.push_str("</tbody></table>\n");
+        }
+        ChartType::Geographic => {
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" role=\"img\">\n");
+            body.push_str("<path data-geo-backdrop=\"1\" d=\"M 12 18 L 78 14 L 88 45 L 74 88 L 18 86 L 14 48 Z\" fill=\"#0f1f38\" stroke=\"#2b3b58\" stroke-width=\"1.2\"></path>\n");
+            body.push_str("<path d=\"M 46 20 Q 52 38 50 56 T 56 84\" fill=\"none\" stroke=\"#1d4ed8\" stroke-opacity=\"0.55\" stroke-width=\"2\"></path>\n");
+            for (idx, point) in series.points.iter().enumerate() {
+                let r = 2.5 + (f64::from(point.ratio_pct.min(100)) / 100.0) * 6.5;
+                let color = SLICE_PALETTE[idx % SLICE_PALETTE.len()];
+                body.push_str(&format!(
+                    "<circle data-geo-marker=\"{idx}\" cx=\"{}\" cy=\"{}\" r=\"{r:.1}\" fill=\"{color}\" fill-opacity=\"0.82\" stroke=\"#e2e8f0\" stroke-width=\"0.7\"></circle>\n",
+                    point.x_pct, point.y_pct
+                ));
+            }
+            body.push_str("</svg>\n<ul class=\"legend\">\n");
+            for point in &series.points {
+                let share = point.share_pct.as_deref().unwrap_or("0");
+                body.push_str(&format!(
+                    "<li><span>{}</span><span class=\"provenance\">{} ({}%)</span></li>\n",
+                    escape_html(&point.label),
+                    escape_html(&point.value),
+                    escape_html(share)
                 ));
             }
             body.push_str("</ul>\n");
@@ -886,6 +1249,100 @@ mod tests {
             .unwrap_or("");
         assert!(!kpi_section.contains("class=\"bars\""));
         assert!(!kpi_section.contains("class=\"track\""));
+        Ok(())
+    }
+
+    #[test]
+    fn all_21_chart_types_compute_and_render_distinct_visual_elements() -> Result<(), SafiError> {
+        let g0 = graph()?;
+        let qty = Column::new(
+            ColumnSchema::new(2, "qty", ColumnType::Unknown, ConfidenceScore::ONE),
+            ["2", "4", "1"]
+                .into_iter()
+                .map(CellValue::from_raw)
+                .collect(),
+        );
+        let mut cols = g0.working().columns().to_vec();
+        cols.push(qty);
+        let table = Table::new("tbl_sales_21", "sales", cols)?;
+        let g = DataGraph::new(SourceId::new("sales")?, table, 10)?;
+        let all_21 = [
+            ChartType::Bar,
+            ChartType::Column,
+            ChartType::Line,
+            ChartType::Area,
+            ChartType::Stacked,
+            ChartType::Combo,
+            ChartType::Pie,
+            ChartType::Donut,
+            ChartType::Scatter,
+            ChartType::Bubble,
+            ChartType::Histogram,
+            ChartType::BoxPlot,
+            ChartType::Heatmap,
+            ChartType::Treemap,
+            ChartType::Waterfall,
+            ChartType::Funnel,
+            ChartType::Gauge,
+            ChartType::Kpi,
+            ChartType::Table,
+            ChartType::PivotSummary,
+            ChartType::Geographic,
+        ];
+        let charts: Vec<CapsuleChart> = all_21
+            .iter()
+            .map(|&ct| CapsuleChart {
+                title: format!("Chart {}", ct.as_str()),
+                chart_type: ct,
+                function: if matches!(ct, ChartType::Histogram) {
+                    AggFunc::Count
+                } else {
+                    AggFunc::Sum
+                },
+                column: "amount".to_owned(),
+                group_by: if matches!(ct, ChartType::Scatter | ChartType::Bubble) {
+                    "qty".to_owned()
+                } else {
+                    "region".to_owned()
+                },
+            })
+            .collect();
+        let opts = CapsuleOptions {
+            title: "All 21 Charts".to_owned(),
+            created_at: "2026-11-18T00:00:00Z".to_owned(),
+            charts,
+            ..CapsuleOptions::default()
+        };
+        let html = export_capsule(&g, &opts)?;
+        for marker in [
+            "class=\"bars\"",
+            "data-column-bar=",
+            "data-line-series=",
+            "data-area-fill=",
+            "data-stacked-segment=",
+            "data-combo-bar=",
+            "data-combo-line=",
+            "data-pie-slice=",
+            "data-donut-slice=",
+            "data-scatter-point=",
+            "data-bubble-point=",
+            "data-histogram-bin=",
+            "data-boxplot-whisker=",
+            "data-heatmap-cell=",
+            "data-treemap-tile=",
+            "data-waterfall-step=",
+            "data-funnel-stage=",
+            "data-gauge-arc=",
+            "data-kpi-value",
+            "data-chart-table",
+            "data-pivot-table",
+            "data-geo-marker=",
+        ] {
+            assert!(
+                html.contains(marker),
+                "missing capsule visual marker {marker}"
+            );
+        }
         Ok(())
     }
 }

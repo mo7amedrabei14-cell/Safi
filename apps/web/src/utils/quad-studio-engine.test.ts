@@ -47,8 +47,8 @@ describe("Unified Quad-Studio Engine (Phases 5, 6, 7, 8)", () => {
     let dash = generateAutoDashboard(sampleModel, sampleAnalysis);
     expect(dash.widgets.length).toBeGreaterThanOrEqual(5);
 
-    const rankingWidget = dash.widgets.find((w) => w.widgetId === "w_chart_ranking")!;
-    expect(rankingWidget.dataPoints[0]).toMatchObject({ label: "Cairo", value: 8000 });
+    const rankingWidget = dash.widgets.find((w) => w.widgetId === "w_chart_ranking");
+    expect(rankingWidget?.dataPoints[0]).toMatchObject({ label: "Cairo", value: 8000 });
 
     // Cross-filtering by Branch = Alexandria filters sibling trend chart to Alexandria (4000)
     dash = applyDashboardEdit(dash, sampleModel, {
@@ -59,8 +59,8 @@ describe("Unified Quad-Studio Engine (Phases 5, 6, 7, 8)", () => {
         selectedValue: "Alexandria"
       }
     });
-    const trendAfterCross = dash.widgets.find((w) => w.widgetId === "w_chart_trend")!;
-    expect(trendAfterCross.dataPoints.reduce((a, b) => a + b.value, 0)).toBe(4000);
+    const trendAfterCross = dash.widgets.find((w) => w.widgetId === "w_chart_trend");
+    expect(trendAfterCross?.dataPoints.reduce((a, b) => a + b.value, 0)).toBe(4000);
 
     // Clear cross-filter
     dash = applyDashboardEdit(dash, sampleModel, {
@@ -86,9 +86,9 @@ describe("Unified Quad-Studio Engine (Phases 5, 6, 7, 8)", () => {
       widgetId: "w_chart_ranking",
       patch: { measureColumn: "Net_Profit_EGP", chartType: "Bar" }
     });
-    const updatedRanking = dash.widgets.find((w) => w.widgetId === "w_chart_ranking")!;
-    expect(updatedRanking.chartType).toBe("Bar");
-    expect(updatedRanking.dataPoints.reduce((a, b) => a + b.value, 0)).toBe(5500);
+    const updatedRanking = dash.widgets.find((w) => w.widgetId === "w_chart_ranking");
+    expect(updatedRanking?.chartType).toBe("Bar");
+    expect(updatedRanking?.dataPoints.reduce((a, b) => a + b.value, 0)).toBe(5500);
 
     // Duplicate & Undo/Redo
     const countBeforeDup = dash.widgets.length;
@@ -144,11 +144,11 @@ describe("Unified Quad-Studio Engine (Phases 5, 6, 7, 8)", () => {
       .filter((w) => w.kind === "kpi")
       .map((w) => w.kpiMetric?.formattedValue);
     const deckKpiValues = deck.slides
-      .find((s) => s.sectionRole === "KeyMetrics")!
-      .kpis.map((k) => k.formattedValue);
+      .find((s) => s.sectionRole === "KeyMetrics")
+      ?.kpis.map((k) => k.formattedValue);
     const docKpiValues = doc.sections
-      .find((s) => s.kind === "KpiSummary")!
-      .kpis!.map((k) => k.formattedValue);
+      .find((s) => s.kind === "KpiSummary")
+      ?.kpis?.map((k) => k.formattedValue);
 
     expect(dashKpiValues).toEqual(["14,000 EGP", "8,500 EGP"]);
     expect(deckKpiValues).toEqual(dashKpiValues);

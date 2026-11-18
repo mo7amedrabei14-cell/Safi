@@ -47,17 +47,17 @@ describe("Universal Workbook Ingestion Engine (Phase 1)", () => {
     const tables = segmentWorksheetTables("المبيعات", grid);
     expect(tables).toHaveLength(2);
 
-    const mainTable = tables[0]!;
-    expect(mainTable.title).toBe("تقرير المبيعات الإقليمي 2026");
-    expect(mainTable.headerRows).toEqual([2, 3]);
-    expect(mainTable.headers).toEqual([
+    const mainTable = tables[0];
+    expect(mainTable?.title).toBe("تقرير المبيعات الإقليمي 2026");
+    expect(mainTable?.headerRows).toEqual([2, 3]);
+    expect(mainTable?.headers).toEqual([
       "المنطقة — المدينة",
       "2026 — الربع الأول",
       "2026 — الربع الثاني"
     ]);
     // Only the 3 real city rows (Cairo, Alexandria, Giza) are in dataRows!
-    expect(mainTable.dataRows).toHaveLength(3);
-    expect(mainTable.separatedRows.map((s) => s.kind)).toEqual([
+    expect(mainTable?.dataRows).toHaveLength(3);
+    expect(mainTable?.separatedRows.map((s) => s.kind)).toEqual([
       "Title",
       "Subtotal",
       "RepeatedHeader",
@@ -65,9 +65,9 @@ describe("Universal Workbook Ingestion Engine (Phase 1)", () => {
       "Footnote"
     ]);
 
-    const lookupTable = tables[1]!;
-    expect(lookupTable.headers).toEqual(["الكود — الرمز", "الفرع — الاسم"]);
-    expect(lookupTable.dataRows).toHaveLength(2);
+    const lookupTable = tables[1];
+    expect(lookupTable?.headers).toEqual(["الكود — الرمز", "الفرع — الاسم"]);
+    expect(lookupTable?.dataRows).toHaveLength(2);
   });
 
   it("preserves cell metadata, leading zeros, formulas, cached vs recalculated values, and neutralizes XLSM macros", () => {
@@ -143,6 +143,14 @@ describe("Universal Workbook Ingestion Engine (Phase 1)", () => {
     expect(b5Meta?.recalculatedValue).toBe("3000");
 
     expect(classifyCellType("+201012345678")).toBe("ZeroPreservedText");
-    expect(evaluateSimpleFormula("=A1/B1", new Map([["0,0", 50], ["0,1", 0]]))).toBe("#DIV/0!");
+    expect(
+      evaluateSimpleFormula(
+        "=A1/B1",
+        new Map([
+          ["0,0", 50],
+          ["0,1", 0]
+        ])
+      )
+    ).toBe("#DIV/0!");
   });
 });

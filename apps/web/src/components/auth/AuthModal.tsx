@@ -350,18 +350,39 @@ export function AuthModal({
 
   const updateTabIndicator = useCallback(
     (animate: boolean): void => {
+      const tablist = tablistRef.current;
       const indicator = tabIndicatorRef.current;
       const activeBtn = mode === "signin" ? signinTabRef.current : signupTabRef.current;
-      if (indicator === null || activeBtn === null) return;
-      const targetX = activeBtn.offsetLeft;
-      const targetY = activeBtn.offsetTop;
-      const targetWidth = activeBtn.offsetWidth;
-      const targetHeight = activeBtn.offsetHeight;
+      if (tablist === null || indicator === null || activeBtn === null) return;
+
+      const listRect = tablist.getBoundingClientRect();
+      const btnRect = activeBtn.getBoundingClientRect();
+      const scaleX = tablist.offsetWidth > 0 ? listRect.width / tablist.offsetWidth : 1;
+      const scaleY = tablist.offsetHeight > 0 ? listRect.height / tablist.offsetHeight : 1;
+
+      const targetX =
+        listRect.width > 0 && btnRect.width > 0
+          ? Number(((btnRect.left - listRect.left) / scaleX - tablist.clientLeft).toFixed(2))
+          : activeBtn.offsetLeft;
+      const targetY =
+        listRect.height > 0 && btnRect.height > 0
+          ? Number(((btnRect.top - listRect.top) / scaleY - tablist.clientTop).toFixed(2))
+          : activeBtn.offsetTop;
+      const targetWidth =
+        btnRect.width > 0 ? Number((btnRect.width / scaleX).toFixed(2)) : activeBtn.offsetWidth;
+      const targetHeight =
+        btnRect.height > 0 ? Number((btnRect.height / scaleY).toFixed(2)) : activeBtn.offsetHeight;
       if (targetWidth <= 0 || targetHeight <= 0) return;
 
       indicator.style.opacity = "1";
       if (!animate || !canAnimate()) {
         gsap.killTweensOf(indicator);
+        gsap.set(indicator, {
+          left: targetX,
+          top: targetY,
+          width: targetWidth,
+          height: targetHeight
+        });
         indicator.style.left = `${targetX}px`;
         indicator.style.top = `${targetY}px`;
         indicator.style.width = `${targetWidth}px`;
@@ -390,17 +411,36 @@ export function AuthModal({
       renderedTabModeRef.current !== null && renderedTabModeRef.current !== mode;
     renderedTabModeRef.current = mode;
     updateTabIndicator(shouldAnimate);
+    if (!shouldAnimate || !canAnimate()) {
+      const rafId = window.requestAnimationFrame(() => updateTabIndicator(false));
+      return () => window.cancelAnimationFrame(rafId);
+    }
+    return undefined;
   }, [open, sessionToken, mode, isAr, updateTabIndicator]);
 
   useEffect(() => {
     if (!open || sessionToken !== null) return;
+    let cancelled = false;
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled) updateTabIndicator(false);
+      });
+    }
     const tablist = tablistRef.current;
-    if (tablist === null || typeof ResizeObserver !== "function") return;
+    if (tablist === null || typeof ResizeObserver !== "function") {
+      return () => {
+        cancelled = true;
+      };
+    }
     const observer = new ResizeObserver(() => updateTabIndicator(false));
     observer.observe(tablist);
+    if (panelRef.current !== null) observer.observe(panelRef.current);
     if (signinTabRef.current !== null) observer.observe(signinTabRef.current);
     if (signupTabRef.current !== null) observer.observe(signupTabRef.current);
-    return () => observer.disconnect();
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
   }, [open, sessionToken, updateTabIndicator]);
 
   useLayoutEffect(() => {

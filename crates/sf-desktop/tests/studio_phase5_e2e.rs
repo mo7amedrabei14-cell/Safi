@@ -337,3 +337,113 @@ fn studio_multi_size_benchmarks_and_sample_capsule() {
 
     let _ = fs::remove_dir_all(&temp);
 }
+
+#[test]
+fn studio_opens_real_messy_xlsx_switches_regions_and_computes_verified_metrics() {
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/workbooks/messy_enterprise.xlsx");
+    assert!(fixture.exists(), "missing fixture: {}", fixture.display());
+
+    let temp = std::env::temp_dir().join(format!(
+        "safi_phase5_real_xlsx_{}_{}",
+        std::process::id(),
+        91_000_u64
+    ));
+    let _ = fs::remove_dir_all(&temp);
+    fs::create_dir_all(&temp).expect("temp dir");
+
+    let store = StudioStore::with_storage_dir(temp.join("bundles"));
+    authenticate(&store);
+
+    let initial: serde_json::Value = serde_json::from_str(
+        &store
+            .open_file("wb", &fixture, 2000)
+            .expect("open messy xlsx"),
+    )
+    .expect("json");
+    assert_eq!(initial["rowCount"], 5);
+    assert_eq!(initial["workbookSummary"]["totalSheets"], 3);
+    assert_eq!(initial["workbookSummary"]["hiddenSheets"], 2);
+    assert_eq!(initial["workbookSummary"]["activeSheet"], "Sales & KPIs");
+    assert_eq!(initial["workbookSummary"]["activeTableId"], "tbl_1");
+
+    let details: serde_json::Value =
+        serde_json::from_str(&store.workbook_details("wb").expect("details")).expect("json");
+    let sheets = details["worksheets"].as_array().expect("worksheets");
+    assert_eq!(sheets.len(), 3);
+    assert_eq!(sheets[0]["tables"].as_array().unwrap().len(), 2);
+
+    // Switch region on Sales & KPIs -> tbl_2 (Target Name, Quota, Error Check)
+    let switched_tbl2: serde_json::Value = serde_json::from_str(
+        &store
+            .select_region("wb", "Sales & KPIs", "tbl_2", 2001)
+            .expect("select tbl_2"),
+    )
+    .expect("json");
+    assert_eq!(switched_tbl2["rowCount"], 2);
+    assert_eq!(switched_tbl2["columns"][0]["name"], "Target Name");
+
+    let with_quota: serde_json::Value = serde_json::from_str(
+        &store
+            .define_metric(
+                "wb",
+                "quota_sum",
+                "Total Quota",
+                Some("EGP"),
+                "SUM(Quota)",
+                2002,
+            )
+            .expect("quota metric"),
+    )
+    .expect("json");
+    assert_eq!(with_quota["metrics"][0]["value"], "35000");
+
+    // Switch onto hidden sheet Lookup_Rates explicitly
+    let switched_hidden: serde_json::Value = serde_json::from_str(
+        &store
+            .select_region("wb", "Lookup_Rates", "tbl_1", 2003)
+            .expect("select hidden sheet"),
+    )
+    .expect("json");
+    assert_eq!(switched_hidden["rowCount"], 2);
+    assert_eq!(switched_hidden["columns"][0]["name"], "Code");
+
+    // Switch back to primary Sales & KPIs tbl_1 and verify Revenue total (12500+8400+6100+4200+1900 = 33100)
+    // Note: merged multi-row header ("Financials" over "Revenue") produces flattened column name
+    // "Financials — Revenue", referenced with bracketed syntax `[Financials — Revenue]`.
+    store
+        .select_region("wb", "Sales & KPIs", "tbl_1", 2004)
+        .expect("select tbl_1");
+    let with_rev: serde_json::Value = serde_json::from_str(
+        &store
+            .define_metric(
+                "wb",
+                "rev_sum",
+                "Verified Revenue",
+                Some("EGP"),
+                "SUM([Financials — Revenue])",
+                2005,
+            )
+            .expect("rev metric"),
+    )
+    .expect("json");
+    let rev_metric = with_rev["metrics"]
+        .as_array()
+        .expect("metrics")
+        .iter()
+        .find(|m| m["id"] == "rev_sum")
+        .expect("rev_sum metric");
+    assert_eq!(rev_metric["value"], "33100");
+
+    // Verify leading zeros survived on tbl_1 ("00105")
+    let page1: serde_json::Value = serde_json::from_str(
+        &store
+            .rows_page("wb", r#"{"offset":0,"limit":10}"#)
+            .expect("rows page"),
+    )
+    .expect("json");
+    assert_eq!(page1["rows"][0]["cells"][0]["visible"], "00105");
+    assert_eq!(page1["rows"][0]["cells"][1]["visible"], "القاهرة");
+
+    let _ = fs::remove_dir_all(&temp);
+}

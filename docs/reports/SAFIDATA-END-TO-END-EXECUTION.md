@@ -24,7 +24,7 @@
 | **Phase 11** | Privacy, Consent & Security Enforcement | `VERIFIED` |
 | **Phase 12** | Performance, Scalability & Cancellation Controls | `VERIFIED` |
 | **Phase 13** | Permanent 35-Workbook Regression & Cross-Studio Verification Suite | `VERIFIED` |
-| **Phase 14** | Final Regression, Quality Gates & Handover Report | `IN PROGRESS` |
+| **Phase 14** | Final Integration, Root-Cause Remediation & Production Acceptance (`SAFIDATA-FINAL-REMEDIATION-AND-ACCEPTANCE.md`) | `VERIFIED (with documented platform/format caveats)` |
 
 ---
 
@@ -115,7 +115,8 @@
   - `apps/web/src/utils/export.test.ts`
 - **Capabilities Verified**:
   - Eliminated all mock export strings in `apps/web/src/utils/export.ts`.
-  - Implemented genuine CRC-32 + STORE ZIP OOXML builders for `.xlsx`, `.pptx`, and `.docx`, genuine `%PDF-1.4` vector binary, genuine `\x89PNG` image binary (with IHDR, zlib IDAT, Adler-32, CRC-32, IEND), `.svg`, `.csv` with formula-injection protection, `.safi.html`, and Power BI export bundle (`.pbids` + Tabular `model.bim` + CSV + README).
+  - Implemented genuine CRC-32 + STORE ZIP OOXML builders for `.xlsx`, `.pptx`, and `.docx`, genuine multi-page `%PDF-1.7` vector binary (exact `xref` byte offsets, running headers/footers, Arabic contextual glyph shaping + `/ActualText`), genuine multi-color chunked-Deflate `\x89PNG` chart rasterizer, `.svg` (21 distinct chart renders with explicit `420x210` dimensions), `.csv` with formula-injection protection, `.safi.html`, and Power BI export bundle (`.pbids` + Tabular `model.bim` + all model CSVs + README).
+  - Wired all 9 deliverable formats through Rust `StudioStore::export_deliverable` with atomic write + explicit hidden-sheet exclusion/disclosure.
 
 ### Phases 10, 11, 12 — Tooltips/Tutorials, Privacy/Security & Performance
 - **Status**: `VERIFIED`
@@ -135,3 +136,15 @@
   - All 35 permanent workbook regression fixtures pass with zero silent data loss.
   - Known-answer analytical dataset verifies exact sums, means, medians, quartiles, ID exclusion, and subtotal separation.
   - Cross-Studio consistency test proves identical canonical KPIs across Semantic Model, Assistant, Dashboard Studio, Presentation Studio, Document Studio, and exported `.xlsx`/`.pptx`/`.docx`/`.safi.html` deliverables.
+
+---
+
+## Phase 14 — Final Integration, Root-Cause Remediation & Production Acceptance
+
+- **Status**: `VERIFIED (with documented platform/format caveats)`
+- **Full Remediation & Acceptance Ledger**: See [`SAFIDATA-FINAL-REMEDIATION-AND-ACCEPTANCE.md`](./SAFIDATA-FINAL-REMEDIATION-AND-ACCEPTANCE.md).
+- **Headline Verified Totals**:
+  - `cargo test --workspace`: **287 passed, 0 failed, 3 ignored** (PostgreSQL 18 live DB tests require `SF_TEST_DATABASE_URL`).
+  - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets`: **2 passed, 0 failed, 1 ignored** (manual perf benchmark).
+  - `pnpm run test` (Vitest monorepo): **66 test files / 231 tests passed, 0 failed**.
+  - Browser & Binary Suites: `verify-intro-visual.mjs`, `verify-ux-e2e.mjs` (7 viewports + public website DOM preservation), `verify-device-identity.mjs`, `verify-capsule-chromium.mjs`, `verify-studio-desktop-e2e.mjs` (14 E2E steps), `verify-exports-roundtrip.mjs` (Python ZIP/PDF/PNG round-trip + Chromium image/SVG verification), and `verify-desktop-build-config.mjs` all passed with exit code `0`.

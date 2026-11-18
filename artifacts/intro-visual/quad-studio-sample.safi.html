@@ -74,7 +74,8 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 <section class="card chart" data-chart-type="line">
 <h3>Trend Line <span class="badge">line</span></h3>
 <svg class="chart-svg" viewBox="0 0 100 100" preserveAspectRatio="none" role="img">
-<polyline points="10,10 50,63 90,83" fill="none" stroke="#38bdf8" stroke-width="2.5"></polyline>
+<line x1="8" y1="92" x2="94" y2="92" stroke="#334155" stroke-width="1"></line>
+<polyline data-line-series="1" points="10,10 50,63 90,83" fill="none" stroke="#38bdf8" stroke-width="2.5"></polyline>
 <circle cx="10" cy="10" r="2.5" fill="#22d3ee"></circle>
 <circle cx="50" cy="63" r="2.5" fill="#22d3ee"></circle>
 <circle cx="90" cy="83" r="2.5" fill="#22d3ee"></circle>
@@ -89,8 +90,9 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 <section class="card chart" data-chart-type="area">
 <h3>Cumulative Area <span class="badge">area</span></h3>
 <svg class="chart-svg" viewBox="0 0 100 100" preserveAspectRatio="none" role="img">
-<polygon points="10,90 10,10 50,63 90,83 90,90" fill="#1d4ed8" fill-opacity="0.35"></polygon>
-<polyline points="10,10 50,63 90,83" fill="none" stroke="#38bdf8" stroke-width="2.5"></polyline>
+<line x1="8" y1="92" x2="94" y2="92" stroke="#334155" stroke-width="1"></line>
+<polygon data-area-fill="1" points="10,90 10,10 50,63 90,83 90,90" fill="#1d4ed8" fill-opacity="0.35"></polygon>
+<polyline data-line-series="1" points="10,10 50,63 90,83" fill="none" stroke="#38bdf8" stroke-width="2.5"></polyline>
 <circle cx="10" cy="10" r="2.5" fill="#22d3ee"></circle>
 <circle cx="50" cy="63" r="2.5" fill="#22d3ee"></circle>
 <circle cx="90" cy="83" r="2.5" fill="#22d3ee"></circle>
@@ -136,10 +138,10 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 <svg class="chart-svg" viewBox="0 0 100 100" preserveAspectRatio="none" role="img">
 <line x1="8" y1="92" x2="94" y2="92" stroke="#334155" stroke-width="1"></line>
 <line x1="8" y1="8" x2="8" y2="92" stroke="#334155" stroke-width="1"></line>
-<circle cx="50" cy="10" r="2.5" fill="#22d3ee"></circle>
-<circle cx="90" cy="63" r="2.5" fill="#22d3ee"></circle>
-<circle cx="50" cy="81" r="2.5" fill="#22d3ee"></circle>
-<circle cx="10" cy="90" r="2.5" fill="#22d3ee"></circle>
+<circle data-scatter-point="0" cx="50" cy="10" r="2.5" fill="#2563eb"></circle>
+<circle data-scatter-point="1" cx="90" cy="63" r="2.5" fill="#0891b2"></circle>
+<circle data-scatter-point="2" cx="50" cy="81" r="2.5" fill="#7c3aed"></circle>
+<circle data-scatter-point="3" cx="10" cy="90" r="2.5" fill="#059669"></circle>
 </svg>
 <ul class="legend">
 <li><span>#1</span><span class="provenance">(2, 500)</span></li>
@@ -170,6 +172,11 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 <section class="card chart" data-chart-type="kpi">
 <h3>Headline KPI Card <span class="badge">kpi</span></h3>
 <p class="value" data-kpi-value>850</p>
+<ul class="legend">
+<li><span>Cairo</span><span class="provenance">600</span></li>
+<li><span>Alex</span><span class="provenance">200</span></li>
+<li><span>Unknown</span><span class="provenance">50</span></li>
+</ul>
 <p class="provenance">kpi · SUM of amount grouped by region</p>
 </section>
 </div>
@@ -179,7 +186,7 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 <h3>Executive Deck</h3>
 <p class="value">850 EGP</p>
 <p>Total: 850</p>
-<p class="provenance">Verified refs: rev_total:1f61d95a58c5</p>
+<p class="provenance">Verified refs: rev_total:96620925c6ca</p>
 </section>
 </div>
 <h2 id="report">Executive Report</h2>
@@ -202,7 +209,7 @@ th,td{text-align:start;padding:8px;border-bottom:1px solid #1f2b42;vertical-alig
 <table>
 <thead><tr><th>Metric</th><th>Value</th><th>Formula</th><th>Version</th><th>Fingerprint</th></tr></thead>
 <tbody>
-<tr><td>Total Revenue</td><td>850 EGP</td><td>SUM(amount)</td><td>v1 / data v0</td><td class="provenance">1f61d95a58c51ce1fe0dfcb175e12300e4651e6f690c2d0256c0f46eee1bde86</td></tr>
+<tr><td>Total Revenue</td><td>850 EGP</td><td>SUM(amount)</td><td>v1 / data v0</td><td class="provenance">96620925c6ca8e298482d502dd8833ca8f861dd16dcd73154dbd4ea6d4c237a1</td></tr>
 </tbody>
 </table>
 <p class="meta">Filter controls only select between aggregates computed by Safi before export; they never calculate a new number.</p>

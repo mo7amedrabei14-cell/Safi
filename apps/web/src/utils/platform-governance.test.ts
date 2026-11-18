@@ -16,12 +16,12 @@ import {
 describe("Platform Governance: Tooltips, Tutorials, Privacy/Security & Performance (Phases 10, 11, 12)", () => {
   it("provides bilingual contextual tooltips and an 8-step replayable tutorial state machine (Phase 10)", () => {
     expect(INTERACTIVE_TUTORIAL_STEPS).toHaveLength(8);
-    const enTip = getTooltipDescriptor("epistemic.ConfirmedFact", "en")!;
-    const arTip = getTooltipDescriptor("epistemic.ConfirmedFact", "ar")!;
-    expect(enTip.title).toBe("Confirmed Fact");
-    expect(arTip.title).toBe("حقيقة مؤكدة");
-    expect(enTip.whatItDoes.length).toBeGreaterThan(10);
-    expect(arTip.impact.length).toBeGreaterThan(10);
+    const enTip = getTooltipDescriptor("epistemic.ConfirmedFact", "en");
+    const arTip = getTooltipDescriptor("epistemic.ConfirmedFact", "ar");
+    expect(enTip?.title).toBe("Confirmed Fact");
+    expect(arTip?.title).toBe("حقيقة مؤكدة");
+    expect(enTip?.whatItDoes.length).toBeGreaterThan(10);
+    expect(arTip?.impact.length).toBeGreaterThan(10);
 
     let tut = createInitialTutorialState(true);
     expect(tut.isOpen).toBe(true);

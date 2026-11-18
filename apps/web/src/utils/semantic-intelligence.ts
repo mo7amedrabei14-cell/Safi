@@ -86,7 +86,13 @@ export interface SemanticColumnProfile {
   readonly analyticalRole: ColumnAnalyticalRole;
   readonly isIdentifier: boolean;
   readonly aggregationAllowed: boolean;
-  readonly recommendedAggregation: "SUM" | "AVERAGE" | "MEDIAN" | "COUNT_DISTINCT" | "COUNT" | "NONE";
+  readonly recommendedAggregation:
+    | "SUM"
+    | "AVERAGE"
+    | "MEDIAN"
+    | "COUNT_DISTINCT"
+    | "COUNT"
+    | "NONE";
   readonly unit?: string | undefined;
   readonly currencyCode?: string | undefined;
   readonly piiSensitivity: PiiSensitivityLevel;
@@ -130,12 +136,14 @@ export interface DataQualityFinding {
   readonly description: string;
   readonly affectedRowCount: number;
   readonly sampleRowIndices: readonly number[];
-  readonly suggestedAction?: {
-    readonly actionType: ReversibleCleaningActionType;
-    readonly label: string;
-    readonly previewSummary: string;
-    readonly reversible: true;
-  } | undefined;
+  readonly suggestedAction?:
+    | {
+        readonly actionType: ReversibleCleaningActionType;
+        readonly label: string;
+        readonly previewSummary: string;
+        readonly reversible: true;
+      }
+    | undefined;
 }
 
 export type RelationshipCardinality = "1:1" | "1:N" | "N:1" | "M:N";
@@ -220,6 +228,8 @@ const QUANTITY_HEADER_PATTERN =
 const PERCENT_HEADER_PATTERN =
   /(rate|ratio|pct|percent|margin|share|growth|utilization|نسبة|معدل|هامش|حصة|نمو)/i;
 
+const SCORE_HEADER_PATTERN = /(score|grade|rating|points|rank|marks|index|درجة|تقييم|نقاط|مؤشر)/i;
+
 const DATE_HEADER_PATTERN =
   /(date|time|day|month|year|quarter|period|created|updated|تاريخ|وقت|يوم|شهر|سنة|عام|فترة|الربع)/i;
 
@@ -252,6 +262,12 @@ function detectCurrencyAndUnit(
   return {};
 }
 
+function isDateLikeString(v: string): boolean {
+  return (
+    /^\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[T\s].*)?$/.test(v) || /^\d{1,2}[-/]\d{1,2}[-/]\d{4}$/.test(v)
+  );
+}
+
 function detectPiiSensitivity(
   header: string,
   sampleValues: readonly string[]
@@ -261,7 +277,12 @@ function detectPiiSensitivity(
     return "HighRiskPii";
   }
   const hasEmail = sampleValues.some((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v));
-  const hasPhone = sampleValues.some((v) => /^\+?\d[\d\s-]{8,14}$/.test(v));
+  const hasPhone = sampleValues.some(
+    (v) =>
+      !isDateLikeString(v) &&
+      /^\+?\d[\d\s-]{8,14}$/.test(v) &&
+      (v.startsWith("+") || v.startsWith("0") || v.replace(/\D/g, "").length >= 10)
+  );
   if (hasEmail || hasPhone || /email|phone|mobile|بريد|هاتف|جوال|موبايل/i.test(lower)) {
     return "PersonalContact";
   }
@@ -333,8 +354,8 @@ function computeDateRangeStats(rawDates: readonly string[]): DateRangeStats | un
   }
   if (timestamps.length === 0) return undefined;
   timestamps.sort((a, b) => a - b);
-  const minTs = timestamps[0]!;
-  const maxTs = timestamps[timestamps.length - 1]!;
+  const minTs = timestamps[0] ?? 0;
+  const maxTs = timestamps[timestamps.length - 1] ?? minTs;
   const spanDays = Math.max(0, Math.round((maxTs - minTs) / 86_400_000));
 
   const uniqueSorted = [...new Set(timestamps)];
@@ -342,7 +363,9 @@ function computeDateRangeStats(rawDates: readonly string[]): DateRangeStats | un
   if (uniqueSorted.length > 1) {
     let totalGap = 0;
     for (let i = 1; i < uniqueSorted.length; i += 1) {
-      totalGap += (uniqueSorted[i]! - uniqueSorted[i - 1]!) / 86_400_000;
+      const cur = uniqueSorted[i] ?? 0;
+      const prev = uniqueSorted[i - 1] ?? cur;
+      totalGap += (cur - prev) / 86_400_000;
     }
     avgGapDays = totalGap / (uniqueSorted.length - 1);
   }
@@ -461,18 +484,13 @@ function profileTableRegion(
       (v) => (v.length > 1 && v.startsWith("0") && /^\d+$/.test(v)) || /^\+\d{5,15}$/.test(v)
     ).length;
     const formulaErrorCount = nonNullCells.filter((v) => v.startsWith("#")).length;
-    const numericVals = nonNullCells
-      .map(parseNumericCell)
-      .filter((v): v is number => v !== null);
+    const numericVals = nonNullCells.map(parseNumericCell).filter((v): v is number => v !== null);
     const dateVals = nonNullCells.filter(
-      (v) =>
-        /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(v) || /^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(v)
+      (v) => /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(v) || /^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(v)
     );
 
     const isNumericDominant =
-      nonNullCount > 0 &&
-      numericVals.length / nonNullCount >= 0.8 &&
-      leadingZeroCount === 0;
+      nonNullCount > 0 && numericVals.length / nonNullCount >= 0.8 && leadingZeroCount === 0;
     const isDateDominant = nonNullCount > 0 && dateVals.length / nonNullCount >= 0.8;
 
     const { currencyCode, unit } = detectCurrencyAndUnit(header, nonNullCells);
@@ -483,7 +501,8 @@ function profileTableRegion(
     const headerSaysMeasure =
       CURRENCY_HEADER_PATTERN.test(header) ||
       QUANTITY_HEADER_PATTERN.test(header) ||
-      PERCENT_HEADER_PATTERN.test(header);
+      PERCENT_HEADER_PATTERN.test(header) ||
+      SCORE_HEADER_PATTERN.test(header);
 
     const looksLikeSequentialOrCodeId =
       headerSaysId ||
@@ -492,6 +511,7 @@ function profileTableRegion(
       piiSensitivity === "PersonalContact" ||
       (!headerSaysMeasure &&
         isNumericDominant &&
+        numericVals.length === nonNullCount &&
         uniquenessPct >= 98 &&
         totalRows >= 5 &&
         numericVals.every((n) => Number.isInteger(n) && n >= 1));
@@ -511,7 +531,8 @@ function profileTableRegion(
               ? "EmailAddress"
               : "PhoneOrContact"
             : "IdentifierCode";
-      storageType = leadingZeroCount > 0 ? "ZeroPreservedText" : isNumericDominant ? "Integer" : "Text";
+      storageType =
+        leadingZeroCount > 0 ? "ZeroPreservedText" : isNumericDominant ? "Integer" : "Text";
       confidencePct = headerSaysId || leadingZeroCount > 0 ? 96 : 72;
     } else if (isDateDominant || (DATE_HEADER_PATTERN.test(header) && dateVals.length > 0)) {
       analyticalRole = "Temporal";
@@ -547,7 +568,10 @@ function profileTableRegion(
       } else if (ORG_HEADER_PATTERN.test(header)) {
         semanticType = "OrganizationOrBranch";
         confidencePct = 91;
-      } else if (CATEGORY_HEADER_PATTERN.test(header) || distinctCount <= Math.max(12, totalRows * 0.3)) {
+      } else if (
+        CATEGORY_HEADER_PATTERN.test(header) ||
+        distinctCount <= Math.max(12, totalRows * 0.3)
+      ) {
         semanticType = "CategoryOrStatus";
         confidencePct = 86;
       } else {
@@ -735,10 +759,11 @@ function discoverCrossTableRelationships(
 
   for (let i = 0; i < tables.length; i += 1) {
     for (let j = i + 1; j < tables.length; j += 1) {
-      const tableA = tables[i]!;
-      const tableB = tables[j]!;
-      const regionA = rawRegionsById.get(tableA.tableId);
-      const regionB = rawRegionsById.get(tableB.tableId);
+      const tableA = tables[i];
+      const tableB = tables[j];
+      if (!tableA || !tableB) continue;
+      const regionA = rawRegionsById.get(`${tableA.sheetName}::${tableA.tableId}`);
+      const regionB = rawRegionsById.get(`${tableB.sheetName}::${tableB.tableId}`);
       if (!regionA || !regionB || tableA.rowCount === 0 || tableB.rowCount === 0) continue;
 
       for (const colA of tableA.columns) {
@@ -784,13 +809,7 @@ function discoverCrossTableRelationships(
           const uniqueB = colB.uniquenessPct === 100 && colB.missingCount === 0;
 
           const cardinality: RelationshipCardinality =
-            uniqueA && uniqueB
-              ? "1:1"
-              : uniqueB
-                ? "N:1"
-                : uniqueA
-                  ? "1:N"
-                  : "M:N";
+            uniqueA && uniqueB ? "1:1" : uniqueB ? "N:1" : uniqueA ? "1:N" : "M:N";
 
           const orphanSourceKeyCount = [...setA].filter((k) => !setB.has(k)).length;
           const duplicateTargetKeyCount = colB.duplicateCount;
@@ -851,7 +870,7 @@ export function buildSemanticWorkbookModel(
 
   for (const ws of ingestionReport.worksheets) {
     for (const region of ws.tables) {
-      rawRegionsById.set(region.tableId, region);
+      rawRegionsById.set(`${ws.name}::${region.tableId}`, region);
       tables.push(profileTableRegion(region, qualityFindings));
     }
   }

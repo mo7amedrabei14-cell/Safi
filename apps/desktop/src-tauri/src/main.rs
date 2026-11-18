@@ -361,7 +361,10 @@ async fn pick_input_file(
     tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
-            .add_filter("Spreadsheets", &["csv", "xlsx", "xls"])
+            .add_filter(
+                "Spreadsheets",
+                &["csv", "tsv", "xlsx", "xlsm", "xlsb", "xls", "ods"],
+            )
             .blocking_pick_file()
             .and_then(|path| path.into_path().ok())
             .map(|path| path.display().to_string())
@@ -394,7 +397,7 @@ async fn pick_output_file(
     .map_err(|_| "SF-SYS-011".to_owned())
 }
 
-/// Native save dialog restricted to `.safi.html` offline capsule exports (requires an authenticated Studio session).
+/// Native save dialog for `.safi.html` offline capsule exports (requires an authenticated Studio session).
 #[tauri::command]
 async fn pick_capsule_output_file(
     app: tauri::AppHandle,
@@ -410,6 +413,47 @@ async fn pick_capsule_output_file(
             .file()
             .add_filter("Safi Capsule", &["html"])
             .set_file_name("report.safi.html")
+            .blocking_save_file()
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.display().to_string())
+    })
+    .await
+    .map_err(|_| "SF-SYS-011".to_owned())
+}
+
+/// Native save dialog for desktop deliverables (`.xlsx`, `.pptx`, `.docx`, `.pdf`, `.png`, `.svg`, `.csv`, `.zip`).
+#[tauri::command]
+async fn pick_deliverable_file(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, StudioStore>,
+    default_name: Option<String>,
+    extension: Option<String>,
+) -> Result<Option<String>, String> {
+    let ext = extension.unwrap_or_else(|| "xlsx".to_owned());
+    let name = default_name.unwrap_or_else(|| format!("safidata_deliverable.{ext}"));
+    store.gate_command(
+        "pick_deliverable_file",
+        sf_desktop::ipc_payload_len!(("extension", &ext), ("defaultName", &name)),
+        Some(now_ms()),
+    )?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter(
+                "SafiData Deliverable",
+                &[
+                    ext.as_str(),
+                    "xlsx",
+                    "pptx",
+                    "docx",
+                    "pdf",
+                    "png",
+                    "svg",
+                    "csv",
+                    "zip",
+                ],
+            )
+            .set_file_name(&name)
             .blocking_save_file()
             .and_then(|path| path.into_path().ok())
             .map(|path| path.display().to_string())
@@ -451,6 +495,24 @@ fn studio_open_file(
     path: String,
 ) -> Result<String, String> {
     store.open_file(&project, std::path::Path::new(&path), now_ms())
+}
+
+#[tauri::command]
+fn studio_select_region(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    sheet_name: String,
+    table_id: String,
+) -> Result<String, String> {
+    store.select_region(&project, &sheet_name, &table_id, now_ms())
+}
+
+#[tauri::command]
+fn studio_workbook_details(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+) -> Result<String, String> {
+    store.workbook_details(&project)
 }
 
 #[tauri::command]
@@ -819,6 +881,17 @@ fn studio_export_capsule(
     store.export_capsule(&project, std::path::Path::new(&target), &options)
 }
 
+#[tauri::command]
+fn studio_export_deliverable(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    target: String,
+    is_base64: bool,
+    payload: String,
+) -> Result<String, String> {
+    store.export_deliverable(&project, std::path::Path::new(&target), is_base64, &payload)
+}
+
 fn studio_generated_handler(
 ) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
@@ -827,9 +900,12 @@ fn studio_generated_handler(
         pick_input_file,
         pick_output_file,
         pick_capsule_output_file,
+        pick_deliverable_file,
         studio_set_auth_session,
         studio_clear_auth_session,
         studio_open_file,
+        studio_select_region,
+        studio_workbook_details,
         studio_state,
         studio_rows_page,
         studio_set_cell,
@@ -868,7 +944,8 @@ fn studio_generated_handler(
         studio_delete_project,
         studio_list_templates,
         studio_instantiate_template,
-        studio_export_capsule
+        studio_export_capsule,
+        studio_export_deliverable
     ]
 }
 

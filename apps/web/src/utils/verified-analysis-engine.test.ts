@@ -28,7 +28,9 @@ describe("Contextual Question System, Conversational Assistant & Verified Analys
     const questions = generateContextualQuestions(model);
     expect(questions.length).toBeGreaterThanOrEqual(1);
 
-    const firstQ = questions[0]!;
+    const firstQ = questions[0];
+    expect(firstQ).toBeDefined();
+    if (!firstQ) return;
     expect(firstQ.status).toBe("Pending");
 
     // 1. Skip -> marks dependent metric provisional
@@ -38,7 +40,9 @@ describe("Contextual Question System, Conversational Assistant & Verified Analys
     expect(afterSkip[0]?.status).toBe("Skipped");
 
     const skippedReport = buildVerifiedAnalysisReport(model, afterSkip);
-    expect(skippedReport.insightsByEpistemicCategory.UnresolvedQuestion.length).toBeGreaterThanOrEqual(1);
+    expect(
+      skippedReport.insightsByEpistemicCategory.UnresolvedQuestion.length
+    ).toBeGreaterThanOrEqual(1);
 
     // 2. Defer -> status becomes Deferred
     const afterDefer = applyQuestionResolution(afterSkip, firstQ.questionId, {
@@ -95,16 +99,28 @@ describe("Contextual Question System, Conversational Assistant & Verified Analys
     expect(summaryAns.answerText).toContain("1 worksheet");
     expect(summaryAns.citations.length).toBeGreaterThan(0);
 
-    const rankAns = answerAnalyticalQuestion("Which branch performed best and worst?", model, report);
+    const rankAns = answerAnalyticalQuestion(
+      "Which branch performed best and worst?",
+      model,
+      report
+    );
     expect(rankAns.intent).toBe("PerformanceRanking");
     expect(rankAns.answerText).toContain("Cairo");
     expect(rankAns.answerText).toContain("Giza");
 
-    const changeAns = answerAnalyticalQuestion("Why did Revenue_EGP change over time?", model, report);
+    const changeAns = answerAnalyticalQuestion(
+      "Why did Revenue_EGP change over time?",
+      model,
+      report
+    );
     expect(changeAns.intent).toBe("MetricChangeExplanation");
     expect(changeAns.bulletPoints.some((b) => b.includes("[PotentialExplanation]"))).toBe(true);
 
-    const anomalyAns = answerAnalyticalQuestion("Are there any anomalies or outliers?", model, report);
+    const anomalyAns = answerAnalyticalQuestion(
+      "Are there any anomalies or outliers?",
+      model,
+      report
+    );
     expect(anomalyAns.intent).toBe("AnomaliesAndQuality");
     expect(anomalyAns.bulletPoints.some((b) => b.includes("9500"))).toBe(true);
 

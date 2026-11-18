@@ -15,12 +15,16 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use sf_core::Decimal;
 use sf_core::datagraph::{ColumnId, MetricId, RowId, ScenarioId, SourceId, VerifiedMetricToken};
 use sf_core::error::SafiError;
 use sf_core::limits::PlatformLimits;
 use sf_core::table::Table;
-use sf_io::{read_csv_stream, read_excel_stream};
+use sf_io::{
+    FormulaVerificationStatus, SheetVisibility, WorkbookIngestionReport, ingest_workbook_universal,
+};
 use sf_recipe::datagraph::{
     AggFunc, ChangeOutcome, ChartType, DataGraph, RowQuery, datagraph_display,
 };
@@ -63,6 +67,16 @@ const SESSION_RANDOM_HEX_LEN: usize = 64;
 
 fn default_chart_type() -> String {
     "bar".to_owned()
+}
+
+const fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
+const fn is_default_privacy(privacy: &StudioPrivacySettingsArtifact) -> bool {
+    !privacy.external_ai_consent_granted
+        && !privacy.mask_pii_on_cloud
+        && privacy.consent_timestamp_ms.is_none()
 }
 
 /// Validates a Safi opaque session token (`sfs_<64 lowercase hex>`), matching `sf-server::auth::session`.
@@ -416,6 +430,12 @@ pub struct StudioSlideArtifact {
     pub chart_index: Option<usize>,
     /// Layout preset (`kpi_split`, `chart_focus`, `narrative`).
     pub layout: String,
+    /// Presenter notes stored for presenter mode and PPTX speaker notes.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub presenter_notes: String,
+    /// Visual slide theme id.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub theme: String,
 }
 
 /// Document block persisted inside a Studio project bundle.
@@ -434,6 +454,15 @@ pub struct StudioDocBlockArtifact {
     pub metric_id: Option<String>,
     /// Authorship attribution (`user` or `ai`).
     pub authored_by: String,
+    /// Whether to start a new page before this section in PDF/DOCX exports.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub page_break_before: bool,
+    /// Running header text associated with this document section.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub header_text: String,
+    /// Running footer text associated with this document section.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub footer_text: String,
 }
 
 /// Positioned Free-Form Builder block persisted inside a Studio project bundle.
@@ -490,6 +519,35 @@ pub struct StudioTemplateConfigArtifact {
     pub section_overrides: BTreeMap<String, String>,
 }
 
+/// Resolution state for a contextual clarification question in Desktop Studio.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioQuestionResolutionArtifact {
+    /// Stable question identifier.
+    pub question_id: String,
+    /// Resolution action (`answered`, `skipped`, `deferred`, `custom`, `corrected`).
+    pub action: String,
+    /// Selected option or textual answer.
+    pub answer: String,
+    /// Optional custom explanation from user.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub custom_text: String,
+    /// Epoch timestamp in milliseconds.
+    pub updated_at_ms: u64,
+}
+
+/// Privacy & optional external AI consent record persisted locally per project.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StudioPrivacySettingsArtifact {
+    /// Explicit opt-in consent before sending aggregated schema metadata to external AI providers.
+    pub external_ai_consent_granted: bool,
+    /// Mask/exclude raw personal identifiers even when consent is granted.
+    pub mask_pii_on_cloud: bool,
+    /// Epoch timestamp when consent state was last updated.
+    pub consent_timestamp_ms: Option<u64>,
+}
+
 /// Complete Quad-Studio non-table creative artifacts for one project.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -506,6 +564,12 @@ pub struct StudioWorkspaceArtifacts {
     pub assets: Vec<StudioAssetArtifact>,
     /// Living Template selection and customizations.
     pub template_config: Option<StudioTemplateConfigArtifact>,
+    /// Recorded contextual clarification question resolutions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub question_resolutions: Vec<StudioQuestionResolutionArtifact>,
+    /// Explicit local/cloud privacy consent settings.
+    #[serde(default, skip_serializing_if = "is_default_privacy")]
+    pub privacy_settings: StudioPrivacySettingsArtifact,
 }
 
 /// Integrity-checked project bundle persisted on local disk.
@@ -603,6 +667,8 @@ fn system_now_ms() -> u64 {
 pub struct StudioStore {
     projects: Mutex<BTreeMap<String, DataGraph>>,
     artifacts: Mutex<BTreeMap<String, StudioWorkspaceArtifacts>>,
+    ingestion_reports: Mutex<BTreeMap<String, WorkbookIngestionReport>>,
+    active_regions: Mutex<BTreeMap<String, (String, String)>>,
     storage_dir: Mutex<Option<PathBuf>>,
     active_session: Mutex<Option<ActiveStudioSession>>,
     authority: Arc<StudioSessionAuthority>,
@@ -617,6 +683,8 @@ impl Default for StudioStore {
         Self {
             projects: Mutex::new(BTreeMap::new()),
             artifacts: Mutex::new(BTreeMap::new()),
+            ingestion_reports: Mutex::new(BTreeMap::new()),
+            active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(None),
             active_session: Mutex::new(None),
             authority,
@@ -641,6 +709,8 @@ impl StudioStore {
         Self {
             projects: Mutex::new(BTreeMap::new()),
             artifacts: Mutex::new(BTreeMap::new()),
+            ingestion_reports: Mutex::new(BTreeMap::new()),
+            active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(Some(dir)),
             active_session: Mutex::new(None),
             authority,
@@ -659,6 +729,8 @@ impl StudioStore {
         Self {
             projects: Mutex::new(BTreeMap::new()),
             artifacts: Mutex::new(BTreeMap::new()),
+            ingestion_reports: Mutex::new(BTreeMap::new()),
+            active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(Some(dir)),
             active_session: Mutex::new(None),
             authority,
@@ -823,6 +895,16 @@ impl StudioStore {
 
     fn state_unlocked(&self, project: &str) -> Result<String, String> {
         let artifacts = self.current_artifacts(project);
+        let report = self
+            .ingestion_reports
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project).cloned());
+        let active_region = self
+            .active_regions
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project).cloned());
         let projects = self
             .projects
             .lock()
@@ -830,7 +912,7 @@ impl StudioStore {
         let graph = projects
             .get(project)
             .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
-        state_json(graph, &artifacts)
+        state_json(graph, &artifacts, report.as_ref(), active_region.as_ref())
     }
 
     fn snapshot_unlocked(&self, project: &str) -> Result<String, String> {
@@ -883,7 +965,8 @@ impl StudioStore {
         serde_json::to_string(&entries).map_err(|_| "SF-SYS-001".to_owned())
     }
 
-    /// Imports a CSV or Excel file from disk and replaces any project with the same id.
+    /// Imports a CSV, TSV, XLSX, XLSM, XLSB, XLS, or ODS file via the Universal Workbook
+    /// Intelligence Engine and replaces any project with the same id.
     ///
     /// # Errors
     /// Returns the `SF-*` code of the first failing step: unauthenticated (`SF-AUTH-001`),
@@ -891,16 +974,103 @@ impl StudioStore {
     pub fn open_file(&self, project: &str, path: &Path, now_ms: u64) -> Result<String, String> {
         let payload_len = crate::ipc_payload_len!(("project", project), ("path", path));
         self.gate_command("studio_open_file", payload_len, Some(now_ms))?;
-        let table = read_table(path)?;
+        let (report, table, sheet_name, table_id) = ingest_workbook_for_desktop(path)?;
         let source = SourceId::new(project).map_err(|error| code_of(&error))?;
         let graph = DataGraph::new(source, table, now_ms).map_err(|error| code_of(&error))?;
-        let mut projects = self
+        {
+            let mut projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let _ = projects.insert(project.to_owned(), graph);
+        }
+        if let Ok(mut reports) = self.ingestion_reports.lock() {
+            let _ = reports.insert(project.to_owned(), report);
+        }
+        if let Ok(mut regions) = self.active_regions.lock() {
+            let _ = regions.insert(project.to_owned(), (sheet_name, table_id));
+        }
+        self.state_unlocked(project)
+    }
+
+    /// Switches the active worksheet and detected table region for a multi-sheet/multi-table workbook.
+    ///
+    /// # Errors
+    /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-IMP-001` when the region is missing.
+    pub fn select_region(
+        &self,
+        project: &str,
+        sheet_name: &str,
+        table_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("sheetName", sheet_name),
+            ("tableId", table_id),
+        );
+        self.gate_command("studio_select_region", payload_len, Some(now_ms))?;
+        let table = {
+            let reports = self
+                .ingestion_reports
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let report = reports
+                .get(project)
+                .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+            report
+                .core_table_by_sheet_and_table(sheet_name, table_id)
+                .map_err(|error| code_of(&error))?
+                .ok_or_else(|| "SF-IMP-001".to_owned())?
+        };
+        let source = SourceId::new(project).map_err(|error| code_of(&error))?;
+        let graph = DataGraph::new(source, table, now_ms).map_err(|error| code_of(&error))?;
+        {
+            let mut projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let _ = projects.insert(project.to_owned(), graph);
+        }
+        if let Ok(mut regions) = self.active_regions.lock() {
+            let _ = regions.insert(
+                project.to_owned(),
+                (sheet_name.to_owned(), table_id.to_owned()),
+            );
+        }
+        self.state_unlocked(project)
+    }
+
+    /// Returns complete multi-sheet, formula verification, separated-rows, and embedded-object
+    /// metadata from the Universal Workbook Intelligence Engine for `project`.
+    ///
+    /// # Errors
+    /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], or `SF-SYS-001`.
+    pub fn workbook_details(&self, project: &str) -> Result<String, String> {
+        self.gate_command(
+            "studio_workbook_details",
+            crate::ipc_payload_len!(("project", project)),
+            None,
+        )?;
+        let report = self
+            .ingestion_reports
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project).cloned());
+        let active_region = self
+            .active_regions
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project).cloned());
+        let projects = self
             .projects
             .lock()
             .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
-        let _ = projects.insert(project.to_owned(), graph);
-        drop(projects);
-        self.state_unlocked(project)
+        let graph = projects
+            .get(project)
+            .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+        let payload = workbook_details_json(graph, report.as_ref(), active_region.as_ref());
+        serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
     }
 
     /// Returns the state snapshot (metadata, columns, tokens, scenarios — never unbounded rows).
@@ -1990,6 +2160,45 @@ impl StudioStore {
         Ok(target.display().to_string())
     }
 
+    /// Writes any generated binary (base64) or UTF-8 text deliverable atomically to disk
+    /// (`temp -> fsync -> rename`) without modifying any source workbook.
+    ///
+    /// # Errors
+    /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], `SF-SYS-001` on invalid base64,
+    /// or [`EXPORT_FAILED_CODE`].
+    pub fn export_deliverable(
+        &self,
+        project: &str,
+        target: &Path,
+        is_base64: bool,
+        payload: &str,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("project", project),
+            ("target", target),
+            ("payload", payload),
+        );
+        self.gate_command("studio_export_deliverable", payload_len, None)?;
+        {
+            let projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            if !projects.contains_key(project) {
+                return Err(UNKNOWN_PROJECT_CODE.to_owned());
+            }
+        }
+        let bytes = if is_base64 {
+            BASE64_STANDARD
+                .decode(payload.trim())
+                .map_err(|_| "SF-SYS-001".to_owned())?
+        } else {
+            payload.as_bytes().to_vec()
+        };
+        write_atomic_bytes(target, &bytes)?;
+        Ok(target.display().to_string())
+    }
+
     fn mutate(
         &self,
         project: &str,
@@ -2079,15 +2288,20 @@ fn code_of(error: &SafiError) -> String {
     error.code().as_code_string()
 }
 
-/// Reads a spreadsheet from disk with the desktop platform limits.
-fn read_table(path: &Path) -> Result<Table, String> {
+/// Reads any supported workbook or delimited file via the Universal Workbook Intelligence Engine
+/// and selects its primary analytical table `(report, primary_table, sheet_name, table_id)`.
+fn ingest_workbook_for_desktop(
+    path: &Path,
+) -> Result<(WorkbookIngestionReport, Table, String, String), String> {
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| "SF-IMP-002".to_owned())?;
-    let is_csv = extension == "csv";
-    if !is_csv && !matches!(extension.as_str(), "xlsx" | "xlsm" | "xls" | "ods") {
+    if !matches!(
+        extension.as_str(),
+        "csv" | "tsv" | "xlsx" | "xlsm" | "xlsb" | "xls" | "ods"
+    ) {
         return Err("SF-IMP-002".to_owned());
     }
     let metadata = fs::metadata(path).map_err(|_| "SF-IMP-001".to_owned())?;
@@ -2095,39 +2309,293 @@ fn read_table(path: &Path) -> Result<Table, String> {
         return Err("SF-IMP-003".to_owned());
     }
     let bytes = fs::read(path).map_err(|_| "SF-IMP-001".to_owned())?;
-    let sheet_name = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("Sheet1")
-        .to_owned();
-    let sheet = if is_csv {
-        read_csv_stream(
-            Cursor::new(&bytes),
-            PlatformLimits::DESKTOP_CLI,
-            &sheet_name,
-            "tbl_1",
-            "table",
-        )
-        .map_err(|error| code_of(&error))?
-    } else {
-        read_excel_stream(
-            Cursor::new(&bytes),
-            bytes.len() as u64,
-            PlatformLimits::DESKTOP_CLI,
-        )
-        .map_err(|error| code_of(&error))?
-        .into_iter()
-        .next()
-        .ok_or_else(|| "SF-IMP-001".to_owned())?
+    let hint = path.file_name().and_then(|value| value.to_str());
+    let report =
+        ingest_workbook_universal(Cursor::new(bytes), PlatformLimits::DESKTOP_CLI, hint, None)
+            .map_err(|error| code_of(&error))?;
+    let primary_region = report
+        .worksheets
+        .iter()
+        .filter(|ws| ws.visibility == SheetVisibility::Visible)
+        .flat_map(|ws| ws.tables.iter())
+        .max_by_key(|t| (t.data_rows.len(), t.headers.len()))
+        .or_else(|| {
+            report
+                .worksheets
+                .iter()
+                .flat_map(|ws| ws.tables.iter())
+                .max_by_key(|t| (t.data_rows.len(), t.headers.len()))
+        })
+        .ok_or_else(|| "SF-IMP-001".to_owned())?;
+    let table = primary_region
+        .to_core_table()
+        .map_err(|error| code_of(&error))?;
+    Ok((
+        report.clone(),
+        table,
+        primary_region.sheet_name.clone(),
+        primary_region.table_id.clone(),
+    ))
+}
+
+fn workbook_summary_json(
+    report: Option<&WorkbookIngestionReport>,
+    active_region: Option<&(String, String)>,
+) -> serde_json::Value {
+    let Some(rep) = report else {
+        return serde_json::Value::Null;
     };
-    sheet
-        .primary_table()
-        .cloned()
-        .ok_or_else(|| "SF-IMP-001".to_owned())
+    let sheets: Vec<serde_json::Value> = rep
+        .worksheets
+        .iter()
+        .map(|ws| {
+            let tables: Vec<serde_json::Value> = ws
+                .tables
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "tableId": t.table_id,
+                        "title": t.title,
+                        "sheetName": t.sheet_name,
+                        "headerCount": t.headers.len(),
+                        "rowCount": t.data_rows.len(),
+                        "separatedRowCount": t.separated_rows.len(),
+                        "confidencePct": t.confidence_pct,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "name": ws.name,
+                "index": ws.index,
+                "visibility": format!("{:?}", ws.visibility),
+                "classification": format!("{:?}", ws.classification),
+                "classificationConfidencePct": ws.classification_confidence_pct,
+                "tables": tables,
+                "formulaCount": ws.formula_count,
+                "verifiedFormulaCount": ws.verified_formula_count,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "detectedFormat": format!("{:?}", rep.detected_format),
+        "supportLevel": format!("{:?}", rep.support_level),
+        "dateSystem": format!("{:?}", rep.date_system),
+        "macrosNeutralized": rep.macros_neutralized,
+        "totalSheets": rep.total_sheets,
+        "visibleSheets": rep.visible_sheets,
+        "hiddenSheets": rep.hidden_sheets,
+        "totalTablesExtracted": rep.total_tables_extracted,
+        "totalAnalyticalRows": rep.total_analytical_rows,
+        "totalFormulasDetected": rep.total_formulas_detected,
+        "totalFormulasVerified": rep.total_formulas_verified,
+        "warningsCount": rep.warnings.len(),
+        "activeSheet": active_region.map(|r| r.0.as_str()),
+        "activeTableId": active_region.map(|r| r.1.as_str()),
+        "sheets": sheets,
+    })
+}
+
+fn workbook_details_json(
+    graph: &DataGraph,
+    report: Option<&WorkbookIngestionReport>,
+    active_region: Option<&(String, String)>,
+) -> serde_json::Value {
+    let Some(rep) = report else {
+        let headers: Vec<String> = graph
+            .working()
+            .columns()
+            .iter()
+            .map(|c| c.schema().name.clone())
+            .collect();
+        return serde_json::json!({
+            "detectedFormat": "Unknown",
+            "supportLevel": "FullSupport",
+            "dateSystem": "Standard1900",
+            "macrosNeutralized": false,
+            "totalSheets": 1,
+            "visibleSheets": 1,
+            "hiddenSheets": 0,
+            "totalTablesExtracted": 1,
+            "totalAnalyticalRows": graph.working().row_count(),
+            "totalFormulasDetected": 0,
+            "totalFormulasVerified": 0,
+            "activeSheet": "Sheet1",
+            "activeTableId": "tbl_1",
+            "definedNames": [],
+            "embeddedObjects": [],
+            "warnings": [],
+            "worksheets": [{
+                "name": "Sheet1",
+                "index": 0,
+                "visibility": "Visible",
+                "classification": "MainDataset",
+                "classificationConfidencePct": 90,
+                "classificationReason": "Restored project snapshot",
+                "rawRowCount": graph.working().row_count() + 1,
+                "rawColCount": headers.len(),
+                "mergedRanges": [],
+                "hasFrozenPanes": false,
+                "isProtected": false,
+                "formulaCount": 0,
+                "verifiedFormulaCount": 0,
+                "tables": [{
+                    "tableId": "tbl_1",
+                    "title": graph.working().name(),
+                    "sheetName": "Sheet1",
+                    "headers": headers,
+                    "rowCount": graph.working().row_count(),
+                    "separatedRows": [],
+                    "confidencePct": 95,
+                }],
+                "formulaSamples": [],
+            }],
+        });
+    };
+
+    let worksheets: Vec<serde_json::Value> = rep
+        .worksheets
+        .iter()
+        .map(|ws| {
+            let tables: Vec<serde_json::Value> = ws
+                .tables
+                .iter()
+                .map(|t| {
+                    let separated: Vec<serde_json::Value> = t
+                        .separated_rows
+                        .iter()
+                        .take(50)
+                        .map(|sr| {
+                            serde_json::json!({
+                                "sheetRow": sr.sheet_row,
+                                "kind": format!("{:?}", sr.kind),
+                                "cells": sr.values,
+                            })
+                        })
+                        .collect();
+                    serde_json::json!({
+                        "tableId": t.table_id,
+                        "title": t.title,
+                        "sheetName": t.sheet_name,
+                        "headers": t.headers,
+                        "rowCount": t.data_rows.len(),
+                        "separatedRows": separated,
+                        "confidencePct": t.confidence_pct,
+                    })
+                })
+                .collect();
+
+            let mut unsupported_count = 0usize;
+            let mut error_count = 0usize;
+            let mut volatile_count = 0usize;
+            let mut external_count = 0usize;
+            let mut formula_samples = Vec::new();
+            for cell in &ws.cell_metadata {
+                match cell.formula_status {
+                    FormulaVerificationStatus::UnsupportedFormula => unsupported_count += 1,
+                    FormulaVerificationStatus::FormulaError => error_count += 1,
+                    FormulaVerificationStatus::VolatileFormula => volatile_count += 1,
+                    FormulaVerificationStatus::ExternalWorkbookReference => external_count += 1,
+                    _ => {}
+                }
+                let interesting =
+                    cell.formula.is_some() || cell.comment.is_some() || cell.hyperlink.is_some();
+                if interesting && formula_samples.len() < 120 {
+                    formula_samples.push(serde_json::json!({
+                        "address": cell.address,
+                        "row": cell.row,
+                        "col": cell.col,
+                        "rawValue": cell.raw_value,
+                        "formula": cell.formula,
+                        "cachedValue": cell.cached_value,
+                        "recalculatedValue": cell.recalculated_value,
+                        "formulaStatus": format!("{:?}", cell.formula_status),
+                        "dataType": format!("{:?}", cell.data_type),
+                        "numberFormat": cell.number_format,
+                        "comment": cell.comment,
+                        "hyperlink": cell.hyperlink,
+                    }));
+                }
+            }
+
+            serde_json::json!({
+                "name": ws.name,
+                "index": ws.index,
+                "visibility": format!("{:?}", ws.visibility),
+                "classification": format!("{:?}", ws.classification),
+                "classificationConfidencePct": ws.classification_confidence_pct,
+                "classificationReason": ws.classification_reason,
+                "rawRowCount": ws.raw_row_count,
+                "rawColCount": ws.raw_col_count,
+                "mergedRanges": ws.merged_ranges,
+                "hasFrozenPanes": ws.has_frozen_panes,
+                "autoFilterRange": ws.auto_filter_range,
+                "printArea": ws.print_area,
+                "isProtected": ws.is_protected,
+                "formulaCount": ws.formula_count,
+                "verifiedFormulaCount": ws.verified_formula_count,
+                "unsupportedFormulaCount": unsupported_count,
+                "formulaErrorCount": error_count,
+                "volatileFormulaCount": volatile_count,
+                "externalRefCount": external_count,
+                "tables": tables,
+                "formulaSamples": formula_samples,
+            })
+        })
+        .collect();
+
+    let defined_names: Vec<serde_json::Value> = rep
+        .defined_names
+        .iter()
+        .map(|dn| {
+            serde_json::json!({
+                "name": dn.name,
+                "refersTo": dn.refers_to,
+                "isBuiltIn": dn.is_built_in,
+            })
+        })
+        .collect();
+
+    let embedded_objects: Vec<serde_json::Value> = rep
+        .embedded_objects
+        .iter()
+        .map(|obj| {
+            serde_json::json!({
+                "kind": format!("{:?}", obj.kind),
+                "location": obj.location,
+                "handling": format!("{:?}", obj.handling),
+                "summary": obj.summary,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "detectedFormat": format!("{:?}", rep.detected_format),
+        "supportLevel": format!("{:?}", rep.support_level),
+        "dateSystem": format!("{:?}", rep.date_system),
+        "macrosNeutralized": rep.macros_neutralized,
+        "totalSheets": rep.total_sheets,
+        "visibleSheets": rep.visible_sheets,
+        "hiddenSheets": rep.hidden_sheets,
+        "totalTablesExtracted": rep.total_tables_extracted,
+        "totalAnalyticalRows": rep.total_analytical_rows,
+        "totalFormulasDetected": rep.total_formulas_detected,
+        "totalFormulasVerified": rep.total_formulas_verified,
+        "activeSheet": active_region.map(|r| r.0.as_str()),
+        "activeTableId": active_region.map(|r| r.1.as_str()),
+        "definedNames": defined_names,
+        "embeddedObjects": embedded_objects,
+        "warnings": rep.warnings,
+        "worksheets": worksheets,
+    })
 }
 
 /// Serializes the metadata & provenance state the desktop UI renders without dumping all rows.
-fn state_json(graph: &DataGraph, artifacts: &StudioWorkspaceArtifacts) -> Result<String, String> {
+fn state_json(
+    graph: &DataGraph,
+    artifacts: &StudioWorkspaceArtifacts,
+    report: Option<&WorkbookIngestionReport>,
+    active_region: Option<&(String, String)>,
+) -> Result<String, String> {
     let columns = graph
         .working()
         .columns()
@@ -2218,6 +2686,7 @@ fn state_json(graph: &DataGraph, artifacts: &StudioWorkspaceArtifacts) -> Result
             .map(|(name, value)| serde_json::json!({ "name": name, "value": value.normalize().to_string() }))
             .collect::<Vec<_>>(),
         "artifacts": artifacts,
+        "workbookSummary": workbook_summary_json(report, active_region),
     });
     serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
 }
@@ -2247,6 +2716,10 @@ fn token_json(token: &VerifiedMetricToken) -> serde_json::Value {
 
 /// Writes a new file via a temporary sibling, `fsync`, then rename (AGENTS.md rule 13).
 fn write_atomic(target: &Path, contents: &str) -> Result<(), String> {
+    write_atomic_bytes(target, contents.as_bytes())
+}
+
+fn write_atomic_bytes(target: &Path, contents: &[u8]) -> Result<(), String> {
     let directory: PathBuf = target
         .parent()
         .ok_or_else(|| EXPORT_FAILED_CODE.to_owned())?
@@ -2262,7 +2735,7 @@ fn write_atomic(target: &Path, contents: &str) -> Result<(), String> {
     let temporary = directory.join(format!(".{name}.{stamp}.tmp"));
     let write = || -> std::io::Result<()> {
         let mut file = fs::File::create(&temporary)?;
-        file.write_all(contents.as_bytes())?;
+        file.write_all(contents)?;
         file.sync_all()?;
         drop(file);
         fs::rename(&temporary, target)
@@ -3148,5 +3621,72 @@ mod tests {
         }
         assert!(html.contains(r#"data-grid-row-span="6""#));
         assert!(html.contains("grid-row:3 / span 6"));
+    }
+
+    #[test]
+    fn all_21_chart_types_and_region_switching_and_deliverable_export_work() {
+        let directory = test_result(tempfile::tempdir());
+        let storage = directory.path().join("projects");
+        let store = authenticated_store_with_dir(storage);
+        let csv_path = directory.path().join("metrics21.csv");
+        test_result(fs::write(
+            &csv_path,
+            "region,amount,units\nCairo,100,10\nGiza,200,20\nAlex,300,30\nCairo,150,15\n",
+        ));
+        let opened = json(&test_result(store.open_file("p21", &csv_path, 1_000)));
+        assert_eq!(
+            opened["workbookSummary"]["totalSheets"],
+            serde_json::json!(1)
+        );
+
+        for kind in [
+            "bar",
+            "column",
+            "line",
+            "area",
+            "stacked",
+            "combo",
+            "pie",
+            "donut",
+            "scatter",
+            "bubble",
+            "histogram",
+            "boxplot",
+            "heatmap",
+            "treemap",
+            "waterfall",
+            "funnel",
+            "gauge",
+            "kpi",
+            "table",
+            "pivotsummary",
+            "geographic",
+        ] {
+            let group_col = if kind == "scatter" || kind == "bubble" {
+                "units"
+            } else {
+                "region"
+            };
+            let func = if kind == "histogram" { "COUNT" } else { "SUM" };
+            let raw = test_result(store.chart_data("p21", kind, func, "amount", group_col));
+            let parsed = json(&raw);
+            assert_eq!(parsed["chartType"], serde_json::json!(kind));
+            assert!(
+                parsed["points"]
+                    .as_array()
+                    .is_some_and(|pts| !pts.is_empty()),
+                "chart {kind} must return computed points"
+            );
+        }
+
+        let details = json(&test_result(store.workbook_details("p21")));
+        assert_eq!(details["detectedFormat"], serde_json::json!("Csv"));
+        assert_eq!(details["totalTablesExtracted"], serde_json::json!(1));
+
+        let out_bin = directory.path().join("export.pdf");
+        let payload_b64 = BASE64_STANDARD.encode(b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n");
+        test_result(store.export_deliverable("p21", &out_bin, true, &payload_b64));
+        let written = test_result(fs::read(&out_bin));
+        assert!(written.starts_with(b"%PDF-1.7"));
     }
 }

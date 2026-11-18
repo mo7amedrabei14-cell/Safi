@@ -15,13 +15,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use calamine::{Data, DataType, Reader, Sheets, open_workbook_auto_from_rs};
+use calamine::{
+    Data, DataType, Reader, SheetType, SheetVisible, Sheets, open_workbook_auto_from_rs,
+};
 use quick_xml::Reader as XmlReader;
 use quick_xml::events::Event;
 use sf_core::Decimal;
+use sf_core::column::{Column, ColumnSchema, ColumnType, ConfidenceScore};
 use sf_core::error::{ErrorCode, ErrorSeverity, SafiError};
 use sf_core::limits::PlatformLimits;
-use sf_core::value::is_recognized_empty_token;
+use sf_core::table::Table;
+use sf_core::value::{CellValue, is_recognized_empty_token};
 use zip::ZipArchive;
 
 use crate::delimiter::detect_delimiter;
@@ -246,6 +250,8 @@ pub enum FormulaVerificationStatus {
     ExternalWorkbookReference,
     /// Formula evaluates to an error token (`#REF!`, `#DIV/0!`, etc.).
     FormulaError,
+    /// Formula uses a recognized Excel function not supported by local recalculation and has no cached value.
+    UnsupportedFormula,
     /// Formula syntax or function is unsupported for local recalculation and has no cached value.
     UnverifiedFormula,
 }
@@ -359,6 +365,90 @@ pub struct DetectedTableRegion {
     pub separated_rows: Vec<SeparatedSheetRow>,
     /// Calibrated confidence (`0..=100`) in the table boundary and header resolution.
     pub confidence_pct: u8,
+}
+
+impl DetectedTableRegion {
+    /// Converts this detected analytical region (headers + `data_rows`, excluding separated totals/banners)
+    /// into a canonical [`sf_core::table::Table`], preserving leading-zero identifiers and deduplicating headers.
+    ///
+    /// # Errors
+    /// Propagates [`SafiError`] if confidence bounds or [`Table::new`] shape invariants fail.
+    pub fn to_core_table(&self) -> Result<Table, SafiError> {
+        let col_count = self
+            .headers
+            .len()
+            .max(self.data_rows.iter().map(Vec::len).max().unwrap_or(0));
+        let mut seen_names: BTreeMap<String, usize> = BTreeMap::new();
+        let mut resolved_headers = Vec::with_capacity(col_count);
+        for c in 0..col_count {
+            let base = self
+                .headers
+                .get(c)
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map_or_else(|| format!("column_{}", c + 1), str::to_owned);
+            let count = seen_names.entry(base.clone()).or_insert(0);
+            *count += 1;
+            let unique = if *count == 1 {
+                base
+            } else {
+                format!("{base}_{count}")
+            };
+            resolved_headers.push(unique);
+        }
+
+        let low_conf = ConfidenceScore::new(0.4)?;
+        let high_conf = ConfidenceScore::new(0.85)?;
+        let mut columns = Vec::with_capacity(col_count);
+
+        for (c_idx, header_name) in resolved_headers.into_iter().enumerate() {
+            let mut has_leading_zero_id = false;
+            for row in &self.data_rows {
+                let raw = row.get(c_idx).map_or("", String::as_str).trim();
+                if raw.is_empty() || is_recognized_empty_token(raw) {
+                    continue;
+                }
+                if is_leading_zero_code(raw) {
+                    has_leading_zero_id = true;
+                    break;
+                }
+            }
+
+            // Preserve leading-zero codes strictly as `Identifier`; leave general columns as `Unknown`
+            // so downstream semantic profiling infers domain types from complete context.
+            let (col_type, confidence) = if has_leading_zero_id {
+                (ColumnType::Identifier, high_conf)
+            } else {
+                (ColumnType::Unknown, low_conf)
+            };
+
+            let schema = ColumnSchema::new(c_idx, header_name, col_type, confidence);
+            let mut cells = Vec::with_capacity(self.data_rows.len());
+            for row in &self.data_rows {
+                let raw = row.get(c_idx).map_or("", String::as_str);
+                if has_leading_zero_id && !raw.trim().is_empty() && !is_recognized_empty_token(raw)
+                {
+                    cells.push(CellValue::identifier(raw));
+                } else {
+                    cells.push(CellValue::from_raw(raw));
+                }
+            }
+            columns.push(Column::new(schema, cells));
+        }
+
+        let stable_id = format!("{}::{}", self.sheet_name, self.table_id);
+        let display_name = if self.title.trim().is_empty() {
+            self.sheet_name.clone()
+        } else {
+            self.title.clone()
+        };
+        Table::new(stable_id, display_name, columns)
+    }
+}
+
+fn is_leading_zero_code(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    trimmed.len() > 1 && trimmed.starts_with('0') && trimmed.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Embedded non-cell object discovered inside the workbook package.
@@ -510,6 +600,64 @@ pub struct WorkbookIngestionReport {
     pub progress_log: Vec<IngestionProgressUpdate>,
 }
 
+impl WorkbookIngestionReport {
+    /// Converts every extracted [`DetectedTableRegion`] across all worksheets into canonical [`Table`]s.
+    ///
+    /// # Errors
+    /// Propagates [`SafiError`] if any table violates [`Table::new`] invariants.
+    pub fn all_core_tables(&self) -> Result<Vec<(String, String, Table)>, SafiError> {
+        let mut out = Vec::new();
+        for ws in &self.worksheets {
+            for region in &ws.tables {
+                out.push((
+                    ws.name.clone(),
+                    region.table_id.clone(),
+                    region.to_core_table()?,
+                ));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Selects the primary analytical [`Table`]: prefers the largest analytical region on a visible
+    /// worksheet, falling back to the largest region across hidden worksheets if none are visible.
+    ///
+    /// # Errors
+    /// Propagates [`SafiError`] if [`DetectedTableRegion::to_core_table`] fails.
+    pub fn primary_core_table(&self) -> Result<Option<Table>, SafiError> {
+        let best_visible = self
+            .worksheets
+            .iter()
+            .filter(|ws| ws.visibility == SheetVisibility::Visible)
+            .flat_map(|ws| ws.tables.iter())
+            .max_by_key(|t| (t.data_rows.len(), t.headers.len()));
+        let best_any = best_visible.or_else(|| {
+            self.worksheets
+                .iter()
+                .flat_map(|ws| ws.tables.iter())
+                .max_by_key(|t| (t.data_rows.len(), t.headers.len()))
+        });
+        best_any.map(DetectedTableRegion::to_core_table).transpose()
+    }
+
+    /// Converts a specific `(sheet_name, table_id)` region into a canonical [`Table`].
+    ///
+    /// # Errors
+    /// Propagates [`SafiError`] if [`DetectedTableRegion::to_core_table`] fails.
+    pub fn core_table_by_sheet_and_table(
+        &self,
+        sheet_name: &str,
+        table_id: &str,
+    ) -> Result<Option<Table>, SafiError> {
+        let region = self
+            .worksheets
+            .iter()
+            .find(|ws| ws.name == sheet_name)
+            .and_then(|ws| ws.tables.iter().find(|t| t.table_id == table_id));
+        region.map(DetectedTableRegion::to_core_table).transpose()
+    }
+}
+
 /// Converts 0-based `(row, col)` coordinates to an Excel A1 cell address.
 #[must_use]
 pub fn coords_to_a1(row: u32, col: u32) -> String {
@@ -535,7 +683,10 @@ pub fn sniff_workbook_format(bytes: &[u8], filename_hint: Option<&str>) -> Workb
         let mut cursor = Cursor::new(bytes);
         if let Ok(zip) = ZipArchive::new(&mut cursor) {
             let names: Vec<String> = zip.file_names().map(str::to_owned).collect();
-            if names.iter().any(|n| n.eq_ignore_ascii_case("xl/workbook.bin")) {
+            if names
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case("xl/workbook.bin"))
+            {
                 return WorkbookFormat::Xlsb;
             }
             if names
@@ -617,13 +768,26 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
     } else {
         MAX_UNCOMPRESSED_BYTES.min(file_bytes.saturating_mul(MAX_DECOMPRESSION_RATIO))
     };
+    let mut declared_total: u64 = 0;
+    for idx in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(idx) {
+            declared_total = declared_total.saturating_add(entry.size());
+            if declared_total > budget {
+                return Err(SafiError::new(
+                    ErrorCode::SF_IMP_005,
+                    ErrorSeverity::Error,
+                    "ZipBombDecompressionLimitExceeded",
+                    "import.zip_bomb_detected",
+                ));
+            }
+        }
+    }
     let mut total_uncompressed: u64 = 0;
 
     let file_names: Vec<String> = archive.file_names().map(str::to_owned).collect();
-    if file_names
-        .iter()
-        .any(|n| n.eq_ignore_ascii_case("EncryptedPackage") || n.eq_ignore_ascii_case("EncryptionInfo"))
-    {
+    if file_names.iter().any(|n| {
+        n.eq_ignore_ascii_case("EncryptedPackage") || n.eq_ignore_ascii_case("EncryptionInfo")
+    }) {
         return Err(SafiError::new(
             ErrorCode::SF_IMP_002,
             ErrorSeverity::Error,
@@ -642,7 +806,8 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
                 kind: EmbeddedObjectKind::VbaMacroProject,
                 location: name.clone(),
                 handling: EmbeddedObjectHandling::NeutralizedBySecurityPolicy,
-                summary: "VBA macro binary detected and neutralized by local security policy".to_string(),
+                summary: "VBA macro binary detected and neutralized by local security policy"
+                    .to_string(),
             });
             meta.warnings.push(
                 "Workbook contains a VBA macro project (vbaProject.bin); macros were neutralized and never executed."
@@ -723,9 +888,11 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
 
     // 2. Parse xl/_rels/workbook.xml.rels and xl/workbook.xml for sheet visibility & date1904
     let mut rel_target_by_id: BTreeMap<String, String> = BTreeMap::new();
-    if let Some(rels_bytes) =
-        read_part(&mut archive, "xl/_rels/workbook.xml.rels", &mut total_uncompressed)?
-    {
+    if let Some(rels_bytes) = read_part(
+        &mut archive,
+        "xl/_rels/workbook.xml.rels",
+        &mut total_uncompressed,
+    )? {
         let mut xml = XmlReader::from_reader(rels_bytes.as_slice());
         xml.expand_empty_elements(true);
         let mut buf = Vec::new();
@@ -738,11 +905,16 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
                         for attr in el.attributes().flatten() {
                             match attr.key.local_name().as_ref() {
                                 b"Id" => {
-                                    id = attr.decode_and_unescape_value(&xml).ok().map(|s| s.into_owned());
+                                    id = attr
+                                        .decode_and_unescape_value(&xml)
+                                        .ok()
+                                        .map(|s| s.into_owned());
                                 }
                                 b"Target" => {
-                                    target =
-                                        attr.decode_and_unescape_value(&xml).ok().map(|s| s.into_owned());
+                                    target = attr
+                                        .decode_and_unescape_value(&xml)
+                                        .ok()
+                                        .map(|s| s.into_owned());
                                 }
                                 _ => {}
                             }
@@ -770,9 +942,7 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
                     b"workbookPr" => {
                         for attr in el.attributes().flatten() {
                             if attr.key.local_name().as_ref() == b"date1904" {
-                                let v = attr
-                                    .decode_and_unescape_value(&xml)
-                                    .unwrap_or_default();
+                                let v = attr.decode_and_unescape_value(&xml).unwrap_or_default();
                                 if v == "1" || v.eq_ignore_ascii_case("true") {
                                     meta.date_system = Some(WorkbookDateSystem::Macintosh1904);
                                 }
@@ -792,9 +962,8 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
                                         .map(|s| s.into_owned());
                                 }
                                 b"state" => {
-                                    let s = attr
-                                        .decode_and_unescape_value(&xml)
-                                        .unwrap_or_default();
+                                    let s =
+                                        attr.decode_and_unescape_value(&xml).unwrap_or_default();
                                     if s.eq_ignore_ascii_case("hidden") {
                                         state = SheetVisibility::Hidden;
                                     } else if s.eq_ignore_ascii_case("veryHidden") {
@@ -996,13 +1165,11 @@ fn parse_worksheet_xml(bytes: &[u8], sheet_name: &str, meta: &mut OoxmlMetadata)
                                     .ok()
                                     .map(|s| s.into_owned());
                             }
-                            b"location" | b"display" | b"id" => {
-                                if location.is_none() {
-                                    location = attr
-                                        .decode_and_unescape_value(&xml)
-                                        .ok()
-                                        .map(|s| s.into_owned());
-                                }
+                            b"location" | b"display" | b"id" if location.is_none() => {
+                                location = attr
+                                    .decode_and_unescape_value(&xml)
+                                    .ok()
+                                    .map(|s| s.into_owned());
                             }
                             _ => {}
                         }
@@ -1215,7 +1382,7 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
         ));
     }
 
-    let ooxml_meta = if matches!(format, WorkbookFormat::Xlsx | WorkbookFormat::Xlsm) {
+    let mut ooxml_meta = if matches!(format, WorkbookFormat::Xlsx | WorkbookFormat::Xlsm) {
         inspect_ooxml_package(&raw_bytes, raw_bytes.len() as u64)?
     } else {
         OoxmlMetadata::default()
@@ -1223,8 +1390,8 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
 
     check_cancelled()?;
 
-    let mut workbook: Sheets<Cursor<&[u8]>> = open_workbook_auto_from_rs(Cursor::new(raw_bytes.as_slice()))
-        .map_err(|_| {
+    let mut workbook: Sheets<Cursor<&[u8]>> =
+        open_workbook_auto_from_rs(Cursor::new(raw_bytes.as_slice())).map_err(|_| {
             SafiError::new(
                 ErrorCode::SF_IMP_002,
                 ErrorSeverity::Error,
@@ -1232,6 +1399,24 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
                 "import.excel_corrupted",
             )
         })?;
+
+    for sheet in workbook.sheets_metadata() {
+        let vis = match sheet.visible {
+            SheetVisible::Visible => SheetVisibility::Visible,
+            SheetVisible::Hidden => SheetVisibility::Hidden,
+            SheetVisible::VeryHidden => SheetVisibility::VeryHidden,
+        };
+        ooxml_meta
+            .sheet_visibility
+            .entry(sheet.name.clone())
+            .or_insert(vis);
+        if sheet.typ != SheetType::WorkSheet {
+            ooxml_meta.warnings.push(format!(
+                "Sheet '{}' is a {:?} sheet; tabular extraction applies only to worksheet cells.",
+                sheet.name, sheet.typ
+            ));
+        }
+    }
 
     let defined_names: Vec<DefinedNameRecord> = workbook
         .defined_names()
@@ -1321,6 +1506,17 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
         total_sheets,
         percent_complete: 100,
     });
+
+    let unsupported_formula_count: usize = worksheets
+        .iter()
+        .flat_map(|w| w.cell_metadata.iter())
+        .filter(|c| c.formula_status == FormulaVerificationStatus::UnsupportedFormula)
+        .count();
+    if unsupported_formula_count > 0 {
+        ooxml_meta.warnings.push(format!(
+            "{unsupported_formula_count} formula cell(s) use Excel functions outside local recalculation and had no cached result."
+        ));
+    }
 
     let support_level = match format {
         WorkbookFormat::Xlsx | WorkbookFormat::Csv => FormatSupportLevel::FullSupport,
@@ -1559,7 +1755,10 @@ fn build_worksheet_intelligence(
         for (c_offset, cell) in row.iter().enumerate() {
             let abs_c = start_c as usize + c_offset;
             let text = format_calamine_cell(cell);
-            if let Some(num) = cell.get_float().or_else(|| cell.get_int().map(|i| i as f64)) {
+            if let Some(num) = cell
+                .get_float()
+                .or_else(|| cell.get_int().map(|i| i as f64))
+            {
                 numeric_lookup.insert((abs_r as u32, abs_c as u32), num);
             }
             if let Some(slot) = grid.get_mut(abs_r).and_then(|r| r.get_mut(abs_c)) {
@@ -1583,7 +1782,9 @@ fn build_worksheet_intelligence(
                     merged_origin_by_coord.insert((r, c), origin_addr.clone());
                     // Propagate horizontal merged banners/headers when destination is empty
                     if r == m.start_row
-                        && let Some(slot) = grid.get_mut(r as usize).and_then(|row| row.get_mut(c as usize))
+                        && let Some(slot) = grid
+                            .get_mut(r as usize)
+                            .and_then(|row| row.get_mut(c as usize))
                         && slot.is_empty()
                     {
                         *slot = origin_val.clone();
@@ -1598,12 +1799,12 @@ fn build_worksheet_intelligence(
     let mut formula_count = 0usize;
     let mut verified_formula_count = 0usize;
 
-    for r in 0..total_r {
-        for c in 0..total_c {
+    for (r, grid_row) in grid.iter_mut().enumerate().take(total_r) {
+        for (c, cell_slot) in grid_row.iter_mut().enumerate().take(total_c) {
             let r_u32 = u32::try_from(r).unwrap_or(0);
             let c_u32 = u32::try_from(c).unwrap_or(0);
             let addr = coords_to_a1(r_u32, c_u32);
-            let raw_val = grid[r][c].clone();
+            let raw_val = cell_slot.clone();
             let raw_data = range.get_value((r_u32, c_u32));
             let formula_str = formula_range
                 .and_then(|fr| fr.get_value((r_u32, c_u32)))
@@ -1642,7 +1843,12 @@ fn build_worksheet_intelligence(
                         Some(raw_val.clone())
                     };
                     let recalc = evaluate_simple_sheet_formula(f_expr, &numeric_lookup);
-                    let status = classify_formula_status(f_expr, cached.as_deref(), recalc.as_deref(), data_type);
+                    let status = classify_formula_status(
+                        f_expr,
+                        cached.as_deref(),
+                        recalc.as_deref(),
+                        data_type,
+                    );
                     if matches!(
                         status,
                         FormulaVerificationStatus::VerifiedCachedAndRecalculated
@@ -1654,7 +1860,7 @@ fn build_worksheet_intelligence(
                     if raw_val.is_empty()
                         && let Some(ref rec_str) = recalc
                     {
-                        grid[r][c] = rec_str.clone();
+                        *cell_slot = rec_str.clone();
                     }
                     (cached, recalc, status)
                 } else {
@@ -1666,7 +1872,7 @@ fn build_worksheet_intelligence(
                 address: addr,
                 row: r_u32,
                 col: c_u32,
-                raw_value: grid[r][c].clone(),
+                raw_value: cell_slot.clone(),
                 formula: formula_str,
                 cached_value,
                 recalculated_value,
@@ -1830,7 +2036,9 @@ fn classify_text_cell_type(raw_text: &str, num_fmt: Option<&str>) -> IngestedCel
     if trimmed.is_empty() || is_recognized_empty_token(trimmed) {
         return IngestedCellDataType::Empty;
     }
-    if trimmed.starts_with('#') && (trimmed.ends_with('!') || trimmed.ends_with('?') || trimmed == "#N/A") {
+    if trimmed.starts_with('#')
+        && (trimmed.ends_with('!') || trimmed.ends_with('?') || trimmed == "#N/A")
+    {
         return IngestedCellDataType::FormulaError;
     }
     // Leading-zero preservation check (e.g. "00123", "+201012345678")
@@ -1838,19 +2046,16 @@ fn classify_text_cell_type(raw_text: &str, num_fmt: Option<&str>) -> IngestedCel
         && trimmed.starts_with('0')
         && !trimmed.starts_with("0.")
         && trimmed.bytes().all(|b| b.is_ascii_digit()))
-        || (trimmed.starts_with('+') && trimmed.len() > 4 && trimmed[1..].bytes().all(|b| b.is_ascii_digit()))
+        || (trimmed.starts_with('+')
+            && trimmed.len() > 4
+            && trimmed[1..].bytes().all(|b| b.is_ascii_digit()))
     {
         return IngestedCellDataType::ZeroPreservedText;
     }
     if trimmed.eq_ignore_ascii_case("true") || trimmed.eq_ignore_ascii_case("false") {
         return IngestedCellDataType::Boolean;
     }
-    if trimmed.ends_with('%')
-        && trimmed[..trimmed.len() - 1]
-            .trim()
-            .parse::<f64>()
-            .is_ok()
-    {
+    if trimmed.ends_with('%') && trimmed[..trimmed.len() - 1].trim().parse::<f64>().is_ok() {
         return IngestedCellDataType::Percentage;
     }
     let mut currency_stripped = trimmed.trim_start_matches(['$', '€', '£']).trim();
@@ -1891,7 +2096,9 @@ fn looks_like_iso_date(s: &str) -> bool {
         return false;
     }
     let lens = (parts[0].len(), parts[1].len(), parts[2].len());
-    let all_digits = parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    let all_digits = parts
+        .iter()
+        .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
     all_digits && (lens.0 == 4 || lens.2 == 4)
 }
 
@@ -1899,7 +2106,11 @@ fn evaluate_simple_sheet_formula(
     formula: &str,
     numeric_lookup: &BTreeMap<(u32, u32), f64>,
 ) -> Option<String> {
-    let expr = formula.trim().strip_prefix('=').unwrap_or(formula.trim()).trim();
+    let expr = formula
+        .trim()
+        .strip_prefix('=')
+        .unwrap_or(formula.trim())
+        .trim();
     let upper = expr.to_ascii_uppercase();
     if upper.contains('!') || upper.contains('[') {
         return None;
@@ -1989,7 +2200,14 @@ fn classify_formula_status(
     if upper.contains('[') && upper.contains(']') {
         return FormulaVerificationStatus::ExternalWorkbookReference;
     }
-    for volatile in ["NOW(", "TODAY(", "RAND(", "RANDBETWEEN(", "OFFSET(", "INDIRECT("] {
+    for volatile in [
+        "NOW(",
+        "TODAY(",
+        "RAND(",
+        "RANDBETWEEN(",
+        "OFFSET(",
+        "INDIRECT(",
+    ] {
         if upper.contains(volatile) {
             return FormulaVerificationStatus::VolatileFormula;
         }
@@ -2006,7 +2224,39 @@ fn classify_formula_status(
         }
         (None, Some(_)) => FormulaVerificationStatus::RecalculatedLocally,
         (Some(_), None) => FormulaVerificationStatus::CachedResultOnly,
-        (None, None) => FormulaVerificationStatus::UnverifiedFormula,
+        (None, None) => {
+            const UNSUPPORTED_LOCAL_FUNCTIONS: &[&str] = &[
+                "IF(",
+                "VLOOKUP(",
+                "XLOOKUP(",
+                "HLOOKUP(",
+                "INDEX(",
+                "MATCH(",
+                "SUMIF(",
+                "COUNTIF(",
+                "SUMIFS(",
+                "COUNTIFS(",
+                "AVERAGEIF(",
+                "CONCAT",
+                "TEXT(",
+                "ROUND(",
+                "LEFT(",
+                "RIGHT(",
+                "MID(",
+                "LEN(",
+                "TRIM(",
+                "DATE(",
+                "EOMONTH(",
+            ];
+            if UNSUPPORTED_LOCAL_FUNCTIONS
+                .iter()
+                .any(|func| upper.contains(func))
+            {
+                FormulaVerificationStatus::UnsupportedFormula
+            } else {
+                FormulaVerificationStatus::UnverifiedFormula
+            }
+        }
     }
 }
 
@@ -2044,15 +2294,22 @@ pub fn segment_sheet_tables(
     let mut tables = Vec::new();
 
     for (r_start, r_end) in row_bands {
-        // Check if this band is just a 1-2 row title banner (1 non-empty cell per row)
+        // Check if this band is just a 1-2 row title banner (<= 1 distinct non-empty cell value per row,
+        // so horizontally merged banners like A1:E1 also resolve as pending titles rather than empty tables).
         let band_rows = &grid[r_start..=r_end];
-        let max_non_empty_in_band = band_rows
+        let max_distinct_in_band = band_rows
             .iter()
-            .map(|r| r.iter().filter(|c| !c.trim().is_empty()).count())
+            .map(|r| {
+                r.iter()
+                    .map(|c| c.trim())
+                    .filter(|c| !c.is_empty())
+                    .collect::<BTreeSet<_>>()
+                    .len()
+            })
             .max()
             .unwrap_or(0);
 
-        if band_rows.len() <= 2 && max_non_empty_in_band <= 1 {
+        if band_rows.len() <= 2 && max_distinct_in_band <= 1 {
             for (offset, r) in band_rows.iter().enumerate() {
                 if let Some(text) = r.iter().find(|c| !c.trim().is_empty()) {
                     pending_banner_titles.push((
@@ -2231,8 +2488,8 @@ fn build_table_region_from_block(
     let mut data_rows = Vec::new();
     let mut source_row_indices = Vec::new();
 
-    for row_idx in cur_r..=r_end {
-        let row_vals = extract_row_slice(&grid[row_idx], c_start, c_end);
+    for (row_idx, grid_row) in grid.iter().enumerate().take(r_end + 1).skip(cur_r) {
+        let row_vals = extract_row_slice(grid_row, c_start, c_end);
         let non_empty: Vec<&String> = row_vals.iter().filter(|s| !s.trim().is_empty()).collect();
         if non_empty.is_empty() {
             continue;
@@ -2645,12 +2902,8 @@ mod tests {
             max_file_bytes: 10 * 1024 * 1024,
             max_rows: 1000,
         };
-        let report = ingest_workbook_universal(
-            Cursor::new(bytes),
-            limits,
-            Some("finance.xlsm"),
-            None,
-        );
+        let report =
+            ingest_workbook_universal(Cursor::new(bytes), limits, Some("finance.xlsm"), None);
         assert!(report.is_ok());
         if let Ok(rep) = report {
             assert_eq!(rep.detected_format, WorkbookFormat::Xlsm);
@@ -2675,6 +2928,69 @@ mod tests {
                 b4.map(|c| c.formula_status),
                 Some(FormulaVerificationStatus::VerifiedCachedAndRecalculated)
             );
+            let core_table = ws.tables[0].to_core_table();
+            assert!(core_table.is_ok());
+            if let Ok(tbl) = core_table {
+                assert_eq!(tbl.row_count(), 2);
+                assert_eq!(
+                    tbl.cell(0, 0).map(CellValue::visible_text),
+                    Some("00125".to_owned())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn flags_uncached_unsupported_excel_formulas_and_preserves_multi_table_core_conversion() {
+        let wb_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Orders" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+        let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Account</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Status</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>0042</t></is></c>
+      <c r="B2"><f>IF(A2="0042","OK","NO")</f></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+        let bytes = build_custom_xlsx(wb_xml, sheet1_xml, &[]);
+        let limits = PlatformLimits::DESKTOP_CLI;
+        let report =
+            ingest_workbook_universal(Cursor::new(bytes), limits, Some("orders.xlsx"), None);
+        assert!(report.is_ok());
+        if let Ok(rep) = report {
+            let b2 = rep.worksheets[0]
+                .cell_metadata
+                .iter()
+                .find(|c| c.address == "B2");
+            assert_eq!(
+                b2.map(|c| c.formula_status),
+                Some(FormulaVerificationStatus::UnsupportedFormula)
+            );
+            assert!(
+                rep.warnings
+                    .iter()
+                    .any(|w| w.contains("outside local recalculation")),
+                "expected transparent warning for unsupported formula"
+            );
+            let all_tables = rep.all_core_tables();
+            assert!(all_tables.is_ok());
+            if let Ok(tables) = all_tables {
+                assert_eq!(tables.len(), 1);
+                assert_eq!(
+                    tables[0].2.cell(0, 0).map(CellValue::visible_text),
+                    Some("0042".to_owned())
+                );
+            }
         }
     }
 }

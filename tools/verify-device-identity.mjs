@@ -22,7 +22,7 @@ const server = spawn(
     "4174",
     "--strictPort"
   ],
-  { stdio: "inherit" }
+  { stdio: "inherit", shell: process.platform === "win32" }
 );
 
 async function waitForServer() {

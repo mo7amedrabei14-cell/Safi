@@ -21,16 +21,16 @@
     "targets": ["msi", "appimage", "deb", "rpm"],
     "fileAssociations": [
       {
-        "ext": ["xlsx", "xls"],
+        "ext": ["xlsx", "xlsm", "xlsb", "xls", "ods"],
         "name": "SafiData spreadsheet",
-        "description": "Open an Excel workbook in SafiData",
+        "description": "Open a workbook in SafiData",
         "role": "Editor",
         "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       },
       {
-        "ext": ["csv"],
+        "ext": ["csv", "tsv"],
         "name": "SafiData CSV",
-        "description": "Open a CSV file in SafiData",
+        "description": "Open a CSV or TSV file in SafiData",
         "role": "Editor",
         "mimeType": "text/csv"
       }

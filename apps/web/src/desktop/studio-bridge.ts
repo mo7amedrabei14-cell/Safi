@@ -95,13 +95,26 @@ export interface DesktopScenarioComparison {
 
 export type StudioChartType =
   | "bar"
+  | "column"
   | "line"
   | "area"
+  | "stacked"
+  | "combo"
   | "pie"
   | "donut"
   | "scatter"
+  | "bubble"
   | "histogram"
-  | "kpi";
+  | "boxplot"
+  | "heatmap"
+  | "treemap"
+  | "waterfall"
+  | "funnel"
+  | "gauge"
+  | "kpi"
+  | "table"
+  | "pivotsummary"
+  | "geographic";
 
 export interface StudioChartArtifact {
   readonly id: string;
@@ -142,6 +155,8 @@ export interface StudioSlideArtifact {
   readonly metricId: string | null;
   readonly chartIndex: number | null;
   readonly layout: string;
+  readonly presenterNotes?: string;
+  readonly theme?: string;
 }
 
 export interface StudioDocBlockArtifact {
@@ -151,6 +166,23 @@ export interface StudioDocBlockArtifact {
   readonly content: string;
   readonly metricId: string | null;
   readonly authoredBy: string;
+  readonly pageBreakBefore?: boolean;
+  readonly headerText?: string;
+  readonly footerText?: string;
+}
+
+export interface StudioQuestionResolutionArtifact {
+  readonly questionId: string;
+  readonly action: "answered" | "skipped" | "deferred" | "custom" | "corrected";
+  readonly answer: string;
+  readonly customText?: string;
+  readonly updatedAtMs: number;
+}
+
+export interface StudioPrivacySettingsArtifact {
+  readonly externalAiConsentGranted: boolean;
+  readonly maskPiiOnCloud: boolean;
+  readonly consentTimestampMs?: number | null;
 }
 
 export interface StudioFreeFormBlockArtifact {
@@ -187,6 +219,123 @@ export interface StudioWorkspaceArtifacts {
   readonly freeformBlocks: readonly StudioFreeFormBlockArtifact[];
   readonly assets: readonly StudioAssetArtifact[];
   readonly templateConfig: StudioTemplateConfigArtifact | null;
+  readonly questionResolutions?: readonly StudioQuestionResolutionArtifact[];
+  readonly privacySettings?: StudioPrivacySettingsArtifact;
+}
+
+export interface DesktopWorkbookSheetTableSummary {
+  readonly tableId: string;
+  readonly title: string;
+  readonly sheetName: string;
+  readonly headerCount: number;
+  readonly rowCount: number;
+  readonly separatedRowCount: number;
+  readonly confidencePct: number;
+}
+
+export interface DesktopWorkbookSheetSummary {
+  readonly name: string;
+  readonly index: number;
+  readonly visibility: "Visible" | "Hidden" | "VeryHidden" | string;
+  readonly classification: string;
+  readonly classificationConfidencePct: number;
+  readonly tables: readonly DesktopWorkbookSheetTableSummary[];
+  readonly formulaCount: number;
+  readonly verifiedFormulaCount: number;
+}
+
+export interface DesktopWorkbookSummary {
+  readonly detectedFormat: string;
+  readonly supportLevel: string;
+  readonly dateSystem: string;
+  readonly macrosNeutralized: boolean;
+  readonly totalSheets: number;
+  readonly visibleSheets: number;
+  readonly hiddenSheets: number;
+  readonly totalTablesExtracted: number;
+  readonly totalAnalyticalRows: number;
+  readonly totalFormulasDetected: number;
+  readonly totalFormulasVerified: number;
+  readonly warningsCount: number;
+  readonly activeSheet?: string | null;
+  readonly activeTableId?: string | null;
+  readonly sheets: readonly DesktopWorkbookSheetSummary[];
+}
+
+export interface DesktopWorkbookDetails {
+  readonly detectedFormat: string;
+  readonly supportLevel: string;
+  readonly dateSystem: string;
+  readonly macrosNeutralized: boolean;
+  readonly totalSheets: number;
+  readonly visibleSheets: number;
+  readonly hiddenSheets: number;
+  readonly totalTablesExtracted: number;
+  readonly totalAnalyticalRows: number;
+  readonly totalFormulasDetected: number;
+  readonly totalFormulasVerified: number;
+  readonly activeSheet?: string | null;
+  readonly activeTableId?: string | null;
+  readonly definedNames: readonly {
+    readonly name: string;
+    readonly refersTo: string;
+    readonly isBuiltIn: boolean;
+  }[];
+  readonly embeddedObjects: readonly {
+    readonly kind: string;
+    readonly location: string;
+    readonly handling: string;
+    readonly summary: string;
+  }[];
+  readonly warnings: readonly string[];
+  readonly worksheets: readonly {
+    readonly name: string;
+    readonly index: number;
+    readonly visibility: string;
+    readonly classification: string;
+    readonly classificationConfidencePct: number;
+    readonly classificationReason: string;
+    readonly rawRowCount: number;
+    readonly rawColCount: number;
+    readonly mergedRanges: readonly string[];
+    readonly hasFrozenPanes: boolean;
+    readonly autoFilterRange?: string | null;
+    readonly printArea?: string | null;
+    readonly isProtected: boolean;
+    readonly formulaCount: number;
+    readonly verifiedFormulaCount: number;
+    readonly unsupportedFormulaCount?: number;
+    readonly formulaErrorCount?: number;
+    readonly volatileFormulaCount?: number;
+    readonly externalRefCount?: number;
+    readonly tables: readonly {
+      readonly tableId: string;
+      readonly title: string;
+      readonly sheetName: string;
+      readonly headers: readonly string[];
+      readonly rowCount: number;
+      readonly separatedRows: readonly {
+        readonly sheetRow: number;
+        readonly kind: string;
+        readonly cells: readonly string[];
+      }[];
+      readonly confidencePct: number;
+    }[];
+    readonly formulaSamples: readonly {
+      readonly address: string;
+      readonly row: number;
+      readonly col: number;
+      readonly rawValue: string;
+      readonly formula?: string | null;
+      readonly cachedValue?: string | null;
+      readonly recalculatedValue?: string | null;
+      readonly formulaStatus: string;
+      readonly dataType: string;
+      readonly numberFormat?: string | null;
+      readonly comment?: string | null;
+      readonly hyperlink?: string | null;
+    }[];
+  }[];
 }
 
 export interface DesktopProjectBundleMeta {
@@ -224,6 +373,7 @@ export interface DesktopStudioState {
   readonly scenarios: readonly DesktopScenario[];
   readonly parameters: readonly DesktopParameter[];
   readonly artifacts?: StudioWorkspaceArtifacts;
+  readonly workbookSummary?: DesktopWorkbookSummary | null;
 }
 
 export interface DesktopRowQuery {
@@ -376,9 +526,36 @@ export async function pickCapsuleOutputFile(): Promise<string | null> {
   return JSON.parse(await call("pick_capsule_output_file")) as string | null;
 }
 
+/** Opens the native save dialog for any desktop deliverable export; returns chosen path or `null`. */
+export async function pickDeliverableFile(
+  defaultName?: string,
+  extension?: string
+): Promise<string | null> {
+  return JSON.parse(
+    await call("pick_deliverable_file", {
+      defaultName: defaultName ?? null,
+      extension: extension ?? null
+    })
+  ) as string | null;
+}
+
 /** Imports a spreadsheet from disk into a new session. */
 export async function openProject(project: string, path: string): Promise<DesktopStudioState> {
   return stateCall("studio_open_file", { project, path });
+}
+
+/** Switches active worksheet & detected table region inside a multi-sheet workbook. */
+export async function selectRegion(
+  project: string,
+  sheetName: string,
+  tableId: string
+): Promise<DesktopStudioState> {
+  return stateCall("studio_select_region", { project, sheetName, tableId });
+}
+
+/** Fetches complete workbook intelligence details (visibility, separated rows, formulas, warnings). */
+export async function workbookDetails(project: string): Promise<DesktopWorkbookDetails> {
+  return JSON.parse(await call("studio_workbook_details", { project })) as DesktopWorkbookDetails;
 }
 
 /** Reads the current metadata/provenance state of an open project. */
@@ -742,11 +919,38 @@ export async function instantiateTemplate(
   ) as readonly DesktopInstantiatedSection[];
 }
 
+function unwrapStringResult(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (typeof parsed === "string") {
+        return parsed;
+      }
+    } catch {
+      // Fall through and return raw string directly.
+    }
+  }
+  return raw;
+}
+
 /** Writes the capsule to the chosen path and returns it. */
 export async function exportCapsule(
   project: string,
   target: string,
   options: string
 ): Promise<string> {
-  return JSON.parse(await call("studio_export_capsule", { project, target, options })) as string;
+  return unwrapStringResult(await call("studio_export_capsule", { project, target, options }));
+}
+
+/** Atomically writes any generated binary (base64) or UTF-8 text deliverable to disk via Rust. */
+export async function exportDeliverable(
+  project: string,
+  target: string,
+  isBase64: boolean,
+  payload: string
+): Promise<string> {
+  return unwrapStringResult(
+    await call("studio_export_deliverable", { project, target, isBase64, payload })
+  );
 }

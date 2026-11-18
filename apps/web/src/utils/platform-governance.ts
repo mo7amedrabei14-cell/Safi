@@ -40,7 +40,8 @@ export const UNIFIED_TOOLTIP_CATALOG: Readonly<Record<string, SafiTooltipDescrip
     category: "Epistemic",
     titleEn: "Confirmed Fact",
     titleAr: "حقيقة مؤكدة",
-    whatItDoesEn: "Marks an exact mathematical total, count, or formula result verified directly from the workbook.",
+    whatItDoesEn:
+      "Marks an exact mathematical total, count, or formula result verified directly from the workbook.",
     whatItDoesAr: "يشير إلى نتيجة حسابية دقيقة أو معادلة تم التحقق منها مباشرة من ملف البيانات.",
     whenToUseEn: "Use for executive reporting, financial disclosures, and board KPIs.",
     whenToUseAr: "يُستخدم في التقارير التنفيذية والإفصاحات المالية ومؤشرات الأداء المعتمدة.",
@@ -52,9 +53,12 @@ export const UNIFIED_TOOLTIP_CATALOG: Readonly<Record<string, SafiTooltipDescrip
     category: "Epistemic",
     titleEn: "Data-Supported Observation",
     titleAr: "ملاحظة مدعومة بالبيانات",
-    whatItDoesEn: "Highlights a statistical pattern, concentration, correlation, or trend observed in the dataset.",
-    whatItDoesAr: "يوضح نمطًا إحصائيًا أو تركزًا أو ارتباطًا أو اتجاهًا زمنيًا مرصودًا في البيانات.",
-    whenToUseEn: "Use to identify trends, anomalies, and co-movements across categories or periods.",
+    whatItDoesEn:
+      "Highlights a statistical pattern, concentration, correlation, or trend observed in the dataset.",
+    whatItDoesAr:
+      "يوضح نمطًا إحصائيًا أو تركزًا أو ارتباطًا أو اتجاهًا زمنيًا مرصودًا في البيانات.",
+    whenToUseEn:
+      "Use to identify trends, anomalies, and co-movements across categories or periods.",
     whenToUseAr: "يُستخدم لاكتشاف الاتجاهات والقيم المتطرفة والارتباطات بين الفئات أو الفترات.",
     impactEn: "Reflects empirical association without claiming unverified external causation.",
     impactAr: "يعكس ارتباطًا رقميًا فعليًا دون ادعاء أسباب خارجية غير مثبتة."
@@ -64,11 +68,13 @@ export const UNIFIED_TOOLTIP_CATALOG: Readonly<Record<string, SafiTooltipDescrip
     category: "Epistemic",
     titleEn: "Potential Explanation (Hypothesis)",
     titleAr: "تفسير محتمل (فرضية)",
-    whatItDoesEn: "Presents a plausible domain hypothesis consistent with the data that requires operational verification.",
+    whatItDoesEn:
+      "Presents a plausible domain hypothesis consistent with the data that requires operational verification.",
     whatItDoesAr: "يعرض فرضية محتملة متسقة مع حركة الأرقام ولكنها تحتاج إلى تحقق تشغيلي.",
     whenToUseEn: "Use as a starting point for root-cause investigation with operational teams.",
     whenToUseAr: "يُستخدم كنقطة انطلاق للتحقق من الأسباب الجذرية مع فرق العمل.",
-    impactEn: "Clearly separated from confirmed facts so hypotheses are never presented as certainties.",
+    impactEn:
+      "Clearly separated from confirmed facts so hypotheses are never presented as certainties.",
     impactAr: "مفصول بوضوح عن الحقائق المؤكدة لمنع الخلط بين الفرضيات واليقينيات."
   },
   "epistemic.UnresolvedQuestion": {
@@ -76,9 +82,11 @@ export const UNIFIED_TOOLTIP_CATALOG: Readonly<Record<string, SafiTooltipDescrip
     category: "Epistemic",
     titleEn: "Unresolved Clarification Question",
     titleAr: "سؤال توضيحي غير محسوم",
-    whatItDoesEn: "Indicates an analytical ambiguity (such as an unconfirmed column role or skipped question).",
+    whatItDoesEn:
+      "Indicates an analytical ambiguity (such as an unconfirmed column role or skipped question).",
     whatItDoesAr: "يشير إلى غموض تحليلي (مثل دور عمود غير مؤكد أو سؤال تم تخطيه).",
-    whenToUseEn: "Answer or confirm the question to upgrade dependent metrics from provisional to verified.",
+    whenToUseEn:
+      "Answer or confirm the question to upgrade dependent metrics from provisional to verified.",
     whenToUseAr: "أجب عن السؤال لترقية المؤشرات المعتمدة عليه من مؤقتة إلى مؤكدة.",
     impactEn: "Dependent KPIs and charts carry a Provisional badge until resolved.",
     impactAr: "تحمل المؤشرات المعتمدة عليه شارة (مؤقت) حتى يتم حسمه."
@@ -88,8 +96,10 @@ export const UNIFIED_TOOLTIP_CATALOG: Readonly<Record<string, SafiTooltipDescrip
     category: "Epistemic",
     titleEn: "Epistemic Boundary (Cannot Be Concluded)",
     titleAr: "حدود الاستنتاج (لا يمكن الجزم به)",
-    whatItDoesEn: "Explicitly states causal or external claims that cannot be proven from this workbook alone.",
-    whatItDoesAr: "يوضح صراحة الاستنتاجات السببية أو الخارجية التي لا يمكن إثباتها من هذا الملف وحده.",
+    whatItDoesEn:
+      "Explicitly states causal or external claims that cannot be proven from this workbook alone.",
+    whatItDoesAr:
+      "يوضح صراحة الاستنتاجات السببية أو الخارجية التي لا يمكن إثباتها من هذا الملف وحده.",
     whenToUseEn: "Include in methodology and executive briefings to prevent over-interpretation.",
     whenToUseAr: "يُدرج في قسم المنهجية والعروض التنفيذية لمنع التفسير المبالغ فيه.",
     impactEn: "Protects decision-makers from unsupported causal leaps.",
@@ -112,7 +122,8 @@ export const UNIFIED_TOOLTIP_CATALOG: Readonly<Record<string, SafiTooltipDescrip
     category: "Confidence",
     titleEn: "Low / Provisional Confidence (< 65%)",
     titleAr: "ثقة منخفضة / مؤقتة (< 65%)",
-    whatItDoesEn: "Signals ambiguous column semantics, partial key overlap, or skipped clarification questions.",
+    whatItDoesEn:
+      "Signals ambiguous column semantics, partial key overlap, or skipped clarification questions.",
     whatItDoesAr: "ينبه إلى غموض في دلالة العمود أو تطابق جزئي في المفاتيح أو سؤال تم تخطيه.",
     whenToUseEn: "Review in the Contextual Questions panel to confirm the intended meaning.",
     whenToUseAr: "راجعه في لوحة الأسئلة السياقية لتأكيد المعنى المقصود.",
@@ -124,9 +135,11 @@ export const UNIFIED_TOOLTIP_CATALOG: Readonly<Record<string, SafiTooltipDescrip
     category: "Dashboard",
     titleEn: "Interactive Cross-Filtering & Drill-Down",
     titleAr: "التصفية التفاعلية المتقاطعة والتعمق",
-    whatItDoesEn: "Clicking any bar, slice, or category filters sibling charts and drills down into sub-dimensions.",
+    whatItDoesEn:
+      "Clicking any bar, slice, or category filters sibling charts and drills down into sub-dimensions.",
     whatItDoesAr: "النقر على أي فئة يصفي الرسوم البيانية الأخرى ويتعمق في الأبعاد الفرعية.",
-    whenToUseEn: "Use during live exploration to isolate a specific branch, product, or time period.",
+    whenToUseEn:
+      "Use during live exploration to isolate a specific branch, product, or time period.",
     whenToUseAr: "يُستخدم أثناء الاستكشاف المباشر لعزل فرع أو منتج أو فترة زمنية محددة.",
     impactEn: "Recomputes all dashboard visuals instantaneously from the canonical semantic model.",
     impactAr: "يعيد حساب جميع الرسوم البيانية فورًا من النموذج الدلالي الموحد."
@@ -136,9 +149,11 @@ export const UNIFIED_TOOLTIP_CATALOG: Readonly<Record<string, SafiTooltipDescrip
     category: "Export",
     titleEn: "Genuine OOXML & Vector Export",
     titleAr: "تصدير ملفات أوفيس ومتجهات حقيقية",
-    whatItDoesEn: "Packages real .xlsx, .pptx, .docx, .pdf, .png, .svg, .csv, .safi.html, and Power BI bundles locally.",
+    whatItDoesEn:
+      "Packages real .xlsx, .pptx, .docx, .pdf, .png, .svg, .csv, .safi.html, and Power BI bundles locally.",
     whatItDoesAr: "ينشئ ملفات Excel وPowerPoint وWord وPDF وPNG وSVG وPower BI حقيقية محليًا.",
-    whenToUseEn: "Use when sharing deliverables with stakeholders or importing into Microsoft Office / Power BI.",
+    whenToUseEn:
+      "Use when sharing deliverables with stakeholders or importing into Microsoft Office / Power BI.",
     whenToUseAr: "يُستخدم عند مشاركة المخرجات مع الإدارة أو فتحها في برامج أوفيس وPower BI.",
     impactEn: "Writes new atomic files without ever modifying your original source workbook.",
     impactAr: "ينشئ ملفات جديدة بالكامل دون المساس بملفك الأصلي على الإطلاق."
@@ -194,8 +209,10 @@ export const INTERACTIVE_TUTORIAL_STEPS: readonly TutorialStepDefinition[] = [
     targetSelector: "[data-tutorial-target='import']",
     titleEn: "1. Universal Workbook Import",
     titleAr: "1. استيراد ملفات إكسل والبيانات الشامل",
-    bodyEn: "Open XLSX, XLS, XLSM, XLSB, CSV, or ODS files locally. Macros are neutralized automatically and original files are never modified.",
-    bodyAr: "افتح ملفات XLSX وXLS وXLSM وXLSB وCSV وODS محليًا. يتم تحييد الماكرو تلقائيًا ولا يتم تعديل ملفك الأصلي أبدًا."
+    bodyEn:
+      "Open XLSX, XLS, XLSM, XLSB, CSV, or ODS files locally. Macros are neutralized automatically and original files are never modified.",
+    bodyAr:
+      "افتح ملفات XLSX وXLS وXLSM وXLSB وCSV وODS محليًا. يتم تحييد الماكرو تلقائيًا ولا يتم تعديل ملفك الأصلي أبدًا."
   },
   {
     stepId: "step_2_sheets_tables",
@@ -203,8 +220,10 @@ export const INTERACTIVE_TUTORIAL_STEPS: readonly TutorialStepDefinition[] = [
     targetSelector: "[data-tutorial-target='sheets-tables']",
     titleEn: "2. Multi-Sheet & Multi-Table Discovery",
     titleAr: "2. اكتشاف الأوراق والجداول المتعددة",
-    bodyEn: "Review visible and hidden worksheets, separated title banners, multi-row headers, and isolated subtotal/grand-total rows.",
-    bodyAr: "راجع الأوراق المرئية والمخفية، وعناوين الجداول متعددة الصفوف، وصفوف الإجماليات المفصولة تلقائيًا لمنع ازدواجية الحساب."
+    bodyEn:
+      "Review visible and hidden worksheets, separated title banners, multi-row headers, and isolated subtotal/grand-total rows.",
+    bodyAr:
+      "راجع الأوراق المرئية والمخفية، وعناوين الجداول متعددة الصفوف، وصفوف الإجماليات المفصولة تلقائيًا لمنع ازدواجية الحساب."
   },
   {
     stepId: "step_3_quality_cleaning",
@@ -212,8 +231,10 @@ export const INTERACTIVE_TUTORIAL_STEPS: readonly TutorialStepDefinition[] = [
     targetSelector: "[data-tutorial-target='quality-cleaning']",
     titleEn: "3. Data Quality & Reversible Cleaning",
     titleAr: "3. جودة البيانات والتنظيف القابل للتراجع",
-    bodyEn: "Inspect Confirmed Issues, Potential Issues, and Outliers, and preview reversible cleaning actions before applying.",
-    bodyAr: "افحص المشكلات المؤكدة والمحتملة والقيم المتطرفة، وعاين خطوات التنظيف القابلة للتراجع قبل تطبيقها."
+    bodyEn:
+      "Inspect Confirmed Issues, Potential Issues, and Outliers, and preview reversible cleaning actions before applying.",
+    bodyAr:
+      "افحص المشكلات المؤكدة والمحتملة والقيم المتطرفة، وعاين خطوات التنظيف القابلة للتراجع قبل تطبيقها."
   },
   {
     stepId: "step_4_questions_assistant",
@@ -221,8 +242,10 @@ export const INTERACTIVE_TUTORIAL_STEPS: readonly TutorialStepDefinition[] = [
     targetSelector: "[data-tutorial-target='questions-assistant']",
     titleEn: "4. Contextual Questions & Data Assistant",
     titleAr: "4. الأسئلة السياقية والمساعد التحليلي",
-    bodyEn: "Answer, Skip, or Defer high-impact clarification questions and ask grounded natural-language questions citing exact cells.",
-    bodyAr: "أجب أو تخطَّ أو أجّل أسئلة التوضيح الجوهرية، واطرح أسئلة تحليلية مدعومة بمصادر الخلايا والمعادلات."
+    bodyEn:
+      "Answer, Skip, or Defer high-impact clarification questions and ask grounded natural-language questions citing exact cells.",
+    bodyAr:
+      "أجب أو تخطَّ أو أجّل أسئلة التوضيح الجوهرية، واطرح أسئلة تحليلية مدعومة بمصادر الخلايا والمعادلات."
   },
   {
     stepId: "step_5_dashboard_studio",
@@ -230,8 +253,10 @@ export const INTERACTIVE_TUTORIAL_STEPS: readonly TutorialStepDefinition[] = [
     targetSelector: "[data-tutorial-target='dashboard-studio']",
     titleEn: "5. Dashboard Studio (21 Chart Types)",
     titleAr: "5. استوديو لوحات المؤشرات (21 نوع رسم بياني)",
-    bodyEn: "Customize KPIs and 21 chart types, add calculated metrics, cross-filter across visuals, and undo/redo any layout change.",
-    bodyAr: "خصّص بطاقات الأداء و21 نوعًا من الرسوم البيانية، وأضف مقاييس محسوبة وتصفية متقاطعة مع تراجع وإعادة كاملة."
+    bodyEn:
+      "Customize KPIs and 21 chart types, add calculated metrics, cross-filter across visuals, and undo/redo any layout change.",
+    bodyAr:
+      "خصّص بطاقات الأداء و21 نوعًا من الرسوم البيانية، وأضف مقاييس محسوبة وتصفية متقاطعة مع تراجع وإعادة كاملة."
   },
   {
     stepId: "step_6_presentation_studio",
@@ -239,8 +264,10 @@ export const INTERACTIVE_TUTORIAL_STEPS: readonly TutorialStepDefinition[] = [
     targetSelector: "[data-tutorial-target='presentation-studio']",
     titleEn: "6. Presentation Studio & Fullscreen Mode",
     titleAr: "6. استوديو العروض التقديمية ووضع العرض الكامل",
-    bodyEn: "Edit the 10-slide executive deck, customize layouts and speaker notes, and present fullscreen with keyboard navigation.",
-    bodyAr: "حرّر العرض التنفيذي المكوّن من 10 شرائح وملاحظات المتحدث، واعرضه بملء الشاشة باستخدام لوحة المفاتيح."
+    bodyEn:
+      "Edit the 10-slide executive deck, customize layouts and speaker notes, and present fullscreen with keyboard navigation.",
+    bodyAr:
+      "حرّر العرض التنفيذي المكوّن من 10 شرائح وملاحظات المتحدث، واعرضه بملء الشاشة باستخدام لوحة المفاتيح."
   },
   {
     stepId: "step_7_document_studio",
@@ -248,8 +275,10 @@ export const INTERACTIVE_TUTORIAL_STEPS: readonly TutorialStepDefinition[] = [
     targetSelector: "[data-tutorial-target='document-studio']",
     titleEn: "7. Document Studio (Paginated Reports)",
     titleAr: "7. استوديو المستندات والتقارير المرقّمة",
-    bodyEn: "Edit all 13 structured report sections, headers, footers, page breaks, and epistemic findings.",
-    bodyAr: "حرّر أقسام التقرير الـ 13، والترويسة والتذييل وفواصل الصفحات والنتائج المصنّفة معرفيًا."
+    bodyEn:
+      "Edit all 13 structured report sections, headers, footers, page breaks, and epistemic findings.",
+    bodyAr:
+      "حرّر أقسام التقرير الـ 13، والترويسة والتذييل وفواصل الصفحات والنتائج المصنّفة معرفيًا."
   },
   {
     stepId: "step_8_professional_exports",
@@ -257,8 +286,10 @@ export const INTERACTIVE_TUTORIAL_STEPS: readonly TutorialStepDefinition[] = [
     targetSelector: "[data-tutorial-target='exports']",
     titleEn: "8. Genuine Office, PDF & Power BI Exports",
     titleAr: "8. التصدير الاحترافي إلى أوفيس وPDF وPower BI",
-    bodyEn: "Export genuine .xlsx, .pptx, .docx, .pdf, .png, .svg, .csv, .safi.html, and Power BI packages with identical verified numbers.",
-    bodyAr: "صدّر ملفات Excel وPowerPoint وWord وPDF وPNG وSVG وPower BI حقيقية بأرقام موحّدة ومؤكدة."
+    bodyEn:
+      "Export genuine .xlsx, .pptx, .docx, .pdf, .png, .svg, .csv, .safi.html, and Power BI packages with identical verified numbers.",
+    bodyAr:
+      "صدّر ملفات Excel وPowerPoint وWord وPDF وPNG وSVG وPower BI حقيقية بأرقام موحّدة ومؤكدة."
   }
 ];
 
@@ -477,7 +508,10 @@ export function processRowsInChunks<T, R>(params: {
     }
     const end = Math.min(rows.length, i + chunkSize);
     for (let j = i; j < end; j += 1) {
-      out.push(mapRow(rows[j]!, j));
+      const row = rows[j];
+      if (row) {
+        out.push(mapRow(row, j));
+      }
     }
     const pct = rows.length > 0 ? Math.round((end / rows.length) * 100) : 100;
     onProgress?.(end, rows.length, pct);
@@ -498,7 +532,7 @@ export function runIngestionAndProfilingBenchmark(rowCount = 1000): {
   for (let i = 1; i <= rowCount; i += 1) {
     rows.push([
       `TX-${String(i).padStart(5, "0")}`,
-      branches[i % branches.length]!,
+      branches[i % branches.length] ?? "Cairo",
       `2026-01-${String((i % 28) + 1).padStart(2, "0")}`,
       String(1000 + (i % 50) * 25),
       String(600 + (i % 30) * 15)

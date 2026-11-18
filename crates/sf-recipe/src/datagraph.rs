@@ -215,6 +215,7 @@ pub enum Formula {
 enum Token {
     Number(String),
     Identifier(String),
+    BracketedIdentifier(String),
     OpenParen,
     CloseParen,
     Plus,
@@ -275,6 +276,29 @@ fn tokenize(source: &str) -> Result<Vec<Token>, SafiError> {
                     return Err(invalid_formula());
                 }
                 tokens.push(Token::Number(number));
+            }
+            '[' => {
+                let _ = characters.next();
+                let mut identifier = String::new();
+                let mut closed = false;
+                for next in characters.by_ref() {
+                    if next == ']' {
+                        closed = true;
+                        break;
+                    }
+                    if next == '[' || next.is_control() {
+                        return Err(invalid_formula());
+                    }
+                    identifier.push(next);
+                    if identifier.len() > MAX_FORMULA_LENGTH {
+                        return Err(invalid_formula());
+                    }
+                }
+                let trimmed = identifier.trim();
+                if !closed || trimmed.is_empty() {
+                    return Err(invalid_formula());
+                }
+                tokens.push(Token::BracketedIdentifier(trimmed.to_owned()));
             }
             _ if character.is_alphabetic() || character == '_' => {
                 let mut identifier = String::new();
@@ -376,7 +400,9 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek(), Some(Token::OpenParen)) {
                     let _ = self.advance();
                     let column = match self.advance() {
-                        Some(Token::Identifier(column)) => column.clone(),
+                        Some(Token::Identifier(column) | Token::BracketedIdentifier(column)) => {
+                            column.clone()
+                        }
                         _ => return Err(invalid_formula()),
                     };
                     match self.advance() {
@@ -389,6 +415,7 @@ impl<'a> Parser<'a> {
                     Ok(Formula::Reference(name.clone()))
                 }
             }
+            Some(Token::BracketedIdentifier(name)) => Ok(Formula::Reference(name.clone())),
             _ => Err(invalid_formula()),
         }
     }
@@ -3009,18 +3036,7 @@ impl DataGraph {
                     } else {
                         u32::try_from(10 + (idx * 80) / (count - 1)).unwrap_or(50)
                     };
-                    let y_pct = if span <= Decimal::ZERO {
-                        50
-                    } else {
-                        let norm = group
-                            .value
-                            .checked_sub(min_val)
-                            .and_then(|d| d.checked_div(span))
-                            .unwrap_or(Decimal::ZERO);
-                        let scaled = (Decimal::from(90) - (norm * Decimal::from(80))).round();
-                        u32::try_from(scaled.max(Decimal::from(10)).min(Decimal::from(90)).trunc())
-                            .unwrap_or(50)
-                    };
+                    let y_pct = scale_vertical_coord(group.value, min_val, span);
                     points.push(ComputedChartPoint {
                         label: group.label,
                         value: group.value.normalize().to_string(),
@@ -3030,6 +3046,149 @@ impl DataGraph {
                         svg_path: None,
                         ratio_pct,
                         start_pct: 0,
+                        x_pct,
+                        y_pct,
+                        row_refs: group.row_refs,
+                    });
+                }
+                Ok(ComputedChartSeries {
+                    chart_type: chart_type.as_str().to_owned(),
+                    function: function.as_str().to_owned(),
+                    column: column.to_owned(),
+                    group_by: group_by.to_owned(),
+                    total_or_kpi: total.normalize().to_string(),
+                    points,
+                })
+            }
+            ChartType::Column => {
+                let groups = self.grouped_aggregate(function, column, group_by)?;
+                if groups.is_empty() {
+                    return Err(type_mismatch());
+                }
+                let max_val = groups
+                    .iter()
+                    .map(|g| g.value)
+                    .fold(Decimal::ZERO, Decimal::max);
+                let total = groups
+                    .iter()
+                    .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+                    .ok_or_else(type_mismatch)?;
+                let count = groups.len();
+                let mut points = Vec::with_capacity(count);
+                for (idx, group) in groups.into_iter().enumerate() {
+                    let ratio_pct = scale_percentage(group.value, max_val);
+                    let x_pct = if count <= 1 {
+                        50
+                    } else {
+                        u32::try_from(12 + (idx * 76) / (count - 1)).unwrap_or(50)
+                    };
+                    let top_y = 90_u32.saturating_sub((ratio_pct * 76) / 100).clamp(14, 90);
+                    points.push(ComputedChartPoint {
+                        label: group.label,
+                        value: group.value.normalize().to_string(),
+                        x_value: None,
+                        y_value: Some(ratio_pct.to_string()),
+                        share_pct: Some(scale_share_str(group.value, total)),
+                        svg_path: None,
+                        ratio_pct,
+                        start_pct: top_y,
+                        x_pct,
+                        y_pct: top_y,
+                        row_refs: group.row_refs,
+                    });
+                }
+                Ok(ComputedChartSeries {
+                    chart_type: chart_type.as_str().to_owned(),
+                    function: function.as_str().to_owned(),
+                    column: column.to_owned(),
+                    group_by: group_by.to_owned(),
+                    total_or_kpi: total.normalize().to_string(),
+                    points,
+                })
+            }
+            ChartType::Stacked => {
+                let groups = self.grouped_aggregate(function, column, group_by)?;
+                if groups.is_empty() {
+                    return Err(type_mismatch());
+                }
+                let abs_total = groups
+                    .iter()
+                    .map(|g| g.value.abs())
+                    .fold(Decimal::ZERO, |acc, v| acc + v)
+                    .max(Decimal::ONE);
+                let total = groups
+                    .iter()
+                    .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+                    .ok_or_else(type_mismatch)?;
+                let mut cumulative_pct = 0_u32;
+                let mut points = Vec::with_capacity(groups.len());
+                for (idx, group) in groups.into_iter().enumerate() {
+                    let ratio_pct = scale_percentage(group.value.abs(), abs_total);
+                    let start_pct = cumulative_pct.min(100);
+                    cumulative_pct = cumulative_pct.saturating_add(ratio_pct).min(100);
+                    points.push(ComputedChartPoint {
+                        label: group.label,
+                        value: group.value.normalize().to_string(),
+                        x_value: Some(start_pct.to_string()),
+                        y_value: Some(cumulative_pct.to_string()),
+                        share_pct: Some(scale_share_str(group.value.abs(), abs_total)),
+                        svg_path: None,
+                        ratio_pct,
+                        start_pct,
+                        x_pct: u32::try_from(10 + idx * 14).unwrap_or(50).min(90),
+                        y_pct: 50,
+                        row_refs: group.row_refs,
+                    });
+                }
+                Ok(ComputedChartSeries {
+                    chart_type: chart_type.as_str().to_owned(),
+                    function: function.as_str().to_owned(),
+                    column: column.to_owned(),
+                    group_by: group_by.to_owned(),
+                    total_or_kpi: total.normalize().to_string(),
+                    points,
+                })
+            }
+            ChartType::Combo => {
+                let groups = self.grouped_aggregate(function, column, group_by)?;
+                if groups.is_empty() {
+                    return Err(type_mismatch());
+                }
+                let max_val = groups
+                    .iter()
+                    .map(|g| g.value)
+                    .fold(Decimal::ZERO, Decimal::max);
+                let abs_total = groups
+                    .iter()
+                    .map(|g| g.value.abs())
+                    .fold(Decimal::ZERO, |acc, v| acc + v)
+                    .max(Decimal::ONE);
+                let total = groups
+                    .iter()
+                    .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+                    .ok_or_else(type_mismatch)?;
+                let count = groups.len();
+                let mut running_abs = Decimal::ZERO;
+                let mut points = Vec::with_capacity(count);
+                for (idx, group) in groups.into_iter().enumerate() {
+                    let ratio_pct = scale_percentage(group.value, max_val);
+                    running_abs += group.value.abs();
+                    let cum_pct = scale_percentage(running_abs, abs_total);
+                    let x_pct = if count <= 1 {
+                        50
+                    } else {
+                        u32::try_from(14 + (idx * 72) / (count - 1)).unwrap_or(50)
+                    };
+                    let y_pct = 90_u32.saturating_sub((cum_pct * 76) / 100).clamp(14, 90);
+                    points.push(ComputedChartPoint {
+                        label: group.label,
+                        value: group.value.normalize().to_string(),
+                        x_value: Some(cum_pct.to_string()),
+                        y_value: Some(running_abs.normalize().to_string()),
+                        share_pct: Some(cum_pct.to_string()),
+                        svg_path: None,
+                        ratio_pct,
+                        start_pct: 90_u32.saturating_sub((ratio_pct * 76) / 100).clamp(14, 90),
                         x_pct,
                         y_pct,
                         row_refs: group.row_refs,
@@ -3145,28 +3304,8 @@ impl DataGraph {
                 let count_str = pairs.len().to_string();
                 let mut points = Vec::with_capacity(pairs.len());
                 for (row_id, x_val, y_val) in pairs {
-                    let x_pct = if span_x <= Decimal::ZERO {
-                        50
-                    } else {
-                        let norm = x_val
-                            .checked_sub(min_x)
-                            .and_then(|d| d.checked_div(span_x))
-                            .unwrap_or(Decimal::ZERO);
-                        let scaled = (Decimal::from(10) + (norm * Decimal::from(80))).round();
-                        u32::try_from(scaled.max(Decimal::from(10)).min(Decimal::from(90)).trunc())
-                            .unwrap_or(50)
-                    };
-                    let y_pct = if span_y <= Decimal::ZERO {
-                        50
-                    } else {
-                        let norm = y_val
-                            .checked_sub(min_y)
-                            .and_then(|d| d.checked_div(span_y))
-                            .unwrap_or(Decimal::ZERO);
-                        let scaled = (Decimal::from(90) - (norm * Decimal::from(80))).round();
-                        u32::try_from(scaled.max(Decimal::from(10)).min(Decimal::from(90)).trunc())
-                            .unwrap_or(50)
-                    };
+                    let x_pct = scale_horizontal_coord(x_val, min_x, span_x);
+                    let y_pct = scale_vertical_coord(y_val, min_y, span_y);
                     points.push(ComputedChartPoint {
                         label: format!("#{row_id}"),
                         value: y_val.normalize().to_string(),
@@ -3190,6 +3329,18 @@ impl DataGraph {
                     points,
                 })
             }
+            ChartType::Bubble => self.compute_bubble_series(function, column, group_by),
+            ChartType::Gauge => self.compute_gauge_series(function, column, group_by),
+            ChartType::BoxPlot => self.compute_boxplot_series(function, column, group_by),
+            ChartType::Heatmap => self.compute_heatmap_series(function, column, group_by),
+            ChartType::Treemap => self.compute_treemap_series(function, column, group_by),
+            ChartType::Waterfall => self.compute_waterfall_series(function, column, group_by),
+            ChartType::Funnel => self.compute_funnel_series(function, column, group_by),
+            ChartType::Table => self.compute_table_series(function, column, group_by),
+            ChartType::PivotSummary => {
+                self.compute_pivot_summary_series(function, column, group_by)
+            }
+            ChartType::Geographic => self.compute_geographic_series(function, column, group_by),
             ChartType::Histogram => {
                 let val_col = self
                     .working
@@ -3577,6 +3728,814 @@ impl DataGraph {
         self.collect_provenance();
         Ok(affected)
     }
+
+    fn compute_bubble_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let x_col = self
+            .working
+            .column_by_name(group_by)
+            .ok_or_else(unknown_column)?;
+        let y_col = self
+            .working
+            .column_by_name(column)
+            .ok_or_else(unknown_column)?;
+
+        let mut pairs: Vec<(u64, Decimal, Decimal)> = Vec::new();
+        let mut all_numeric = true;
+        for row in 0..self.working.row_count() {
+            let x_cell = x_col.cell_at(row).ok_or_else(invalid_request)?;
+            let y_cell = y_col.cell_at(row).ok_or_else(invalid_request)?;
+            if x_cell.is_empty() && y_cell.is_empty() {
+                continue;
+            }
+            let Some(x_num) = cell_number(x_cell) else {
+                all_numeric = false;
+                break;
+            };
+            let y_num = cell_number(y_cell).ok_or_else(type_mismatch)?;
+            let row_id = self
+                .row_id_at(row)
+                .map(RowId::get)
+                .ok_or_else(verification_mismatch)?;
+            pairs.push((row_id, x_num, y_num));
+        }
+
+        if all_numeric && !pairs.is_empty() {
+            let min_x = pairs
+                .iter()
+                .map(|(_, x, _)| *x)
+                .fold(pairs[0].1, Decimal::min);
+            let max_x = pairs
+                .iter()
+                .map(|(_, x, _)| *x)
+                .fold(pairs[0].1, Decimal::max);
+            let min_y = pairs
+                .iter()
+                .map(|(_, _, y)| *y)
+                .fold(pairs[0].2, Decimal::min);
+            let max_y = pairs
+                .iter()
+                .map(|(_, _, y)| *y)
+                .fold(pairs[0].2, Decimal::max);
+            let max_abs = pairs
+                .iter()
+                .map(|(_, _, y)| y.abs())
+                .fold(Decimal::ONE, Decimal::max);
+            let span_x = max_x.checked_sub(min_x).unwrap_or(Decimal::ZERO);
+            let span_y = max_y.checked_sub(min_y).unwrap_or(Decimal::ZERO);
+            let count_str = pairs.len().to_string();
+            let mut points = Vec::with_capacity(pairs.len());
+            for (row_id, x_val, y_val) in pairs {
+                let ratio_pct = scale_percentage(y_val.abs(), max_abs).max(12);
+                let radius = bubble_radius_from_pct(ratio_pct);
+                points.push(ComputedChartPoint {
+                    label: format!("#{row_id}"),
+                    value: y_val.normalize().to_string(),
+                    x_value: Some(x_val.normalize().to_string()),
+                    y_value: Some(y_val.normalize().to_string()),
+                    share_pct: Some(format!("{radius:.1}")),
+                    svg_path: None,
+                    ratio_pct,
+                    start_pct: radius.round() as u32,
+                    x_pct: scale_horizontal_coord(x_val, min_x, span_x),
+                    y_pct: scale_vertical_coord(y_val, min_y, span_y),
+                    row_refs: vec![row_id],
+                });
+            }
+            return Ok(ComputedChartSeries {
+                chart_type: ChartType::Bubble.as_str().to_owned(),
+                function: function.as_str().to_owned(),
+                column: column.to_owned(),
+                group_by: group_by.to_owned(),
+                total_or_kpi: count_str,
+                points,
+            });
+        }
+
+        let groups = self.grouped_aggregate(function, column, group_by)?;
+        if groups.is_empty() {
+            return Err(type_mismatch());
+        }
+        let max_val = groups
+            .iter()
+            .map(|g| g.value.abs())
+            .fold(Decimal::ONE, Decimal::max);
+        let min_val = groups
+            .iter()
+            .map(|g| g.value)
+            .fold(groups[0].value, Decimal::min);
+        let max_y = groups
+            .iter()
+            .map(|g| g.value)
+            .fold(groups[0].value, Decimal::max);
+        let span = max_y.checked_sub(min_val).unwrap_or(Decimal::ZERO);
+        let total = groups
+            .iter()
+            .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+            .ok_or_else(type_mismatch)?;
+        let count = groups.len();
+        let mut points = Vec::with_capacity(count);
+        for (idx, group) in groups.into_iter().enumerate() {
+            let ratio_pct = scale_percentage(group.value.abs(), max_val).max(12);
+            let radius = bubble_radius_from_pct(ratio_pct);
+            let x_pct = if count <= 1 {
+                50
+            } else {
+                u32::try_from(14 + (idx * 72) / (count - 1)).unwrap_or(50)
+            };
+            let y_pct = scale_vertical_coord(group.value, min_val, span);
+            points.push(ComputedChartPoint {
+                label: group.label,
+                value: group.value.normalize().to_string(),
+                x_value: Some(x_pct.to_string()),
+                y_value: Some(group.value.normalize().to_string()),
+                share_pct: Some(format!("{radius:.1}")),
+                svg_path: None,
+                ratio_pct,
+                start_pct: radius.round() as u32,
+                x_pct,
+                y_pct,
+                row_refs: group.row_refs,
+            });
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::Bubble.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: total.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_gauge_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let (overall, overall_refs) =
+            aggregate_column(&self.working, &self.row_provenance, function, column)?;
+        let groups =
+            if !group_by.trim().is_empty() && self.working.column_by_name(group_by).is_some() {
+                self.grouped_aggregate(function, column, group_by)?
+            } else {
+                Vec::new()
+            };
+
+        let target_sum = if groups.is_empty() {
+            overall.abs().max(Decimal::ONE)
+        } else {
+            groups
+                .iter()
+                .map(|g| g.value.abs())
+                .fold(Decimal::ZERO, |acc, v| acc + v)
+                .max(Decimal::ONE)
+        };
+        let top_val = groups
+            .iter()
+            .map(|g| g.value.abs())
+            .fold(Decimal::ZERO, Decimal::max);
+        let pct_fill = if groups.len() > 1 && target_sum > Decimal::ZERO {
+            scale_percentage(top_val, target_sum).clamp(5, 100)
+        } else if overall <= Decimal::from(100) && overall >= Decimal::ZERO {
+            u32::try_from(overall.round().trunc())
+                .unwrap_or(100)
+                .min(100)
+        } else {
+            75
+        };
+
+        let mut points = Vec::new();
+        if groups.is_empty() {
+            points.push(ComputedChartPoint {
+                label: format!("{}({column})", function.as_str()),
+                value: overall.normalize().to_string(),
+                x_value: Some(pct_fill.to_string()),
+                y_value: Some("100".to_owned()),
+                share_pct: Some(pct_fill.to_string()),
+                svg_path: gauge_arc_svg_path(pct_fill),
+                ratio_pct: pct_fill,
+                start_pct: 0,
+                x_pct: 50,
+                y_pct: 50,
+                row_refs: overall_refs.into_iter().map(RowId::get).collect(),
+            });
+        } else {
+            for (idx, group) in groups.into_iter().enumerate() {
+                let g_pct = scale_percentage(group.value.abs(), target_sum).clamp(2, 100);
+                points.push(ComputedChartPoint {
+                    label: group.label,
+                    value: group.value.normalize().to_string(),
+                    x_value: Some(g_pct.to_string()),
+                    y_value: Some("100".to_owned()),
+                    share_pct: Some(scale_share_str(group.value.abs(), target_sum)),
+                    svg_path: if idx == 0 {
+                        gauge_arc_svg_path(pct_fill)
+                    } else {
+                        gauge_arc_svg_path(g_pct)
+                    },
+                    ratio_pct: g_pct,
+                    start_pct: pct_fill,
+                    x_pct: 50,
+                    y_pct: 50,
+                    row_refs: group.row_refs,
+                });
+            }
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::Gauge.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: overall.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_boxplot_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let group_column = self
+            .working
+            .column_by_name(group_by)
+            .ok_or_else(unknown_column)?;
+        let value_column = self
+            .working
+            .column_by_name(column)
+            .ok_or_else(unknown_column)?;
+        let mut order: Vec<String> = Vec::new();
+        let mut buckets: BTreeMap<String, (Vec<Decimal>, Vec<u64>)> = BTreeMap::new();
+        for row in 0..self.working.row_count() {
+            let cell = value_column.cell_at(row).ok_or_else(invalid_request)?;
+            if cell.is_empty() {
+                continue;
+            }
+            let num = cell_number(cell).ok_or_else(type_mismatch)?;
+            let label = group_column
+                .cell_at(row)
+                .map(|c| c.visible_text().to_owned())
+                .unwrap_or_default();
+            let row_id = self
+                .row_id_at(row)
+                .map(RowId::get)
+                .ok_or_else(verification_mismatch)?;
+            if !buckets.contains_key(&label) {
+                order.push(label.clone());
+            }
+            let entry = buckets.entry(label).or_default();
+            entry.0.push(num);
+            entry.1.push(row_id);
+        }
+        if order.is_empty() {
+            return Err(type_mismatch());
+        }
+
+        let mut global_min = Decimal::MAX;
+        let mut global_max = Decimal::MIN;
+        let mut summaries = Vec::with_capacity(order.len());
+        for label in order {
+            let (mut vals, row_refs) = buckets.remove(&label).ok_or_else(invalid_request)?;
+            vals.sort();
+            let min_v = vals[0];
+            let max_v = vals[vals.len() - 1];
+            let q1 = decimal_quantile(&vals, 1, 4);
+            let median = decimal_quantile(&vals, 2, 4);
+            let q3 = decimal_quantile(&vals, 3, 4);
+            global_min = global_min.min(min_v);
+            global_max = global_max.max(max_v);
+            summaries.push((label, min_v, q1, median, q3, max_v, row_refs));
+        }
+        let span = global_max.checked_sub(global_min).unwrap_or(Decimal::ZERO);
+        let count = summaries.len();
+        let mut median_sum = Decimal::ZERO;
+        let mut points = Vec::with_capacity(count);
+        for (idx, (label, min_v, q1, median, q3, max_v, row_refs)) in
+            summaries.into_iter().enumerate()
+        {
+            median_sum += median;
+            let x_pct = if count <= 1 {
+                50
+            } else {
+                u32::try_from(14 + (idx * 72) / (count - 1)).unwrap_or(50)
+            };
+            let min_y = scale_vertical_coord(min_v, global_min, span);
+            let q1_y = scale_vertical_coord(q1, global_min, span);
+            let med_y = scale_vertical_coord(median, global_min, span);
+            let q3_y = scale_vertical_coord(q3, global_min, span);
+            let max_y = scale_vertical_coord(max_v, global_min, span);
+            let iqr = q3 - q1;
+            let svg_path = Some(format!(
+                "M {x_pct} {max_y} L {x_pct} {min_y} M {x_l} {q3_y} L {x_r} {q3_y} L {x_r} {q1_y} L {x_l} {q1_y} Z M {x_m_l} {med_y} L {x_m_r} {med_y}",
+                x_l = x_pct.saturating_sub(4),
+                x_r = (x_pct + 4).min(96),
+                x_m_l = x_pct.saturating_sub(5),
+                x_m_r = (x_pct + 5).min(96),
+            ));
+            points.push(ComputedChartPoint {
+                label,
+                value: median.normalize().to_string(),
+                x_value: Some(format!(
+                    "{}..{}",
+                    min_v.round_dp(2).normalize(),
+                    max_v.round_dp(2).normalize()
+                )),
+                y_value: Some(format!(
+                    "{}..{}",
+                    q1.round_dp(2).normalize(),
+                    q3.round_dp(2).normalize()
+                )),
+                share_pct: Some(iqr.round_dp(2).normalize().to_string()),
+                svg_path,
+                ratio_pct: q3_y,
+                start_pct: q1_y,
+                x_pct,
+                y_pct: med_y,
+                row_refs,
+            });
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::BoxPlot.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: median_sum.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_heatmap_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let groups = self.grouped_aggregate(function, column, group_by)?;
+        if groups.is_empty() {
+            return Err(type_mismatch());
+        }
+        let min_v = groups
+            .iter()
+            .map(|g| g.value)
+            .fold(groups[0].value, Decimal::min);
+        let max_v = groups
+            .iter()
+            .map(|g| g.value)
+            .fold(groups[0].value, Decimal::max);
+        let span = max_v.checked_sub(min_v).unwrap_or(Decimal::ZERO);
+        let total = groups
+            .iter()
+            .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+            .ok_or_else(type_mismatch)?;
+        let cols = (groups.len() as f64).sqrt().ceil().max(2.0) as usize;
+        let rows = groups.len().div_ceil(cols).max(1);
+        let mut points = Vec::with_capacity(groups.len());
+        for (idx, group) in groups.into_iter().enumerate() {
+            let intensity = if span <= Decimal::ZERO {
+                50
+            } else {
+                scale_percentage(group.value - min_v, span)
+            };
+            let grid_col = idx % cols;
+            let grid_row = idx / cols;
+            let x_pct = u32::try_from(8 + (grid_col * 84) / cols).unwrap_or(10);
+            let y_pct = u32::try_from(12 + (grid_row * 76) / rows).unwrap_or(12);
+            points.push(ComputedChartPoint {
+                label: group.label,
+                value: group.value.normalize().to_string(),
+                x_value: Some(grid_col.to_string()),
+                y_value: Some(grid_row.to_string()),
+                share_pct: Some(intensity.to_string()),
+                svg_path: None,
+                ratio_pct: intensity,
+                start_pct: u32::try_from(cols).unwrap_or(2),
+                x_pct,
+                y_pct,
+                row_refs: group.row_refs,
+            });
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::Heatmap.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: total.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_treemap_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let mut groups = self.grouped_aggregate(function, column, group_by)?;
+        if groups.is_empty() {
+            return Err(type_mismatch());
+        }
+        groups.sort_by_key(|a| std::cmp::Reverse(a.value.abs()));
+        let abs_total = groups
+            .iter()
+            .map(|g| g.value.abs())
+            .fold(Decimal::ZERO, |acc, v| acc + v)
+            .max(Decimal::ONE);
+        let total = groups
+            .iter()
+            .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+            .ok_or_else(type_mismatch)?;
+
+        let mut rx = 4.0_f64;
+        let mut ry = 8.0_f64;
+        let mut rw = 92.0_f64;
+        let mut rh = 84.0_f64;
+        let mut remaining_abs = abs_total
+            .to_string()
+            .parse::<f64>()
+            .unwrap_or(1.0)
+            .max(1e-9);
+        let mut points = Vec::with_capacity(groups.len());
+        let len = groups.len();
+        for (idx, group) in groups.into_iter().enumerate() {
+            let val_f = group
+                .value
+                .abs()
+                .to_string()
+                .parse::<f64>()
+                .unwrap_or(0.0)
+                .max(0.0);
+            let frac = if idx + 1 == len || remaining_abs <= 1e-9 {
+                1.0
+            } else {
+                (val_f / remaining_abs).clamp(0.06, 0.94)
+            };
+            remaining_abs = (remaining_abs - val_f).max(1e-9);
+            let (tx, ty, tw, th) = if idx % 2 == 0 {
+                let w = rw * frac;
+                let rect = (rx, ry, w, rh);
+                rx += w;
+                rw = (rw - w).max(4.0);
+                rect
+            } else {
+                let h = rh * frac;
+                let rect = (rx, ry, rw, h);
+                ry += h;
+                rh = (rh - h).max(4.0);
+                rect
+            };
+            let share_str = scale_share_str(group.value.abs(), abs_total);
+            points.push(ComputedChartPoint {
+                label: group.label,
+                value: group.value.normalize().to_string(),
+                x_value: Some(format!("{tx:.1},{ty:.1}")),
+                y_value: Some(format!("{tw:.1},{th:.1}")),
+                share_pct: Some(share_str),
+                svg_path: Some(format!(
+                    "M {tx:.1} {ty:.1} h {tw:.1} v {th:.1} h -{tw:.1} Z"
+                )),
+                ratio_pct: scale_percentage(group.value.abs(), abs_total),
+                start_pct: 0,
+                x_pct: (tx + tw / 2.0).round() as u32,
+                y_pct: (ty + th / 2.0).round() as u32,
+                row_refs: group.row_refs,
+            });
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::Treemap.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: total.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_waterfall_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let groups = self.grouped_aggregate(function, column, group_by)?;
+        if groups.is_empty() {
+            return Err(type_mismatch());
+        }
+        let mut running = Decimal::ZERO;
+        let mut min_cum = Decimal::ZERO;
+        let mut max_cum = Decimal::ZERO;
+        let mut steps = Vec::with_capacity(groups.len());
+        for group in groups {
+            let start = running;
+            running += group.value;
+            min_cum = min_cum.min(start).min(running);
+            max_cum = max_cum.max(start).max(running);
+            steps.push((group.label, group.value, start, running, group.row_refs));
+        }
+        let span = max_cum.checked_sub(min_cum).unwrap_or(Decimal::ZERO);
+        let step_count = steps.len() + 1;
+        let mut points = Vec::with_capacity(step_count);
+        for (idx, (label, delta, start, end, row_refs)) in steps.into_iter().enumerate() {
+            let start_y = scale_vertical_coord(start, min_cum, span);
+            let end_y = scale_vertical_coord(end, min_cum, span);
+            let x_pct =
+                u32::try_from(12 + (idx * 76) / step_count.saturating_sub(1).max(1)).unwrap_or(50);
+            let delta_sign = if delta >= Decimal::ZERO { "+" } else { "" };
+            points.push(ComputedChartPoint {
+                label,
+                value: delta.normalize().to_string(),
+                x_value: Some(start.normalize().to_string()),
+                y_value: Some(end.normalize().to_string()),
+                share_pct: Some(format!("{delta_sign}{}", delta.normalize())),
+                svg_path: None,
+                ratio_pct: start_y.min(end_y),
+                start_pct: start_y.max(end_y),
+                x_pct,
+                y_pct: end_y,
+                row_refs,
+            });
+        }
+        let zero_y = scale_vertical_coord(Decimal::ZERO, min_cum, span);
+        let final_y = scale_vertical_coord(running, min_cum, span);
+        points.push(ComputedChartPoint {
+            label: "Net Total".to_owned(),
+            value: running.normalize().to_string(),
+            x_value: Some("0".to_owned()),
+            y_value: Some(running.normalize().to_string()),
+            share_pct: Some("Total".to_owned()),
+            svg_path: None,
+            ratio_pct: zero_y.min(final_y),
+            start_pct: zero_y.max(final_y),
+            x_pct: 88,
+            y_pct: final_y,
+            row_refs: Vec::new(),
+        });
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::Waterfall.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: running.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_funnel_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let mut groups = self.grouped_aggregate(function, column, group_by)?;
+        if groups.is_empty() {
+            return Err(type_mismatch());
+        }
+        groups.sort_by_key(|a| std::cmp::Reverse(a.value.abs()));
+        let top = groups[0].value.abs().max(Decimal::ONE);
+        let total = groups
+            .iter()
+            .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+            .ok_or_else(type_mismatch)?;
+        let count = groups.len();
+        let mut points = Vec::with_capacity(count);
+        for (idx, group) in groups.iter().enumerate() {
+            let width_top = scale_percentage(group.value.abs(), top).max(16);
+            let width_bottom = if idx + 1 < count {
+                scale_percentage(groups[idx + 1].value.abs(), top).max(12)
+            } else {
+                (width_top * 3 / 4).max(10)
+            };
+            let retention = if idx == 0 {
+                "100".to_owned()
+            } else {
+                scale_share_str(
+                    group.value.abs(),
+                    groups[idx - 1].value.abs().max(Decimal::ONE),
+                )
+            };
+            points.push(ComputedChartPoint {
+                label: group.label.clone(),
+                value: group.value.normalize().to_string(),
+                x_value: Some(retention),
+                y_value: Some(top.normalize().to_string()),
+                share_pct: Some(scale_share_str(group.value.abs(), top)),
+                svg_path: None,
+                ratio_pct: width_top,
+                start_pct: width_bottom,
+                x_pct: 50,
+                y_pct: u32::try_from(10 + (idx * 80) / count.max(1)).unwrap_or(50),
+                row_refs: group.row_refs.clone(),
+            });
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::Funnel.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: total.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_table_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let mut groups = self.grouped_aggregate(function, column, group_by)?;
+        if groups.is_empty() {
+            return Err(type_mismatch());
+        }
+        groups.sort_by_key(|a| std::cmp::Reverse(a.value));
+        let abs_total = groups
+            .iter()
+            .map(|g| g.value.abs())
+            .fold(Decimal::ZERO, |acc, v| acc + v)
+            .max(Decimal::ONE);
+        let max_val = groups
+            .iter()
+            .map(|g| g.value.abs())
+            .fold(Decimal::ONE, Decimal::max);
+        let total = groups
+            .iter()
+            .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+            .ok_or_else(type_mismatch)?;
+        let mut points = Vec::with_capacity(groups.len());
+        for (idx, group) in groups.into_iter().enumerate() {
+            let row_count = group.row_refs.len();
+            points.push(ComputedChartPoint {
+                label: group.label,
+                value: group.value.normalize().to_string(),
+                x_value: Some(format!("#{}", idx + 1)),
+                y_value: Some(row_count.to_string()),
+                share_pct: Some(scale_share_str(group.value.abs(), abs_total)),
+                svg_path: None,
+                ratio_pct: scale_percentage(group.value.abs(), max_val),
+                start_pct: u32::try_from(idx + 1).unwrap_or(1),
+                x_pct: 50,
+                y_pct: 50,
+                row_refs: group.row_refs,
+            });
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::Table.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: total.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_pivot_summary_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let group_column = self
+            .working
+            .column_by_name(group_by)
+            .ok_or_else(unknown_column)?;
+        let value_column = self
+            .working
+            .column_by_name(column)
+            .ok_or_else(unknown_column)?;
+        let mut order: Vec<String> = Vec::new();
+        let mut buckets: BTreeMap<String, (Vec<Decimal>, Vec<u64>)> = BTreeMap::new();
+        for row in 0..self.working.row_count() {
+            let cell = value_column.cell_at(row).ok_or_else(invalid_request)?;
+            if cell.is_empty() {
+                continue;
+            }
+            let num = cell_number(cell).ok_or_else(type_mismatch)?;
+            let label = group_column
+                .cell_at(row)
+                .map(|c| c.visible_text().to_owned())
+                .unwrap_or_default();
+            let row_id = self
+                .row_id_at(row)
+                .map(RowId::get)
+                .ok_or_else(verification_mismatch)?;
+            if !buckets.contains_key(&label) {
+                order.push(label.clone());
+            }
+            let entry = buckets.entry(label).or_default();
+            entry.0.push(num);
+            entry.1.push(row_id);
+        }
+        if order.is_empty() {
+            return Err(type_mismatch());
+        }
+        let primary_groups = self.grouped_aggregate(function, column, group_by)?;
+        let primary_map: BTreeMap<String, Decimal> = primary_groups
+            .into_iter()
+            .map(|g| (g.label, g.value))
+            .collect();
+        let mut grand_sum = Decimal::ZERO;
+        let mut raw_entries = Vec::with_capacity(order.len());
+        for label in order {
+            let (vals, row_refs) = buckets.remove(&label).ok_or_else(invalid_request)?;
+            let sum = vals.iter().copied().fold(Decimal::ZERO, |acc, v| acc + v);
+            let cnt = vals.len();
+            let avg = sum
+                .checked_div(Decimal::from(cnt as u64))
+                .unwrap_or(Decimal::ZERO)
+                .round_dp(AVERAGE_SCALE);
+            let min_v = vals.iter().copied().fold(vals[0], Decimal::min);
+            let max_v = vals.iter().copied().fold(vals[0], Decimal::max);
+            let primary_val = primary_map.get(&label).copied().unwrap_or(sum);
+            grand_sum += sum;
+            raw_entries.push((label, primary_val, cnt, avg, min_v, max_v, row_refs));
+        }
+        let abs_total = grand_sum.abs().max(Decimal::ONE);
+        let max_primary = raw_entries
+            .iter()
+            .map(|e| e.1.abs())
+            .fold(Decimal::ONE, Decimal::max);
+        let mut points = Vec::with_capacity(raw_entries.len());
+        for (label, primary_val, cnt, avg, min_v, max_v, row_refs) in raw_entries {
+            points.push(ComputedChartPoint {
+                label,
+                value: primary_val.normalize().to_string(),
+                x_value: Some(format!("n={cnt}, avg={}", avg.normalize())),
+                y_value: Some(format!("{}..{}", min_v.normalize(), max_v.normalize())),
+                share_pct: Some(scale_share_str(primary_val.abs(), abs_total)),
+                svg_path: None,
+                ratio_pct: scale_percentage(primary_val.abs(), max_primary),
+                start_pct: u32::try_from(cnt).unwrap_or(0),
+                x_pct: 50,
+                y_pct: 50,
+                row_refs,
+            });
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::PivotSummary.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: grand_sum.normalize().to_string(),
+            points,
+        })
+    }
+
+    fn compute_geographic_series(
+        &self,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let groups = self.grouped_aggregate(function, column, group_by)?;
+        if groups.is_empty() {
+            return Err(type_mismatch());
+        }
+        let max_val = groups
+            .iter()
+            .map(|g| g.value.abs())
+            .fold(Decimal::ONE, Decimal::max);
+        let abs_total = groups
+            .iter()
+            .map(|g| g.value.abs())
+            .fold(Decimal::ZERO, |acc, v| acc + v)
+            .max(Decimal::ONE);
+        let total = groups
+            .iter()
+            .try_fold(Decimal::ZERO, |acc, g| acc.checked_add(g.value))
+            .ok_or_else(type_mismatch)?;
+        let mut points = Vec::with_capacity(groups.len());
+        for (idx, group) in groups.into_iter().enumerate() {
+            let (x_pct, y_pct) = geo_region_coords(&group.label, idx);
+            let ratio_pct = scale_percentage(group.value.abs(), max_val).max(15);
+            points.push(ComputedChartPoint {
+                label: group.label,
+                value: group.value.normalize().to_string(),
+                x_value: Some(format!("{x_pct}")),
+                y_value: Some(format!("{y_pct}")),
+                share_pct: Some(scale_share_str(group.value.abs(), abs_total)),
+                svg_path: None,
+                ratio_pct,
+                start_pct: 0,
+                x_pct,
+                y_pct,
+                row_refs: group.row_refs,
+            });
+        }
+        Ok(ComputedChartSeries {
+            chart_type: ChartType::Geographic.as_str().to_owned(),
+            function: function.as_str().to_owned(),
+            column: column.to_owned(),
+            group_by: group_by.to_owned(),
+            total_or_kpi: total.normalize().to_string(),
+            points,
+        })
+    }
 }
 
 /// Maximum rows returned by a single paginated grid query.
@@ -3759,27 +4718,53 @@ pub struct GroupedValue {
     pub row_refs: Vec<u64>,
 }
 
-/// Supported Quad-Studio dashboard chart visualisations (`STUDIO-PHASE-2`).
+/// Supported Quad-Studio dashboard chart visualisations (`STUDIO-PHASE-2` + 21-chart expansion).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChartType {
-    /// Categorical bar chart.
+    /// Horizontal categorical bar chart.
     #[default]
     Bar,
+    /// Vertical categorical column chart.
+    Column,
     /// Ordered series line chart.
     Line,
     /// Filled series area chart.
     Area,
+    /// Stacked categorical bar/column chart.
+    Stacked,
+    /// Combined bar + line chart.
+    Combo,
     /// Proportional pie chart (requires non-negative values and positive total).
     Pie,
     /// Proportional donut ring chart (requires non-negative values and positive total).
     Donut,
     /// Two-column numeric `(x, y)` scatter plot (`group_by` = X column, `column` = Y column).
     Scatter,
+    /// Two-column numeric bubble chart with magnitude radius.
+    Bubble,
     /// Numeric frequency distribution histogram across equal-width bins.
     Histogram,
+    /// Quartile & median distribution box plot.
+    BoxPlot,
+    /// Matrix intensity heatmap.
+    Heatmap,
+    /// Hierarchical proportional treemap.
+    Treemap,
+    /// Cumulative sequential waterfall bridge chart.
+    Waterfall,
+    /// Stage conversion funnel chart.
+    Funnel,
+    /// Radial progress gauge chart.
+    Gauge,
     /// Single headline KPI card with optional group breakdown.
     Kpi,
+    /// Tabular summary grid visual.
+    Table,
+    /// Cross-tabulated pivot summary visual.
+    PivotSummary,
+    /// Regional/geographic choropleth/symbol visual.
+    Geographic,
 }
 
 impl ChartType {
@@ -3788,13 +4773,26 @@ impl ChartType {
     pub fn from_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "bar" => Some(Self::Bar),
+            "column" => Some(Self::Column),
             "line" => Some(Self::Line),
             "area" => Some(Self::Area),
+            "stacked" => Some(Self::Stacked),
+            "combo" => Some(Self::Combo),
             "pie" => Some(Self::Pie),
             "donut" => Some(Self::Donut),
             "scatter" => Some(Self::Scatter),
+            "bubble" => Some(Self::Bubble),
             "histogram" => Some(Self::Histogram),
+            "boxplot" | "box_plot" => Some(Self::BoxPlot),
+            "heatmap" => Some(Self::Heatmap),
+            "treemap" => Some(Self::Treemap),
+            "waterfall" => Some(Self::Waterfall),
+            "funnel" => Some(Self::Funnel),
+            "gauge" => Some(Self::Gauge),
             "kpi" => Some(Self::Kpi),
+            "table" => Some(Self::Table),
+            "pivotsummary" | "pivot_summary" | "pivot" => Some(Self::PivotSummary),
+            "geographic" | "geo" | "map" => Some(Self::Geographic),
             _ => None,
         }
     }
@@ -3804,13 +4802,26 @@ impl ChartType {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Bar => "bar",
+            Self::Column => "column",
             Self::Line => "line",
             Self::Area => "area",
+            Self::Stacked => "stacked",
+            Self::Combo => "combo",
             Self::Pie => "pie",
             Self::Donut => "donut",
             Self::Scatter => "scatter",
+            Self::Bubble => "bubble",
             Self::Histogram => "histogram",
+            Self::BoxPlot => "boxplot",
+            Self::Heatmap => "heatmap",
+            Self::Treemap => "treemap",
+            Self::Waterfall => "waterfall",
+            Self::Funnel => "funnel",
+            Self::Gauge => "gauge",
             Self::Kpi => "kpi",
+            Self::Table => "table",
+            Self::PivotSummary => "pivotsummary",
+            Self::Geographic => "geographic",
         }
     }
 }
@@ -3903,6 +4914,127 @@ fn scale_percentage(value: Decimal, maximum: Decimal) -> u32 {
     let percent = (ratio * Decimal::from(100)).round();
     let clamped = percent.max(Decimal::ZERO).min(Decimal::from(100));
     u32::try_from(clamped.trunc()).unwrap_or(100)
+}
+
+fn scale_share_str(value: Decimal, total: Decimal) -> String {
+    if total <= Decimal::ZERO {
+        return "0".to_owned();
+    }
+    let share = (value * Decimal::from(100))
+        .checked_div(total)
+        .unwrap_or(Decimal::ZERO)
+        .round_dp(2)
+        .normalize();
+    share.to_string()
+}
+
+fn scale_horizontal_coord(value: Decimal, min_val: Decimal, span: Decimal) -> u32 {
+    if span <= Decimal::ZERO {
+        return 50;
+    }
+    let norm = value
+        .checked_sub(min_val)
+        .and_then(|d| d.checked_div(span))
+        .unwrap_or(Decimal::ZERO);
+    let scaled = (Decimal::from(10) + (norm * Decimal::from(80))).round();
+    u32::try_from(scaled.max(Decimal::from(10)).min(Decimal::from(90)).trunc()).unwrap_or(50)
+}
+
+fn scale_vertical_coord(value: Decimal, min_val: Decimal, span: Decimal) -> u32 {
+    if span <= Decimal::ZERO {
+        return 50;
+    }
+    let norm = value
+        .checked_sub(min_val)
+        .and_then(|d| d.checked_div(span))
+        .unwrap_or(Decimal::ZERO);
+    let scaled = (Decimal::from(90) - (norm * Decimal::from(80))).round();
+    u32::try_from(scaled.max(Decimal::from(10)).min(Decimal::from(90)).trunc()).unwrap_or(50)
+}
+
+fn bubble_radius_from_pct(ratio_pct: u32) -> f64 {
+    let norm = (f64::from(ratio_pct.min(100)) / 100.0).clamp(0.05, 1.0);
+    2.5 + norm.sqrt() * 8.5
+}
+
+fn decimal_quantile(sorted: &[Decimal], numerator: usize, denominator: usize) -> Decimal {
+    if sorted.is_empty() {
+        return Decimal::ZERO;
+    }
+    let idx = ((sorted.len().saturating_sub(1)) * numerator) / denominator.max(1);
+    sorted[idx.min(sorted.len() - 1)]
+}
+
+fn gauge_arc_svg_path(pct: u32) -> Option<String> {
+    let frac = (f64::from(pct.min(100)) / 100.0).clamp(0.02, 1.0);
+    let start_rad = std::f64::consts::PI;
+    let end_rad = std::f64::consts::PI - frac * std::f64::consts::PI;
+    let x1 = 50.0 + 35.0 * start_rad.cos();
+    let y1 = 68.0 - 35.0 * start_rad.sin();
+    let x2 = 50.0 + 35.0 * end_rad.cos();
+    let y2 = 68.0 - 35.0 * end_rad.sin();
+    Some(format!("M {x1:.2} {y1:.2} A 35 35 0 0 1 {x2:.2} {y2:.2}"))
+}
+
+fn geo_region_coords(label: &str, fallback_idx: usize) -> (u32, u32) {
+    let lower = label.trim().to_ascii_lowercase();
+    if lower.contains("alex") || label.contains("الإسكندرية") || label.contains("اسكندرية")
+    {
+        (30, 22)
+    } else if lower.contains("port said") || label.contains("بورسعيد") || lower.contains("دمياط")
+    {
+        (60, 20)
+    } else if lower.contains("delta")
+        || lower.contains("dakahl")
+        || lower.contains("gharbia")
+        || lower.contains("tanta")
+        || label.contains("الدلتا")
+        || label.contains("المنصورة")
+        || label.contains("طنطا")
+    {
+        (48, 28)
+    } else if lower.contains("sharq")
+        || lower.contains("ismail")
+        || lower.contains("suez")
+        || label.contains("الشرقية")
+        || label.contains("الإسماعيلية")
+        || label.contains("السويس")
+    {
+        (64, 34)
+    } else if lower.contains("cairo") || label.contains("القاهرة") {
+        (52, 42)
+    } else if lower.contains("giza") || label.contains("الجيزة") || label.contains("الفيوم")
+    {
+        (44, 46)
+    } else if lower.contains("minya")
+        || lower.contains("asyut")
+        || lower.contains("upper")
+        || label.contains("المنيا")
+        || label.contains("أسيوط")
+        || label.contains("الصعيد")
+    {
+        (46, 66)
+    } else if lower.contains("luxor")
+        || lower.contains("aswan")
+        || label.contains("الأقصر")
+        || label.contains("أسوان")
+    {
+        (56, 82)
+    } else if lower.contains("red sea")
+        || lower.contains("sinai")
+        || label.contains("البحر الأحمر")
+        || label.contains("سيناء")
+    {
+        (76, 54)
+    } else {
+        let mut hash: u32 = (fallback_idx as u32).wrapping_mul(37);
+        for b in label.as_bytes() {
+            hash = hash.wrapping_mul(31).wrapping_add(u32::from(*b));
+        }
+        let x = 18 + (hash % 64);
+        let y = 20 + ((hash / 64) % 60);
+        (x, y)
+    }
 }
 
 /// Returns `true` when two tables are byte-identical for Studio purposes.

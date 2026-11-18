@@ -395,7 +395,7 @@ export function classifyCellType(rawValue: string, numberFormat?: string): Inges
       trimmed.startsWith("0") &&
       !trimmed.startsWith("0.") &&
       /^\d+$/.test(trimmed)) ||
-    (/^\+\d{5,15}$/.test(trimmed))
+    /^\+\d{5,15}$/.test(trimmed)
   ) {
     return "ZeroPreservedText";
   }
@@ -428,8 +428,10 @@ export function classifyCellType(rawValue: string, numberFormat?: string): Inges
   if (/^-?\d+(\.\d+)?$/.test(numCandidate) && Number.isFinite(Number(numCandidate))) {
     return "Decimal";
   }
-  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed) ||
-      /^\d{1,2}[-/]\d{1,2}[-/]\d{4}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed)) {
+  if (
+    /^\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed) ||
+    /^\d{1,2}[-/]\d{1,2}[-/]\d{4}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed)
+  ) {
     return trimmed.includes(":") ? "DateTime" : "Date";
   }
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(trimmed)) {
@@ -499,7 +501,12 @@ export function evaluateSimpleFormula(
       const rVal = rightCoord
         ? numericLookup.get(`${rightCoord.row},${rightCoord.col}`)
         : Number(rightStr);
-      if (lVal === undefined || rVal === undefined || !Number.isFinite(lVal) || !Number.isFinite(rVal)) {
+      if (
+        lVal === undefined ||
+        rVal === undefined ||
+        !Number.isFinite(lVal) ||
+        !Number.isFinite(rVal)
+      ) {
         return undefined;
       }
       if (op === "/" && Math.abs(rVal) < 1e-12) {
@@ -560,7 +567,10 @@ function classifyFormulaVerification(
 }
 
 function detectTotalRowKind(rowVals: readonly string[]): SeparatedRowKind | null {
-  const firstText = rowVals.find((s) => s.trim().length > 0)?.trim().toLowerCase();
+  const firstText = rowVals
+    .find((s) => s.trim().length > 0)
+    ?.trim()
+    .toLowerCase();
   if (!firstText) return null;
   if (
     firstText === "grand total" ||
@@ -738,9 +748,15 @@ function buildTableRegionFromBlock(
 
   let curR = rStart;
   while (curR < rEnd) {
-    const vals = sliceRow(curR).filter((v) => v.length > 0);
+    const rowSlice = sliceRow(curR);
+    const vals = rowSlice.filter((v) => v.length > 0);
     const distinct = new Set(vals);
-    if (distinct.size === 1 && width > 1) {
+    const nextVals = sliceRow(curR + 1).filter((v) => v.length > 0);
+    const nextIsPureNumbers =
+      nextVals.length > 0 && nextVals.every((s) => Number.isFinite(Number(s.replace(/,/g, ""))));
+    // Treat as a standalone title/subtitle row only when it holds a single distinct value across
+    // multiple columns AND either only 1 non-empty cell (merged origin) OR the following row is not pure numeric data.
+    if (distinct.size === 1 && width > 1 && (vals.length === 1 || !nextIsPureNumbers)) {
       const hasTitle = separatedRows.some((s) => s.kind === "Title");
       separatedRows.push({
         sheetRow: curR,
@@ -764,14 +780,26 @@ function buildTableRegionFromBlock(
     const thirdRow = sliceRow(curR + 2);
     const secondAllText = secondRow
       .filter((s) => s.length > 0)
-      .every((s) => !Number.isFinite(Number(s.replace(/,/g, ""))));
+      .every(
+        (s) =>
+          !Number.isFinite(Number(s.replace(/,/g, ""))) &&
+          !/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(s) &&
+          !/^[A-Z]{1,4}[-_]?\d+$/i.test(s)
+      );
     const thirdHasNumbers = thirdRow
       .filter((s) => s.length > 0)
       .some((s) => Number.isFinite(Number(s.replace(/,/g, ""))));
+    const fourthRow = curR + 3 <= rEnd ? sliceRow(curR + 3) : [];
+    const codeRowsConsistent =
+      secondRow.length > 0 &&
+      thirdRow.length > 0 &&
+      fourthRow.length > 0 &&
+      thirdRow.some((s) => /^[A-Z]{1,4}[-_]?\d+$/i.test(s)) &&
+      fourthRow.some((s) => /^[A-Z]{1,4}[-_]?\d+$/i.test(s));
     const nonEmptyFirst = firstRow.filter((s) => s.length > 0);
     const firstHasDuplicates = nonEmptyFirst.length > new Set(nonEmptyFirst).size;
 
-    if (secondAllText && thirdHasNumbers && firstHasDuplicates) {
+    if (secondAllText && ((thirdHasNumbers && firstHasDuplicates) || codeRowsConsistent)) {
       headerRows.push(curR + 1);
       headers = firstRow.map((top, idx) => {
         const sub = secondRow[idx] ?? "";
@@ -962,8 +990,7 @@ export function ingestWorkbookStructure(
     throw new Error("SF-IMP-002: WorkbookIngestionCancelled");
   }
 
-  const detectedFormat =
-    options.formatHint ?? detectWorkbookFormatFromFilename(options.filename);
+  const detectedFormat = options.formatHint ?? detectWorkbookFormatFromFilename(options.filename);
   const progressLog: IngestionProgressUpdate[] = [];
   const emitProgress = (update: IngestionProgressUpdate): void => {
     progressLog.push(update);
@@ -1101,8 +1128,9 @@ export function ingestWorkbookStructure(
           ) {
             verifiedFormulaCount += 1;
           }
-          if (!rawVal && recalculatedValue !== undefined && workingGrid[r]) {
-            workingGrid[r]![c] = recalculatedValue;
+          const targetRow = workingGrid[r];
+          if (!rawVal && recalculatedValue !== undefined && targetRow) {
+            targetRow[c] = recalculatedValue;
           }
         }
 

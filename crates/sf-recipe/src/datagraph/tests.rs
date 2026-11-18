@@ -708,3 +708,34 @@ fn all_eight_chart_types_compute_in_rust_and_reject_unsuitable_columns() -> Resu
     }
     Ok(())
 }
+
+#[test]
+fn bracketed_column_identifiers_handle_merged_headers_and_reject_malformed_syntax()
+-> Result<(), SafiError> {
+    let parsed = super::parse_formula("SUM([Financials — Revenue]) * 2")?;
+    match parsed {
+        super::Formula::Binary {
+            left,
+            op: super::BinaryOp::Multiply,
+            ..
+        } => {
+            assert_eq!(
+                *left,
+                super::Formula::Aggregate {
+                    function: AggFunc::Sum,
+                    column: "Financials — Revenue".to_owned(),
+                }
+            );
+        }
+        other => panic!("unexpected formula AST: {other:?}"),
+    }
+
+    for invalid in ["SUM([])", "SUM([unclosed)", "SUM([a[b]])", "[SUM](amount)"] {
+        assert_eq!(
+            super::parse_formula(invalid).err().map(|e| e.code()),
+            Some(ErrorCode::SF_CAL_002),
+            "input: {invalid}"
+        );
+    }
+    Ok(())
+}

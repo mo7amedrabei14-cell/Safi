@@ -211,8 +211,19 @@ try {
   });
   const page = await context.newPage();
 
+  let nextOpenFileOverride = null;
+  await page.exposeFunction("__safiSetNextOpenFile", (targetPath) => {
+    nextOpenFileOverride = targetPath;
+  });
+
   await page.exposeFunction("__safiRustInvoke", async (command, args) => {
     const safeArgs = args ?? {};
+    if (command === "pick_input_file" && nextOpenFileOverride) {
+      const chosen = nextOpenFileOverride;
+      nextOpenFileOverride = null;
+      await callRust("pick_input_file", safeArgs);
+      return JSON.stringify(chosen);
+    }
     if (command === "studio_set_auth_session") {
       const token = String(safeArgs.token ?? "");
       const installationId = String(safeArgs.installationId ?? safeArgs.installation_id ?? "");
@@ -538,6 +549,105 @@ try {
     exportedHtml.includes("1000") && exportedHtml.includes("EGP"),
     `Exported capsule must contain the verified What-If metric value 1000 EGP. Tail: ${exportedHtml.slice(-1200)}`
   );
+
+  // 11. Universal Multi-Sheet XLSX Ingestion & Region Switching (messy_enterprise.xlsx)
+  console.log("[11/14] Opening multi-sheet messy_enterprise.xlsx, inspecting hidden sheets & switching regions...");
+  const messyXlsxPath = resolve("tests/fixtures/workbooks/messy_enterprise.xlsx");
+  await page.evaluate((p) => window.__safiSetNextOpenFile(p), messyXlsxPath);
+  await page.locator('[data-tutorial-target="open-workbook"]').click();
+  await page.locator('[data-testid="workbook-intelligence-drawer"]').waitFor({ state: "visible", timeout: 15_000 });
+  await page.waitForFunction(() => {
+    const drawer = document.querySelector('[data-testid="workbook-intelligence-drawer"]');
+    return (drawer?.textContent ?? "").includes("Sales & KPIs") && (drawer?.textContent ?? "").includes("Show Hidden (2)");
+  });
+
+  // Reveal hidden/veryHidden tabs ("Lookup_Rates", "Secret_Params")
+  await page.locator('[data-testid="toggle-hidden-sheets-btn"]').click();
+  await page.waitForFunction(() => {
+    const drawer = document.querySelector('[data-testid="workbook-intelligence-drawer"]');
+    const t = drawer?.textContent ?? "";
+    return t.includes("Lookup_Rates") && t.includes("Secret_Params");
+  });
+
+  // Switch back to Sheet tab so paginated grid assertions match live rows
+  await page.locator('[aria-label="Quad-Studio workspaces"] button[role="tab"]').first().click();
+
+  // Switch active table on Sales & KPIs from tbl_1 -> tbl_2 ("Target Name", "North", "South")
+  await page.locator('[data-testid="activate-region-0-tbl_2"]').click();
+  try {
+    await page.waitForFunction(() => {
+      const tbl = document.querySelector(".safi-desktop-studio__table");
+      if (!tbl) return false;
+      const headers = tbl.textContent ?? "";
+      const vals = Array.from(tbl.querySelectorAll("input")).map((i) => i.value);
+      return headers.includes("Target Name") && vals.includes("North") && vals.includes("South");
+    }, undefined, { timeout: 15_000 });
+  } catch (err) {
+    const diag = await page.evaluate(() => ({
+      err: document.querySelector(".safi-desktop-studio__error")?.textContent ?? null,
+      headers: document.querySelector(".safi-desktop-studio__table thead")?.textContent ?? null,
+      vals: Array.from(document.querySelectorAll(".safi-desktop-studio__table input")).map((i) => i.value),
+      activeTab: document.querySelector('[aria-label="Quad-Studio workspaces"] [aria-selected="true"]')?.textContent ?? null
+    }));
+    throw new Error(`Region switch tbl_2 failed (${err instanceof Error ? err.message : err}): ${JSON.stringify(diag)}`);
+  }
+
+  // Switch back to tbl_1 ("القاهرة", "00105")
+  await page.locator('[data-testid="activate-region-0-tbl_1"]').click();
+  await page.waitForFunction(() => {
+    const tbl = document.querySelector(".safi-desktop-studio__table");
+    if (!tbl) return false;
+    const vals = Array.from(tbl.querySelectorAll("input")).map((i) => i.value);
+    return vals.includes("القاهرة") && vals.includes("00105");
+  });
+
+  // 12. Intelligence, Epistemic Separation & Grounded Assistant
+  console.log("[12/14] Testing Contextual Intelligence & Grounded Data Assistant...");
+  await page.locator('[data-testid="tab-intelligence"]').click();
+  await page.locator('[data-testid="grounded-assistant-panel"]').waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator('[data-testid="privacy-consent-panel"]').waitFor({ state: "visible" });
+  await page.locator('[data-testid="assistant-question-input"]').fill("What does this workbook contain?");
+  await page.locator('[data-testid="assistant-ask-btn"]').click();
+  await page.locator('[data-testid="assistant-answer-0"]').waitFor({ state: "visible" });
+  const assistantText = await page.locator('[data-testid="assistant-answer-0"]').textContent();
+  assert.ok(assistantText && assistantText.includes("Sales & KPIs"), `Expected citation to Sales & KPIs, got: ${assistantText}`);
+
+  // 13. Add Waterfall Chart in Dashboard (21-type Rust & SVG engine)
+  console.log("[13/14] Creating Waterfall chart in Dashboard...");
+  await page.locator('[data-tutorial-target="dashboard-tab"]').click();
+  await page.locator('[data-testid="dashboard-charts-view"]').waitFor({ state: "visible" });
+  await page.locator('select[aria-label="Chart Type"]').selectOption("waterfall");
+  await page.locator('[data-testid="dashboard-charts-view"] label:has-text("Value Column") select').selectOption("Financials — Revenue");
+  await page.locator('[data-testid="dashboard-charts-view"] label:has-text("Group By / X Axis") select').selectOption("Account Info — Region");
+  await page
+    .locator('[data-testid="dashboard-charts-view"] button')
+    .filter({ hasText: /Add Chart/ })
+    .click();
+  await page
+    .locator('[data-testid="dashboard-charts-view"] [data-chart-type="waterfall"]')
+    .waitFor({ state: "visible" });
+
+  // 14. Export Real Binary Multi-Sheet .xlsx and Multi-Page .pdf Deliverables via Rust Atomic Writer
+  console.log("[14/14] Exporting atomic .xlsx and .pdf deliverables via DeliverableExportModal...");
+  const deliverableXlsxPath = resolve(e2eWorkDir, "safi_deliverable.xlsx");
+  const deliverablePdfPath = resolve(e2eWorkDir, "safi_deliverable.pdf");
+  await page.locator('[data-tutorial-target="export-deliverable-btn"]').click();
+  await page.locator('[data-testid="deliverable-export-modal"]').waitFor({ state: "visible" });
+
+  await page.locator('[data-testid="export-format-select"]').selectOption("xlsx");
+  await page.locator('[data-testid="confirm-export-deliverable-btn"]').click();
+  await page.waitForFunction(() => (document.querySelector('[data-testid="export-deliverable-status"]')?.textContent ?? "").includes(".xlsx"));
+  const xlsxBytes = await readFile(deliverableXlsxPath);
+  assert.ok(xlsxBytes.length > 3000 && xlsxBytes[0] === 0x50 && xlsxBytes[1] === 0x4b, "Exported .xlsx must be a valid OOXML ZIP binary.");
+
+  await page.locator('[data-testid="export-format-select"]').selectOption("pdf");
+  await page.locator('[data-testid="confirm-export-deliverable-btn"]').click();
+  await page.waitForFunction(() => (document.querySelector('[data-testid="export-deliverable-status"]')?.textContent ?? "").includes(".pdf"));
+  const pdfBytes = await readFile(deliverablePdfPath);
+  const pdfAscii = pdfBytes.toString("latin1");
+  assert.ok(pdfAscii.startsWith("%PDF-1.7") && pdfAscii.includes("xref") && pdfAscii.trim().endsWith("%%EOF"), "Exported .pdf must be valid PDF 1.7.");
+
+  await page.locator('[data-testid="deliverable-export-modal"] button[aria-label="Close"]').click();
 
   // Clear native session (sign-out via real DELETE /v1/auth/sessions/current + native clear) and verify immediate rejection
   const remoteRevokeResp = await fetch(`http://${authAddr}/v1/auth/sessions/current`, {

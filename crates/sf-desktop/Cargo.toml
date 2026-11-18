@@ -15,6 +15,7 @@ zeroize = { version = "=1.9.1", features = ["zeroize_derive"] }
 ed25519-dalek = { version = "=2.2.0", features = ["serde"] }
 hex = "=0.4.3"
 rand = "=0.8.8"
+base64 = "=0.22.1"
 
 # The desktop app is the only place the Studio engine executes (AGENTS: web is a showcase).
 sf-core = { path = "../sf-core" }

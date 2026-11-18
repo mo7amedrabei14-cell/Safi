@@ -828,6 +828,124 @@ try {
     await rmCtx.close();
   }
 
+  // =========================================================================
+  // 4. Seven-Viewport AuthModal Fit, Internal Scrollbar, Tab Alignment & Compact RTL Check
+  // =========================================================================
+  {
+    const sevenViewports = [
+      { name: "1920x1080", width: 1920, height: 1080, dir: "ltr" },
+      { name: "1440x900", width: 1440, height: 900, dir: "ltr" },
+      { name: "1366x768", width: 1366, height: 768, dir: "ltr" },
+      { name: "1366x520", width: 1366, height: 520, dir: "ltr" },
+      { name: "390x844", width: 390, height: 844, dir: "ltr" },
+      { name: "360x800", width: 360, height: 800, dir: "ltr" },
+      { name: "320x700", width: 320, height: 700, dir: "rtl" }
+    ];
+    const viewportMatrix = {};
+    for (const vp of sevenViewports) {
+      const vpCtx = await browser.newContext({
+        viewport: { width: vp.width, height: vp.height },
+        deviceScaleFactor: 1,
+        hasTouch: vp.width < 500,
+        isMobile: vp.width < 500
+      });
+      const vpPage = await vpCtx.newPage();
+      if (vp.dir === "rtl") {
+        await vpPage.addInitScript(() => localStorage.setItem("safi.locale", "ar"));
+      }
+      await vpPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+      await vpPage.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 20_000 });
+      await vpPage.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 10_000 });
+      await delay(300);
+
+      const inspectAuthFit = async () =>
+        vpPage.evaluate(() => {
+          const modal = document.querySelector(".safi-auth-modal");
+          const rect = modal.getBoundingClientRect();
+          const ind = document.querySelector(".safi-auth-tabs-indicator").getBoundingClientRect();
+          const activeTab = document.querySelector('.safi-auth-tabs [role="tab"][aria-selected="true"]').getBoundingClientRect();
+          return {
+            modalLeft: rect.left,
+            modalRight: rect.right,
+            modalTop: rect.top,
+            modalBottom: rect.bottom,
+            modalScrollWidth: modal.scrollWidth,
+            modalClientWidth: modal.clientWidth,
+            modalScrollHeight: modal.scrollHeight,
+            modalClientHeight: modal.clientHeight,
+            docScrollWidth: document.documentElement.scrollWidth,
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            tabAlignedDelta: Math.abs(ind.left - activeTab.left),
+            canScrollInternally: modal.scrollHeight > modal.clientHeight + 2
+          };
+        });
+
+      const signInMetrics = await inspectAuthFit();
+      assert.ok(signInMetrics.modalLeft >= -1 && signInMetrics.modalRight <= vp.width + 1, `${vp.name} SignIn horizontal clip: ${JSON.stringify(signInMetrics)}`);
+      assert.ok(signInMetrics.modalTop >= -1 && signInMetrics.modalBottom <= vp.height + 1, `${vp.name} SignIn vertical clip: ${JSON.stringify(signInMetrics)}`);
+      assert.ok(signInMetrics.modalScrollWidth <= signInMetrics.modalClientWidth + 1, `${vp.name} SignIn internal horizontal overflow`);
+      assert.ok(signInMetrics.docScrollWidth <= signInMetrics.innerWidth + 1, `${vp.name} SignIn document horizontal overflow`);
+      assert.ok(signInMetrics.tabAlignedDelta <= 3, `${vp.name} SignIn indicator misaligned by ${signInMetrics.tabAlignedDelta}px`);
+
+      await vpPage.locator('.safi-auth-tabs [role="tab"]:nth-child(2)').click();
+      await delay(400);
+      const signUpMetrics = await inspectAuthFit();
+      assert.ok(signUpMetrics.modalLeft >= -1 && signUpMetrics.modalRight <= vp.width + 1, `${vp.name} SignUp horizontal clip`);
+      assert.ok(signUpMetrics.modalTop >= -1 && signUpMetrics.modalBottom <= vp.height + 1, `${vp.name} SignUp vertical clip`);
+      assert.ok(signUpMetrics.modalScrollWidth <= signUpMetrics.modalClientWidth + 1, `${vp.name} SignUp internal horizontal overflow`);
+      assert.ok(signUpMetrics.tabAlignedDelta <= 3, `${vp.name} SignUp indicator misaligned by ${signUpMetrics.tabAlignedDelta}px`);
+
+      let scrolledInternally = false;
+      if (signUpMetrics.canScrollInternally) {
+        const sc = await vpPage.evaluate(() => {
+          const m = document.querySelector(".safi-auth-modal");
+          m.scrollTop = 120;
+          return { scrollTop: m.scrollTop, windowY: window.scrollY };
+        });
+        assert.ok(sc.scrollTop > 0, `${vp.name} SignUp modal failed to scroll internally`);
+        assert.equal(sc.windowY, 0, `${vp.name} window scrolled behind modal`);
+        scrolledInternally = true;
+      }
+
+      viewportMatrix[vp.name] = { dir: vp.dir, signInMetrics, signUpMetrics, scrolledInternally };
+      await vpCtx.close();
+    }
+    summary.sevenViewportAuthMatrix = viewportMatrix;
+  }
+
+  // =========================================================================
+  // 5. Public Website Preservation Check (No Desktop-Only Studio Surfaces on Web)
+  // =========================================================================
+  {
+    const webCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const webPage = await webCtx.newPage();
+    await mockAuthRoute(webPage);
+    await webPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+    await signIn(webPage);
+    await delay(250);
+    const leakedDesktopSelectors = await webPage.evaluate(() => ({
+      isDesktopFlag: typeof window.__TAURI_INTERNALS__ !== "undefined",
+      desktopTriggerCount: document.querySelectorAll('button[data-desktop-studio-trigger="true"]').length,
+      desktopStudioCount: document.querySelectorAll(".safi-desktop-studio").length,
+      workbookDrawerCount: document.querySelectorAll('[data-testid="workbook-intelligence-drawer"]').length,
+      intelligencePanelCount: document.querySelectorAll('[data-testid="intelligence-assistant-panel"]').length,
+      exportModalCount: document.querySelectorAll('[data-testid="deliverable-export-modal"]').length,
+      tutorialDialogCount: document.querySelectorAll('[data-testid="interactive-tutorial-dialog"]').length,
+      hasPublicShell: document.querySelector(".safi-shell") !== null
+    }));
+    assert.equal(leakedDesktopSelectors.hasPublicShell, true);
+    assert.equal(leakedDesktopSelectors.isDesktopFlag, false);
+    assert.equal(leakedDesktopSelectors.desktopTriggerCount, 0);
+    assert.equal(leakedDesktopSelectors.desktopStudioCount, 0);
+    assert.equal(leakedDesktopSelectors.workbookDrawerCount, 0);
+    assert.equal(leakedDesktopSelectors.intelligencePanelCount, 0);
+    assert.equal(leakedDesktopSelectors.exportModalCount, 0);
+    assert.equal(leakedDesktopSelectors.tutorialDialogCount, 0);
+    summary.websitePreservation = leakedDesktopSelectors;
+    await webCtx.close();
+  }
+
   await writeFile(join(evidenceDir, "ux-e2e-summary.json"), JSON.stringify(summary, null, 2));
   console.log("VERIFY_UX_E2E_PASSED", JSON.stringify(summary));
 } finally {

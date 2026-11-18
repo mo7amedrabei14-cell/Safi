@@ -10,10 +10,7 @@ import {
   ingestWorkbookStructure
 } from "./workbook-ingestion";
 import { buildSemanticWorkbookModel } from "./semantic-intelligence";
-import {
-  answerAnalyticalQuestion,
-  buildVerifiedAnalysisReport
-} from "./verified-analysis-engine";
+import { answerAnalyticalQuestion, buildVerifiedAnalysisReport } from "./verified-analysis-engine";
 import {
   generateAutoDashboard,
   generateDocumentReport,
@@ -217,10 +214,10 @@ const PERMANENT_35_FIXTURES: readonly RegressionFixtureSpec[] = [
       }
     ],
     assertIngestion: (r) => {
-      const tbl = r.worksheets[0]?.tables[0]!;
-      expect(tbl.title).toBe("Ministry of Finance — Annual Summary");
-      expect(tbl.dataRows).toHaveLength(1);
-      expect(tbl.separatedRows.map((s) => s.kind)).toEqual(["Title", "Subtitle", "Footnote"]);
+      const tbl = r.worksheets[0]?.tables[0];
+      expect(tbl?.title).toBe("Ministry of Finance — Annual Summary");
+      expect(tbl?.dataRows).toHaveLength(1);
+      expect(tbl?.separatedRows.map((s) => s.kind)).toEqual(["Title", "Subtitle", "Footnote"]);
     }
   },
   {
@@ -241,10 +238,10 @@ const PERMANENT_35_FIXTURES: readonly RegressionFixtureSpec[] = [
       }
     ],
     assertIngestion: (r) => {
-      const tbl = r.worksheets[0]?.tables[0]!;
-      expect(tbl.dataRows).toHaveLength(2);
-      expect(tbl.separatedRows.filter((s) => s.kind === "Subtotal")).toHaveLength(2);
-      expect(tbl.separatedRows.filter((s) => s.kind === "GrandTotal")).toHaveLength(1);
+      const tbl = r.worksheets[0]?.tables[0];
+      expect(tbl?.dataRows).toHaveLength(2);
+      expect(tbl?.separatedRows.filter((s) => s.kind === "Subtotal")).toHaveLength(2);
+      expect(tbl?.separatedRows.filter((s) => s.kind === "GrandTotal")).toHaveLength(1);
     }
   },
   {
@@ -453,12 +450,7 @@ const PERMANENT_35_FIXTURES: readonly RegressionFixtureSpec[] = [
       const statuses = r.worksheets[0]?.cellMetadata
         .filter((c) => c.col === 1 && c.row >= 1)
         .map((c) => c.formulaStatus);
-      expect(statuses).toEqual([
-        "FormulaError",
-        "FormulaError",
-        "FormulaError",
-        "FormulaError"
-      ]);
+      expect(statuses).toEqual(["FormulaError", "FormulaError", "FormulaError", "FormulaError"]);
     }
   },
   {
@@ -804,10 +796,10 @@ const PERMANENT_35_FIXTURES: readonly RegressionFixtureSpec[] = [
     ],
     assertIngestion: (r) => {
       const model = buildSemanticWorkbookModel(r);
-      const costCol = model.tables[0]?.columns[1]!;
-      expect(costCol.missingCount).toBe(1);
-      expect(costCol.numericStats?.outlierCount).toBe(1);
-      expect(costCol.numericStats?.outlierValues).toEqual([5000]);
+      const costCol = model.tables[0]?.columns[1];
+      expect(costCol?.missingCount).toBe(1);
+      expect(costCol?.numericStats?.outlierCount).toBe(1);
+      expect(costCol?.numericStats?.outlierValues).toEqual([5000]);
     }
   },
   {
@@ -855,12 +847,28 @@ const PERMANENT_35_FIXTURES: readonly RegressionFixtureSpec[] = [
       expect(r.detectedFormat).toBe("Xlsb");
       expect(r.supportLevel).toBe("SupportedTabularAndFormulas");
       const csvRep = ingestWorkbookStructure(
-        [{ name: "flat", grid: [["K", "V"], ["1", "2"]] }],
+        [
+          {
+            name: "flat",
+            grid: [
+              ["K", "V"],
+              ["1", "2"]
+            ]
+          }
+        ],
         { filename: "data.csv" }
       );
       expect(csvRep.detectedFormat).toBe("Csv");
       const odsRep = ingestWorkbookStructure(
-        [{ name: "open", grid: [["K", "V"], ["1", "2"]] }],
+        [
+          {
+            name: "open",
+            grid: [
+              ["K", "V"],
+              ["1", "2"]
+            ]
+          }
+        ],
         { filename: "data.ods" }
       );
       expect(odsRep.detectedFormat).toBe("Ods");
@@ -912,8 +920,8 @@ describe("Permanent 35-Workbook Regression Matrix & Cross-Studio Consistency (Ph
     const document = generateDocumentReport(model, analysis);
 
     // 1. Verify ground-truth statistical accuracy
-    const revCol = model.tables[0]!.columns.find((c) => c.headerName === "Revenue_EGP")!;
-    expect(revCol.numericStats).toMatchObject({
+    const revCol = model.tables[0]?.columns.find((c) => c.headerName === "Revenue_EGP");
+    expect(revCol?.numericStats).toMatchObject({
       count: 5,
       sum: 15000,
       mean: 3000,
@@ -949,13 +957,13 @@ describe("Permanent 35-Workbook Regression Matrix & Cross-Studio Consistency (Ph
     expect(dashKpis).toEqual(canonicalFormatted);
 
     const slideKpis = presentation.slides
-      .find((s) => s.sectionRole === "KeyMetrics")!
-      .kpis.map((k) => k.formattedValue);
+      .find((s) => s.sectionRole === "KeyMetrics")
+      ?.kpis.map((k) => k.formattedValue);
     expect(slideKpis).toEqual(canonicalFormatted);
 
     const docKpis = document.sections
-      .find((s) => s.kind === "KpiSummary")!
-      .kpis!.map((k) => k.formattedValue);
+      .find((s) => s.kind === "KpiSummary")
+      ?.kpis?.map((k) => k.formattedValue);
     expect(docKpis).toEqual(canonicalFormatted);
 
     const pptxExport = exportStudioDeliverable({ format: "pptx", model, presentation });

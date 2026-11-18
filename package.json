@@ -35,7 +35,8 @@
   },
   "pnpm": {
     "overrides": {
-      "minimatch": "11.0.3"
+      "minimatch": "11.0.3",
+      "picomatch": "file:tools/vendor/picomatch"
     }
   }
 }

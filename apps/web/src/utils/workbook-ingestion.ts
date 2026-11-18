@@ -395,7 +395,7 @@ export function classifyCellType(rawValue: string, numberFormat?: string): Inges
       trimmed.startsWith("0") &&
       !trimmed.startsWith("0.") &&
       /^\d+$/.test(trimmed)) ||
-    (/^\+\d{5,15}$/.test(trimmed))
+    /^\+\d{5,15}$/.test(trimmed)
   ) {
     return "ZeroPreservedText";
   }
@@ -428,8 +428,10 @@ export function classifyCellType(rawValue: string, numberFormat?: string): Inges
   if (/^-?\d+(\.\d+)?$/.test(numCandidate) && Number.isFinite(Number(numCandidate))) {
     return "Decimal";
   }
-  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed) ||
-      /^\d{1,2}[-/]\d{1,2}[-/]\d{4}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed)) {
+  if (
+    /^\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed) ||
+    /^\d{1,2}[-/]\d{1,2}[-/]\d{4}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed)
+  ) {
     return trimmed.includes(":") ? "DateTime" : "Date";
   }
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(trimmed)) {
@@ -499,7 +501,12 @@ export function evaluateSimpleFormula(
       const rVal = rightCoord
         ? numericLookup.get(`${rightCoord.row},${rightCoord.col}`)
         : Number(rightStr);
-      if (lVal === undefined || rVal === undefined || !Number.isFinite(lVal) || !Number.isFinite(rVal)) {
+      if (
+        lVal === undefined ||
+        rVal === undefined ||
+        !Number.isFinite(lVal) ||
+        !Number.isFinite(rVal)
+      ) {
         return undefined;
       }
       if (op === "/" && Math.abs(rVal) < 1e-12) {
@@ -560,7 +567,10 @@ function classifyFormulaVerification(
 }
 
 function detectTotalRowKind(rowVals: readonly string[]): SeparatedRowKind | null {
-  const firstText = rowVals.find((s) => s.trim().length > 0)?.trim().toLowerCase();
+  const firstText = rowVals
+    .find((s) => s.trim().length > 0)
+    ?.trim()
+    .toLowerCase();
   if (!firstText) return null;
   if (
     firstText === "grand total" ||
@@ -962,8 +972,7 @@ export function ingestWorkbookStructure(
     throw new Error("SF-IMP-002: WorkbookIngestionCancelled");
   }
 
-  const detectedFormat =
-    options.formatHint ?? detectWorkbookFormatFromFilename(options.filename);
+  const detectedFormat = options.formatHint ?? detectWorkbookFormatFromFilename(options.filename);
   const progressLog: IngestionProgressUpdate[] = [];
   const emitProgress = (update: IngestionProgressUpdate): void => {
     progressLog.push(update);

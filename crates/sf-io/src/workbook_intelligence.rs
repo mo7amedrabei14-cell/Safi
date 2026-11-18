@@ -535,7 +535,10 @@ pub fn sniff_workbook_format(bytes: &[u8], filename_hint: Option<&str>) -> Workb
         let mut cursor = Cursor::new(bytes);
         if let Ok(zip) = ZipArchive::new(&mut cursor) {
             let names: Vec<String> = zip.file_names().map(str::to_owned).collect();
-            if names.iter().any(|n| n.eq_ignore_ascii_case("xl/workbook.bin")) {
+            if names
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case("xl/workbook.bin"))
+            {
                 return WorkbookFormat::Xlsb;
             }
             if names
@@ -620,10 +623,9 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
     let mut total_uncompressed: u64 = 0;
 
     let file_names: Vec<String> = archive.file_names().map(str::to_owned).collect();
-    if file_names
-        .iter()
-        .any(|n| n.eq_ignore_ascii_case("EncryptedPackage") || n.eq_ignore_ascii_case("EncryptionInfo"))
-    {
+    if file_names.iter().any(|n| {
+        n.eq_ignore_ascii_case("EncryptedPackage") || n.eq_ignore_ascii_case("EncryptionInfo")
+    }) {
         return Err(SafiError::new(
             ErrorCode::SF_IMP_002,
             ErrorSeverity::Error,
@@ -642,7 +644,8 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
                 kind: EmbeddedObjectKind::VbaMacroProject,
                 location: name.clone(),
                 handling: EmbeddedObjectHandling::NeutralizedBySecurityPolicy,
-                summary: "VBA macro binary detected and neutralized by local security policy".to_string(),
+                summary: "VBA macro binary detected and neutralized by local security policy"
+                    .to_string(),
             });
             meta.warnings.push(
                 "Workbook contains a VBA macro project (vbaProject.bin); macros were neutralized and never executed."
@@ -723,9 +726,11 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
 
     // 2. Parse xl/_rels/workbook.xml.rels and xl/workbook.xml for sheet visibility & date1904
     let mut rel_target_by_id: BTreeMap<String, String> = BTreeMap::new();
-    if let Some(rels_bytes) =
-        read_part(&mut archive, "xl/_rels/workbook.xml.rels", &mut total_uncompressed)?
-    {
+    if let Some(rels_bytes) = read_part(
+        &mut archive,
+        "xl/_rels/workbook.xml.rels",
+        &mut total_uncompressed,
+    )? {
         let mut xml = XmlReader::from_reader(rels_bytes.as_slice());
         xml.expand_empty_elements(true);
         let mut buf = Vec::new();
@@ -738,11 +743,16 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
                         for attr in el.attributes().flatten() {
                             match attr.key.local_name().as_ref() {
                                 b"Id" => {
-                                    id = attr.decode_and_unescape_value(&xml).ok().map(|s| s.into_owned());
+                                    id = attr
+                                        .decode_and_unescape_value(&xml)
+                                        .ok()
+                                        .map(|s| s.into_owned());
                                 }
                                 b"Target" => {
-                                    target =
-                                        attr.decode_and_unescape_value(&xml).ok().map(|s| s.into_owned());
+                                    target = attr
+                                        .decode_and_unescape_value(&xml)
+                                        .ok()
+                                        .map(|s| s.into_owned());
                                 }
                                 _ => {}
                             }
@@ -770,9 +780,7 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
                     b"workbookPr" => {
                         for attr in el.attributes().flatten() {
                             if attr.key.local_name().as_ref() == b"date1904" {
-                                let v = attr
-                                    .decode_and_unescape_value(&xml)
-                                    .unwrap_or_default();
+                                let v = attr.decode_and_unescape_value(&xml).unwrap_or_default();
                                 if v == "1" || v.eq_ignore_ascii_case("true") {
                                     meta.date_system = Some(WorkbookDateSystem::Macintosh1904);
                                 }
@@ -792,9 +800,8 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
                                         .map(|s| s.into_owned());
                                 }
                                 b"state" => {
-                                    let s = attr
-                                        .decode_and_unescape_value(&xml)
-                                        .unwrap_or_default();
+                                    let s =
+                                        attr.decode_and_unescape_value(&xml).unwrap_or_default();
                                     if s.eq_ignore_ascii_case("hidden") {
                                         state = SheetVisibility::Hidden;
                                     } else if s.eq_ignore_ascii_case("veryHidden") {
@@ -1223,8 +1230,8 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
 
     check_cancelled()?;
 
-    let mut workbook: Sheets<Cursor<&[u8]>> = open_workbook_auto_from_rs(Cursor::new(raw_bytes.as_slice()))
-        .map_err(|_| {
+    let mut workbook: Sheets<Cursor<&[u8]>> =
+        open_workbook_auto_from_rs(Cursor::new(raw_bytes.as_slice())).map_err(|_| {
             SafiError::new(
                 ErrorCode::SF_IMP_002,
                 ErrorSeverity::Error,
@@ -1559,7 +1566,10 @@ fn build_worksheet_intelligence(
         for (c_offset, cell) in row.iter().enumerate() {
             let abs_c = start_c as usize + c_offset;
             let text = format_calamine_cell(cell);
-            if let Some(num) = cell.get_float().or_else(|| cell.get_int().map(|i| i as f64)) {
+            if let Some(num) = cell
+                .get_float()
+                .or_else(|| cell.get_int().map(|i| i as f64))
+            {
                 numeric_lookup.insert((abs_r as u32, abs_c as u32), num);
             }
             if let Some(slot) = grid.get_mut(abs_r).and_then(|r| r.get_mut(abs_c)) {
@@ -1583,7 +1593,9 @@ fn build_worksheet_intelligence(
                     merged_origin_by_coord.insert((r, c), origin_addr.clone());
                     // Propagate horizontal merged banners/headers when destination is empty
                     if r == m.start_row
-                        && let Some(slot) = grid.get_mut(r as usize).and_then(|row| row.get_mut(c as usize))
+                        && let Some(slot) = grid
+                            .get_mut(r as usize)
+                            .and_then(|row| row.get_mut(c as usize))
                         && slot.is_empty()
                     {
                         *slot = origin_val.clone();
@@ -1642,7 +1654,12 @@ fn build_worksheet_intelligence(
                         Some(raw_val.clone())
                     };
                     let recalc = evaluate_simple_sheet_formula(f_expr, &numeric_lookup);
-                    let status = classify_formula_status(f_expr, cached.as_deref(), recalc.as_deref(), data_type);
+                    let status = classify_formula_status(
+                        f_expr,
+                        cached.as_deref(),
+                        recalc.as_deref(),
+                        data_type,
+                    );
                     if matches!(
                         status,
                         FormulaVerificationStatus::VerifiedCachedAndRecalculated
@@ -1830,7 +1847,9 @@ fn classify_text_cell_type(raw_text: &str, num_fmt: Option<&str>) -> IngestedCel
     if trimmed.is_empty() || is_recognized_empty_token(trimmed) {
         return IngestedCellDataType::Empty;
     }
-    if trimmed.starts_with('#') && (trimmed.ends_with('!') || trimmed.ends_with('?') || trimmed == "#N/A") {
+    if trimmed.starts_with('#')
+        && (trimmed.ends_with('!') || trimmed.ends_with('?') || trimmed == "#N/A")
+    {
         return IngestedCellDataType::FormulaError;
     }
     // Leading-zero preservation check (e.g. "00123", "+201012345678")
@@ -1838,19 +1857,16 @@ fn classify_text_cell_type(raw_text: &str, num_fmt: Option<&str>) -> IngestedCel
         && trimmed.starts_with('0')
         && !trimmed.starts_with("0.")
         && trimmed.bytes().all(|b| b.is_ascii_digit()))
-        || (trimmed.starts_with('+') && trimmed.len() > 4 && trimmed[1..].bytes().all(|b| b.is_ascii_digit()))
+        || (trimmed.starts_with('+')
+            && trimmed.len() > 4
+            && trimmed[1..].bytes().all(|b| b.is_ascii_digit()))
     {
         return IngestedCellDataType::ZeroPreservedText;
     }
     if trimmed.eq_ignore_ascii_case("true") || trimmed.eq_ignore_ascii_case("false") {
         return IngestedCellDataType::Boolean;
     }
-    if trimmed.ends_with('%')
-        && trimmed[..trimmed.len() - 1]
-            .trim()
-            .parse::<f64>()
-            .is_ok()
-    {
+    if trimmed.ends_with('%') && trimmed[..trimmed.len() - 1].trim().parse::<f64>().is_ok() {
         return IngestedCellDataType::Percentage;
     }
     let mut currency_stripped = trimmed.trim_start_matches(['$', '€', '£']).trim();
@@ -1891,7 +1907,9 @@ fn looks_like_iso_date(s: &str) -> bool {
         return false;
     }
     let lens = (parts[0].len(), parts[1].len(), parts[2].len());
-    let all_digits = parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    let all_digits = parts
+        .iter()
+        .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
     all_digits && (lens.0 == 4 || lens.2 == 4)
 }
 
@@ -1899,7 +1917,11 @@ fn evaluate_simple_sheet_formula(
     formula: &str,
     numeric_lookup: &BTreeMap<(u32, u32), f64>,
 ) -> Option<String> {
-    let expr = formula.trim().strip_prefix('=').unwrap_or(formula.trim()).trim();
+    let expr = formula
+        .trim()
+        .strip_prefix('=')
+        .unwrap_or(formula.trim())
+        .trim();
     let upper = expr.to_ascii_uppercase();
     if upper.contains('!') || upper.contains('[') {
         return None;
@@ -1989,7 +2011,14 @@ fn classify_formula_status(
     if upper.contains('[') && upper.contains(']') {
         return FormulaVerificationStatus::ExternalWorkbookReference;
     }
-    for volatile in ["NOW(", "TODAY(", "RAND(", "RANDBETWEEN(", "OFFSET(", "INDIRECT("] {
+    for volatile in [
+        "NOW(",
+        "TODAY(",
+        "RAND(",
+        "RANDBETWEEN(",
+        "OFFSET(",
+        "INDIRECT(",
+    ] {
         if upper.contains(volatile) {
             return FormulaVerificationStatus::VolatileFormula;
         }
@@ -2645,12 +2674,8 @@ mod tests {
             max_file_bytes: 10 * 1024 * 1024,
             max_rows: 1000,
         };
-        let report = ingest_workbook_universal(
-            Cursor::new(bytes),
-            limits,
-            Some("finance.xlsm"),
-            None,
-        );
+        let report =
+            ingest_workbook_universal(Cursor::new(bytes), limits, Some("finance.xlsm"), None);
         assert!(report.is_ok());
         if let Ok(rep) = report {
             assert_eq!(rep.detected_format, WorkbookFormat::Xlsm);

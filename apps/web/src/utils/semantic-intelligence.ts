@@ -86,7 +86,13 @@ export interface SemanticColumnProfile {
   readonly analyticalRole: ColumnAnalyticalRole;
   readonly isIdentifier: boolean;
   readonly aggregationAllowed: boolean;
-  readonly recommendedAggregation: "SUM" | "AVERAGE" | "MEDIAN" | "COUNT_DISTINCT" | "COUNT" | "NONE";
+  readonly recommendedAggregation:
+    | "SUM"
+    | "AVERAGE"
+    | "MEDIAN"
+    | "COUNT_DISTINCT"
+    | "COUNT"
+    | "NONE";
   readonly unit?: string | undefined;
   readonly currencyCode?: string | undefined;
   readonly piiSensitivity: PiiSensitivityLevel;
@@ -130,12 +136,14 @@ export interface DataQualityFinding {
   readonly description: string;
   readonly affectedRowCount: number;
   readonly sampleRowIndices: readonly number[];
-  readonly suggestedAction?: {
-    readonly actionType: ReversibleCleaningActionType;
-    readonly label: string;
-    readonly previewSummary: string;
-    readonly reversible: true;
-  } | undefined;
+  readonly suggestedAction?:
+    | {
+        readonly actionType: ReversibleCleaningActionType;
+        readonly label: string;
+        readonly previewSummary: string;
+        readonly reversible: true;
+      }
+    | undefined;
 }
 
 export type RelationshipCardinality = "1:1" | "1:N" | "N:1" | "M:N";
@@ -461,18 +469,13 @@ function profileTableRegion(
       (v) => (v.length > 1 && v.startsWith("0") && /^\d+$/.test(v)) || /^\+\d{5,15}$/.test(v)
     ).length;
     const formulaErrorCount = nonNullCells.filter((v) => v.startsWith("#")).length;
-    const numericVals = nonNullCells
-      .map(parseNumericCell)
-      .filter((v): v is number => v !== null);
+    const numericVals = nonNullCells.map(parseNumericCell).filter((v): v is number => v !== null);
     const dateVals = nonNullCells.filter(
-      (v) =>
-        /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(v) || /^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(v)
+      (v) => /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(v) || /^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(v)
     );
 
     const isNumericDominant =
-      nonNullCount > 0 &&
-      numericVals.length / nonNullCount >= 0.8 &&
-      leadingZeroCount === 0;
+      nonNullCount > 0 && numericVals.length / nonNullCount >= 0.8 && leadingZeroCount === 0;
     const isDateDominant = nonNullCount > 0 && dateVals.length / nonNullCount >= 0.8;
 
     const { currencyCode, unit } = detectCurrencyAndUnit(header, nonNullCells);
@@ -511,7 +514,8 @@ function profileTableRegion(
               ? "EmailAddress"
               : "PhoneOrContact"
             : "IdentifierCode";
-      storageType = leadingZeroCount > 0 ? "ZeroPreservedText" : isNumericDominant ? "Integer" : "Text";
+      storageType =
+        leadingZeroCount > 0 ? "ZeroPreservedText" : isNumericDominant ? "Integer" : "Text";
       confidencePct = headerSaysId || leadingZeroCount > 0 ? 96 : 72;
     } else if (isDateDominant || (DATE_HEADER_PATTERN.test(header) && dateVals.length > 0)) {
       analyticalRole = "Temporal";
@@ -547,7 +551,10 @@ function profileTableRegion(
       } else if (ORG_HEADER_PATTERN.test(header)) {
         semanticType = "OrganizationOrBranch";
         confidencePct = 91;
-      } else if (CATEGORY_HEADER_PATTERN.test(header) || distinctCount <= Math.max(12, totalRows * 0.3)) {
+      } else if (
+        CATEGORY_HEADER_PATTERN.test(header) ||
+        distinctCount <= Math.max(12, totalRows * 0.3)
+      ) {
         semanticType = "CategoryOrStatus";
         confidencePct = 86;
       } else {
@@ -784,13 +791,7 @@ function discoverCrossTableRelationships(
           const uniqueB = colB.uniquenessPct === 100 && colB.missingCount === 0;
 
           const cardinality: RelationshipCardinality =
-            uniqueA && uniqueB
-              ? "1:1"
-              : uniqueB
-                ? "N:1"
-                : uniqueA
-                  ? "1:N"
-                  : "M:N";
+            uniqueA && uniqueB ? "1:1" : uniqueB ? "N:1" : uniqueA ? "1:N" : "M:N";
 
           const orphanSourceKeyCount = [...setA].filter((k) => !setB.has(k)).length;
           const duplicateTargetKeyCount = colB.duplicateCount;

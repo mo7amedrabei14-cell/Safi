@@ -10,10 +10,7 @@
  * 5. `UnsupportedConclusion`
  */
 
-import type {
-  ConfidenceTier,
-  SemanticWorkbookModel
-} from "./semantic-intelligence";
+import type { ConfidenceTier, SemanticWorkbookModel } from "./semantic-intelligence";
 import { scoreToConfidenceTier } from "./semantic-intelligence";
 
 export type QuestionResolutionStatus =
@@ -192,7 +189,8 @@ export function generateContextualQuestions(
           {
             optionId: "confirm_join",
             label: "Confirm relationship and join matching keys",
-            effectSummary: "Enables cross-sheet dimensional grouping; unmatched keys are grouped as 'Unmatched'."
+            effectSummary:
+              "Enables cross-sheet dimensional grouping; unmatched keys are grouped as 'Unmatched'."
           },
           {
             optionId: "keep_separate",
@@ -227,7 +225,8 @@ export function generateContextualQuestions(
             {
               optionId: "exclude_missing",
               label: "Exclude missing rows from averages (Recommended)",
-              effectSummary: "Computes averages over non-null records only without fabricating values."
+              effectSummary:
+                "Computes averages over non-null records only without fabricating values."
             },
             {
               optionId: "impute_median",
@@ -407,8 +406,7 @@ export function buildVerifiedAnalysisReport(
         sheetName: kpi.sheetName,
         tableId: kpi.tableId,
         columnNames: [kpi.columnName],
-        a1Range:
-          model.tables.find((t) => t.tableId === kpi.tableId)?.a1Range ?? "A1",
+        a1Range: model.tables.find((t) => t.tableId === kpi.tableId)?.a1Range ?? "A1",
         formulaOrMethod: kpi.formulaTrace
       }
     });
@@ -446,8 +444,7 @@ export function buildVerifiedAnalysisReport(
         const top = ranked[0]!;
         const bottom = ranked[ranked.length - 1]!;
         const grandSum = ranked.reduce((acc, [, v]) => acc + v, 0);
-        const topSharePct =
-          grandSum > 0 ? Number(((top[1] / grandSum) * 100).toFixed(1)) : 0;
+        const topSharePct = grandSum > 0 ? Number(((top[1] / grandSum) * 100).toFixed(1)) : 0;
 
         insights.push({
           insightId: `ins_rank_${table.tableId}_${dim.columnIndex}_${meas.columnIndex}`,
@@ -541,7 +538,8 @@ export function buildVerifiedAnalysisReport(
           confidencePct: 68,
           confidenceTier: "Medium",
           provisional: true,
-          provisionalReason: "Hypothesis requires external operational context beyond the workbook.",
+          provisionalReason:
+            "Hypothesis requires external operational context beyond the workbook.",
           citation: {
             sheetName: table.sheetName,
             tableId: table.tableId,
@@ -596,7 +594,8 @@ export function buildVerifiedAnalysisReport(
             confidencePct: Math.max(55, Math.min(88, Math.round(rSquared * 90))),
             confidenceTier: scoreToConfidenceTier(Math.max(55, Math.round(rSquared * 90))),
             provisional: true,
-            provisionalReason: "Conditional statistical projection subject to explicit linear trend assumptions.",
+            provisionalReason:
+              "Conditional statistical projection subject to explicit linear trend assumptions.",
             citation: {
               sheetName: table.sheetName,
               tableId: table.tableId,
@@ -669,9 +668,13 @@ export function buildVerifiedAnalysisReport(
       }
 
       // Check for Target/Budget vs Actual variance pair
-      const budgetCol = measureCols.find((c) => /budget|target|plan|ميزانية|مستهدف|خطة/i.test(c.headerName));
+      const budgetCol = measureCols.find((c) =>
+        /budget|target|plan|ميزانية|مستهدف|خطة/i.test(c.headerName)
+      );
       const actualCol = measureCols.find(
-        (c) => c !== budgetCol && /actual|revenue|sales|amount|فعلي|إيراد|مبيعات|منجز/i.test(c.headerName)
+        (c) =>
+          c !== budgetCol &&
+          /actual|revenue|sales|amount|فعلي|إيراد|مبيعات|منجز/i.test(c.headerName)
       );
       if (budgetCol?.numericStats && actualCol?.numericStats) {
         const variance = actualCol.numericStats.sum - budgetCol.numericStats.sum;
@@ -789,7 +792,10 @@ export function answerAnalyticalQuestion(
   );
 
   // 1. Epistemic boundaries / What can or cannot be concluded
-  if (/cannot|can't|conclude|limit|prove|causal|لا يمكن|استنتاج|حدود|سبب/.test(qLower) && /conclude|limit|prove|استنتاج|حدود/.test(qLower)) {
+  if (
+    /cannot|can't|conclude|limit|prove|causal|لا يمكن|استنتاج|حدود|سبب/.test(qLower) &&
+    /conclude|limit|prove|استنتاج|حدود/.test(qLower)
+  ) {
     const facts = report.insightsByEpistemicCategory.ConfirmedFact.map((i) => i.statement);
     const unresolved = report.insightsByEpistemicCategory.UnresolvedQuestion.map(
       (i) => i.statement
@@ -807,7 +813,11 @@ export function answerAnalyticalQuestion(
   }
 
   // 2. Anomalies or data quality issues
-  if (/anomal|outlier|quality|missing|duplicate|error|issue|شذوذ|متطرف|جودة|مفقود|مكرر|خطأ|مشاكل/.test(qLower)) {
+  if (
+    /anomal|outlier|quality|missing|duplicate|error|issue|شذوذ|متطرف|جودة|مفقود|مكرر|خطأ|مشاكل/.test(
+      qLower
+    )
+  ) {
     const findingsBullets = model.qualityFindings.map(
       (f) => `[${f.category}] ${f.title}: ${f.description}`
     );
@@ -819,10 +829,7 @@ export function answerAnalyticalQuestion(
         model.qualityFindings.length > 0
           ? `Detected ${model.qualityFindings.length} data quality & anomaly finding(s) across the workbook (Overall Quality Score: ${model.overallQualityScorePct}%).`
           : `No critical data quality issues or statistical outliers were detected (Overall Quality Score: ${model.overallQualityScorePct}%).`,
-      bulletPoints: [
-        ...findingsBullets,
-        ...anomalyInsights.map((a) => a.statement)
-      ],
+      bulletPoints: [...findingsBullets, ...anomalyInsights.map((a) => a.statement)],
       epistemicCategory: "ConfirmedFact",
       confidenceTier: "High",
       citations: anomalyInsights[0] ? [anomalyInsights[0].citation] : [defaultCitation],
@@ -831,7 +838,11 @@ export function answerAnalyticalQuestion(
   }
 
   // 3. Best / worst branch, category, product, or ranking
-  if (/best|worst|top|bottom|highest|lowest|rank|branch|category|product|أفضل|أسوأ|أعلى|أقل|ترتيب|فرع|فئة|منتج/.test(qLower)) {
+  if (
+    /best|worst|top|bottom|highest|lowest|rank|branch|category|product|أفضل|أسوأ|أعلى|أقل|ترتيب|فرع|فئة|منتج/.test(
+      qLower
+    )
+  ) {
     const rankInsights = report.insights.filter(
       (i) => i.domain === "CategoryRanking" || i.domain === "OperationalIndicators"
     );
@@ -850,7 +861,11 @@ export function answerAnalyticalQuestion(
   }
 
   // 4. Why a metric changed / trend / period comparison
-  if (/why|change|trend|grow|declin|increase|decrease|period|forecast|لماذا|تغير|اتجاه|نمو|انخفاض|فترة|توقع/.test(qLower)) {
+  if (
+    /why|change|trend|grow|declin|increase|decrease|period|forecast|لماذا|تغير|اتجاه|نمو|انخفاض|فترة|توقع/.test(
+      qLower
+    )
+  ) {
     const trendInsights = report.insights.filter(
       (i) =>
         i.domain === "PeriodComparison" ||
@@ -873,7 +888,9 @@ export function answerAnalyticalQuestion(
   }
 
   // 5. Workbook structure / what the workbook contains
-  if (/contain|sheet|table|structure|column|what is in|ماذا يحتوي|ورقة|جدول|هيكل|أعمدة/.test(qLower)) {
+  if (
+    /contain|sheet|table|structure|column|what is in|ماذا يحتوي|ورقة|جدول|هيكل|أعمدة/.test(qLower)
+  ) {
     const sheetSummaries = model.ingestionReport.worksheets.map(
       (w) =>
         `Sheet "${w.name}" (${w.visibility}, classified as ${w.classification}): ${w.tables.length} table(s), ${w.formulaCount} formula(s)`

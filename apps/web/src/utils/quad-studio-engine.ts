@@ -10,13 +10,8 @@
  *   and Portable JSON Import/Export across all Studios)
  */
 
-import type {
-  CanonicalKpiMetric,
-  SemanticWorkbookModel
-} from "./semantic-intelligence";
-import type {
-  VerifiedAnalysisReport
-} from "./verified-analysis-engine";
+import type { CanonicalKpiMetric, SemanticWorkbookModel } from "./semantic-intelligence";
+import type { VerifiedAnalysisReport } from "./verified-analysis-engine";
 
 // ============================================================================
 // PHASE 8: SHARED TEMPLATE & DESIGN SYSTEM
@@ -247,8 +242,7 @@ export function migrateAndValidateTemplate(raw: unknown): UnifiedStudioTemplate 
           ? rawTokens.pageMarginMm
           : fallback.tokens.pageMarginMm
     },
-    createdAtIso:
-      typeof obj.createdAtIso === "string" ? obj.createdAtIso : fallback.createdAtIso
+    createdAtIso: typeof obj.createdAtIso === "string" ? obj.createdAtIso : fallback.createdAtIso
   };
 }
 
@@ -362,11 +356,13 @@ export interface DashboardStudioState {
   readonly title: string;
   readonly templateId: string;
   readonly globalFilters: readonly DashboardFilterCondition[];
-  readonly crossFilterSelection?: {
-    readonly sourceWidgetId: string;
-    readonly dimensionColumn: string;
-    readonly selectedValue: string;
-  } | undefined;
+  readonly crossFilterSelection?:
+    | {
+        readonly sourceWidgetId: string;
+        readonly dimensionColumn: string;
+        readonly selectedValue: string;
+      }
+    | undefined;
   readonly calculatedMetrics: readonly CalculatedMetricDefinition[];
   readonly widgets: readonly DashboardWidget[];
   readonly undoStack: readonly (readonly DashboardWidget[])[];
@@ -426,10 +422,7 @@ export function computeWidgetDataPoints(
     ? headerIndex.get(widget.secondaryMeasureColumn)
     : undefined;
 
-  const allFilters: DashboardFilterCondition[] = [
-    ...globalFilters,
-    ...widget.localFilters
-  ];
+  const allFilters: DashboardFilterCondition[] = [...globalFilters, ...widget.localFilters];
   if (crossFilter && crossFilter.dimensionColumn) {
     allFilters.push({
       columnName: crossFilter.dimensionColumn,
@@ -868,11 +861,7 @@ export function renderChartSvg(
   primaryColor = "#0284c7"
 ): string {
   const esc = (s: string): string =>
-    s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
   const safePoints = points.length > 0 ? points.slice(0, 12) : [{ label: "N/A", value: 0 }];
   const maxVal = Math.max(1, ...safePoints.map((p) => Math.abs(p.value)));
@@ -1057,7 +1046,9 @@ export function generatePresentationDeck(
       sectionRole: "KeyMetrics",
       title: "Key Performance Indicators (KPIs)",
       subtitle: "Canonical Aggregations Excluding Identifier Codes & Subtotal Rows",
-      bullets: model.canonicalKpis.map((k) => `${k.label}: ${k.formattedValue} (${k.formulaTrace})`),
+      bullets: model.canonicalKpis.map(
+        (k) => `${k.label}: ${k.formattedValue} (${k.formulaTrace})`
+      ),
       kpis: model.canonicalKpis,
       presenterNotes: "Emphasize that IDs and subtotal rows were excluded from KPI summation."
     },
@@ -1107,8 +1098,7 @@ export function generatePresentationDeck(
         )
       ],
       kpis: [],
-      calloutNote:
-        analysis.insightsByEpistemicCategory.UnsupportedConclusion[0]?.statement,
+      calloutNote: analysis.insightsByEpistemicCategory.UnsupportedConclusion[0]?.statement,
       presenterNotes: "Clarify which findings are direct observations vs hypotheses."
     },
     {
@@ -1239,11 +1229,7 @@ export function buildInteractiveHtmlPresentation(
   dir: "ltr" | "rtl" = "ltr"
 ): string {
   const esc = (s: string): string =>
-    s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
   const slidesHtml = deck.slides
     .map((slide, idx) => {
@@ -1532,8 +1518,7 @@ export function generateDocumentReport(
         ...model.qualityFindings
           .filter((f) => f.suggestedAction !== undefined)
           .map(
-            (f) =>
-              `${f.suggestedAction!.label}: ${f.suggestedAction!.previewSummary} (Reversible)`
+            (f) => `${f.suggestedAction!.label}: ${f.suggestedAction!.previewSummary} (Reversible)`
           ),
         ...analysis.questions
           .filter((q) => q.status !== "Answered")

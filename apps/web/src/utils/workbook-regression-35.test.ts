@@ -10,10 +10,7 @@ import {
   ingestWorkbookStructure
 } from "./workbook-ingestion";
 import { buildSemanticWorkbookModel } from "./semantic-intelligence";
-import {
-  answerAnalyticalQuestion,
-  buildVerifiedAnalysisReport
-} from "./verified-analysis-engine";
+import { answerAnalyticalQuestion, buildVerifiedAnalysisReport } from "./verified-analysis-engine";
 import {
   generateAutoDashboard,
   generateDocumentReport,
@@ -453,12 +450,7 @@ const PERMANENT_35_FIXTURES: readonly RegressionFixtureSpec[] = [
       const statuses = r.worksheets[0]?.cellMetadata
         .filter((c) => c.col === 1 && c.row >= 1)
         .map((c) => c.formulaStatus);
-      expect(statuses).toEqual([
-        "FormulaError",
-        "FormulaError",
-        "FormulaError",
-        "FormulaError"
-      ]);
+      expect(statuses).toEqual(["FormulaError", "FormulaError", "FormulaError", "FormulaError"]);
     }
   },
   {
@@ -855,12 +847,28 @@ const PERMANENT_35_FIXTURES: readonly RegressionFixtureSpec[] = [
       expect(r.detectedFormat).toBe("Xlsb");
       expect(r.supportLevel).toBe("SupportedTabularAndFormulas");
       const csvRep = ingestWorkbookStructure(
-        [{ name: "flat", grid: [["K", "V"], ["1", "2"]] }],
+        [
+          {
+            name: "flat",
+            grid: [
+              ["K", "V"],
+              ["1", "2"]
+            ]
+          }
+        ],
         { filename: "data.csv" }
       );
       expect(csvRep.detectedFormat).toBe("Csv");
       const odsRep = ingestWorkbookStructure(
-        [{ name: "open", grid: [["K", "V"], ["1", "2"]] }],
+        [
+          {
+            name: "open",
+            grid: [
+              ["K", "V"],
+              ["1", "2"]
+            ]
+          }
+        ],
         { filename: "data.ods" }
       );
       expect(odsRep.detectedFormat).toBe("Ods");

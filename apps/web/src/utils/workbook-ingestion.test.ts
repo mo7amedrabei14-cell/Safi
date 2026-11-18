@@ -143,6 +143,14 @@ describe("Universal Workbook Ingestion Engine (Phase 1)", () => {
     expect(b5Meta?.recalculatedValue).toBe("3000");
 
     expect(classifyCellType("+201012345678")).toBe("ZeroPreservedText");
-    expect(evaluateSimpleFormula("=A1/B1", new Map([["0,0", 50], ["0,1", 0]]))).toBe("#DIV/0!");
+    expect(
+      evaluateSimpleFormula(
+        "=A1/B1",
+        new Map([
+          ["0,0", 50],
+          ["0,1", 0]
+        ])
+      )
+    ).toBe("#DIV/0!");
   });
 });

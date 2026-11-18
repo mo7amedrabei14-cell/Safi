@@ -19,10 +19,7 @@ import type {
   DocumentReportState,
   PresentationDeckState
 } from "./quad-studio-engine";
-import {
-  buildInteractiveHtmlPresentation,
-  renderChartSvg
-} from "./quad-studio-engine";
+import { buildInteractiveHtmlPresentation, renderChartSvg } from "./quad-studio-engine";
 
 export interface ExportOptions {
   readonly format:
@@ -251,9 +248,7 @@ export function buildGenuineXlsxBinary(
   const rtlAttr = options.rtl ? ' rightToLeft="1"' : "";
 
   const safeSheets: XlsxSheetInput[] =
-    sheets.length > 0
-      ? sheets
-      : [{ name: "Sheet1", headers: ["Column1"], rows: [] }];
+    sheets.length > 0 ? sheets : [{ name: "Sheet1", headers: ["Column1"], rows: [] }];
 
   const contentTypesOverrides = safeSheets
     .map(
@@ -439,10 +434,7 @@ ${sldIdLst}
       `Notes: ${slide.presenterNotes}`
     ]
       .filter((t) => t.trim().length > 0)
-      .map(
-        (line) =>
-          `<a:p><a:r><a:t>${escapeXml(line)}</a:t></a:r></a:p>`
-      )
+      .map((line) => `<a:p><a:r><a:t>${escapeXml(line)}</a:t></a:r></a:p>`)
       .join("");
 
     const slideXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -477,10 +469,7 @@ ${sldIdLst}
 // 3. GENUINE WORD OOXML (.DOCX) BUILDER
 // ============================================================================
 
-export function buildGenuineDocxBinary(
-  doc: DocumentReportState,
-  rtl = false
-): Uint8Array {
+export function buildGenuineDocxBinary(doc: DocumentReportState, rtl = false): Uint8Array {
   const encoder = new TextEncoder();
   const bidiTag = rtl ? "<w:bidi/>" : "";
 
@@ -788,11 +777,17 @@ export function generateExportContent(
 
   if (options.format === "csv") {
     const headerLine = columns
-      .map((col) => `"${sanitizeCellForExport(col, options.protectFormulaInjection).replace(/"/g, '""')}"`)
+      .map(
+        (col) =>
+          `"${sanitizeCellForExport(col, options.protectFormulaInjection).replace(/"/g, '""')}"`
+      )
       .join(",");
     const bodyLines = rows.map((row) =>
       row
-        .map((cell) => `"${sanitizeCellForExport(cell, options.protectFormulaInjection).replace(/"/g, '""')}"`)
+        .map(
+          (cell) =>
+            `"${sanitizeCellForExport(cell, options.protectFormulaInjection).replace(/"/g, '""')}"`
+        )
         .join(",")
     );
     const bom = options.rtl ? "\uFEFF" : "";
@@ -871,10 +866,7 @@ export function generateExportContent(
   }
 
   if (options.format === "pdf") {
-    const lines = [
-      columns.join(" | "),
-      ...rows.slice(0, 30).map((r) => r.join(" | "))
-    ];
+    const lines = [columns.join(" | "), ...rows.slice(0, 30).map((r) => r.join(" | "))];
     const binaryBytes = buildGenuinePdfBinary("SafiData Analytical Report", lines);
     return {
       filename: "safi-export.pdf",
@@ -924,9 +916,7 @@ export function generateExportContent(
       path: "rows.json",
       data: encoder.encode(
         JSON.stringify(
-          rows.map((r) =>
-            r.map((c) => sanitizeCellForExport(c, options.protectFormulaInjection))
-          )
+          rows.map((r) => r.map((c) => sanitizeCellForExport(c, options.protectFormulaInjection)))
         )
       )
     }
@@ -956,8 +946,7 @@ export function exportStudioDeliverable(params: {
   const rawRegion = params.model.ingestionReport.worksheets[0]?.tables[0];
   const headers = rawRegion?.headers ?? ["Metric", "Value"];
   const dataRows =
-    rawRegion?.dataRows ??
-    params.model.canonicalKpis.map((k) => [k.label, k.formattedValue]);
+    rawRegion?.dataRows ?? params.model.canonicalKpis.map((k) => [k.label, k.formattedValue]);
 
   switch (params.format) {
     case "pptx": {
@@ -967,8 +956,7 @@ export function exportStudioDeliverable(params: {
       const binaryBytes = buildGenuinePptxBinary(params.presentation);
       return {
         filename: "safi-presentation.pptx",
-        mimeType:
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         content: bytesToLatin1String(binaryBytes),
         binaryBytes,
         sizeBytes: binaryBytes.length
@@ -981,8 +969,7 @@ export function exportStudioDeliverable(params: {
       const binaryBytes = buildGenuineDocxBinary(params.document, rtl);
       return {
         filename: "safi-report.docx",
-        mimeType:
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         content: bytesToLatin1String(binaryBytes),
         binaryBytes,
         sizeBytes: binaryBytes.length
@@ -1000,10 +987,7 @@ export function exportStudioDeliverable(params: {
     }
     case "safi.html": {
       if (params.presentation) {
-        const html = buildInteractiveHtmlPresentation(
-          params.presentation,
-          rtl ? "rtl" : "ltr"
-        );
+        const html = buildInteractiveHtmlPresentation(params.presentation, rtl ? "rtl" : "ltr");
         const binaryBytes = new TextEncoder().encode(html);
         return {
           filename: "safi-presentation.safi.html",
@@ -1031,9 +1015,7 @@ export function exportStudioDeliverable(params: {
 
 export function triggerDownload(result: ExportResult): void {
   const payload =
-    result.binaryBytes.length > 0
-      ? new Uint8Array(result.binaryBytes)
-      : result.content;
+    result.binaryBytes.length > 0 ? new Uint8Array(result.binaryBytes) : result.content;
   const blob = new Blob([payload], { type: result.mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

@@ -1015,6 +1015,8 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
                 columns={state.columns}
                 metrics={state.metrics}
                 charts={artifacts.charts}
+                activeFilterColumn={filterColumn}
+                activeFilterValue={filterValue}
                 onUpdateCharts={(nextCharts: readonly StudioChartArtifact[]) => {
                   void persistArtifacts({ ...artifacts, charts: nextCharts });
                 }}
@@ -1022,6 +1024,8 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
                   setFilterColumn(col);
                   setFilterValue(label);
                   setPageOffset(0);
+                }}
+                onOpenFilteredSheet={() => {
                   setMode("sheet");
                 }}
               />

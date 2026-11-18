@@ -3,6 +3,7 @@ import {
   sanitizeCellForExport,
   generateExportContent,
   exportStudioDeliverable,
+  buildGenuineXlsxBinary,
   listZipEntryPaths
 } from "./export";
 import { ingestWorkbookStructure } from "./workbook-ingestion";
@@ -182,5 +183,36 @@ describe("Export utilities & Genuine Multi-Format Exporters (Phase 9 & A11)", ()
     expect(listZipEntryPaths(xlsxWithHidden.binaryBytes).length).toBeGreaterThan(
       xlsxVisEntries.length
     );
+
+    // 9. XLSX sheet tab name sanitation, 31-char limit, case-insensitive deduplication & PPTX RTL
+    const edgeXlsxBytes = buildGenuineXlsxBinary([
+      { name: "Q1:Sales/North\\2026?*[]", headers: ["A"], rows: [["1"]] },
+      { name: "Sales", headers: ["A"], rows: [["2"]] },
+      { name: "sales", headers: ["A"], rows: [["3"]] },
+      { name: "   ", headers: ["A"], rows: [["4"]] },
+      {
+        name: "VeryLongDepartmentRevenueSummaryFirstHalf2026",
+        headers: ["A"],
+        rows: [["5"]]
+      },
+      {
+        name: "VeryLongDepartmentRevenueSummarySecondHalf2026",
+        headers: ["A"],
+        rows: [["6"]]
+      },
+      { name: "مبيعات الربع الأول: مصر/القاهرة", headers: ["المبلغ"], rows: [["7"]] }
+    ]);
+    const edgeXlsxXml = new TextDecoder().decode(edgeXlsxBytes);
+    expect(edgeXlsxXml).toContain('name="Q1_Sales_North_2026____"');
+    expect(edgeXlsxXml).toContain('name="Sales"');
+    expect(edgeXlsxXml).toContain('name="sales_2"');
+    expect(edgeXlsxXml).toContain('name="Sheet4"');
+    expect(edgeXlsxXml).toContain('name="VeryLongDepartmentRevenueSummar"');
+    expect(edgeXlsxXml).toContain('name="VeryLongDepartmentRevenueSumm_2"');
+    expect(edgeXlsxXml).toContain('name="مبيعات الربع الأول_ مصر_القاهرة"');
+
+    const rtlPptx = exportStudioDeliverable({ format: "pptx", model, presentation, rtl: true });
+    expect(rtlPptx.content).toContain('<a:pPr rtl="1"/>');
+    expect(rtlPptx.content).toContain('<a:rPr sz="2400" b="1"/>');
   });
 });

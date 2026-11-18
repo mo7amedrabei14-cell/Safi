@@ -7,6 +7,7 @@ pub mod encoding;
 pub mod reader_csv;
 pub mod reader_excel;
 pub mod workbook_intelligence;
+mod xlsb_reader;
 
 pub use delimiter::detect_delimiter;
 pub use encoding::detect_and_decode;

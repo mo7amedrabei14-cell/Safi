@@ -4536,6 +4536,56 @@ impl DataGraph {
             points,
         })
     }
+
+    /// Computes a chart series optionally filtered by exact trimmed case-insensitive cell match.
+    ///
+    /// # Errors
+    /// Propagates column-lookup, aggregation, or chart-compatibility `SafiError` codes.
+    pub fn compute_chart_series_filtered(
+        &self,
+        chart_type: ChartType,
+        function: AggFunc,
+        column: &str,
+        group_by: &str,
+        filter_column: Option<&str>,
+        filter_value: Option<&str>,
+    ) -> Result<ComputedChartSeries, SafiError> {
+        let Some(f_col) = filter_column.map(str::trim).filter(|s| !s.is_empty()) else {
+            return self.compute_chart_series(chart_type, function, column, group_by);
+        };
+        let Some(f_val) = filter_value.map(str::trim).filter(|s| !s.is_empty()) else {
+            return self.compute_chart_series(chart_type, function, column, group_by);
+        };
+        let target_col = self
+            .working
+            .column_by_name(f_col)
+            .ok_or_else(unknown_column)?;
+        let needle = f_val.to_lowercase();
+        let matched_rows: Vec<usize> = (0..self.working.row_count())
+            .filter(|&row| {
+                target_col
+                    .cell_at(row)
+                    .is_some_and(|c| c.visible_text().trim().to_lowercase() == needle)
+            })
+            .collect();
+        let mut columns = Vec::with_capacity(self.working.column_count());
+        for col in self.working.columns() {
+            let cells: Vec<CellValue> = matched_rows
+                .iter()
+                .filter_map(|&row_idx| col.cell_at(row_idx).cloned())
+                .collect();
+            columns.push(Column::new(col.schema().clone(), cells));
+        }
+        let filtered_table = Table::new(self.working.id(), self.working.name(), columns)?;
+        let filtered_prov: Vec<RowProvenance> = matched_rows
+            .iter()
+            .filter_map(|&row_idx| self.row_provenance.get(row_idx).cloned())
+            .collect();
+        let mut sliced = self.clone();
+        sliced.working = filtered_table;
+        sliced.row_provenance = filtered_prov;
+        sliced.compute_chart_series(chart_type, function, column, group_by)
+    }
 }
 
 /// Maximum rows returned by a single paginated grid query.

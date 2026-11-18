@@ -612,8 +612,8 @@ try {
   const assistantText = await page.locator('[data-testid="assistant-answer-0"]').textContent();
   assert.ok(assistantText && assistantText.includes("Sales & KPIs"), `Expected citation to Sales & KPIs, got: ${assistantText}`);
 
-  // 13. Add Waterfall Chart in Dashboard (21-type Rust & SVG engine)
-  console.log("[13/14] Creating Waterfall chart in Dashboard...");
+  // 13. Add Waterfall + Bar charts, edit inline config, and verify live Cross-Filter across sibling charts & sheet rows
+  console.log("[13/14] Creating Waterfall + Bar charts, editing card config, and verifying cross-filter...");
   await page.locator('[data-tutorial-target="dashboard-tab"]').click();
   await page.locator('[data-testid="dashboard-charts-view"]').waitFor({ state: "visible" });
   await page.locator('select[aria-label="Chart Type"]').selectOption("waterfall");
@@ -626,6 +626,57 @@ try {
   await page
     .locator('[data-testid="dashboard-charts-view"] [data-chart-type="waterfall"]')
     .waitFor({ state: "visible" });
+
+  // Add second sibling Bar chart (Units by Region) so cross-filter must update it in Rust
+  await page.locator('select[aria-label="Chart Type"]').selectOption("bar");
+  await page.locator('[data-testid="dashboard-charts-view"] label:has-text("Value Column") select').selectOption("Financials — Units");
+  await page
+    .locator('[data-testid="dashboard-charts-view"] button')
+    .filter({ hasText: /Add Chart/ })
+    .click();
+  const barCard = page.locator('[data-testid="dashboard-charts-view"] [data-chart-type="bar"]').last();
+  await barCard.waitFor({ state: "visible" });
+
+  // Inline edit the waterfall card title + aggregation
+  const wfCard = page.locator('[data-testid="dashboard-charts-view"] [data-chart-type="waterfall"]').first();
+  const wfChartId = await wfCard.getAttribute("data-chart-id");
+  assert.ok(wfChartId, "Waterfall card must expose data-chart-id");
+  await page.locator(`[data-testid="edit-chart-${wfChartId}"]`).click();
+  await page.locator(`[data-testid="chart-editor-${wfChartId}"] input[aria-label="Edit chart title"]`).fill("Edited Waterfall E2E");
+  await page.locator(`[data-testid="chart-editor-${wfChartId}"] select[aria-label="Edit aggregation"]`).selectOption("AVG");
+  await page.locator(`[data-testid="edit-chart-${wfChartId}"]`).click();
+  await page.waitForFunction(() => (document.querySelector('[data-testid="dashboard-charts-view"]')?.textContent ?? "").includes("Edited Waterfall E2E"));
+
+  // Cross-filter from the bar card ("القاهرة") -> verify sibling waterfall marks data-cross-filtered="true"
+  await barCard.locator(".studio-bar-btn").filter({ hasText: "القاهرة" }).click();
+  await page.waitForFunction(
+    (id) => document.querySelector(`[data-chart-id="${id}"]`)?.getAttribute("data-cross-filtered") === "true",
+    wfChartId
+  );
+  // Also verify filtered sheet rows when clicking "View sheet rows"
+  await page.locator('[data-testid="view-filtered-sheet-btn"]').click();
+  await page.waitForFunction(() => {
+    const vals = Array.from(document.querySelectorAll(".safi-desktop-studio__table input")).map((i) => i.value);
+    return vals.includes("القاهرة") && !vals.includes("أسوان");
+  });
+  await page.locator('[data-tutorial-target="dashboard-tab"]').click();
+  await page.locator('[data-testid="clear-cross-filter-btn"]').click();
+
+  // 13b. Real Microsoft Excel Binary (.xlsb) Desktop End-to-End Ingestion
+  console.log("[13b/14] Opening genuine Microsoft Excel binary workbook (enterprise_binary.xlsb)...");
+  const binaryXlsbPath = resolve("tests/fixtures/workbooks/enterprise_binary.xlsb");
+  await page.evaluate((p) => window.__safiSetNextOpenFile(p), binaryXlsbPath);
+  await page.locator('[data-tutorial-target="open-workbook"]').click();
+  await page.waitForFunction(() => {
+    const drawer = document.querySelector('[data-testid="workbook-intelligence-drawer"]');
+    return Boolean(drawer && (drawer.textContent ?? "").includes("Sales & KPIs"));
+  });
+  await page.locator('[aria-label="Quad-Studio workspaces"] button[role="tab"]').first().click();
+  await page.waitForFunction(() => {
+    const vals = Array.from(document.querySelectorAll(".safi-desktop-studio__table input")).map((i) => i.value);
+    return vals.includes("00105") && vals.includes("القاهرة");
+  });
+  await page.locator('[data-tutorial-target="dashboard-tab"]').click();
 
   // 14. Export Real Binary Multi-Sheet .xlsx and Multi-Page .pdf Deliverables via Rust Atomic Writer
   console.log("[14/14] Exporting atomic .xlsx and .pdf deliverables via DeliverableExportModal...");

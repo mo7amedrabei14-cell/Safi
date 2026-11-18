@@ -1162,14 +1162,15 @@ export function renderChartSvg(
       const pins = safePoints
         .slice(0, 8)
         .map((p, i) => {
-          const cx = 64 + ((i * 53) % 290);
-          const cy = 62 + ((i * 37) % 102);
+          const cx =
+            64 + Math.round(((i + 0.5) / Math.max(1, Math.min(8, safePoints.length))) * 290);
+          const cy = 62 + Math.round((Math.abs(p.value) / maxVal) * 0.7 * 90);
           const r = Math.max(6, Math.min(18, Math.round((Math.abs(p.value) / maxVal) * 16)));
           const color = palette[i % palette.length] ?? primaryColor;
           return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" fill-opacity="0.78" stroke="#ffffff" stroke-width="1.5"/><text x="${cx}" y="${cy + r + 11}" text-anchor="middle" font-size="9.5" fill="#0f172a">${esc(p.label.slice(0, 10))}</text>`;
         })
         .join("");
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Geographic" data-visual-kind="geographic">${header}<path d="M 38 48 L 368 42 L 386 112 L 332 184 L 62 180 L 42 108 Z" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/><path d="M 190 48 Q 214 95 206 135 T 222 180" fill="none" stroke="#93c5fd" stroke-width="3"/>${pins}</svg>`;
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Geographic" data-visual-kind="geographic" data-geo-projection="category-coordinate-scatter">${header}<rect x="28" y="42" width="364" height="142" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/><line x1="150" y1="42" x2="150" y2="184" stroke="#e2e8f0" stroke-dasharray="3,3"/><line x1="272" y1="42" x2="272" y2="184" stroke="#e2e8f0" stroke-dasharray="3,3"/><line x1="28" y1="113" x2="392" y2="113" stroke="#e2e8f0" stroke-dasharray="3,3"/>${pins}<text x="210" y="198" text-anchor="middle" font-size="9" fill="#64748b">Category coordinate projection (no GIS boundary implied)</text></svg>`;
     }
 
     case "Column":
@@ -1773,18 +1774,10 @@ export function generateDocumentReport(
       heading: "10. Actionable Recommendations",
       paragraphs: ["Recommended data hygiene and analytical follow-ups:"],
       bulletItems: [
-<<<<<<< HEAD
         ...model.qualityFindings.flatMap((f) => {
           const act = f.suggestedAction;
           return act ? [`${act.label}: ${act.previewSummary} (Reversible)`] : [];
         }),
-=======
-        ...model.qualityFindings
-          .filter((f) => f.suggestedAction !== undefined)
-          .map(
-            (f) => `${f.suggestedAction!.label}: ${f.suggestedAction!.previewSummary} (Reversible)`
-          ),
->>>>>>> 2255a5ba304b41040d3ae32051c5c63997ea23a0
         ...analysis.questions
           .filter((q) => q.status !== "Answered")
           .map((q) => `Resolve Clarification: ${q.prompt}`)

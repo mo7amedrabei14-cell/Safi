@@ -247,10 +247,23 @@ export function buildGenuineXlsxBinary(
   const protect = options.protectFormulaInjection ?? true;
   const rtlAttr = options.rtl ? ' rightToLeft="1"' : "";
 
-  const safeSheets: readonly XlsxSheetInput[] =
-    sheets.length > 0
-      ? sheets
-      : [{ name: "Sheet1", headers: ["Column1"], rows: [] }];
+  const rawSheets: readonly XlsxSheetInput[] =
+    sheets.length > 0 ? sheets : [{ name: "Sheet1", headers: ["Column1"], rows: [] }];
+
+  // Excel requires unique sheet tab names <= 31 characters without : \ / ? * [ ]
+  const usedSheetNames = new Set<string>();
+  const safeSheets: XlsxSheetInput[] = rawSheets.map((s, idx) => {
+    const cleaned = s.name.replace(/[:\\/?*[\]]/g, "_").trim() || `Sheet${idx + 1}`;
+    let candidate = cleaned.slice(0, 31);
+    let suffix = 2;
+    while (usedSheetNames.has(candidate.toLowerCase())) {
+      const tag = `_${suffix}`;
+      candidate = `${cleaned.slice(0, Math.max(1, 31 - tag.length))}${tag}`;
+      suffix += 1;
+    }
+    usedSheetNames.add(candidate.toLowerCase());
+    return { ...s, name: candidate };
+  });
 
   const contentTypesOverrides = safeSheets
     .map(
@@ -453,8 +466,8 @@ ${sldIdLst}
     ]
       .filter((t) => t.trim().length > 0)
       .map(
-        (line) =>
-          `<a:p><a:r><a:t>${escapeXml(line)}</a:t></a:r></a:p>`
+        (line, pIdx) =>
+          `<a:p><a:pPr${rtlAttr}/><a:r><a:rPr sz="${pIdx === 0 ? 2400 : 1400}" b="${pIdx === 0 ? 1 : 0}"/><a:t>${escapeXml(line)}</a:t></a:r></a:p>`
       )
       .join("");
 
@@ -1704,8 +1717,7 @@ export function exportStudioDeliverable(params: {
   const primaryRegion = includedTableInputs[0];
   const headers = primaryRegion?.headers ?? ["Metric", "Value"];
   const dataRows =
-    primaryRegion?.rows ??
-    params.model.canonicalKpis.map((k) => [k.label, k.formattedValue]);
+    primaryRegion?.rows ?? params.model.canonicalKpis.map((k) => [k.label, k.formattedValue]);
 
   switch (params.format) {
     case "xlsx": {
@@ -1910,10 +1922,7 @@ export function exportStudioDeliverable(params: {
 
     case "safi.html": {
       if (params.presentation) {
-        const html = buildInteractiveHtmlPresentation(
-          params.presentation,
-          rtl ? "rtl" : "ltr"
-        );
+        const html = buildInteractiveHtmlPresentation(params.presentation, rtl ? "rtl" : "ltr");
         const binaryBytes = new TextEncoder().encode(html);
         return {
           filename: "safi-presentation.safi.html",

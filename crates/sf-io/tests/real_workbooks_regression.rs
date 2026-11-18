@@ -236,3 +236,85 @@ fn rejects_corrupt_and_zip_bomb_and_supports_atomic_cancellation()
     assert_eq!(err_cancel.code(), ErrorCode::SF_IMP_002);
     Ok(())
 }
+
+#[test]
+fn ingests_genuine_excel_xlsb_binary_workbook() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = fs::read(fixture_path("enterprise_binary.xlsb"))?;
+    let rep = ingest_workbook_universal(
+        Cursor::new(bytes),
+        PlatformLimits::DESKTOP_CLI,
+        Some("enterprise_binary.xlsb"),
+        None,
+    )?;
+
+    eprintln!(
+        "XLSB report: format={:?} support={:?} sheets={} vis={} hid={} tables={} rows={} formulas={} verified={} warnings={:?}",
+        rep.detected_format,
+        rep.support_level,
+        rep.total_sheets,
+        rep.visible_sheets,
+        rep.hidden_sheets,
+        rep.total_tables_extracted,
+        rep.total_analytical_rows,
+        rep.total_formulas_detected,
+        rep.total_formulas_verified,
+        rep.warnings
+    );
+    for ws in &rep.worksheets {
+        eprintln!(
+            "  sheet='{}' vis={:?} tables={} merged={}",
+            ws.name,
+            ws.visibility,
+            ws.tables.len(),
+            ws.merged_ranges.len()
+        );
+        for t in &ws.tables {
+            eprintln!(
+                "    table headers={:?} rows={}",
+                t.headers,
+                t.data_rows.len()
+            );
+        }
+    }
+
+    assert_eq!(rep.detected_format, WorkbookFormat::Xlsb);
+    assert_eq!(rep.total_sheets, 3);
+    assert_eq!(rep.visible_sheets, 1);
+    assert_eq!(rep.hidden_sheets, 2);
+    assert!(rep.total_tables_extracted >= 2);
+    assert_eq!(rep.worksheets[0].name, "Sales & KPIs");
+    assert_eq!(rep.worksheets[0].visibility, SheetVisibility::Visible);
+    assert_eq!(rep.worksheets[1].visibility, SheetVisibility::Hidden);
+    assert_eq!(rep.worksheets[2].visibility, SheetVisibility::VeryHidden);
+    assert!(rep.total_analytical_rows >= 5);
+    assert_eq!(rep.worksheets[0].tables[0].data_rows[0][0], "00105");
+    assert!(rep.worksheets[0].tables[1].data_rows.len() == 2);
+    assert!(!rep.defined_names.is_empty());
+    assert_eq!(
+        rep.worksheets[0].auto_filter_range.as_deref(),
+        Some("A4:E9")
+    );
+    assert!(
+        rep.worksheets[0]
+            .cell_metadata
+            .iter()
+            .any(|c| c.comment.is_some())
+    );
+    assert!(
+        rep.worksheets[0]
+            .cell_metadata
+            .iter()
+            .any(|c| c.hyperlink.is_some())
+    );
+    let xlsb_statuses: Vec<FormulaVerificationStatus> = rep.worksheets[0]
+        .cell_metadata
+        .iter()
+        .filter(|c| c.formula.is_some())
+        .map(|c| c.formula_status)
+        .collect();
+    assert!(xlsb_statuses.contains(&FormulaVerificationStatus::VerifiedCachedAndRecalculated));
+    assert!(xlsb_statuses.contains(&FormulaVerificationStatus::VolatileFormula));
+    assert!(xlsb_statuses.contains(&FormulaVerificationStatus::ExternalWorkbookReference));
+    assert!(xlsb_statuses.contains(&FormulaVerificationStatus::FormulaError));
+    Ok(())
+}

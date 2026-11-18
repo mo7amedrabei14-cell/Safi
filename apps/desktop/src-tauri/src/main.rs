@@ -740,6 +740,7 @@ fn studio_grouped(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn studio_chart_data(
     store: tauri::State<'_, StudioStore>,
     project: String,
@@ -747,8 +748,18 @@ fn studio_chart_data(
     function: String,
     column: String,
     group_by: String,
+    filter_column: Option<String>,
+    filter_value: Option<String>,
 ) -> Result<String, String> {
-    store.chart_data(&project, &chart_type, &function, &column, &group_by)
+    store.chart_data_filtered(
+        &project,
+        &chart_type,
+        &function,
+        &column,
+        &group_by,
+        filter_column.as_deref(),
+        filter_value.as_deref(),
+    )
 }
 
 #[tauri::command]

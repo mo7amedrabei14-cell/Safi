@@ -1879,8 +1879,7 @@ impl StudioStore {
         serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
     }
 
-    /// Computes a full chart series in Rust for any of the 8 supported Dashboard chart types
-    /// (`bar`, `line`, `area`, `pie`, `donut`, `scatter`, `histogram`, `kpi`).
+    /// Computes a full chart series in Rust for any of the 21 supported Dashboard chart types.
     ///
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], `SF-CAL-001`, `SF-CAL-002`, or `SF-CAL-004`.
@@ -1892,12 +1891,34 @@ impl StudioStore {
         column: &str,
         group_by: &str,
     ) -> Result<String, String> {
+        self.chart_data_filtered(project, chart_type, function, column, group_by, None, None)
+    }
+
+    /// Computes a chart series in Rust optionally filtered by `filter_column == filter_value`.
+    ///
+    /// # Errors
+    /// [`AUTH_REQUIRED_CODE`], [`UNKNOWN_PROJECT_CODE`], `SF-CAL-001`, `SF-CAL-002`, or `SF-CAL-004`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn chart_data_filtered(
+        &self,
+        project: &str,
+        chart_type: &str,
+        function: &str,
+        column: &str,
+        group_by: &str,
+        filter_column: Option<&str>,
+        filter_value: Option<&str>,
+    ) -> Result<String, String> {
+        let f_col = filter_column.unwrap_or("");
+        let f_val = filter_value.unwrap_or("");
         let payload_len = crate::ipc_payload_len!(
             ("project", project),
             ("chartType", chart_type),
             ("function", function),
             ("column", column),
             ("groupBy", group_by),
+            ("filterColumn", f_col),
+            ("filterValue", f_val),
         );
         self.gate_command("studio_chart_data", payload_len, None)?;
         let kind = ChartType::from_name(chart_type).ok_or_else(|| "SF-CAL-002".to_owned())?;
@@ -1910,7 +1931,7 @@ impl StudioStore {
             .get(project)
             .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
         let series = graph
-            .compute_chart_series(kind, agg, column, group_by)
+            .compute_chart_series_filtered(kind, agg, column, group_by, filter_column, filter_value)
             .map_err(|error| code_of(&error))?;
         serde_json::to_string(&series).map_err(|_| "SF-SYS-001".to_owned())
     }

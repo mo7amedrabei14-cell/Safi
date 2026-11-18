@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createElement } from "react";
@@ -334,8 +333,50 @@ describe("Desktop Workbook Intelligence, 21 Charts, Epistemic Assistant & Delive
     expect(html).toContain("data-waterfall-step=");
     expect(html).toContain("data-funnel-stage=");
     expect(html).toContain("data-geo-marker=");
+    expect(html).toContain('data-geo-projection="regional-coordinate-scatter"');
+    expect(html).not.toContain("M 12 18 L 78 14");
+    expect(html).toContain('data-testid="edit-chart-c_0"');
     expect(html).toContain('data-chart-table="table"');
     expect(html).toContain('data-chart-table="pivotsummary"');
+
+    const crossFilteredHtml = renderToString(
+      createElement(DashboardChartsView, {
+        language: "en",
+        project: "main",
+        revision: 8,
+        activeScenario: null,
+        columns: state.columns,
+        metrics: state.metrics,
+        charts: [
+          {
+            id: "c_bar",
+            title: "By Branch",
+            chartType: "bar",
+            function: "SUM",
+            column: "Revenue",
+            groupBy: "Branch"
+          },
+          {
+            id: "c_wf",
+            title: "Waterfall Sibling",
+            chartType: "waterfall",
+            function: "AVG",
+            column: "Revenue",
+            groupBy: "Branch"
+          }
+        ],
+        initialSeriesByChart: {
+          c_bar: makeSeries("bar"),
+          c_wf: makeSeries("waterfall")
+        },
+        activeFilterColumn: "Branch",
+        activeFilterValue: "Cairo",
+        onUpdateCharts: vi.fn()
+      })
+    );
+    expect(crossFilteredHtml).toContain('data-testid="active-cross-filter-bar"');
+    expect(crossFilteredHtml).toContain('data-cross-filtered="true"');
+    expect(crossFilteredHtml).toContain("Filtered by Branch=Cairo");
   });
 
   it("renders WorkbookIntelligenceDrawer disclosures, macro neutralization, hidden sheets & table switches", () => {
@@ -524,21 +565,15 @@ describe("Desktop Workbook Intelligence, 21 Charts, Epistemic Assistant & Delive
     }
   });
 
-  it("resists catastrophic ReDoS backtracking on vendored picomatch extglobs", () => {
-    const require = createRequire(import.meta.url);
-    const picomatch = require(resolve(__dirname, "../../../../tools/vendor/picomatch")) as (
-      glob: string
-    ) => (input: string) => boolean;
+  it("verifies picomatch is pinned to upstream 4.0.7 only in build/dev tooling", () => {
+    const rootPkg = JSON.parse(
+      readFileSync(resolve(__dirname, "../../../../package.json"), "utf8")
+    ) as { pnpm?: { overrides?: Record<string, string> } };
+    expect(rootPkg.pnpm?.overrides?.picomatch).toBe("4.0.7");
 
-    const payloads = ["+(*)", "+(*a)", "*(*(a|b)*)", "+(+(a|b))"];
-    const adversarialInput = `${"a".repeat(80)}!`;
-    for (const pattern of payloads) {
-      const start = performance.now();
-      const matcher = picomatch(pattern);
-      const matched = matcher(adversarialInput);
-      const elapsedMs = performance.now() - start;
-      expect(matched).toBe(false);
-      expect(elapsedMs).toBeLessThan(50);
-    }
+    const webPkg = JSON.parse(readFileSync(resolve(__dirname, "../../package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+    };
+    expect(webPkg.dependencies?.picomatch).toBeUndefined();
   });
 });

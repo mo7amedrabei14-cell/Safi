@@ -799,23 +799,28 @@ export async function grouped(
   ) as readonly DesktopGroup[];
 }
 
-/** Computes a complete Dashboard chart series inside Rust for any of the 8 chart types. */
+/** Computes a complete Dashboard chart series inside Rust for any of the 21 chart types. */
 export async function chartData(
   project: string,
   chartType: StudioChartType,
   aggregate: string,
   column: string,
-  groupBy: string
+  groupBy: string,
+  filterColumn?: string,
+  filterValue?: string
 ): Promise<DesktopChartSeries> {
-  return JSON.parse(
-    await call("studio_chart_data", {
-      project,
-      chartType,
-      function: aggregate,
-      column,
-      groupBy
-    })
-  ) as DesktopChartSeries;
+  const args: Record<string, unknown> = {
+    project,
+    chartType,
+    function: aggregate,
+    column,
+    groupBy
+  };
+  if (filterColumn && filterValue) {
+    args.filterColumn = filterColumn;
+    args.filterValue = filterValue;
+  }
+  return JSON.parse(await call("studio_chart_data", args)) as DesktopChartSeries;
 }
 
 /** Serializes the project for local storage. */

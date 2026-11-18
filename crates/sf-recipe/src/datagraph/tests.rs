@@ -739,3 +739,47 @@ fn bracketed_column_identifiers_handle_merged_headers_and_reject_malformed_synta
     }
     Ok(())
 }
+
+#[test]
+fn compute_chart_series_filtered_narrows_rows_for_cross_filter() -> Result<(), SafiError> {
+    let source = table(&[
+        ("region", &["Cairo", "Giza", "Cairo", "Alex"]),
+        ("channel", &["Retail", "Retail", "Enterprise", "Retail"]),
+        ("amount", &["100", "200", "50", "150"]),
+    ])?;
+    let graph = DataGraph::new(SourceId::new("src_xf")?, source, 1)?;
+
+    let unfiltered =
+        graph.compute_chart_series(ChartType::Bar, AggFunc::Sum, "amount", "channel")?;
+    assert_eq!(unfiltered.total_or_kpi, "500");
+
+    let filtered = graph.compute_chart_series_filtered(
+        ChartType::Waterfall,
+        AggFunc::Sum,
+        "amount",
+        "channel",
+        Some("region"),
+        Some("Cairo"),
+    )?;
+    assert_eq!(filtered.total_or_kpi, "150");
+    assert_eq!(filtered.points.len(), 3);
+    assert!(
+        filtered
+            .points
+            .iter()
+            .any(|p| p.label == "Retail" && p.value == "100")
+    );
+    assert!(
+        filtered
+            .points
+            .iter()
+            .any(|p| p.label == "Enterprise" && p.value == "50")
+    );
+    assert!(
+        filtered
+            .points
+            .iter()
+            .any(|p| p.label == "Net Total" && p.value == "150")
+    );
+    Ok(())
+}

@@ -735,34 +735,27 @@ pub fn sniff_workbook_format(bytes: &[u8], filename_hint: Option<&str>) -> Workb
 }
 
 #[derive(Debug, Default)]
-struct OoxmlMetadata {
-    date_system: Option<WorkbookDateSystem>,
-    sheet_visibility: BTreeMap<String, SheetVisibility>,
-    sheet_merges: BTreeMap<String, Vec<SheetRange>>,
-    sheet_frozen: BTreeSet<String>,
-    sheet_autofilter: BTreeMap<String, String>,
-    sheet_protected: BTreeSet<String>,
-    sheet_hyperlinks: BTreeMap<(String, String), String>,
-    sheet_comments: BTreeMap<(String, String), String>,
-    number_formats: BTreeMap<u32, String>,
-    cell_style_numfmt: Vec<u32>,
-    cell_numfmt_by_addr: BTreeMap<(String, String), String>,
-    embedded_objects: Vec<EmbeddedObjectRecord>,
-    macros_neutralized: bool,
-    warnings: Vec<String>,
+pub(crate) struct OoxmlMetadata {
+    pub(crate) date_system: Option<WorkbookDateSystem>,
+    pub(crate) sheet_visibility: BTreeMap<String, SheetVisibility>,
+    pub(crate) sheet_merges: BTreeMap<String, Vec<SheetRange>>,
+    pub(crate) sheet_frozen: BTreeSet<String>,
+    pub(crate) sheet_autofilter: BTreeMap<String, String>,
+    pub(crate) sheet_protected: BTreeSet<String>,
+    pub(crate) sheet_hyperlinks: BTreeMap<(String, String), String>,
+    pub(crate) sheet_comments: BTreeMap<(String, String), String>,
+    pub(crate) number_formats: BTreeMap<u32, String>,
+    pub(crate) cell_style_numfmt: Vec<u32>,
+    pub(crate) cell_numfmt_by_addr: BTreeMap<(String, String), String>,
+    pub(crate) embedded_objects: Vec<EmbeddedObjectRecord>,
+    pub(crate) macros_neutralized: bool,
+    pub(crate) warnings: Vec<String>,
 }
 
-fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata, SafiError> {
-    let mut cursor = Cursor::new(bytes);
-    let mut archive = ZipArchive::new(&mut cursor).map_err(|_| {
-        SafiError::new(
-            ErrorCode::SF_IMP_002,
-            ErrorSeverity::Error,
-            "CorruptedExcelArchive",
-            "import.excel_corrupted",
-        )
-    })?;
-
+pub(crate) fn check_zip_budget_and_scan<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    file_bytes: u64,
+) -> Result<(u64, u64, OoxmlMetadata, Vec<String>), SafiError> {
     let budget = if file_bytes == 0 {
         MAX_UNCOMPRESSED_BYTES
     } else {
@@ -782,7 +775,6 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
             }
         }
     }
-    let mut total_uncompressed: u64 = 0;
 
     let file_names: Vec<String> = archive.file_names().map(str::to_owned).collect();
     if file_names.iter().any(|n| {
@@ -797,7 +789,6 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
     }
 
     let mut meta = OoxmlMetadata::default();
-
     for name in &file_names {
         let lower = name.to_ascii_lowercase();
         if lower == "xl/vbaproject.bin" || lower.ends_with("/vbaproject.bin") {
@@ -851,88 +842,120 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
         }
     }
 
-    // Read helper that enforces the decompression budget (SF-IMP-005).
-    let read_part = |archive: &mut ZipArchive<&mut Cursor<&[u8]>>,
-                     part_name: &str,
-                     total: &mut u64|
-     -> Result<Option<Vec<u8>>, SafiError> {
-        let Ok(file) = archive.by_name(part_name) else {
-            return Ok(None);
-        };
-        let mut buf = Vec::new();
-        let max_to_read = budget.saturating_sub(*total).saturating_add(1);
-        file.take(max_to_read).read_to_end(&mut buf).map_err(|_| {
-            SafiError::new(
-                ErrorCode::SF_IMP_002,
-                ErrorSeverity::Error,
-                "CorruptedExcelArchive",
-                "import.excel_corrupted",
-            )
-        })?;
-        *total = total.saturating_add(buf.len() as u64);
-        if *total > budget {
-            return Err(SafiError::new(
-                ErrorCode::SF_IMP_005,
-                ErrorSeverity::Error,
-                "ZipBombDecompressionLimitExceeded",
-                "import.zip_bomb_detected",
-            ));
-        }
-        Ok(Some(buf))
+    Ok((budget, 0u64, meta, file_names))
+}
+
+pub(crate) fn read_zip_part_budgeted<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    part_name: &str,
+    budget: u64,
+    total: &mut u64,
+) -> Result<Option<Vec<u8>>, SafiError> {
+    let Ok(file) = archive.by_name(part_name) else {
+        return Ok(None);
     };
+    let mut buf = Vec::new();
+    let max_to_read = budget.saturating_sub(*total).saturating_add(1);
+    file.take(max_to_read).read_to_end(&mut buf).map_err(|_| {
+        SafiError::new(
+            ErrorCode::SF_IMP_002,
+            ErrorSeverity::Error,
+            "CorruptedExcelArchive",
+            "import.excel_corrupted",
+        )
+    })?;
+    *total = total.saturating_add(buf.len() as u64);
+    if *total > budget {
+        return Err(SafiError::new(
+            ErrorCode::SF_IMP_005,
+            ErrorSeverity::Error,
+            "ZipBombDecompressionLimitExceeded",
+            "import.zip_bomb_detected",
+        ));
+    }
+    Ok(Some(buf))
+}
+
+pub(crate) fn parse_rels_xml_map(bytes: &[u8]) -> BTreeMap<String, String> {
+    let mut rel_target_by_id: BTreeMap<String, String> = BTreeMap::new();
+    let mut xml = XmlReader::from_reader(bytes);
+    xml.expand_empty_elements(true);
+    let mut buf = Vec::new();
+    while let Ok(event) = xml.read_event_into(&mut buf) {
+        match event {
+            Event::Start(el) if el.local_name().as_ref() == b"Relationship" => {
+                let mut id = None;
+                let mut target = None;
+                for attr in el.attributes().flatten() {
+                    match attr.key.local_name().as_ref() {
+                        b"Id" => {
+                            id = attr
+                                .decode_and_unescape_value(&xml)
+                                .ok()
+                                .map(|s| s.into_owned());
+                        }
+                        b"Target" => {
+                            target = attr
+                                .decode_and_unescape_value(&xml)
+                                .ok()
+                                .map(|s| s.into_owned());
+                        }
+                        _ => {}
+                    }
+                }
+                if let (Some(i), Some(t)) = (id, target) {
+                    rel_target_by_id.insert(i, t);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    rel_target_by_id
+}
+
+fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata, SafiError> {
+    let mut cursor = Cursor::new(bytes);
+    let mut archive = ZipArchive::new(&mut cursor).map_err(|_| {
+        SafiError::new(
+            ErrorCode::SF_IMP_002,
+            ErrorSeverity::Error,
+            "CorruptedExcelArchive",
+            "import.excel_corrupted",
+        )
+    })?;
+
+    let (budget, mut total_uncompressed, mut meta, file_names) =
+        check_zip_budget_and_scan(&mut archive, file_bytes)?;
 
     // 1. Parse xl/styles.xml for number formats
-    if let Some(styles_bytes) = read_part(&mut archive, "xl/styles.xml", &mut total_uncompressed)? {
+    if let Some(styles_bytes) = read_zip_part_budgeted(
+        &mut archive,
+        "xl/styles.xml",
+        budget,
+        &mut total_uncompressed,
+    )? {
         parse_styles_xml(&styles_bytes, &mut meta);
     }
 
     // 2. Parse xl/_rels/workbook.xml.rels and xl/workbook.xml for sheet visibility & date1904
-    let mut rel_target_by_id: BTreeMap<String, String> = BTreeMap::new();
-    if let Some(rels_bytes) = read_part(
+    let rel_target_by_id = read_zip_part_budgeted(
         &mut archive,
         "xl/_rels/workbook.xml.rels",
+        budget,
         &mut total_uncompressed,
-    )? {
-        let mut xml = XmlReader::from_reader(rels_bytes.as_slice());
-        xml.expand_empty_elements(true);
-        let mut buf = Vec::new();
-        while let Ok(event) = xml.read_event_into(&mut buf) {
-            match event {
-                Event::Start(el) => {
-                    if el.local_name().as_ref() == b"Relationship" {
-                        let mut id = None;
-                        let mut target = None;
-                        for attr in el.attributes().flatten() {
-                            match attr.key.local_name().as_ref() {
-                                b"Id" => {
-                                    id = attr
-                                        .decode_and_unescape_value(&xml)
-                                        .ok()
-                                        .map(|s| s.into_owned());
-                                }
-                                b"Target" => {
-                                    target = attr
-                                        .decode_and_unescape_value(&xml)
-                                        .ok()
-                                        .map(|s| s.into_owned());
-                                }
-                                _ => {}
-                            }
-                        }
-                        if let (Some(i), Some(t)) = (id, target) {
-                            rel_target_by_id.insert(i, t);
-                        }
-                    }
-                }
-                Event::Eof => break,
-                _ => {}
-            }
-            buf.clear();
-        }
-    }
+    )?
+    .map(|b| parse_rels_xml_map(&b))
+    .unwrap_or_default();
 
     let mut sheet_path_to_name: BTreeMap<String, String> = BTreeMap::new();
-    if let Some(wb_bytes) = read_part(&mut archive, "xl/workbook.xml", &mut total_uncompressed)? {
+    if let Some(wb_bytes) = read_zip_part_budgeted(
+        &mut archive,
+        "xl/workbook.xml",
+        budget,
+        &mut total_uncompressed,
+    )? {
         let mut xml = XmlReader::from_reader(wb_bytes.as_slice());
         xml.expand_empty_elements(true);
         let mut buf = Vec::new();
@@ -1006,7 +1029,9 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
 
     // 3. Parse each worksheet XML for merges, frozen panes, autoFilter, protection, hyperlinks, and cell style indices
     for (sheet_path, sheet_name) in &sheet_path_to_name {
-        if let Some(ws_bytes) = read_part(&mut archive, sheet_path, &mut total_uncompressed)? {
+        if let Some(ws_bytes) =
+            read_zip_part_budgeted(&mut archive, sheet_path, budget, &mut total_uncompressed)?
+        {
             parse_worksheet_xml(&ws_bytes, sheet_name, &mut meta);
         }
     }
@@ -1018,7 +1043,9 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
         .cloned()
         .collect();
     for (idx, comment_path) in comment_files.iter().enumerate() {
-        if let Some(c_bytes) = read_part(&mut archive, comment_path, &mut total_uncompressed)? {
+        if let Some(c_bytes) =
+            read_zip_part_budgeted(&mut archive, comment_path, budget, &mut total_uncompressed)?
+        {
             let fallback_sheet = sheet_path_to_name
                 .values()
                 .nth(idx)
@@ -1031,8 +1058,7 @@ fn inspect_ooxml_package(bytes: &[u8], file_bytes: u64) -> Result<OoxmlMetadata,
     Ok(meta)
 }
 
-fn parse_styles_xml(bytes: &[u8], meta: &mut OoxmlMetadata) {
-    // Built-in Excel number formats
+pub(crate) fn seed_builtin_number_formats(meta: &mut OoxmlMetadata) {
     for (id, code) in [
         (0u32, "General"),
         (1, "0"),
@@ -1052,6 +1078,10 @@ fn parse_styles_xml(bytes: &[u8], meta: &mut OoxmlMetadata) {
     ] {
         meta.number_formats.insert(id, code.to_string());
     }
+}
+
+fn parse_styles_xml(bytes: &[u8], meta: &mut OoxmlMetadata) {
+    seed_builtin_number_formats(meta);
 
     let mut xml = XmlReader::from_reader(bytes);
     xml.expand_empty_elements(true);
@@ -1382,54 +1412,80 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
         ));
     }
 
-    let mut ooxml_meta = if matches!(format, WorkbookFormat::Xlsx | WorkbookFormat::Xlsm) {
-        inspect_ooxml_package(&raw_bytes, raw_bytes.len() as u64)?
+    let (mut ooxml_meta, defined_names, raw_sheets) = if format == WorkbookFormat::Xlsb {
+        let parsed = crate::xlsb_reader::parse_xlsb_package(&raw_bytes, raw_bytes.len() as u64)?;
+        let sheets = parsed
+            .sheets
+            .into_iter()
+            .map(|s| (s.name, s.range, s.formula_range))
+            .collect::<Vec<_>>();
+        (parsed.meta, parsed.defined_names, sheets)
     } else {
-        OoxmlMetadata::default()
+        let mut meta = if matches!(format, WorkbookFormat::Xlsx | WorkbookFormat::Xlsm) {
+            inspect_ooxml_package(&raw_bytes, raw_bytes.len() as u64)?
+        } else {
+            OoxmlMetadata::default()
+        };
+
+        check_cancelled()?;
+
+        let mut workbook: Sheets<Cursor<&[u8]>> =
+            open_workbook_auto_from_rs(Cursor::new(raw_bytes.as_slice())).map_err(|_| {
+                SafiError::new(
+                    ErrorCode::SF_IMP_002,
+                    ErrorSeverity::Error,
+                    "WorkbookOpenFailed",
+                    "import.excel_corrupted",
+                )
+            })?;
+
+        for sheet in workbook.sheets_metadata() {
+            let vis = match sheet.visible {
+                SheetVisible::Visible => SheetVisibility::Visible,
+                SheetVisible::Hidden => SheetVisibility::Hidden,
+                SheetVisible::VeryHidden => SheetVisibility::VeryHidden,
+            };
+            meta.sheet_visibility
+                .entry(sheet.name.clone())
+                .or_insert(vis);
+            if sheet.typ != SheetType::WorkSheet {
+                meta.warnings.push(format!(
+                    "Sheet '{}' is a {:?} sheet; tabular extraction applies only to worksheet cells.",
+                    sheet.name, sheet.typ
+                ));
+            }
+        }
+
+        let names: Vec<DefinedNameRecord> = workbook
+            .defined_names()
+            .iter()
+            .map(|(name, formula)| DefinedNameRecord {
+                is_built_in: name.starts_with("_xlnm."),
+                name: name.clone(),
+                refers_to: formula.clone(),
+            })
+            .collect();
+
+        let sheet_names = workbook.sheet_names();
+        let mut sheets = Vec::with_capacity(sheet_names.len());
+        for sheet_name in sheet_names {
+            check_cancelled()?;
+            let range = workbook.worksheet_range(&sheet_name).map_err(|_| {
+                SafiError::new(
+                    ErrorCode::SF_IMP_002,
+                    ErrorSeverity::Error,
+                    "WorksheetRangeReadFailed",
+                    "import.excel_corrupted",
+                )
+            })?;
+            let formula_range = workbook.worksheet_formula(&sheet_name).ok();
+            sheets.push((sheet_name, range, formula_range));
+        }
+
+        (meta, names, sheets)
     };
 
-    check_cancelled()?;
-
-    let mut workbook: Sheets<Cursor<&[u8]>> =
-        open_workbook_auto_from_rs(Cursor::new(raw_bytes.as_slice())).map_err(|_| {
-            SafiError::new(
-                ErrorCode::SF_IMP_002,
-                ErrorSeverity::Error,
-                "WorkbookOpenFailed",
-                "import.excel_corrupted",
-            )
-        })?;
-
-    for sheet in workbook.sheets_metadata() {
-        let vis = match sheet.visible {
-            SheetVisible::Visible => SheetVisibility::Visible,
-            SheetVisible::Hidden => SheetVisibility::Hidden,
-            SheetVisible::VeryHidden => SheetVisibility::VeryHidden,
-        };
-        ooxml_meta
-            .sheet_visibility
-            .entry(sheet.name.clone())
-            .or_insert(vis);
-        if sheet.typ != SheetType::WorkSheet {
-            ooxml_meta.warnings.push(format!(
-                "Sheet '{}' is a {:?} sheet; tabular extraction applies only to worksheet cells.",
-                sheet.name, sheet.typ
-            ));
-        }
-    }
-
-    let defined_names: Vec<DefinedNameRecord> = workbook
-        .defined_names()
-        .iter()
-        .map(|(name, formula)| DefinedNameRecord {
-            is_built_in: name.starts_with("_xlnm."),
-            name: name.clone(),
-            refers_to: formula.clone(),
-        })
-        .collect();
-
-    let sheet_names = workbook.sheet_names();
-    let total_sheets = sheet_names.len();
+    let total_sheets = raw_sheets.len();
     progress_log.push(IngestionProgressUpdate {
         phase: "SheetDiscovery".to_string(),
         sheets_processed: 0,
@@ -1444,27 +1500,17 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
     let mut total_formulas_verified = 0usize;
     let mut cumulative_rows = 0u64;
 
-    for (idx, sheet_name) in sheet_names.iter().enumerate() {
+    for (idx, (sheet_name, range, formula_range)) in raw_sheets.into_iter().enumerate() {
         check_cancelled()?;
 
-        let range = workbook.worksheet_range(sheet_name).map_err(|_| {
-            SafiError::new(
-                ErrorCode::SF_IMP_002,
-                ErrorSeverity::Error,
-                "WorksheetRangeReadFailed",
-                "import.excel_corrupted",
-            )
-        })?;
-
-        let formula_range = workbook.worksheet_formula(sheet_name).ok();
         let merges = ooxml_meta
             .sheet_merges
-            .get(sheet_name)
+            .get(&sheet_name)
             .cloned()
             .unwrap_or_default();
 
         let ws_intel = build_worksheet_intelligence(
-            sheet_name,
+            &sheet_name,
             idx,
             &range,
             formula_range.as_ref(),
@@ -2190,15 +2236,15 @@ fn classify_formula_status(
     recalculated: Option<&str>,
     data_type: IngestedCellDataType,
 ) -> FormulaVerificationStatus {
+    let upper = formula.to_ascii_uppercase();
+    if upper.contains('[') && upper.contains(']') {
+        return FormulaVerificationStatus::ExternalWorkbookReference;
+    }
     if data_type == IngestedCellDataType::FormulaError
         || cached.is_some_and(|c| c.starts_with('#'))
         || recalculated.is_some_and(|r| r.starts_with('#'))
     {
         return FormulaVerificationStatus::FormulaError;
-    }
-    let upper = formula.to_ascii_uppercase();
-    if upper.contains('[') && upper.contains(']') {
-        return FormulaVerificationStatus::ExternalWorkbookReference;
     }
     for volatile in [
         "NOW(",

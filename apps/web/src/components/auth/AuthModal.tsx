@@ -804,6 +804,7 @@ export function AuthModal({
   return (
     <div
       className="safi-auth-backdrop"
+      data-lenis-prevent="true"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy && !mandatory) onClose();
       }}
@@ -812,6 +813,7 @@ export function AuthModal({
         ref={panelRef}
         className="safi-auth-modal"
         data-safi-own-scrollbar="true"
+        data-lenis-prevent="true"
         role="dialog"
         aria-modal="true"
         aria-labelledby="safi-auth-title"

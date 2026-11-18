@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, BarChart3, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, BarChart3, Check, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   chartData as fetchChartData,
   grouped,
@@ -109,8 +109,11 @@ export interface DashboardChartsViewProps {
   readonly metrics: readonly DesktopMetric[];
   readonly charts: readonly StudioChartArtifact[];
   readonly initialSeriesByChart?: Readonly<Record<string, DesktopChartSeries>>;
+  readonly activeFilterColumn?: string;
+  readonly activeFilterValue?: string;
   readonly onUpdateCharts: (next: readonly StudioChartArtifact[]) => void;
   readonly onCrossFilter?: (column: string, label: string) => void;
+  readonly onOpenFilteredSheet?: () => void;
   readonly onInspectMetric?: (metric: DesktopMetric) => void;
 }
 
@@ -123,8 +126,11 @@ export function DashboardChartsView({
   metrics,
   charts,
   initialSeriesByChart,
+  activeFilterColumn,
+  activeFilterValue,
   onUpdateCharts,
   onCrossFilter,
+  onOpenFilteredSheet,
   onInspectMetric
 }: DashboardChartsViewProps): React.ReactElement {
   const isAr = language === "ar";
@@ -137,9 +143,29 @@ export function DashboardChartsView({
   const [func, setFunc] = useState<(typeof AGGREGATES)[number]>("SUM");
   const [col, setCol] = useState("");
   const [groupCol, setGroupCol] = useState("");
-  const [activeCrossFilter, setActiveCrossFilter] = useState<{ col: string; val: string } | null>(
-    null
-  );
+  const [editingChartId, setEditingChartId] = useState<string | null>(null);
+  const [draftEdit, setDraftEdit] = useState<{
+    readonly title: string;
+    readonly function: string;
+    readonly column: string;
+    readonly groupBy: string;
+  } | null>(null);
+  const [localCrossFilter, setLocalCrossFilter] = useState<{
+    col: string;
+    val: string;
+    sourceChartId?: string;
+  } | null>(null);
+
+  const effectiveCrossFilter =
+    activeFilterColumn && activeFilterValue
+      ? {
+          col: activeFilterColumn,
+          val: activeFilterValue,
+          ...(localCrossFilter?.sourceChartId
+            ? { sourceChartId: localCrossFilter.sourceChartId }
+            : {})
+        }
+      : localCrossFilter;
 
   useEffect(() => {
     const firstCol = columns[0];
@@ -162,13 +188,20 @@ export function DashboardChartsView({
       const nextErrors: Record<string, string> = {};
       for (const chart of charts) {
         const resolvedType: StudioChartType = chart.chartType ?? "bar";
+        const shouldFilterThisCard =
+          effectiveCrossFilter !== null &&
+          effectiveCrossFilter.col.length > 0 &&
+          effectiveCrossFilter.val.length > 0 &&
+          chart.id !== effectiveCrossFilter.sourceChartId;
         try {
           nextSeries[chart.id] = await fetchChartData(
             project,
             resolvedType,
             chart.function,
             chart.column,
-            chart.groupBy
+            chart.groupBy,
+            shouldFilterThisCard ? effectiveCrossFilter.col : undefined,
+            shouldFilterThisCard ? effectiveCrossFilter.val : undefined
           );
         } catch (err) {
           const code = err instanceof Error ? err.message : String(err);
@@ -221,7 +254,15 @@ export function DashboardChartsView({
     return () => {
       cancelled = true;
     };
-  }, [charts, project, revision, activeScenario]);
+  }, [
+    charts,
+    project,
+    revision,
+    activeScenario,
+    effectiveCrossFilter?.col,
+    effectiveCrossFilter?.val,
+    effectiveCrossFilter?.sourceChartId
+  ]);
 
   function addChart(): void {
     if (!col || !groupCol) {
@@ -241,8 +282,18 @@ export function DashboardChartsView({
     ]);
   }
 
-  function updateChartType(id: string, nextType: StudioChartType): void {
-    onUpdateCharts(charts.map((c) => (c.id === id ? { ...c, chartType: nextType } : c)));
+  function updateChartPatch(
+    id: string,
+    patch: Partial<
+      Pick<StudioChartArtifact, "title" | "chartType" | "function" | "column" | "groupBy">
+    >
+  ): void {
+    onUpdateCharts(charts.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }
+
+  function triggerCrossFilter(chartId: string, groupColumn: string, label: string): void {
+    setLocalCrossFilter({ col: groupColumn, val: label, sourceChartId: chartId });
+    onCrossFilter?.(groupColumn, label);
   }
 
   function moveChart(idx: number, delta: -1 | 1): void {
@@ -269,19 +320,34 @@ export function DashboardChartsView({
               : "Every KPI and all 21 chart types are computed in Rust and update automatically on edits or What-If scenarios."}
           </p>
         </div>
-        {activeCrossFilter ? (
-          <button
-            type="button"
-            className="studio-chip-btn"
-            onClick={() => {
-              setActiveCrossFilter(null);
-              onCrossFilter?.(activeCrossFilter.col, "");
-            }}
-          >
-            {isAr
-              ? `إلغاء التصفية (${activeCrossFilter.val})`
-              : `Clear filter (${activeCrossFilter.val})`}
-          </button>
+        {effectiveCrossFilter ? (
+          <div className="studio-quick-templates" data-testid="active-cross-filter-bar">
+            {onOpenFilteredSheet ? (
+              <button
+                type="button"
+                className="studio-chip-btn"
+                data-testid="view-filtered-sheet-btn"
+                onClick={onOpenFilteredSheet}
+              >
+                {isAr
+                  ? `عرض صفوف الجدول (${effectiveCrossFilter.val})`
+                  : `View sheet rows (${effectiveCrossFilter.val})`}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="studio-chip-btn"
+              data-testid="clear-cross-filter-btn"
+              onClick={() => {
+                setLocalCrossFilter(null);
+                onCrossFilter?.(effectiveCrossFilter.col, "");
+              }}
+            >
+              {isAr
+                ? `إلغاء التصفية (${effectiveCrossFilter.val})`
+                : `Clear filter (${effectiveCrossFilter.val})`}
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -374,12 +440,21 @@ export function DashboardChartsView({
             const firstPt = points[0];
             const lastPt = points[points.length - 1];
 
+            const isEditing = editingChartId === chart.id;
+            const isFilteredSibling =
+              effectiveCrossFilter !== null &&
+              effectiveCrossFilter.col.length > 0 &&
+              effectiveCrossFilter.val.length > 0 &&
+              chart.id !== effectiveCrossFilter.sourceChartId;
+
             return (
               <article
                 key={chart.id}
                 className="studio-subcard"
                 data-testid={`chart-card-${resolvedType}`}
                 data-chart-type={resolvedType}
+                data-chart-id={chart.id}
+                data-cross-filtered={isFilteredSibling ? "true" : "false"}
               >
                 <div className="studio-panel-header">
                   <strong>{chart.title}</strong>
@@ -387,7 +462,9 @@ export function DashboardChartsView({
                     <select
                       aria-label={isAr ? "تغيير نوع الرسم" : "Change chart type"}
                       value={resolvedType}
-                      onChange={(e) => updateChartType(chart.id, e.target.value as StudioChartType)}
+                      onChange={(e) =>
+                        updateChartPatch(chart.id, { chartType: e.target.value as StudioChartType })
+                      }
                     >
                       {CHART_TYPES.map((kind) => (
                         <option key={kind} value={kind}>
@@ -395,6 +472,46 @@ export function DashboardChartsView({
                         </option>
                       ))}
                     </select>
+                    <button
+                      type="button"
+                      className="studio-chip-btn"
+                      data-testid={`edit-chart-${chart.id}`}
+                      aria-label={
+                        isEditing
+                          ? isAr
+                            ? "حفظ تعديلات الرسم"
+                            : "Apply chart configuration"
+                          : isAr
+                            ? "تعديل إعدادات الرسم"
+                            : "Edit chart configuration"
+                      }
+                      onClick={() => {
+                        if (isEditing && draftEdit) {
+                          updateChartPatch(chart.id, {
+                            title: draftEdit.title.trim() || chart.title,
+                            function: draftEdit.function,
+                            column: draftEdit.column,
+                            groupBy: draftEdit.groupBy
+                          });
+                          setEditingChartId(null);
+                          setDraftEdit(null);
+                        } else {
+                          setEditingChartId(chart.id);
+                          setDraftEdit({
+                            title: chart.title,
+                            function: chart.function,
+                            column: chart.column,
+                            groupBy: chart.groupBy
+                          });
+                        }
+                      }}
+                    >
+                      {isEditing ? (
+                        <Check size={13} aria-hidden="true" />
+                      ) : (
+                        <Pencil size={13} aria-hidden="true" />
+                      )}
+                    </button>
                     <button
                       type="button"
                       className="studio-chip-btn"
@@ -425,7 +542,65 @@ export function DashboardChartsView({
                 </div>
                 <div className="studio-muted-note">
                   {`${resolvedType.toUpperCase()} · ${chart.function}(${chart.column}) · ${isAr ? "حسب" : "by"} ${chart.groupBy}`}
+                  {isFilteredSibling && effectiveCrossFilter
+                    ? ` · ${isAr ? "مُصفّى حسب" : "Filtered by"} ${effectiveCrossFilter.col}=${effectiveCrossFilter.val}`
+                    : ""}
                 </div>
+
+                {isEditing && draftEdit ? (
+                  <div className="studio-inline-fields" data-testid={`chart-editor-${chart.id}`}>
+                    <label>
+                      <span>{isAr ? "العنوان" : "Title"}</span>
+                      <input
+                        aria-label={isAr ? "عنوان البطاقة" : "Edit chart title"}
+                        value={draftEdit.title}
+                        onChange={(e) => setDraftEdit({ ...draftEdit, title: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>{isAr ? "الدالة" : "Aggregation"}</span>
+                      <select
+                        aria-label={isAr ? "تعديل الدالة" : "Edit aggregation"}
+                        value={draftEdit.function}
+                        onChange={(e) => setDraftEdit({ ...draftEdit, function: e.target.value })}
+                      >
+                        {AGGREGATES.map((fn) => (
+                          <option key={fn} value={fn}>
+                            {fn}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>{isAr ? "عمود القيمة" : "Value Field"}</span>
+                      <select
+                        aria-label={isAr ? "تعديل عمود القيمة" : "Edit value field"}
+                        value={draftEdit.column}
+                        onChange={(e) => setDraftEdit({ ...draftEdit, column: e.target.value })}
+                      >
+                        {columns.map((c) => (
+                          <option key={c.name} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>{isAr ? "التجميع حسب" : "Group By"}</span>
+                      <select
+                        aria-label={isAr ? "تعديل عمود التجميع" : "Edit grouping field"}
+                        value={draftEdit.groupBy}
+                        onChange={(e) => setDraftEdit({ ...draftEdit, groupBy: e.target.value })}
+                      >
+                        {columns.map((c) => (
+                          <option key={c.name} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
 
                 {errorCode ? (
                   <div className="studio-alert-error" role="alert">
@@ -915,40 +1090,81 @@ export function DashboardChartsView({
                 ) : null}
 
                 {resolvedType === "geographic" && points.length > 0 ? (
-                  <svg
-                    className="studio-chart-svg"
-                    viewBox="0 0 100 100"
-                    role="img"
-                    aria-label={chart.title}
-                  >
-                    <path
-                      data-geo-backdrop="1"
-                      d="M 12 18 L 78 14 L 88 45 L 74 88 L 18 86 L 14 48 Z"
-                      fill="currentColor"
-                      fillOpacity="0.06"
-                      stroke="currentColor"
-                      strokeOpacity="0.25"
-                      strokeWidth="1.2"
-                    />
-                    <path
-                      d="M 46 20 Q 52 38 50 56 T 56 84"
-                      fill="none"
-                      stroke="#2563eb"
-                      strokeOpacity="0.45"
-                      strokeWidth="2"
-                    />
-                    {points.map((pt, pIdx) => (
-                      <circle
-                        key={`${pt.label}_${pIdx}`}
-                        data-geo-marker={pIdx}
-                        cx={pt.xPct}
-                        cy={pt.yPct}
-                        r={2.5 + (Math.min(100, pt.ratioPct) / 100) * 6}
-                        fill={CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]}
-                        fillOpacity="0.82"
+                  <div>
+                    <svg
+                      className="studio-chart-svg"
+                      viewBox="0 0 100 100"
+                      role="img"
+                      data-geo-projection="regional-coordinate-scatter"
+                      aria-label={chart.title}
+                    >
+                      <rect
+                        data-geo-backdrop="1"
+                        x="4"
+                        y="4"
+                        width="92"
+                        height="92"
+                        rx="4"
+                        fill="currentColor"
+                        fillOpacity="0.04"
+                        stroke="currentColor"
+                        strokeOpacity="0.22"
+                        strokeWidth="1"
                       />
-                    ))}
-                  </svg>
+                      <line
+                        x1="35"
+                        y1="4"
+                        x2="35"
+                        y2="96"
+                        stroke="currentColor"
+                        strokeOpacity="0.12"
+                        strokeDasharray="2,2"
+                      />
+                      <line
+                        x1="65"
+                        y1="4"
+                        x2="65"
+                        y2="96"
+                        stroke="currentColor"
+                        strokeOpacity="0.12"
+                        strokeDasharray="2,2"
+                      />
+                      <line
+                        x1="4"
+                        y1="35"
+                        x2="96"
+                        y2="35"
+                        stroke="currentColor"
+                        strokeOpacity="0.12"
+                        strokeDasharray="2,2"
+                      />
+                      <line
+                        x1="4"
+                        y1="65"
+                        x2="96"
+                        y2="65"
+                        stroke="currentColor"
+                        strokeOpacity="0.12"
+                        strokeDasharray="2,2"
+                      />
+                      {points.map((pt, pIdx) => (
+                        <circle
+                          key={`${pt.label}_${pIdx}`}
+                          data-geo-marker={pIdx}
+                          cx={pt.xPct}
+                          cy={pt.yPct}
+                          r={2.5 + (Math.min(100, pt.ratioPct) / 100) * 6}
+                          fill={CHART_SLICE_COLORS[pIdx % CHART_SLICE_COLORS.length]}
+                          fillOpacity="0.82"
+                        />
+                      ))}
+                    </svg>
+                    <p className="studio-muted-note">
+                      {isAr
+                        ? "إسقاط إحداثي للمناطق/الفئات (مناطق مصر المعروفة؛ باقي الفئات دون حدود خرائطية GIS)."
+                        : "Regional / category coordinate scatter (recognized Egypt regions mapped; arbitrary labels plotted without GIS map boundaries)."}
+                    </p>
+                  </div>
                 ) : null}
 
                 {(resolvedType === "table" || resolvedType === "pivotsummary") &&
@@ -1002,14 +1218,11 @@ export function DashboardChartsView({
                         key={`${point.label}_${pIdx}`}
                         type="button"
                         className="safi-desktop-studio__bar studio-bar-btn"
-                        onClick={() => {
-                          setActiveCrossFilter({ col: chart.groupBy, val: point.label });
-                          onCrossFilter?.(chart.groupBy, point.label);
-                        }}
+                        onClick={() => triggerCrossFilter(chart.id, chart.groupBy, point.label)}
                         title={
                           isAr
-                            ? `انقر لتصفية الجدول حسب ${point.label}`
-                            : `Click to cross-filter sheet by ${point.label}`
+                            ? `انقر لتصفية اللوحة والجدول حسب ${point.label}`
+                            : `Click to cross-filter sibling charts and sheet by ${point.label}`
                         }
                       >
                         <span>{point.label}</span>
@@ -1039,14 +1252,11 @@ export function DashboardChartsView({
                           key={`${point.label}_${pIdx}`}
                           type="button"
                           className="safi-desktop-studio__bar studio-bar-btn"
-                          onClick={() => {
-                            setActiveCrossFilter({ col: chart.groupBy, val: point.label });
-                            onCrossFilter?.(chart.groupBy, point.label);
-                          }}
+                          onClick={() => triggerCrossFilter(chart.id, chart.groupBy, point.label)}
                           title={
                             isAr
-                              ? `انقر لتصفية الجدول حسب ${point.label}`
-                              : `Click to cross-filter sheet by ${point.label}`
+                              ? `انقر لتصفية اللوحة والجدول حسب ${point.label}`
+                              : `Click to cross-filter sibling charts and sheet by ${point.label}`
                           }
                         >
                           <span>{point.label}</span>

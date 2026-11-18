@@ -255,12 +255,14 @@ fn dispatch(
             str_arg(args, "column", "column"),
             str_arg(args, "groupBy", "group_by"),
         ),
-        "studio_chart_data" => store.chart_data(
+        "studio_chart_data" => store.chart_data_filtered(
             str_arg(args, "project", "project"),
             str_arg(args, "chartType", "chart_type"),
             str_arg(args, "function", "function"),
             str_arg(args, "column", "column"),
             str_arg(args, "groupBy", "group_by"),
+            opt_str_arg(args, "filterColumn", "filter_column"),
+            opt_str_arg(args, "filterValue", "filter_value"),
         ),
         "studio_narrative" => store.narrative(
             str_arg(args, "project", "project"),

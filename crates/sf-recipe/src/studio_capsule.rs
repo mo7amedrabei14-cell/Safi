@@ -708,17 +708,24 @@ fn render_chart_body(
             body.push_str("</tbody></table>\n");
         }
         ChartType::Geographic => {
-            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" role=\"img\">\n");
-            body.push_str("<path data-geo-backdrop=\"1\" d=\"M 12 18 L 78 14 L 88 45 L 74 88 L 18 86 L 14 48 Z\" fill=\"#0f1f38\" stroke=\"#2b3b58\" stroke-width=\"1.2\"></path>\n");
-            body.push_str("<path d=\"M 46 20 Q 52 38 50 56 T 56 84\" fill=\"none\" stroke=\"#1d4ed8\" stroke-opacity=\"0.55\" stroke-width=\"2\"></path>\n");
+            body.push_str("<svg class=\"chart-svg\" viewBox=\"0 0 100 100\" role=\"img\" data-geo-projection=\"regional-coordinate-scatter\">\n");
+            body.push_str("<rect data-geo-backdrop=\"1\" x=\"4\" y=\"4\" width=\"92\" height=\"92\" rx=\"4\" fill=\"#0f1f38\" stroke=\"#2b3b58\" stroke-width=\"1\"></rect>\n");
+            body.push_str("<line x1=\"35\" y1=\"4\" x2=\"35\" y2=\"96\" stroke=\"#1e293b\" stroke-dasharray=\"2,2\" stroke-width=\"0.6\"></line>\n");
+            body.push_str("<line x1=\"65\" y1=\"4\" x2=\"65\" y2=\"96\" stroke=\"#1e293b\" stroke-dasharray=\"2,2\" stroke-width=\"0.6\"></line>\n");
+            body.push_str("<line x1=\"4\" y1=\"35\" x2=\"96\" y2=\"35\" stroke=\"#1e293b\" stroke-dasharray=\"2,2\" stroke-width=\"0.6\"></line>\n");
+            body.push_str("<line x1=\"4\" y1=\"65\" x2=\"96\" y2=\"65\" stroke=\"#1e293b\" stroke-dasharray=\"2,2\" stroke-width=\"0.6\"></line>\n");
             for (idx, point) in series.points.iter().enumerate() {
                 let r = 2.5 + (f64::from(point.ratio_pct.min(100)) / 100.0) * 6.5;
                 let color = SLICE_PALETTE[idx % SLICE_PALETTE.len()];
                 body.push_str(&format!(
-                    "<circle data-geo-marker=\"{idx}\" cx=\"{}\" cy=\"{}\" r=\"{r:.1}\" fill=\"{color}\" fill-opacity=\"0.82\" stroke=\"#e2e8f0\" stroke-width=\"0.7\"></circle>\n",
-                    point.x_pct, point.y_pct
+                    "<circle data-geo-marker=\"{idx}\" cx=\"{}\" cy=\"{}\" r=\"{r:.1}\" fill=\"{color}\" fill-opacity=\"0.82\" stroke=\"#e2e8f0\" stroke-width=\"0.7\"><title>{}: {}</title></circle>\n",
+                    point.x_pct,
+                    point.y_pct,
+                    escape_html(&point.label),
+                    escape_html(&point.value)
                 ));
             }
+            body.push_str("<text x=\"50\" y=\"93\" text-anchor=\"middle\" font-size=\"4.2\" fill=\"#94a3b8\">Regional coordinate scatter (no GIS boundaries implied)</text>\n");
             body.push_str("</svg>\n<ul class=\"legend\">\n");
             for point in &series.points {
                 let share = point.share_pct.as_deref().unwrap_or("0");

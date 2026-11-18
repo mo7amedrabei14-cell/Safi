@@ -144,6 +144,16 @@ async function main() {
       model,
       dashboard
     });
+    const csv = exporter.exportStudioDeliverable({
+      format: "csv",
+      model
+    });
+    const htmlPlayer = exporter.exportStudioDeliverable({
+      format: "safi.html",
+      model,
+      presentation: editedPresentation,
+      rtl: true
+    });
     const pbi = exporter.exportStudioDeliverable({
       format: "powerbi",
       model
@@ -156,6 +166,8 @@ async function main() {
       pdf: path.join(outDir, "report.pdf"),
       png: path.join(outDir, "chart.png"),
       svg: path.join(outDir, "chart.svg"),
+      csv: path.join(outDir, "data.csv"),
+      safiHtml: path.join(outDir, "deck.safi.html"),
       pbi: path.join(outDir, "powerbi.zip")
     };
     fs.writeFileSync(files.xlsx, xlsx.binaryBytes);
@@ -164,6 +176,8 @@ async function main() {
     fs.writeFileSync(files.pdf, pdf.binaryBytes);
     fs.writeFileSync(files.png, png.binaryBytes);
     fs.writeFileSync(files.svg, svg.binaryBytes);
+    fs.writeFileSync(files.csv, csv.content, "utf8");
+    fs.writeFileSync(files.safiHtml, htmlPlayer.content, "utf8");
     fs.writeFileSync(files.pbi, pbi.binaryBytes);
 
     // 1. Validate XLSX (openpyxl), PPTX/DOCX/PowerBI (zipfile + ElementTree), PNG (PIL), PDF (binary xref & objects) in Python
@@ -184,6 +198,11 @@ ws_disc = wb["Audit & Disclosure"]
 disc_text = "\\n".join(str(r[0]) + ":" + str(r[1]) for r in ws_disc.iter_rows(values_only=True))
 assert "Hidden_Rates (Hidden)" in disc_text, disc_text
 
+with open(${JSON.stringify(files.csv)}, "r", encoding="utf-8") as cf:
+    csv_text = cf.read()
+assert "'=CMD" in csv_text, f"CSV must neutralize formula injection: {csv_text[:200]}"
+assert "Sales_2026" in csv_text or "القاهرة" in csv_text
+
 with zipfile.ZipFile(${JSON.stringify(files.pptx)}) as zp:
     names = zp.namelist()
     assert "[Content_Types].xml" in names
@@ -193,7 +212,11 @@ with zipfile.ZipFile(${JSON.stringify(files.pptx)}) as zp:
     s1 = zp.read("ppt/slides/slide1.xml").decode("utf-8")
     n1 = zp.read("ppt/notesSlides/notesSlide1.xml").decode("utf-8")
     assert "Edited Board Keynote 2026" in s1
+    assert '<a:pPr rtl="1"/>' in s1
+    assert '<a:rPr sz="2400" b="1"/>' in s1
     assert "Verified board briefing note: check Cairo variance." in n1
+    all_slides_xml = "\\n".join(zp.read(n).decode("utf-8") for n in names if n.startswith("ppt/slides/slide"))
+    assert "<a:tbl>" in all_slides_xml, "PPTX must include structured OOXML table (<a:tbl>)"
     for xml_name in names:
         if xml_name.endswith(".xml") or xml_name.endswith(".rels"):
             ET.fromstring(zp.read(xml_name))
@@ -205,6 +228,7 @@ with zipfile.ZipFile(${JSON.stringify(files.docx)}) as zd:
     assert "word/footer1.xml" in names
     doc_xml = zd.read("word/document.xml").decode("utf-8")
     assert "<w:bidi/>" in doc_xml
+    assert "<w:tbl>" in doc_xml, "DOCX must include structured table (<w:tbl>)"
     assert "Edited Section Two: Executive Findings" in doc_xml
     assert "نتائج القاهرة والإسكندرية" in doc_xml
     assert '<w:br w:type="page"/>' in doc_xml
@@ -216,6 +240,9 @@ with zipfile.ZipFile(${JSON.stringify(files.pbi)}) as zpbi:
     pnames = zpbi.namelist()
     assert "safi-datasource.pbids" in pnames
     assert "model.bim" in pnames
+    assert "README-POWERBI.md" in pnames
+    data_csvs = [p for p in pnames if p.startswith("data/") and p.endswith(".csv")]
+    assert len(data_csvs) >= 2, pnames
     bim = json.loads(zpbi.read("model.bim"))
     assert len(bim["model"]["tables"]) >= 2, len(bim["model"]["tables"])
     pbids = json.loads(zpbi.read("safi-datasource.pbids"))
@@ -292,6 +319,35 @@ print("PYTHON_VALIDATION_OK", {
           throw new Error(`Chromium preview validation failed: ${JSON.stringify(loaded)}`);
         }
         console.log("CHROMIUM_IMAGE_AND_SVG_PREVIEW_OK", JSON.stringify(loaded));
+
+        // 4. Open .safi.html deliverable in Chromium and verify zero runtime errors & rendered slides
+        const deckErrors = [];
+        page.on("pageerror", (err) => deckErrors.push(err.message));
+        await page.goto(pathToFileURL(files.safiHtml).href, { waitUntil: "load" });
+        const deckDiag = await page.evaluate(() => {
+          const root = document.querySelector('[data-safi-presentation-player="true"]');
+          const slides = document.querySelectorAll(".safi-slide");
+          const svgs = Array.from(document.querySelectorAll("svg"));
+          const zeroSized = svgs.filter((s) => s.getBoundingClientRect().width <= 0).length;
+          return {
+            slideCountAttr: Number(root?.getAttribute("data-slide-count") ?? 0),
+            slideNodes: slides.length,
+            svgCount: svgs.length,
+            zeroSizedSvgs: zeroSized,
+            hasEditedTitle: (document.body.textContent ?? "").includes("Edited Board Keynote 2026")
+          };
+        });
+        if (
+          deckErrors.length > 0 ||
+          deckDiag.slideNodes < 10 ||
+          !deckDiag.hasEditedTitle ||
+          deckDiag.zeroSizedSvgs > 0
+        ) {
+          throw new Error(
+            `Interactive HTML validation failed (errors=${JSON.stringify(deckErrors)}): ${JSON.stringify(deckDiag)}`
+          );
+        }
+        console.log("CHROMIUM_SAFI_HTML_PLAYER_OK", JSON.stringify(deckDiag));
       } finally {
         await browser.close();
       }

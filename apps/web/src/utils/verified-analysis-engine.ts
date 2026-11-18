@@ -406,9 +406,13 @@ export function buildVerifiedAnalysisReport(
         sheetName: kpi.sheetName,
         tableId: kpi.tableId,
         columnNames: [kpi.columnName],
+<<<<<<< HEAD
         a1Range:
           model.tables.find((t) => t.sheetName === kpi.sheetName && t.tableId === kpi.tableId)
             ?.a1Range ?? "A1",
+=======
+        a1Range: model.tables.find((t) => t.tableId === kpi.tableId)?.a1Range ?? "A1",
+>>>>>>> 2255a5ba304b41040d3ae32051c5c63997ea23a0
         formulaOrMethod: kpi.formulaTrace
       }
     });
@@ -434,11 +438,44 @@ export function buildVerifiedAnalysisReport(
       if (dim && meas) {
         const groupTotals = new Map<string, number>();
 
+<<<<<<< HEAD
         for (const row of rawRegion.dataRows) {
           const key = (row[dim.columnIndex] ?? "").trim() || "(Unspecified)";
           const val = parseNum(row[meas.columnIndex] ?? "");
           if (val !== null) {
             groupTotals.set(key, (groupTotals.get(key) ?? 0) + val);
+=======
+      for (const row of rawRegion.dataRows) {
+        const key = (row[dim.columnIndex] ?? "").trim() || "(Unspecified)";
+        const val = parseNum(row[meas.columnIndex] ?? "");
+        if (val !== null) {
+          groupTotals.set(key, (groupTotals.get(key) ?? 0) + val);
+        }
+      }
+
+      const ranked = [...groupTotals.entries()].sort((a, b) => b[1] - a[1]);
+      if (ranked.length >= 2) {
+        const top = ranked[0]!;
+        const bottom = ranked[ranked.length - 1]!;
+        const grandSum = ranked.reduce((acc, [, v]) => acc + v, 0);
+        const topSharePct = grandSum > 0 ? Number(((top[1] / grandSum) * 100).toFixed(1)) : 0;
+
+        insights.push({
+          insightId: `ins_rank_${table.tableId}_${dim.columnIndex}_${meas.columnIndex}`,
+          domain: "CategoryRanking",
+          epistemicCategory: "ConfirmedFact",
+          title: `${dim.headerName} Performance Ranking by ${meas.headerName}`,
+          statement: `Top ${dim.headerName} is "${top[0]}" (${top[1].toLocaleString("en-US")}, ${topSharePct}% of total), while lowest is "${bottom[0]}" (${bottom[1].toLocaleString("en-US")}).`,
+          confidencePct: 96,
+          confidenceTier: "High",
+          provisional: false,
+          citation: {
+            sheetName: table.sheetName,
+            tableId: table.tableId,
+            columnNames: [dim.headerName, meas.headerName],
+            a1Range: table.a1Range,
+            formulaOrMethod: `GROUP_BY(${dim.headerName}, SUM(${meas.headerName}))`
+>>>>>>> 2255a5ba304b41040d3ae32051c5c63997ea23a0
           }
         }
 
@@ -505,6 +542,7 @@ export function buildVerifiedAnalysisReport(
           }
         }
 
+<<<<<<< HEAD
         const first = periodPoints[0];
         const last = periodPoints[periodPoints.length - 1];
         if (periodPoints.length >= 2 && first && last) {
@@ -514,16 +552,112 @@ export function buildVerifiedAnalysisReport(
               ? Number(((delta / Math.abs(first.value)) * 100).toFixed(2))
               : 0;
           const direction = delta > 0 ? "increased" : delta < 0 ? "decreased" : "remained flat";
+=======
+      if (periodPoints.length >= 2) {
+        const first = periodPoints[0]!;
+        const last = periodPoints[periodPoints.length - 1]!;
+        const delta = last.value - first.value;
+        const pctChange =
+          Math.abs(first.value) > 1e-9
+            ? Number(((delta / Math.abs(first.value)) * 100).toFixed(2))
+            : 0;
+        const direction = delta > 0 ? "increased" : delta < 0 ? "decreased" : "remained flat";
+
+        insights.push({
+          insightId: `ins_trend_${table.tableId}_${meas.columnIndex}`,
+          domain: "PeriodComparison",
+          epistemicCategory: "DataSupportedObservation",
+          title: `${meas.headerName} Period-over-Period Trajectory`,
+          statement: `From ${first.period} (${first.value.toLocaleString("en-US")}) to ${last.period} (${last.value.toLocaleString("en-US")}), ${meas.headerName} ${direction} by ${Math.abs(pctChange)}% (${delta >= 0 ? "+" : ""}${delta.toLocaleString("en-US")}).`,
+          confidencePct: 92,
+          confidenceTier: "High",
+          provisional: false,
+          citation: {
+            sheetName: table.sheetName,
+            tableId: table.tableId,
+            columnNames: [timeCol.headerName, meas.headerName],
+            a1Range: table.a1Range,
+            formulaOrMethod: `PCT_CHANGE(${first.period} -> ${last.period})`
+          }
+        });
+
+        // Potential Explanation (strictly labeled as hypothesis requiring verification!)
+        insights.push({
+          insightId: `ins_hypoth_${table.tableId}_${meas.columnIndex}`,
+          domain: "GrowthAndDecline",
+          epistemicCategory: "PotentialExplanation",
+          title: `Potential Drivers of ${meas.headerName} Movement`,
+          statement: `The ${Math.abs(pctChange)}% shift in ${meas.headerName} between ${first.period} and ${last.period} may reflect seasonal demand, pricing adjustments, or volume concentration in top categories; domain verification is required.`,
+          confidencePct: 68,
+          confidenceTier: "Medium",
+          provisional: true,
+          provisionalReason:
+            "Hypothesis requires external operational context beyond the workbook.",
+          citation: {
+            sheetName: table.sheetName,
+            tableId: table.tableId,
+            columnNames: [timeCol.headerName, meas.headerName],
+            a1Range: table.a1Range,
+            formulaOrMethod: "HYPOTHESIS_GENERATION(TrendDelta)"
+          }
+        });
+
+        // Conditional Forecast if >= 3 periods
+        if (periodPoints.length >= 3) {
+          const n = periodPoints.length;
+          const xs = periodPoints.map((_, idx) => idx);
+          const ys = periodPoints.map((p) => p.value);
+          const meanX = xs.reduce((a, b) => a + b, 0) / n;
+          const meanY = ys.reduce((a, b) => a + b, 0) / n;
+          let num = 0;
+          let den = 0;
+          for (let i = 0; i < n; i += 1) {
+            num += (xs[i]! - meanX) * (ys[i]! - meanY);
+            den += (xs[i]! - meanX) ** 2;
+          }
+          const slope = den > 0 ? num / den : 0;
+          const intercept = meanY - slope * meanX;
+          const projected = Number((intercept + slope * n).toFixed(2));
+          const r = computePearsonCorrelation(xs, ys) ?? 0;
+          const rSquared = Number((r * r).toFixed(3));
+          const stdErr = meas.numericStats?.stdDev ?? Math.abs(projected) * 0.1;
+
+          forecasts.push({
+            metricName: meas.headerName,
+            timeColumn: timeCol.headerName,
+            historicalPoints: periodPoints,
+            projectedNextPeriod: `Next Period (t+${n + 1})`,
+            projectedValue: projected,
+            lowerBound: Number((projected - 1.28 * stdErr).toFixed(2)),
+            upperBound: Number((projected + 1.28 * stdErr).toFixed(2)),
+            slopePerPeriod: Number(slope.toFixed(2)),
+            rSquared,
+            explicitAssumptions: [
+              `Linear continuation of ${n}-period historical trend (R² = ${rSquared})`,
+              "Assumes no structural regime change, price shock, or missing period bias"
+            ]
+          });
+>>>>>>> 2255a5ba304b41040d3ae32051c5c63997ea23a0
 
           insights.push({
             insightId: `ins_trend_${table.tableId}_${meas.columnIndex}`,
             domain: "PeriodComparison",
             epistemicCategory: "DataSupportedObservation",
+<<<<<<< HEAD
             title: `${meas.headerName} Period-over-Period Trajectory`,
             statement: `From ${first.period} (${first.value.toLocaleString("en-US")}) to ${last.period} (${last.value.toLocaleString("en-US")}), ${meas.headerName} ${direction} by ${Math.abs(pctChange)}% (${delta >= 0 ? "+" : ""}${delta.toLocaleString("en-US")}).`,
             confidencePct: 92,
             confidenceTier: "High",
             provisional: false,
+=======
+            title: `Conditional Next-Period Projection for ${meas.headerName}`,
+            statement: `Assuming linear continuation of the ${n}-period trend (slope ${slope >= 0 ? "+" : ""}${slope.toFixed(2)}/period, R² = ${rSquared}), next-period ${meas.headerName} is conditionally projected at ${projected.toLocaleString("en-US")} (80% interval: ${(projected - 1.28 * stdErr).toFixed(1)} to ${(projected + 1.28 * stdErr).toFixed(1)}).`,
+            confidencePct: Math.max(55, Math.min(88, Math.round(rSquared * 90))),
+            confidenceTier: scoreToConfidenceTier(Math.max(55, Math.round(rSquared * 90))),
+            provisional: true,
+            provisionalReason:
+              "Conditional statistical projection subject to explicit linear trend assumptions.",
+>>>>>>> 2255a5ba304b41040d3ae32051c5c63997ea23a0
             citation: {
               sheetName: table.sheetName,
               tableId: table.tableId,

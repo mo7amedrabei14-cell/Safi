@@ -1773,10 +1773,18 @@ export function generateDocumentReport(
       heading: "10. Actionable Recommendations",
       paragraphs: ["Recommended data hygiene and analytical follow-ups:"],
       bulletItems: [
+<<<<<<< HEAD
         ...model.qualityFindings.flatMap((f) => {
           const act = f.suggestedAction;
           return act ? [`${act.label}: ${act.previewSummary} (Reversible)`] : [];
         }),
+=======
+        ...model.qualityFindings
+          .filter((f) => f.suggestedAction !== undefined)
+          .map(
+            (f) => `${f.suggestedAction!.label}: ${f.suggestedAction!.previewSummary} (Reversible)`
+          ),
+>>>>>>> 2255a5ba304b41040d3ae32051c5c63997ea23a0
         ...analysis.questions
           .filter((q) => q.status !== "Answered")
           .map((q) => `Resolve Clarification: ${q.prompt}`)

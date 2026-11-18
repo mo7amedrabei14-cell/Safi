@@ -101,6 +101,22 @@ async function shot(page, name) {
   await page.screenshot({ path: join(evidenceDir, name) });
 }
 
+function parseMatrixScaleAndY(transform) {
+  if (!transform || transform === "none") {
+    return { scaleX: 1, scaleY: 1, translateY: 0 };
+  }
+  const match = transform.match(/^matrix\(([^)]+)\)$/);
+  if (!match) {
+    return { scaleX: 1, scaleY: 1, translateY: 0 };
+  }
+  const parts = match[1].split(",").map((v) => Number(v.trim()));
+  return {
+    scaleX: parts[0] ?? 1,
+    scaleY: parts[3] ?? 1,
+    translateY: parts[5] ?? 0
+  };
+}
+
 function assertEntranceTrace(raw, pageErrors, { reducedMotion }) {
   assert.deepEqual(pageErrors, []);
   assert.equal(raw.prematureAuthWhileIntroPresent, false, "AuthModal must never mount while intro is still present.");
@@ -122,28 +138,66 @@ function assertEntranceTrace(raw, pageErrors, { reducedMotion }) {
   } else {
     assert.ok(
       samples[0].modalOp < 0.85,
-      `First painted frame of AuthModal must start inside the entrance curve (< 0.85 opacity) instead of flashing 1.0 before fading back down; got ${samples[0].modalOp}`
+      `First painted frame of AuthModal must start inside the entrance curve (< 0.85 opacity) instead of flashing 1.0; got ${samples[0].modalOp}`
     );
     entranceCycles = 1;
   }
 
   let peakSoFar = samples[0].modalOp;
   let droppedAfterPeak = false;
-  for (let i = 1; i < samples.length; i += 1) {
-    const op = samples[i].modalOp;
-    if (peakSoFar >= 0.85 && op < peakSoFar - 0.15) {
-      droppedAfterPeak = true;
+  let minBackdropOp = 1;
+  let backdropTransformed = false;
+  let minChildOp = 1;
+  let childTransformed = false;
+  let modalScaledOrBounced = false;
+
+  for (let i = 0; i < samples.length; i += 1) {
+    const s = samples[i];
+    const op = s.modalOp;
+    if (i > 0) {
+      if (peakSoFar >= 0.85 && op < peakSoFar - 0.15) {
+        droppedAfterPeak = true;
+      }
+      if (inLowState && op >= 0.99) {
+        inLowState = false;
+      } else if (!inLowState && op < 0.5) {
+        inLowState = true;
+        entranceCycles += 1;
+      }
+      if (op > peakSoFar) peakSoFar = op;
     }
-    if (inLowState && op >= 0.99) {
-      inLowState = false;
-    } else if (!inLowState && op < 0.5) {
-      inLowState = true;
-      entranceCycles += 1;
+
+    if (s.backdropOp !== null && s.backdropOp < minBackdropOp) {
+      minBackdropOp = s.backdropOp;
     }
-    if (op > peakSoFar) peakSoFar = op;
+    if (s.backdropTf && s.backdropTf !== "none") {
+      backdropTransformed = true;
+    }
+
+    for (const childOp of [s.providerOp, s.fieldOp, s.submitOp]) {
+      if (childOp !== null && childOp < minChildOp) {
+        minChildOp = childOp;
+      }
+    }
+    for (const childTf of [s.providerTf, s.fieldTf, s.submitTf]) {
+      if (childTf && childTf !== "none") {
+        childTransformed = true;
+      }
+    }
+
+    const { scaleX, scaleY, translateY } = parseMatrixScaleAndY(s.modalTf);
+    if (Math.abs(scaleX - 1) > 0.001 || Math.abs(scaleY - 1) > 0.001 || translateY < -0.5 || translateY > 10.5) {
+      modalScaledOrBounced = true;
+    }
   }
 
-  assert.equal(droppedAfterPeak, false, `AuthModal opacity dropped after rising (double entrance flash): ${JSON.stringify(samples.slice(0, 15))}`);
+  assert.equal(droppedAfterPeak, false, `AuthModal opacity dropped after rising: ${JSON.stringify(samples.slice(0, 10))}`);
+  assert.equal(minBackdropOp, 1, `Backdrop must remain calm and static at opacity 1 without independent fade; got min ${minBackdropOp}`);
+  assert.equal(backdropTransformed, false, "Backdrop must never transform during entrance.");
+  assert.equal(minChildOp, 1, `Inner AuthModal elements must not stagger opacity during initial entrance; got min ${minChildOp}`);
+  assert.equal(childTransformed, false, "Inner AuthModal elements must not stagger transform during initial entrance.");
+  assert.equal(modalScaledOrBounced, false, "AuthModal must only translate vertically (0..10px) without zoom/scale or bounce.");
+
   if (!reducedMotion) {
     assert.equal(entranceCycles, 1, `Expected 1 continuous entrance animation cycle, got ${entranceCycles}`);
   } else {
@@ -154,13 +208,19 @@ function assertEntranceTrace(raw, pageErrors, { reducedMotion }) {
   return {
     dir: raw.dir,
     introMountedAt: raw.introMountedAt,
+    introMotionCompletedAt: raw.introMotionCompletedAt,
     introExitingAt: raw.introExitingAt,
     introDetachedAt: raw.introDetachedAt,
     authMountedAt: raw.authMountedAt,
     authMountCount: raw.authMountCount,
     authUnmountCount: raw.authUnmountCount,
     firstFrameOpacity: samples[0].modalOp,
+    firstFrameTransform: samples[0].modalTf,
     lastFrameOpacity: samples[samples.length - 1].modalOp,
+    lastFrameTransform: samples[samples.length - 1].modalTf,
+    minBackdropOp,
+    minChildOp,
+    modalScaledOrBounced,
     sampleCount: samples.length,
     entranceCycles,
     droppedAfterPeak
@@ -175,6 +235,7 @@ async function runSingleEntranceProbe(context, url, { reducedMotion = false, tes
   await page.addInitScript(() => {
     window.__authEntranceTrace = {
       introMountedAt: null,
+      introMotionCompletedAt: null,
       introExitingAt: null,
       introDetachedAt: null,
       authMountedAt: null,
@@ -186,18 +247,36 @@ async function runSingleEntranceProbe(context, url, { reducedMotion = false, tes
 
     const sampleState = () => {
       const t = Math.round(performance.now() * 10) / 10;
+      const intro = document.querySelector("#root .safi-intro-splash");
+      if (intro && intro.dataset.motionComplete === "true" && window.__authEntranceTrace.introMotionCompletedAt === null) {
+        window.__authEntranceTrace.introMotionCompletedAt = t;
+      }
       const modal = document.querySelector(".safi-auth-modal");
       const backdrop = document.querySelector(".safi-auth-backdrop");
       const provider = document.querySelector(".safi-auth-provider");
+      const field = document.querySelector(".safi-auth-field");
+      const submit = document.querySelector(".safi-auth-submit");
       if (modal) {
+        const mCs = getComputedStyle(modal);
+        const bCs = backdrop ? getComputedStyle(backdrop) : null;
+        const pCs = provider ? getComputedStyle(provider) : null;
+        const fCs = field ? getComputedStyle(field) : null;
+        const sCs = submit ? getComputedStyle(submit) : null;
         window.__authEntranceTrace.modalOpacitySamples.push({
           t,
-          modalOp: Number(getComputedStyle(modal).opacity),
-          backdropOp: backdrop ? Number(getComputedStyle(backdrop).opacity) : null,
-          providerOp: provider ? Number(getComputedStyle(provider).opacity) : null
+          modalOp: Number(mCs.opacity),
+          modalTf: mCs.transform,
+          backdropOp: bCs ? Number(bCs.opacity) : null,
+          backdropTf: bCs?.transform ?? null,
+          providerOp: pCs ? Number(pCs.opacity) : null,
+          providerTf: pCs?.transform ?? null,
+          fieldOp: fCs ? Number(fCs.opacity) : null,
+          fieldTf: fCs?.transform ?? null,
+          submitOp: sCs ? Number(sCs.opacity) : null,
+          submitTf: sCs?.transform ?? null
         });
       }
-      if (window.__authEntranceTrace.authMountedAt === null || performance.now() - window.__authEntranceTrace.authMountedAt < 1800) {
+      if (window.__authEntranceTrace.authMountedAt === null || performance.now() - window.__authEntranceTrace.authMountedAt < 900) {
         requestAnimationFrame(sampleState);
       }
     };
@@ -269,7 +348,7 @@ async function runSingleEntranceProbe(context, url, { reducedMotion = false, tes
   if (captureStoryboard && saveScreenshots) {
     await shot(page, "00c-auth-entrance-in-progress.png");
   }
-  await delay(1400);
+  await delay(1000);
   if (captureStoryboard && saveScreenshots) {
     await shot(page, "00d-auth-settled-single.png");
   }
@@ -291,7 +370,7 @@ async function runSingleEntranceProbe(context, url, { reducedMotion = false, tes
   if (testReload) {
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 20_000 });
-    await delay(1400);
+    await delay(1000);
     const rawReload = await page.evaluate(() => ({
       ...window.__authEntranceTrace,
       dir: document.documentElement.dir || "ltr"
@@ -311,7 +390,7 @@ try {
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 
   // =========================================================================
-  // 0. Single Auth Entrance Lifecycle Verification (EN, EN Reload, AR RTL, Reduced Motion)
+  // 0. Single Auth Entrance Lifecycle Verification (EN, EN Reload, AR RTL, Reduced Motion, Tauri Desktop)
   // =========================================================================
   {
     const enCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -352,7 +431,16 @@ try {
     });
     await rmSingleCtx.close();
 
-    summary.singleAuthEntrance = { enFirst, enReload, arFirst, rmSingle };
+    const tauriCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await tauriCtx.addInitScript(() => {
+      window.__TAURI_INTERNALS__ = {
+        invoke: async () => null
+      };
+    });
+    const tauriDesktop = await runSingleEntranceProbe(tauriCtx, baseUrl, { testTabSwitch: true });
+    await tauriCtx.close();
+
+    summary.singleAuthEntrance = { enFirst, enReload, arFirst, rmSingle, tauriDesktop };
   }
 
   // =========================================================================

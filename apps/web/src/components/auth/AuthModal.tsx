@@ -260,10 +260,8 @@ export function AuthModal({
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [ownerRecognized, setOwnerRecognized] = useState(() => isOwnerEmail(email));
-  const backdropRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
-  const fieldsRef = useRef<HTMLDivElement | null>(null);
   const tablistRef = useRef<HTMLDivElement | null>(null);
   const tabIndicatorRef = useRef<HTMLSpanElement | null>(null);
   const signinTabRef = useRef<HTMLButtonElement | null>(null);
@@ -281,7 +279,7 @@ export function AuthModal({
 
   const passwordReady = meetsMinPasswordLength(password);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) {
       wasOpenRef.current = false;
       renderedTabModeRef.current = null;
@@ -295,6 +293,10 @@ export function AuthModal({
         closeRef.current?.focus({ preventScroll: true });
       }
     }
+  }, [open, mandatory]);
+
+  useEffect(() => {
+    if (!open) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape" && !busy && !mandatory) onClose();
     };
@@ -304,61 +306,24 @@ export function AuthModal({
 
   useLayoutEffect(() => {
     if (!open) return;
-    const backdrop = backdropRef.current;
     const panel = panelRef.current;
     if (panel === null || !canAnimate()) return;
 
     const ctx = gsap.context(() => {
-      const timeline = gsap.timeline();
-      if (backdrop !== null) {
-        timeline.fromTo(
-          backdrop,
-          { opacity: 0 },
-          {
-            opacity: 1,
-            duration: 0.28,
-            ease: "power2.out",
-            immediateRender: true,
-            clearProps: "opacity"
-          },
-          0
-        );
-      }
-
-      timeline.fromTo(
+      gsap.fromTo(
         panel,
-        { opacity: 0, y: 16, scale: 0.985 },
+        { opacity: 0, y: 10 },
         {
           opacity: 1,
           y: 0,
-          scale: 1,
-          duration: 0.42,
-          ease: "power3.out",
+          duration: 0.32,
+          ease: "power2.out",
           immediateRender: true,
+          overwrite: "auto",
           clearProps: "transform,opacity"
-        },
-        0
+        }
       );
-
-      const providers = fieldsRef.current;
-      const targets = providers?.querySelectorAll<HTMLElement>("[data-auth-stagger]");
-      if (targets !== undefined && targets.length > 0) {
-        timeline.fromTo(
-          targets,
-          { opacity: 0, y: 8 },
-          {
-            opacity: 1,
-            y: 0,
-            duration: 0.3,
-            stagger: 0.035,
-            ease: "power3.out",
-            immediateRender: true,
-            clearProps: "transform,opacity"
-          },
-          0.05
-        );
-      }
-    }, backdrop ?? panel);
+    }, panel);
 
     return () => {
       ctx.revert();
@@ -780,7 +745,6 @@ export function AuthModal({
 
   return (
     <div
-      ref={backdropRef}
       className="safi-auth-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy && !mandatory) onClose();
@@ -909,7 +873,7 @@ export function AuthModal({
               <span ref={tabIndicatorRef} className="safi-auth-tabs-indicator" aria-hidden="true" />
             </div>
 
-            <div className="safi-auth-providers" ref={fieldsRef}>
+            <div className="safi-auth-providers">
               {OAUTH_PROVIDERS.map((provider) => (
                 <button
                   key={provider}

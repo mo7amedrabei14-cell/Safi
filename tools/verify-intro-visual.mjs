@@ -2,13 +2,30 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
-const moduleUrl = process.env.PLAYWRIGHT_MODULE_URL;
-if (!moduleUrl) {
+async function loadPlaywright() {
+  const candidates = [
+    process.env.PLAYWRIGHT_MODULE_URL,
+    process.platform === "win32"
+      ? pathToFileURL(
+          resolve(process.env.TEMP ?? "C:/Temp", "safi-playwright/node_modules/playwright/index.mjs")
+        ).href
+      : "file:///tmp/safi-playwright/node_modules/playwright/index.mjs"
+  ].filter(Boolean);
+
+  for (const url of candidates) {
+    try {
+      return await import(url);
+    } catch {
+      // Try next candidate.
+    }
+  }
   throw new Error("PLAYWRIGHT_MODULE_URL must point to the pinned Playwright installation.");
 }
-const { chromium } = await import(moduleUrl);
+
+const { chromium } = await loadPlaywright();
 
 const baseUrl = "http://127.0.0.1:4173";
 const artifactDir = resolve("artifacts/intro-visual");
@@ -28,7 +45,7 @@ const server = spawn(
     "4173",
     "--strictPort"
   ],
-  { stdio: "inherit" }
+  { stdio: "inherit", shell: process.platform === "win32" }
 );
 
 async function waitForServer() {
@@ -81,9 +98,42 @@ try {
       applicationEntryMountedAt: null,
       exitStartedAt: null,
       introRemovedAt: null,
+      prematureEntryWhileIntroPresent: false,
+      prematureExitState: null,
       bootFrame: null,
       reactFrame: null
     };
+
+    const inspectDom = () => {
+      const trace = window.__safiIntroTrace;
+      if (!trace) return;
+      const rootIntro = document.querySelector("#root .safi-intro-splash");
+      const intro = document.querySelector("#safi-boot-screen, #root .safi-intro-splash");
+      const entry = document.querySelector(".safi-auth-modal, .safi-shell");
+      if (trace.exitStartedAt === null && rootIntro?.dataset.exiting === "true") {
+        trace.exitStartedAt = performance.now();
+      }
+      if (trace.exitStartedAt !== null && !rootIntro && trace.introRemovedAt === null) {
+        trace.introRemovedAt = performance.now();
+      }
+      if (entry) {
+        if (trace.applicationEntryMountedAt === null) {
+          trace.applicationEntryMountedAt = performance.now();
+        }
+        if (intro) {
+          trace.prematureEntryWhileIntroPresent = true;
+          trace.prematureExitState = intro.getAttribute("data-exiting") ?? "none";
+        }
+      }
+    };
+
+    const domObserver = new MutationObserver(inspectDom);
+    domObserver.observe(document, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-exiting"]
+    });
 
     const readFrame = (root) => {
       const orb = root.querySelector(".safi-intro-orb")?.getBoundingClientRect();
@@ -127,7 +177,7 @@ try {
       }
       if (
         (trace?.exitStartedAt !== null && !react) ||
-        performance.now() - samplingStartedAt > 30_000
+        performance.now() - samplingStartedAt > 120_000
       ) {
         if (
           trace &&
@@ -296,7 +346,7 @@ try {
   await page.evaluate(() => {
     const trace = window.__safiIntroTrace;
     if (trace) {
-      trace.introRemovedAt = performance.now();
+      if (trace.introRemovedAt === null) trace.introRemovedAt = performance.now();
       if (trace.applicationEntryMountedAt === null) {
         trace.applicationEntryMountedAt = performance.now();
       }
@@ -306,10 +356,16 @@ try {
   const finalTrace = await page.evaluate(() => ({ ...window.__safiIntroTrace }));
   const exitDurationMs = finalTrace.introRemovedAt - finalTrace.exitStartedAt;
   const entranceMotionDurationMs = finalTrace.motionCompletedAt - handoff.motionStartedAt;
+  assert.equal(
+    finalTrace.prematureEntryWhileIntroPresent,
+    false,
+    `AuthModal/workspace mounted prematurely while intro was still present (data-exiting=${finalTrace.prematureExitState}).`
+  );
   assert.ok(
-    finalTrace.applicationEntryMountedAt !== null &&
-      finalTrace.applicationEntryMountedAt >= finalTrace.exitStartedAt,
-    "The sign-in gate must appear only after the intro completes and exits."
+    finalTrace.introRemovedAt !== null &&
+      finalTrace.applicationEntryMountedAt !== null &&
+      finalTrace.applicationEntryMountedAt >= finalTrace.introRemovedAt,
+    "The sign-in gate must appear only after the intro completes its exit and detaches completely."
   );
   assert.ok(
     entranceMotionDurationMs <= 1_000,
@@ -331,12 +387,42 @@ try {
     reducedMotion: "reduce"
   });
   const reducedPage = await reducedContext.newPage();
+  await reducedPage.addInitScript(() => {
+    window.__safiReducedTrace = {
+      introSeen: false,
+      prematureEntryWhileIntroPresent: false,
+      introDetachedAt: null,
+      authMountedAt: null
+    };
+    const obs = new MutationObserver(() => {
+      const t = window.__safiReducedTrace;
+      const intro = document.querySelector("#safi-boot-screen, #root .safi-intro-splash");
+      const entry = document.querySelector(".safi-auth-modal, .safi-shell");
+      if (document.querySelector("#root .safi-intro-splash")) {
+        t.introSeen = true;
+      }
+      if (t.introSeen && !intro && t.introDetachedAt === null) {
+        t.introDetachedAt = performance.now();
+      }
+      if (entry) {
+        if (t.authMountedAt === null) t.authMountedAt = performance.now();
+        if (intro) t.prematureEntryWhileIntroPresent = true;
+      }
+    });
+    obs.observe(document, { childList: true, subtree: true });
+  });
   await reducedPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
-  await reducedPage.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 30_000 });
   await reducedPage.waitForSelector("#root .safi-intro-splash", {
     state: "detached",
-    timeout: 5_000
+    timeout: 10_000
   });
+  await reducedPage.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 30_000 });
+  const reducedTrace = await reducedPage.evaluate(() => ({ ...window.__safiReducedTrace }));
+  assert.equal(
+    reducedTrace.prematureEntryWhileIntroPresent,
+    false,
+    "Reduced-motion cold load must never display AuthModal while intro is still mounted."
+  );
   await reducedContext.close();
 
   const report = {

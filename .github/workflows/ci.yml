@@ -177,6 +177,11 @@ jobs:
           PLAYWRIGHT_MODULE_URL: file:///tmp/safi-playwright/node_modules/playwright/index.mjs
         run: node tools/verify-intro-visual.mjs
 
+      - name: Verify Themes, Main/Auth Scrollbar Separation & Auth Motion E2E in Chromium
+        env:
+          PLAYWRIGHT_MODULE_URL: file:///tmp/safi-playwright/node_modules/playwright/index.mjs
+        run: node tools/verify-ux-e2e.mjs
+
       - name: Verify persistent installation identity in real Chromium IndexedDB
         env:
           PLAYWRIGHT_MODULE_URL: file:///tmp/safi-playwright/node_modules/playwright/index.mjs

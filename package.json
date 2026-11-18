@@ -13,6 +13,7 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint \"packages/*/src/**/*.{ts,tsx}\" \"apps/*/src/**/*.{ts,tsx}\"",
     "test": "vitest run",
+    "test:e2e:ux": "node tools/verify-ux-e2e.mjs",
     "check:contrast": "pnpm --filter @safi/design-tokens run check:contrast && pnpm --filter @safi/design-tokens run check:contrast:self-test",
     "check:errors": "node -e \"process.exit(0)\"",
     "format": "prettier --write \"packages/**/*.{ts,tsx,json}\" \"apps/**/*.{ts,tsx,json}\" \".agents/**/*.json\" \"package.json\" \"tsconfig.base.json\"",

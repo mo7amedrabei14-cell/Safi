@@ -9,8 +9,13 @@
  * - Duplicate-account guard with a one-click path to the Sign In tab.
  * - Owner recognition for `mo7amed.rabei14@gmail.com`.
  */
-import type { FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type {
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import {
   ArrowRight,
@@ -145,7 +150,56 @@ function ProviderMark({ provider }: { readonly provider: string }): ReactNode {
   return <GithubMark />;
 }
 
-function buildSanitizedExitGhost(formEl: HTMLElement): HTMLElement {
+function isSensitiveAuthInput(input: HTMLInputElement): boolean {
+  const name = (input.getAttribute("name") ?? input.name ?? "").toLowerCase();
+  const type = (input.getAttribute("type") ?? input.type ?? "").toLowerCase();
+  const autocomplete = (
+    input.getAttribute("autocomplete") ??
+    input.autocomplete ??
+    ""
+  ).toLowerCase();
+  return type === "password" || name.includes("password") || autocomplete.includes("password");
+}
+
+/**
+ * Resolve WAI-ARIA tablist keyboard navigation with full RTL mirroring.
+ */
+export function resolveAuthTabKeyboardTarget(
+  current: AuthMode,
+  key: string,
+  isRtl: boolean
+): AuthMode | null {
+  const logicalOrder: readonly AuthMode[] = ["signin", "signup"];
+  const index = logicalOrder.indexOf(current);
+  const length = logicalOrder.length;
+
+  switch (key) {
+    case "Home":
+      return "signin";
+    case "End":
+      return "signup";
+    case "ArrowRight": {
+      const delta = isRtl ? -1 : 1;
+      return logicalOrder[(index + delta + length) % length] ?? null;
+    }
+    case "ArrowLeft": {
+      const delta = isRtl ? 1 : -1;
+      return logicalOrder[(index + delta + length) % length] ?? null;
+    }
+    case "ArrowDown":
+      return logicalOrder[(index + 1) % length] ?? null;
+    case "ArrowUp":
+      return logicalOrder[(index - 1 + length) % length] ?? null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Build a non-interactive visual exit clone of the outgoing form without ever
+ * exposing password characters or secrets in the transient DOM layer.
+ */
+export function buildSanitizedExitGhost(formEl: HTMLElement): HTMLElement {
   const clone = formEl.cloneNode(true) as HTMLElement;
   clone.className = "safi-auth-form safi-auth-form-exit-ghost";
   clone.setAttribute("aria-hidden", "true");
@@ -154,9 +208,17 @@ function buildSanitizedExitGhost(formEl: HTMLElement): HTMLElement {
   const clonedInputs = clone.querySelectorAll("input");
   sourceInputs.forEach((input, index) => {
     const copy = clonedInputs[index];
-    if (copy !== undefined) {
-      copy.value = input.value;
+    if (copy === undefined) return;
+
+    if (isSensitiveAuthInput(input)) {
+      copy.type = "password";
+      copy.value = "";
+      copy.defaultValue = "";
+      copy.removeAttribute("value");
+      return;
     }
+
+    copy.value = input.value;
   });
 
   clone.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
@@ -185,6 +247,10 @@ export function AuthModal({
   onForgotPassword
 }: AuthModalProps): ReactNode {
   const isAr = lang === "ar";
+  const tabBaseId = useId();
+  const signinTabId = `${tabBaseId}-tab-signin`;
+  const signupTabId = `${tabBaseId}-tab-signup`;
+  const authPanelId = `${tabBaseId}-panel`;
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -194,6 +260,7 @@ export function AuthModal({
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [ownerRecognized, setOwnerRecognized] = useState(() => isOwnerEmail(email));
+  const backdropRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const fieldsRef = useRef<HTMLDivElement | null>(null);
@@ -206,8 +273,8 @@ export function AuthModal({
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const wasOpenRef = useRef(false);
+  const renderedTabModeRef = useRef<AuthMode | null>(null);
   const prevModeRef = useRef<AuthMode>(mode);
-  const didMountTabRef = useRef(false);
   const transitionDirRef = useRef<1 | -1>(1);
   const prevHeightRef = useRef<number | null>(null);
   const exitGhostRef = useRef<HTMLElement | null>(null);
@@ -217,15 +284,15 @@ export function AuthModal({
   useEffect(() => {
     if (!open) {
       wasOpenRef.current = false;
-      didMountTabRef.current = false;
+      renderedTabModeRef.current = null;
       return;
     }
     if (!wasOpenRef.current) {
       wasOpenRef.current = true;
       if (mandatory) {
-        emailInputRef.current?.focus();
+        emailInputRef.current?.focus({ preventScroll: true });
       } else {
-        closeRef.current?.focus();
+        closeRef.current?.focus({ preventScroll: true });
       }
     }
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -235,24 +302,66 @@ export function AuthModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, busy, mandatory, onClose]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
+    const backdrop = backdropRef.current;
     const panel = panelRef.current;
     if (panel === null || !canAnimate()) return;
-    const tween = gsap.fromTo(
-      panel,
-      { opacity: 0, y: 18, scale: 0.985 },
-      {
-        opacity: 1,
-        y: 0,
-        scale: 1,
-        duration: 0.42,
-        ease: "power3.out",
-        clearProps: "transform,opacity"
+
+    const ctx = gsap.context(() => {
+      const timeline = gsap.timeline();
+      if (backdrop !== null) {
+        timeline.fromTo(
+          backdrop,
+          { opacity: 0 },
+          {
+            opacity: 1,
+            duration: 0.28,
+            ease: "power2.out",
+            immediateRender: true,
+            clearProps: "opacity"
+          },
+          0
+        );
       }
-    );
+
+      timeline.fromTo(
+        panel,
+        { opacity: 0, y: 16, scale: 0.985 },
+        {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          duration: 0.42,
+          ease: "power3.out",
+          immediateRender: true,
+          clearProps: "transform,opacity"
+        },
+        0
+      );
+
+      const providers = fieldsRef.current;
+      const targets = providers?.querySelectorAll<HTMLElement>("[data-auth-stagger]");
+      if (targets !== undefined && targets.length > 0) {
+        timeline.fromTo(
+          targets,
+          { opacity: 0, y: 8 },
+          {
+            opacity: 1,
+            y: 0,
+            duration: 0.3,
+            stagger: 0.035,
+            ease: "power3.out",
+            immediateRender: true,
+            clearProps: "transform,opacity"
+          },
+          0.05
+        );
+      }
+    }, backdrop ?? panel);
+
     return () => {
-      tween.kill();
+      ctx.revert();
     };
   }, [open]);
 
@@ -291,11 +400,13 @@ export function AuthModal({
 
   useLayoutEffect(() => {
     if (!open || sessionToken !== null) {
-      didMountTabRef.current = false;
+      renderedTabModeRef.current = null;
       return;
     }
-    updateTabIndicator(didMountTabRef.current);
-    didMountTabRef.current = true;
+    const shouldAnimate =
+      renderedTabModeRef.current !== null && renderedTabModeRef.current !== mode;
+    renderedTabModeRef.current = mode;
+    updateTabIndicator(shouldAnimate);
   }, [open, sessionToken, mode, isAr, updateTabIndicator]);
 
   useEffect(() => {
@@ -308,28 +419,6 @@ export function AuthModal({
     if (signupTabRef.current !== null) observer.observe(signupTabRef.current);
     return () => observer.disconnect();
   }, [open, sessionToken, updateTabIndicator]);
-
-  useEffect(() => {
-    if (!open) return;
-    const providers = fieldsRef.current;
-    if (providers === null || !canAnimate()) return;
-    const targets = providers.querySelectorAll<HTMLElement>("[data-auth-stagger]");
-    const tween = gsap.fromTo(
-      targets,
-      { opacity: 0, y: 10 },
-      {
-        opacity: 1,
-        y: 0,
-        duration: 0.34,
-        stagger: 0.04,
-        ease: "power3.out",
-        clearProps: "transform,opacity"
-      }
-    );
-    return () => {
-      tween.kill();
-    };
-  }, [open]);
 
   useLayoutEffect(() => {
     const previousMode = prevModeRef.current;
@@ -502,6 +591,18 @@ export function AuthModal({
 
     setMode(next);
     setFeedback(null);
+  };
+
+  const onTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const targetMode = resolveAuthTabKeyboardTarget(mode, event.key, isAr);
+    if (targetMode === null) return;
+    event.preventDefault();
+    switchMode(targetMode);
+    if (targetMode === "signin") {
+      signinTabRef.current?.focus();
+    } else {
+      signupTabRef.current?.focus();
+    }
   };
 
   const showDuplicate = (): void => {
@@ -679,6 +780,7 @@ export function AuthModal({
 
   return (
     <div
+      ref={backdropRef}
       className="safi-auth-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy && !mandatory) onClose();
@@ -770,13 +872,18 @@ export function AuthModal({
               ref={tablistRef}
               className="safi-auth-tabs"
               role="tablist"
+              aria-orientation="horizontal"
               aria-label={isAr ? "نوع الحساب" : "Account action"}
+              onKeyDown={onTabKeyDown}
             >
               <button
                 ref={signinTabRef}
+                id={signinTabId}
                 type="button"
                 role="tab"
                 aria-selected={mode === "signin"}
+                aria-controls={authPanelId}
+                tabIndex={mode === "signin" ? 0 : -1}
                 className={mode === "signin" ? "is-active" : ""}
                 onClick={() => switchMode("signin")}
               >
@@ -785,9 +892,12 @@ export function AuthModal({
               </button>
               <button
                 ref={signupTabRef}
+                id={signupTabId}
                 type="button"
                 role="tab"
                 aria-selected={mode === "signup"}
+                aria-controls={authPanelId}
+                tabIndex={mode === "signup" ? 0 : -1}
                 className={mode === "signup" ? "is-active" : ""}
                 onClick={() => switchMode("signup")}
               >
@@ -832,7 +942,14 @@ export function AuthModal({
               <span>{isAr ? "أو بالبريد الإلكتروني" : "or with email"}</span>
             </div>
 
-            <div ref={formStageRef} className="safi-auth-form-stage" data-auth-mode={mode}>
+            <div
+              ref={formStageRef}
+              id={authPanelId}
+              role="tabpanel"
+              aria-labelledby={mode === "signin" ? signinTabId : signupTabId}
+              className="safi-auth-form-stage"
+              data-auth-mode={mode}
+            >
               <form
                 ref={formRef}
                 className="safi-auth-form"

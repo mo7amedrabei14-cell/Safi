@@ -271,6 +271,8 @@ export function AuthModal({
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const wasOpenRef = useRef(false);
+  const entrancePlayedRef = useRef(false);
+  const entranceCtxRef = useRef<gsap.Context | null>(null);
   const renderedTabModeRef = useRef<AuthMode | null>(null);
   const prevModeRef = useRef<AuthMode>(mode);
   const transitionDirRef = useRef<1 | -1>(1);
@@ -305,18 +307,29 @@ export function AuthModal({
   }, [open, busy, mandatory, onClose]);
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      entrancePlayedRef.current = false;
+      entranceCtxRef.current?.revert();
+      entranceCtxRef.current = null;
+      return;
+    }
+    if (entrancePlayedRef.current) return;
     const panel = panelRef.current;
     if (panel === null || !canAnimate()) return;
+
+    entrancePlayedRef.current = true;
+    if (typeof gsap.ticker?.tick === "function") {
+      gsap.ticker.tick();
+    }
 
     const ctx = gsap.context(() => {
       gsap.fromTo(
         panel,
-        { opacity: 0, y: 10 },
+        { opacity: 0, y: 8 },
         {
           opacity: 1,
           y: 0,
-          duration: 0.32,
+          duration: 0.28,
           ease: "power2.out",
           immediateRender: true,
           overwrite: "auto",
@@ -324,9 +337,14 @@ export function AuthModal({
         }
       );
     }, panel);
+    entranceCtxRef.current = ctx;
 
     return () => {
-      ctx.revert();
+      if (!panel.isConnected) {
+        entrancePlayedRef.current = false;
+        ctx.revert();
+        entranceCtxRef.current = null;
+      }
     };
   }, [open]);
 

@@ -6,11 +6,21 @@ pub mod delimiter;
 pub mod encoding;
 pub mod reader_csv;
 pub mod reader_excel;
+pub mod workbook_intelligence;
 
 pub use delimiter::detect_delimiter;
 pub use encoding::detect_and_decode;
 pub use reader_csv::read_csv_stream;
 pub use reader_excel::{MAX_DECOMPRESSION_RATIO, MAX_UNCOMPRESSED_BYTES, read_excel_stream};
+pub use workbook_intelligence::{
+    DefinedNameRecord, DetectedTableRegion, EmbeddedObjectHandling, EmbeddedObjectKind,
+    EmbeddedObjectRecord, FormatCompatibilityEntry, FormatSupportLevel, FormulaVerificationStatus,
+    IngestedCellDataType, IngestedCellMetadata, IngestionProgressUpdate, SeparatedRowKind,
+    SeparatedSheetRow, SheetClassification, SheetRange, SheetVisibility, WorkbookDateSystem,
+    WorkbookFormat, WorkbookIngestionReport, WorksheetIntelligence, coords_to_a1,
+    format_compatibility_matrix, ingest_workbook_universal, segment_sheet_tables,
+    sniff_workbook_format,
+};
 
 /// Canonical Cargo crate identifier within the `safi` workspace.
 pub const CRATE_ID: &str = "sf-io";

@@ -187,15 +187,17 @@ describe("SafiData motion auth portal", () => {
     expect(formAttrs.get("aria-hidden")).toBe("true");
   });
 
-  it("runs a single cohesive panel-only entrance motion before first paint without backdrop fade or child stagger", () => {
+  it("runs a single cohesive panel-only entrance motion before first paint without backdrop fade, child stagger, or StrictMode re-trigger", () => {
     const source = readFileSync(new URL("./AuthModal.tsx", import.meta.url), "utf8");
 
     expect(source).not.toContain("backdropRef");
     expect(source).not.toContain("fieldsRef");
-    expect(source).toContain("useLayoutEffect(() => {\n    if (!open) return;");
+    expect(source).toContain("if (entrancePlayedRef.current) return;");
+    expect(source).toContain("gsap.ticker.tick()");
     expect(source).toContain("gsap.context(() => {");
-    expect(source).toContain("{ opacity: 0, y: 10 }");
+    expect(source).toContain("{ opacity: 0, y: 8 }");
     expect(source).toContain("immediateRender: true");
+    expect(source).toContain("if (!panel.isConnected)");
     expect(source).toContain("ctx.revert()");
     expect(source).toContain("renderedTabModeRef");
   });

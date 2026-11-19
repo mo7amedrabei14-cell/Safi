@@ -490,6 +490,7 @@ export interface DesktopAuthorizationStatus {
   readonly mode: "online_authorized" | "offline_read_only" | "unauthenticated";
   readonly readOnlyOffline: boolean;
   readonly canExecuteProtectedOps: boolean;
+  readonly hasPreviouslyAuthenticated?: boolean;
   readonly sessionId: string | null;
   readonly workspaceId: string | null;
   readonly lastOnlineVerifiedMs: number | null;

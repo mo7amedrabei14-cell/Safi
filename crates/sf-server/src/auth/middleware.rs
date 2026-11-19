@@ -11,7 +11,8 @@ use axum::response::Response;
 use super::api_key::API_KEY_PREFIX;
 use super::service::AuthService;
 use super::session::SESSION_TOKEN_PREFIX;
-use super::{AuthenticatedSession, Principal, Scope};
+use super::{unix_now, AuthenticatedSession, Principal, Scope};
+use crate::desktop_auth::DesktopAuthService;
 use crate::error::AuthError;
 
 /// State for API-key protected routes.
@@ -25,6 +26,16 @@ pub struct ApiKeyGuard {
 #[derive(Clone)]
 pub struct SessionGuard {
     pub auth: Arc<AuthService>,
+    pub required_scope: Scope,
+}
+
+/// State for Owner Control Center routes accepting EITHER a Desktop `sfs_*` session OR a
+/// dedicated Owner Web Portal `sfw_*` session (Section 6.1: Owner web login never counts as a
+/// second Desktop device).
+#[derive(Clone)]
+pub struct OwnerSessionGuard {
+    pub auth: Arc<AuthService>,
+    pub desktop_auth: DesktopAuthService,
     pub required_scope: Scope,
 }
 
@@ -93,6 +104,28 @@ pub async fn require_session(
             return Err(AuthError::Revoked);
         }
     }
+    enforce_scope(&session.principal, guard.required_scope)?;
+    request.extensions_mut().insert(session);
+    Ok(next.run(request).await)
+}
+
+/// Authenticate either a Desktop `sfs_*` session or a dedicated Owner Web `sfw_*` session.
+pub async fn require_owner_session(
+    State(guard): State<OwnerSessionGuard>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, AuthError> {
+    let token = bearer_token(&request).ok_or(AuthError::InvalidCredentials)?;
+    let session = if token.starts_with("sfw_") {
+        guard
+            .desktop_auth
+            .authenticate_owner_web_session(token, unix_now())
+            .await?
+    } else if token.starts_with(SESSION_TOKEN_PREFIX) {
+        guard.auth.authenticate_session(token).await?
+    } else {
+        return Err(AuthError::InvalidCredentials);
+    };
     enforce_scope(&session.principal, guard.required_scope)?;
     request.extensions_mut().insert(session);
     Ok(next.run(request).await)

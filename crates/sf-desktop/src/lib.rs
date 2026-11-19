@@ -8,6 +8,8 @@ pub mod engine_bridge;
 pub mod error;
 pub mod installer;
 pub mod license;
+pub mod local_search;
+pub mod recipe_library;
 pub mod signing;
 pub mod studio;
 pub mod updater;

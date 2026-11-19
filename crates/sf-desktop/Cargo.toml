@@ -20,9 +20,12 @@ rand = "=0.8.8"
 base64 = "=0.22.1"
 
 # The desktop app is the only place the Studio engine executes (AGENTS: web is a showcase).
+sf-arabic = { path = "../sf-arabic" }
 sf-core = { path = "../sf-core" }
 sf-io = { path = "../sf-io" }
 sf-recipe = { path = "../sf-recipe" }
+zip = "=2.2.2"
+quick-xml = "=0.31.0"
 
 [dev-dependencies]
 serde_json = "=1.0.135"

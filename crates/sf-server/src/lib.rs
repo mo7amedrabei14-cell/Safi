@@ -9,6 +9,7 @@ pub mod billing;
 pub mod config;
 pub mod cors;
 pub mod coupons;
+pub mod desktop_auth;
 pub mod device_authority;
 pub mod encrypted_sync;
 pub mod entitlements;
@@ -19,6 +20,7 @@ pub mod owner_mfa;
 pub mod pg_store;
 pub mod routes;
 pub mod routes_updates;
+pub mod templates_hub;
 pub mod updater;
 pub mod zero_trust;
 
@@ -41,6 +43,7 @@ use auth::service::AuthService;
 use billing::BillingService;
 use config::ServerConfig;
 use coupons::CouponService;
+use desktop_auth::DesktopAuthService;
 use device_authority::DeviceAuthorityService;
 use encrypted_sync::EncryptedSyncService;
 use entitlements::EntitlementService;
@@ -48,6 +51,7 @@ use log_center::AuditLogCenter;
 use organizations::OrganizationService;
 use owner_mfa::OwnerMfaService;
 use pg_store::{DurableServerSnapshot, DurableStateJournal, PgControlPlaneStore};
+use templates_hub::TemplatesHubService;
 use updater::ReleaseAndLicenseSigner;
 
 /// Request identifier attached by the middleware and echoed in the response header.
@@ -151,7 +155,9 @@ pub struct AppState {
     pub entitlements: EntitlementService,
     pub billing: BillingService,
     pub coupons: CouponService,
+    pub desktop_auth: DesktopAuthService,
     pub device_authority: DeviceAuthorityService,
+    pub templates_hub: TemplatesHubService,
     pub organizations: OrganizationService,
     pub encrypted_sync: EncryptedSyncService,
     pub signer: ReleaseAndLicenseSigner,
@@ -190,7 +196,9 @@ impl AppState {
             entitlements,
             billing,
             coupons: CouponService::new(),
+            desktop_auth: DesktopAuthService::new(),
             device_authority,
+            templates_hub: TemplatesHubService::new(),
             organizations: OrganizationService::new(),
             encrypted_sync: EncryptedSyncService::new(),
             signer,
@@ -225,6 +233,8 @@ impl AppState {
             self.entitlements.import_snapshot(snap.entitlements).await;
             self.billing.import_snapshot(snap.billing).await;
             self.owner_mfa.import_snapshot(snap.owner_mfa).await;
+            self.desktop_auth.import_snapshot(snap.desktop_auth).await;
+            self.templates_hub.import_snapshot(snap.templates_hub).await;
             self.log_center.import_entries(snap.audit_entries).await;
             if let Some(repo) = &self.in_memory_sessions {
                 repo.import_snapshot(snap.sessions).await;
@@ -273,6 +283,8 @@ impl AppState {
             billing: self.billing.export_snapshot().await,
             owner_mfa: self.owner_mfa.export_snapshot().await,
             sessions,
+            desktop_auth: self.desktop_auth.export_snapshot().await,
+            templates_hub: self.templates_hub.export_snapshot().await,
             maintenance_mode,
             maintenance_reason,
             feature_flags,

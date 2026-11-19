@@ -19,10 +19,15 @@ pub struct UpdateQuery {
 #[derive(Debug, Serialize)]
 pub struct SignedUpdateResponse {
     pub manifest: ReleaseManifestRecord,
+    pub version_name: String,
+    pub download_url: String,
+    pub file_size_bytes: u64,
+    pub sha256_hex: String,
     pub verifying_key_hex: String,
 }
 
-/// `GET /v1/updates/latest` — returns a genuinely Ed25519-signed Desktop release manifest.
+/// `GET /v1/updates/latest` — returns a genuinely Ed25519-signed Desktop release manifest
+/// backed by Owner-managed `app_releases` metadata (zero dummy hashes).
 /// Fails closed with `SF-AUTH-005` if `SAFI_UPDATE_SIGNING_PRIVATE_KEY` is not configured.
 pub async fn get_latest_update(
     State(state): State<AppState>,
@@ -37,17 +42,11 @@ pub async fn get_latest_update(
         .filter(|p| !p.trim().is_empty() && p.len() <= 64)
         .unwrap_or_else(|| "windows-x86_64".to_owned());
 
-    let unsigned = ReleaseManifestRecord {
-        version: 105,
-        channel,
-        platform,
-        min_required_version: 100,
-        delta_checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-            .to_owned(),
-        signature_hex: String::new(),
-        is_mandatory: false,
-        release_notes: "SafiData Desktop 1.0 production release".to_owned(),
-    };
+    let (release, unsigned) = state
+        .templates_hub
+        .latest_release(&channel, &platform)
+        .await
+        .ok_or(AuthError::InvalidRequest)?;
     let manifest = state.signer.sign_manifest(unsigned)?;
     let verifying_key_hex = state
         .signer
@@ -56,6 +55,10 @@ pub async fn get_latest_update(
 
     Ok(Json(SignedUpdateResponse {
         manifest,
+        version_name: release.version_name,
+        download_url: release.download_url,
+        file_size_bytes: release.file_size_bytes,
+        sha256_hex: release.sha256_hex,
         verifying_key_hex,
     }))
 }

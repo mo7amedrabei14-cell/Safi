@@ -32,14 +32,17 @@ import {
   ownerApi,
   type OwnerAccountView,
   type OwnerAnnouncement,
+  type OwnerAppRelease,
   type OwnerAuditLogEntry,
   type OwnerBillingEvent,
+  type OwnerCommunitySubmission,
   type OwnerCouponRecord,
   type OwnerCustomerProfileResponse,
   type OwnerDeviceRecord,
   type OwnerDeviceReplacementEvent,
   type OwnerFeatureFlag,
   type OwnerMfaStatus,
+  type OwnerOfficialTemplate,
   type OwnerOrganizationRow,
   type OwnerStatsResponse,
   type OwnerSupportTicket,
@@ -60,6 +63,9 @@ type OwnerPanelTab =
   | "coupons"
   | "devices"
   | "orgs"
+  | "community"
+  | "templates"
+  | "releases"
   | "system"
   | "audit";
 
@@ -91,6 +97,17 @@ export function OwnerDashboard({
   const [announcements, setAnnouncements] = useState<readonly OwnerAnnouncement[]>([]);
   const [productConfig, setProductConfig] = useState<Record<string, unknown> | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<OwnerCustomerProfileResponse | null>(null);
+  const [communitySubmissions, setCommunitySubmissions] = useState<
+    readonly OwnerCommunitySubmission[]
+  >([]);
+  const [officialTemplates, setOfficialTemplates] = useState<readonly OwnerOfficialTemplate[]>([]);
+  const [releases, setReleases] = useState<readonly OwnerAppRelease[]>([]);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [relVersion, setRelVersion] = useState("1.0.1");
+  const [relUrl, setRelUrl] = useState("https://downloads.safidata.app/SafiData-1.0.1-x64.msi");
+  const [relSha256, setRelSha256] = useState("");
+  const [relBytes, setRelBytes] = useState("6240768");
+  const [relNotes, setRelNotes] = useState("");
 
   const [newCouponCode, setNewCouponCode] = useState("");
   const [newCouponPct, setNewCouponPct] = useState("20");
@@ -147,7 +164,10 @@ export function OwnerDashboard({
         ownerApi.listOrganizations(token),
         ownerApi.listSupportTickets(token),
         ownerApi.listAnnouncements(token),
-        ownerApi.getProductConfig(token)
+        ownerApi.getProductConfig(token),
+        ownerApi.listCommunitySubmissions(token),
+        ownerApi.listOfficialTemplates(token),
+        ownerApi.listReleases(token)
       ]);
       if (extended[0].status === "fulfilled") setCoupons(extended[0].value);
       if (extended[1].status === "fulfilled") {
@@ -158,6 +178,9 @@ export function OwnerDashboard({
       if (extended[3].status === "fulfilled") setTickets(extended[3].value);
       if (extended[4].status === "fulfilled") setAnnouncements(extended[4].value);
       if (extended[5].status === "fulfilled") setProductConfig(extended[5].value);
+      if (extended[6].status === "fulfilled") setCommunitySubmissions(extended[6].value);
+      if (extended[7].status === "fulfilled") setOfficialTemplates(extended[7].value);
+      if (extended[8].status === "fulfilled") setReleases(extended[8].value);
     },
     [accountQuery]
   );
@@ -492,6 +515,9 @@ export function OwnerDashboard({
             ["coupons", isAr ? "الكوبونات والعروض" : "Coupons & Promos"],
             ["devices", isAr ? "الأجهزة والجلسات" : "Devices & Sessions"],
             ["orgs", isAr ? "المؤسسات والدعم" : "Orgs, Support & Notices"],
+            ["community", isAr ? "مشاركات المجتمع" : "Community Submissions"],
+            ["templates", isAr ? "القوالب الرسمية" : "Official Templates"],
+            ["releases", isAr ? "إصدارات التطبيق" : "App Releases"],
             ["system", isAr ? "الإعدادات والأعلام" : "Config & Flags"],
             ["audit", isAr ? "سجل التدقيق" : "Audit Chain"]
           ] as const
@@ -1104,6 +1130,272 @@ export function OwnerDashboard({
           <button type="button" className="safi-btn" onClick={() => setSelectedProfile(null)}>
             {isAr ? "إغلاق الملف" : "Close Profile"}
           </button>
+        </section>
+      ) : null}
+
+      {panelTab === "community" ? (
+        <section className="safi-panel" data-owner-section="community-submissions">
+          <h3>{isAr ? "مشاركات القوالب من المجتمع" : "Community Template Submissions"}</h3>
+          <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+            {isAr
+              ? "مراجعة المساهمات المرسلة بموافقة صريحة من المستخدمين. النشر للمكتبة الرسمية يتطلب قرارًا صريحًا منفصلًا."
+              : "Review explicitly shared user recipes. Publishing to the Official Template Library requires a separate explicit Owner publish action."}
+          </p>
+          <div style={{ marginBottom: "12px" }}>
+            <input
+              type="text"
+              className="safi-input"
+              value={reviewNotes}
+              onChange={(e) => setReviewNotes(e.target.value)}
+              placeholder={isAr ? "ملاحظات المراجعة..." : "Reviewer notes..."}
+            />
+          </div>
+          {communitySubmissions.length === 0 ? (
+            <p>{isAr ? "لا توجد مشاركات مجتمع بعد." : "No community submissions yet."}</p>
+          ) : (
+            <ul style={{ display: "grid", gap: "10px", listStyle: "none", padding: 0 }}>
+              {communitySubmissions.map((sub) => (
+                <li
+                  key={sub.id}
+                  className="safi-panel"
+                  style={{ display: "grid", gap: "6px" }}
+                  data-community-submission-id={sub.id}
+                >
+                  <div>
+                    <strong>{sub.name}</strong> ({sub.recipe_type}) — <code>{sub.status}</code>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                    {sub.description}
+                  </div>
+                  {sub.pii_warnings.length > 0 ? (
+                    <div style={{ fontSize: "12px", color: "var(--safi-warning, #f59e0b)" }}>
+                      {isAr ? "تحذيرات الفحص:" : "Scanner warnings:"} {sub.pii_warnings.join(" | ")}
+                    </div>
+                  ) : null}
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="safi-btn"
+                      onClick={() =>
+                        void runOwnerAction(
+                          () =>
+                            ownerApi.reviewCommunitySubmission(
+                              sessionToken,
+                              sub.id,
+                              "approved",
+                              reviewNotes.trim() || "Approved by Owner"
+                            ),
+                          "تمت الموافقة على المساهمة.",
+                          "Submission approved."
+                        )
+                      }
+                    >
+                      {isAr ? "موافقة" : "Approve"}
+                    </button>
+                    <button
+                      type="button"
+                      className="safi-btn"
+                      onClick={() =>
+                        void runOwnerAction(
+                          () =>
+                            ownerApi.reviewCommunitySubmission(
+                              sessionToken,
+                              sub.id,
+                              "rejected",
+                              reviewNotes.trim() || "Rejected by Owner"
+                            ),
+                          "تم رفض المساهمة.",
+                          "Submission rejected."
+                        )
+                      }
+                    >
+                      {isAr ? "رفض" : "Reject"}
+                    </button>
+                    {sub.status === "approved" ? (
+                      <button
+                        type="button"
+                        className="safi-btn safi-btn-primary"
+                        onClick={() =>
+                          void runOwnerAction(
+                            () =>
+                              ownerApi.publishCommunitySubmission(sessionToken, sub.id, {
+                                slug: `community-${sub.id.slice(0, 8)}`,
+                                official_name: sub.name,
+                                official_description: sub.description,
+                                category: sub.recipe_type,
+                                release_notes: reviewNotes.trim() || "Published to Official Library"
+                              }),
+                            "تم النشر في المكتبة الرسمية.",
+                            "Published to Official Template Library."
+                          )
+                        }
+                      >
+                        {isAr ? "نشر في المكتبة الرسمية" : "Publish to Official Library"}
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {panelTab === "templates" ? (
+        <section className="safi-panel" data-owner-section="official-templates">
+          <h3>
+            {isAr ? "مكتبة القوالب الرسمية (الإصدارات والتراجع)" : "Official Template Library"}
+          </h3>
+          {officialTemplates.length === 0 ? (
+            <p>{isAr ? "لا توجد قوالب رسمية." : "No official templates loaded."}</p>
+          ) : (
+            <ul style={{ display: "grid", gap: "10px", listStyle: "none", padding: 0 }}>
+              {officialTemplates.map((tpl) => (
+                <li
+                  key={tpl.id}
+                  className="safi-panel"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: "10px"
+                  }}
+                >
+                  <div>
+                    <strong>{tpl.name}</strong> (<code>{tpl.slug}</code>) • v{tpl.current_version} •{" "}
+                    <span>
+                      {tpl.active ? (isAr ? "نشط" : "Active") : isAr ? "موقوف" : "Inactive"}
+                    </span>
+                    <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                      {tpl.description}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="safi-btn"
+                      onClick={() =>
+                        void runOwnerAction(
+                          () =>
+                            ownerApi.setOfficialTemplateStatus(sessionToken, tpl.id, !tpl.active),
+                          "تم تحديث حالة القالب.",
+                          "Template status updated."
+                        )
+                      }
+                    >
+                      {tpl.active ? (isAr ? "تعطيل" : "Deactivate") : isAr ? "تفعيل" : "Activate"}
+                    </button>
+                    {tpl.current_version > 1 ? (
+                      <button
+                        type="button"
+                        className="safi-btn"
+                        onClick={() =>
+                          void runOwnerAction(
+                            () =>
+                              ownerApi.rollbackOfficialTemplate(
+                                sessionToken,
+                                tpl.id,
+                                tpl.current_version - 1
+                              ),
+                            "تم التراجع إلى الإصدار السابق.",
+                            "Rolled back to previous template version."
+                          )
+                        }
+                      >
+                        {isAr ? "تراجع إصدار" : "Rollback Version"}
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {panelTab === "releases" ? (
+        <section className="safi-panel" data-owner-section="app-releases">
+          <h3>
+            {isAr
+              ? "إدارة إصدارات تطبيق سطح المكتب الموقّعة"
+              : "Signed Desktop Application Releases"}
+          </h3>
+          <div style={{ display: "grid", gap: "8px", marginBottom: "14px", maxWidth: "560px" }}>
+            <input
+              type="text"
+              className="safi-input"
+              value={relVersion}
+              onChange={(e) => setRelVersion(e.target.value)}
+              placeholder="1.0.1"
+            />
+            <input
+              type="url"
+              className="safi-input"
+              value={relUrl}
+              onChange={(e) => setRelUrl(e.target.value)}
+              placeholder="https://downloads.safidata.app/..."
+            />
+            <input
+              type="text"
+              className="safi-input"
+              value={relSha256}
+              onChange={(e) => setRelSha256(e.target.value)}
+              placeholder="64-char SHA-256 hex"
+            />
+            <input
+              type="number"
+              className="safi-input"
+              value={relBytes}
+              onChange={(e) => setRelBytes(e.target.value)}
+              placeholder="File size bytes"
+            />
+            <input
+              type="text"
+              className="safi-input"
+              value={relNotes}
+              onChange={(e) => setRelNotes(e.target.value)}
+              placeholder={isAr ? "ملاحظات الإصدار..." : "Release notes..."}
+            />
+            <button
+              type="button"
+              className="safi-btn safi-btn-primary"
+              onClick={() =>
+                void runOwnerAction(
+                  () =>
+                    ownerApi.publishRelease(sessionToken, {
+                      version_code: releases.length + 2,
+                      version_name: relVersion.trim(),
+                      channel: "stable",
+                      platform: "windows-x86_64",
+                      download_url: relUrl.trim(),
+                      file_size_bytes: Number.parseInt(relBytes, 10) || 1,
+                      sha256_hex: relSha256.trim().toLowerCase(),
+                      release_notes: relNotes.trim()
+                    }),
+                  "تم نشر الإصدار الموقّع.",
+                  "Signed release published."
+                )
+              }
+            >
+              {isAr ? "نشر إصدار جديد" : "Publish Release"}
+            </button>
+          </div>
+          {releases.length === 0 ? (
+            <p>
+              {isAr
+                ? "لا توجد إصدارات منشورة في قاعدة البيانات بعد."
+                : "No releases published yet."}
+            </p>
+          ) : (
+            <ul style={{ display: "grid", gap: "8px", listStyle: "none", padding: 0 }}>
+              {releases.map((rel) => (
+                <li key={rel.id} className="safi-panel">
+                  <strong>v{rel.version_name}</strong> ({rel.channel} / {rel.platform}) —{" "}
+                  <code>{rel.sha256_hex.slice(0, 16)}…</code> ({rel.file_size_bytes} bytes)
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       ) : null}
 

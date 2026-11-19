@@ -76,7 +76,7 @@ describe("SafiData startup and application shell", () => {
     expect(html).not.toContain("مرحبًا بك في منصة صافي البيانات");
   });
 
-  it("renders a distinct studio for every tab and gates Owner to verified Desktop sessions", () => {
+  it("blocks operational studios on public Showcase browser and renders them strictly inside Desktop runtime", () => {
     const expectations: Array<[string, string]> = [
       ["home", "الإصدار الذهبي المعتمد"],
       ["cleaning", "مختبر التنقية والخصوصية"],
@@ -85,12 +85,28 @@ describe("SafiData startup and application shell", () => {
       ["library", "مكتبة القوالب وتقارير الجودة"]
     ];
 
+    // Public Showcase (desktopRuntime: false) must NEVER expose operational studios.
     for (const [tab, marker] of expectations) {
-      const html = renderToString(renderStudio(tab as (typeof SHELL_TABS)[number], noop, "ar"));
-      expect(html).toContain(marker);
+      const browserHtml = renderToString(
+        renderStudio(tab as (typeof SHELL_TABS)[number], noop, "ar", { desktopRuntime: false })
+      );
+      if (tab === "home") {
+        expect(browserHtml).toContain(marker);
+      } else {
+        expect(browserHtml).not.toContain(marker);
+        expect(browserHtml).toContain("data-download-installer-btn");
+      }
     }
 
-    // Browser / non-owner never renders OwnerDashboard.
+    // Packaged Desktop runtime renders every operational studio tab.
+    for (const [tab, marker] of expectations) {
+      const desktopHtml = renderToString(
+        renderStudio(tab as (typeof SHELL_TABS)[number], noop, "ar", { desktopRuntime: true })
+      );
+      expect(desktopHtml).toContain(marker);
+    }
+
+    // Browser / non-owner never renders OwnerDashboard inside renderStudio.
     const browserOwner = renderToString(renderStudio("owner", noop, "ar"));
     expect(browserOwner).not.toContain("safi-owner-frame");
 

@@ -1,0 +1,43 @@
+{
+  "version": "1.0.0",
+  "channel": "stable",
+  "publishedAt": "2026-11-19T00:00:00Z",
+  "platforms": {
+    "windows": {
+      "available": true,
+      "labelEn": "Windows 64-bit Desktop Executable (Local Unsigned Build)",
+      "labelAr": "تطبيق سطح المكتب لنظام Windows 64-bit (إصدار محلي غير موقّع بشهادة Authenticode)",
+      "fileName": "SafiData-Desktop-1.0.0-windows-x64.exe",
+      "downloadUrl": "/downloads/SafiData-Desktop-1.0.0-windows-x64.exe",
+      "fileSizeBytes": 6240768,
+      "sha256": "f78a0776cb5cb7f9829aa95e108c8e5c8675509ac5445603d1136e4c566f9024",
+      "codeSigned": false,
+      "signingNoticeEn": "Authenticode code-signing requires an external commercial certificate (not yet configured in this local build).",
+      "signingNoticeAr": "التوقيع الرقمي لـ Windows (Authenticode) يتطلب شهادة تجارية خارجية لم يتم إعدادها بعد في هذا البناء المحلي."
+    },
+    "mac": {
+      "available": false,
+      "labelEn": "macOS Universal (Apple Silicon & Intel) — Not Yet Published",
+      "labelAr": "نسخة macOS الشاملة — غير منشورة بعد",
+      "fileName": null,
+      "downloadUrl": null,
+      "fileSizeBytes": 0,
+      "sha256": null,
+      "codeSigned": false,
+      "signingNoticeEn": "macOS DMG build & Apple notarization require a macOS CI runner and Apple Developer credentials.",
+      "signingNoticeAr": "بناء نسخة macOS وتوثيقها يتطلبان جهاز macOS وحساب Apple Developer."
+    },
+    "linux": {
+      "available": false,
+      "labelEn": "Linux (AppImage / DEB) — Not Yet Published",
+      "labelAr": "نسخة Linux (AppImage / DEB) — غير منشورة بعد",
+      "fileName": null,
+      "downloadUrl": null,
+      "fileSizeBytes": 0,
+      "sha256": null,
+      "codeSigned": false,
+      "signingNoticeEn": "Linux AppImage/DEB packages require a Linux build runner.",
+      "signingNoticeAr": "حزم Linux (AppImage / DEB) تتطلب بيئة بناء Linux."
+    }
+  }
+}

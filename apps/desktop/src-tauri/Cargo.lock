@@ -4637,14 +4637,17 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "hex",
+ "quick-xml 0.31.0",
  "rand 0.8.8",
  "ring",
  "serde",
  "serde_json",
+ "sf-arabic",
  "sf-core",
  "sf-io",
  "sf-recipe",
  "zeroize",
+ "zip",
 ]
 
 [[package]]

@@ -66,7 +66,43 @@ try {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    // Scenario 1: Real Offline Mode -> Offline Read-Only Banner & Locked Protected Actions
+    // Scenario 0: Fresh Unauthenticated Desktop Install MUST NOT Expose Offline Read-Only Bypass
+    {
+      const ctx = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        reducedMotion: "reduce"
+      });
+      await ctx.addInitScript(() => {
+        window.__TAURI_INTERNALS__ = {
+          invoke: async (cmd) => {
+            if (cmd === "studio_authorization_status") {
+              return JSON.stringify({
+                mode: "unauthenticated",
+                readOnlyOffline: false,
+                canExecuteProtectedOps: false,
+                hasPreviouslyAuthenticated: false,
+                sessionId: null,
+                workspaceId: null,
+                lastOnlineVerifiedMs: null
+              });
+            }
+            return JSON.stringify({ ok: true });
+          }
+        };
+      });
+      const page = await ctx.newPage();
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await page.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 20_000 });
+      await page.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 10_000 });
+      assert.equal(
+        await page.locator('[data-enter-offline-readonly="true"]').count(),
+        0,
+        "Fresh unauthenticated install MUST NOT expose Offline Read-Only bypass button"
+      );
+      await ctx.close();
+    }
+
+    // Scenario 1: Previously Authenticated User Offline -> Offline Read-Only Banner & Locked Protected Actions
     {
       const ctx = await browser.newContext({
         viewport: { width: 1440, height: 900 },
@@ -80,6 +116,7 @@ try {
                 mode: "offline_read_only",
                 readOnlyOffline: true,
                 canExecuteProtectedOps: false,
+                hasPreviouslyAuthenticated: true,
                 sessionId: null,
                 workspaceId: null,
                 lastOnlineVerifiedMs: null

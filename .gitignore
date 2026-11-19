@@ -43,3 +43,10 @@ test-results/
 
 # Tauri generated schemas (rebuilt by tauri-build)
 apps/desktop/src-tauri/gen/
+
+# Staged Desktop installer binaries (published via CDN / release storage, not Git)
+apps/web/public/downloads/*.exe
+apps/web/public/downloads/*.msi
+apps/web/public/downloads/*.dmg
+apps/web/public/downloads/*.AppImage
+apps/web/public/downloads/*.deb

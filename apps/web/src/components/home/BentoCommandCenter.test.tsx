@@ -5,10 +5,16 @@ import { BentoCommandCenter } from "./BentoCommandCenter";
 import { inspectImportFile, MAX_FILE_BYTES, WARN_FILE_BYTES } from "./SmartDropzone";
 
 describe("UI-Phase-4 Bento command centre", () => {
-  it("renders the gold badge, the word-split headline and the magnetic CTAs", () => {
+  it("renders the gold badge, accurate local/online-auth copy, real installer metadata, and magnetic CTAs", () => {
     const html = renderToString(createElement(BentoCommandCenter, { lang: "ar" }));
 
-    expect(html).toContain("الإصدار الذهبي المعتمد v1.0.0-s5-gold • معالجة محلية 100% بلا إنترنت");
+    expect(html).toContain(
+      "الإصدار الذهبي المعتمد v1.0.0-s5-gold • معالجة محلية على جهازك مع تفويض متصل ووضع قراءة فقط للمحفوظات"
+    );
+    expect(html).not.toContain("Works 100% Offline");
+    expect(html).not.toContain("100% offline");
+    expect(html).toContain('data-download-installer-btn="true"');
+    expect(html).toContain("data-installer-sha256=");
     expect(html.startsWith("<div")).toBe(true);
     expect(html).toContain("<h1");
     expect(html).toContain("مرحبًا");

@@ -32,6 +32,14 @@ pub enum DeepLinkAction {
         /// The requested section.
         section: SettingsSection,
     },
+    /// Complete a Desktop Browser PKCE sign-in/sign-up callback (`safi://auth?code=...&state=...`).
+    /// Tokens NEVER travel in deep-link URLs; only a short-lived one-time PKCE code + state.
+    AuthCallback {
+        /// One-time short-lived authorization code (`sfcode_...`).
+        code: String,
+        /// Cryptographically random state echoed by the browser flow.
+        state: String,
+    },
 }
 
 /// Settings sections a deep link may target.
@@ -105,7 +113,58 @@ pub fn parse(raw: &str) -> Result<DeepLinkAction, DesktopError> {
                 _ => return Err(parameter_denied()),
             },
         }),
+        "auth" => {
+            let (code, state) = auth_callback_params(query)?;
+            Ok(DeepLinkAction::AuthCallback { code, state })
+        }
         _ => Err(action_denied()),
+    }
+}
+
+fn auth_callback_params(query: Option<&str>) -> Result<(String, String), DesktopError> {
+    let query = query.ok_or_else(parameter_denied)?;
+    if query.is_empty() {
+        return Err(parameter_denied());
+    }
+    let mut code: Option<String> = None;
+    let mut state: Option<String> = None;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').ok_or_else(parameter_denied)?;
+        if value.is_empty() || value.len() > MAX_PARAM_LEN {
+            return Err(parameter_denied());
+        }
+        let decoded = percent_decode(value)?;
+        match key {
+            "code" if code.is_none() => {
+                if !decoded.starts_with("sfcode_")
+                    || decoded.len() < 16
+                    || decoded.len() > 160
+                    || !decoded
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                {
+                    return Err(parameter_denied());
+                }
+                code = Some(decoded);
+            }
+            "state" if state.is_none() => {
+                if decoded.len() < 16
+                    || decoded.len() > 256
+                    || !decoded
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+                {
+                    return Err(parameter_denied());
+                }
+                state = Some(decoded);
+            }
+            // Reject any token, secret, or unexpected parameter in URLs.
+            _ => return Err(parameter_denied()),
+        }
+    }
+    match (code, state) {
+        (Some(c), Some(s)) => Ok((c, s)),
+        _ => Err(parameter_denied()),
     }
 }
 

@@ -23,11 +23,15 @@ use uuid::Uuid;
 use crate::auth::repository::InMemorySessionSnapshot;
 use crate::billing::BillingSnapshot;
 use crate::coupons::{CouponRecord, CouponRedemptionRecord, CouponSnapshot};
+use crate::desktop_auth::{DesktopAuthSnapshot, OwnerWebSessionRecord};
 use crate::device_authority::{DeviceAuthoritySnapshot, DeviceReplacementEvent};
 use crate::entitlements::EntitlementSnapshot;
 use crate::error::AuthError;
 use crate::log_center::AuditLogEntry;
 use crate::owner_mfa::OwnerMfaSnapshot;
+use crate::templates_hub::{
+    AppReleaseRecord, CommunitySubmissionRecord, OfficialTemplateRecord, TemplatesHubSnapshot,
+};
 use crate::{FeatureFlag, ManagedAccountRecord, PlatformAnnouncement, SupportTicket};
 
 /// Real PostgreSQL 18 SQLx repository for control-plane durability (migrations `0007..0010`).
@@ -300,6 +304,240 @@ impl PgControlPlaneStore {
         .map_err(|_| AuthError::BackendUnavailable)?;
         Ok(())
     }
+
+    /// Persist a dedicated Owner Web Portal session in `owner_web_sessions` (Migration 0011).
+    pub async fn insert_owner_web_session(
+        &self,
+        rec: &OwnerWebSessionRecord,
+    ) -> Result<(), AuthError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        sqlx::query("SELECT set_config('app.owner_override', 'true', true)")
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        let hash_bytes = hex::decode(&rec.token_hash).unwrap_or_default();
+        sqlx::query(
+            r"
+            INSERT INTO owner_web_sessions (
+                id, user_id, workspace_id, token_hash, user_agent_hint,
+                created_at, last_seen_at, expires_at
+            )
+            VALUES ($1, $2, $3, $4, $5, to_timestamp($6), to_timestamp($7), to_timestamp($8))
+            ",
+        )
+        .bind(rec.id)
+        .bind(rec.user_id)
+        .bind(rec.workspace_id)
+        .bind(hash_bytes)
+        .bind(&rec.user_agent_hint)
+        .bind(rec.created_at)
+        .bind(rec.last_seen_at)
+        .bind(rec.expires_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+        tx.commit()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(())
+    }
+
+    /// Persist or update a community template submission in `community_template_submissions` (Migration 0011).
+    pub async fn upsert_community_submission(
+        &self,
+        sub: &CommunitySubmissionRecord,
+        owner_override: bool,
+    ) -> Result<(), AuthError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        if owner_override {
+            sqlx::query("SELECT set_config('app.owner_override', 'true', true)")
+                .execute(&mut *tx)
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+        } else {
+            sqlx::query("SELECT set_config('app.current_workspace_id', $1, true)")
+                .bind(sub.workspace_id.to_string())
+                .execute(&mut *tx)
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+        }
+        let status_str = serde_json::to_value(sub.status)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "pending".to_owned());
+        let cols_json =
+            serde_json::to_value(&sub.required_columns).unwrap_or_else(|_| Value::Array(vec![]));
+        let steps_json = serde_json::to_value(&sub.steps).unwrap_or_else(|_| Value::Array(vec![]));
+        sqlx::query(
+            r"
+            INSERT INTO community_template_submissions (
+                id, contributor_user_id, workspace_id, name, description, recipe_type,
+                schema_version, app_version, required_columns, steps_json, content_hash,
+                status, reviewer_notes, reviewed_by, consent_accepted, consent_terms_version,
+                show_contributor_attribution, published_template_id
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11,
+                $12, $13, $14, $15, $16,
+                $17, $18
+            )
+            ON CONFLICT (id) DO UPDATE
+            SET status = EXCLUDED.status,
+                reviewer_notes = EXCLUDED.reviewer_notes,
+                reviewed_by = EXCLUDED.reviewed_by,
+                published_template_id = EXCLUDED.published_template_id,
+                updated_at = now()
+            ",
+        )
+        .bind(sub.id)
+        .bind(sub.contributor_user_id)
+        .bind(sub.workspace_id)
+        .bind(&sub.name)
+        .bind(&sub.description)
+        .bind(&sub.recipe_type)
+        .bind(i32::try_from(sub.schema_version).unwrap_or(1))
+        .bind(&sub.app_version)
+        .bind(cols_json)
+        .bind(steps_json)
+        .bind(&sub.content_hash)
+        .bind(status_str)
+        .bind(&sub.reviewer_notes)
+        .bind(sub.reviewed_by)
+        .bind(sub.consent_accepted)
+        .bind(&sub.consent_terms_version)
+        .bind(sub.show_contributor_attribution)
+        .bind(sub.published_template_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+        tx.commit()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(())
+    }
+
+    /// Persist an official template and its latest version atomically in PostgreSQL (Migration 0011).
+    pub async fn upsert_official_template(
+        &self,
+        tpl: &OfficialTemplateRecord,
+    ) -> Result<(), AuthError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        sqlx::query(
+            r"
+            INSERT INTO official_templates (
+                id, slug, name, description, category, recipe_type,
+                active, current_version, requires_paid_plan, source_submission_id, published_by
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (id) DO UPDATE
+            SET name = EXCLUDED.name,
+                description = EXCLUDED.description,
+                category = EXCLUDED.category,
+                active = EXCLUDED.active,
+                current_version = EXCLUDED.current_version,
+                requires_paid_plan = EXCLUDED.requires_paid_plan,
+                updated_at = now()
+            ",
+        )
+        .bind(tpl.id)
+        .bind(&tpl.slug)
+        .bind(&tpl.name)
+        .bind(&tpl.description)
+        .bind(&tpl.category)
+        .bind(&tpl.recipe_type)
+        .bind(tpl.active)
+        .bind(i32::try_from(tpl.current_version).unwrap_or(1))
+        .bind(tpl.requires_paid_plan)
+        .bind(tpl.source_submission_id)
+        .bind(tpl.published_by)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+
+        if let Some(latest) = tpl.versions.last() {
+            let cols = serde_json::to_value(&latest.required_columns)
+                .unwrap_or_else(|_| Value::Array(vec![]));
+            let steps =
+                serde_json::to_value(&latest.steps).unwrap_or_else(|_| Value::Array(vec![]));
+            sqlx::query(
+                r"
+                INSERT INTO official_template_versions (
+                    id, template_id, version_number, schema_version, compatible_app_version,
+                    release_notes, required_columns, steps_json, content_hash, published_by
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                ON CONFLICT (template_id, version_number) DO NOTHING
+                ",
+            )
+            .bind(latest.id)
+            .bind(latest.template_id)
+            .bind(i32::try_from(latest.version_number).unwrap_or(1))
+            .bind(i32::try_from(latest.schema_version).unwrap_or(1))
+            .bind(&latest.compatible_app_version)
+            .bind(&latest.release_notes)
+            .bind(cols)
+            .bind(steps)
+            .bind(&latest.content_hash)
+            .bind(latest.published_by)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        }
+        tx.commit()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(())
+    }
+
+    /// Persist a Desktop application release record in `app_releases` (Migration 0011).
+    pub async fn insert_app_release(&self, rel: &AppReleaseRecord) -> Result<(), AuthError> {
+        sqlx::query(
+            r"
+            INSERT INTO app_releases (
+                id, version_code, version_name, channel, platform, download_url,
+                sha256_hex, file_size_bytes, min_required_version, release_notes,
+                is_mandatory, active, published_by
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ON CONFLICT (channel, platform, version_code) DO UPDATE
+            SET download_url = EXCLUDED.download_url,
+                sha256_hex = EXCLUDED.sha256_hex,
+                file_size_bytes = EXCLUDED.file_size_bytes,
+                release_notes = EXCLUDED.release_notes,
+                active = EXCLUDED.active
+            ",
+        )
+        .bind(rel.id)
+        .bind(i64::try_from(rel.version_code).unwrap_or(100))
+        .bind(&rel.version_name)
+        .bind(&rel.channel)
+        .bind(&rel.platform)
+        .bind(&rel.download_url)
+        .bind(&rel.sha256_hex)
+        .bind(i64::try_from(rel.file_size_bytes).unwrap_or(1))
+        .bind(i64::try_from(rel.min_required_version).unwrap_or(100))
+        .bind(&rel.release_notes)
+        .bind(rel.is_mandatory)
+        .bind(rel.active)
+        .bind(rel.published_by)
+        .execute(&self.pool)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(())
+    }
 }
 
 /// Complete durable server state snapshot for atomic local restart persistence.
@@ -315,6 +553,10 @@ pub struct DurableServerSnapshot {
     pub owner_mfa: OwnerMfaSnapshot,
     #[serde(default)]
     pub sessions: InMemorySessionSnapshot,
+    #[serde(default)]
+    pub desktop_auth: DesktopAuthSnapshot,
+    #[serde(default)]
+    pub templates_hub: TemplatesHubSnapshot,
     pub maintenance_mode: bool,
     pub maintenance_reason: Option<String>,
     pub feature_flags: BTreeMap<String, FeatureFlag>,

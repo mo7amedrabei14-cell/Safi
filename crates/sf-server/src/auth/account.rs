@@ -386,6 +386,34 @@ impl AccountAuthService {
             .await
     }
 
+    /// Verify email/password credentials and active verified account status WITHOUT creating or
+    /// replacing any Desktop device session (used by Desktop Browser PKCE approval and dedicated
+    /// Owner Web Portal login so web logins never revoke a Desktop installation).
+    pub async fn verify_credentials_only(
+        &self,
+        raw_email: &str,
+        password: &str,
+    ) -> Result<(Uuid, Uuid, String), AuthError> {
+        let email = normalize_email(raw_email)?;
+        validate_login_password(password)?;
+        let account = self.repository.find_for_login(&email).await?;
+        let encoded_hash = match account.as_ref() {
+            Some(account) => account.password_hash.clone(),
+            None => dummy_password_hash().await?,
+        };
+        let password_matches = verify_password(password.to_owned(), encoded_hash).await?;
+        let Some(account) = account else {
+            return Err(AuthError::InvalidCredentials);
+        };
+        if !password_matches || !account.email_verified || account.deleted || account.suspended {
+            return Err(AuthError::InvalidCredentials);
+        }
+        let Some(workspace_id) = account.workspace_id else {
+            return Err(AuthError::InvalidCredentials);
+        };
+        Ok((account.user_id, workspace_id, email))
+    }
+
     async fn dispatch_verification(&self, email: &str, token: &str) {
         let url = format!("{}/#verify_email={token}", self.public_base_url);
         if self

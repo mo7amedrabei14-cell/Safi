@@ -216,6 +216,73 @@ export interface OwnerAuditLogsResponse {
   readonly is_chain_valid: boolean;
 }
 
+export interface OwnerWebLoginResponse {
+  readonly token: string;
+  readonly session_id: string;
+  readonly user_id: string;
+  readonly workspace_id: string;
+  readonly email: string;
+  readonly is_owner: boolean;
+  readonly expires_at: number;
+}
+
+export interface OwnerOfficialTemplate {
+  readonly id: string;
+  readonly slug: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category: string;
+  readonly current_version: number;
+  readonly active: boolean;
+  readonly updated_at: number;
+  readonly versions: readonly {
+    readonly version_number: number;
+    readonly release_notes: string;
+    readonly content_hash: string;
+    readonly published_at: number;
+  }[];
+}
+
+export interface OwnerCommunitySubmission {
+  readonly id: string;
+  readonly submitter_user_id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly recipe_type: string;
+  readonly status:
+    | "pending"
+    | "under_review"
+    | "approved"
+    | "rejected"
+    | "changes_requested"
+    | "published";
+  readonly pii_warnings: readonly string[];
+  readonly reviewer_notes: string;
+  readonly published_template_id: string | null;
+  readonly created_at: number;
+  readonly updated_at: number;
+}
+
+export interface OwnerAppRelease {
+  readonly id: string;
+  readonly version_code: number;
+  readonly version_name: string;
+  readonly channel: string;
+  readonly platform: string;
+  readonly download_url: string;
+  readonly file_size_bytes: number;
+  readonly sha256_hex: string;
+  readonly release_notes: string;
+  readonly active: boolean;
+  readonly created_at: number;
+}
+
+export interface DesktopPkceApproveResponse {
+  readonly code: string;
+  readonly state: string;
+  readonly callback_uri: string;
+}
+
 const BUILD_API_ORIGIN = typeof __SAFI_API_BASE_URL__ === "string" ? __SAFI_API_BASE_URL__ : "";
 
 function apiOrigin(): string {
@@ -224,23 +291,23 @@ function apiOrigin(): string {
   return resolveAuthApiBaseUrl(BUILD_API_ORIGIN, desktop);
 }
 
-async function ownerRequest<T>(
-  path: string,
-  method: "GET" | "POST",
-  sessionToken: string,
+async function rawJsonRequest<T>(
+  urlPath: string,
+  method: "GET" | "POST" | "DELETE",
+  token?: string | null,
   body?: unknown
 ): Promise<T> {
-  const headers = new Headers({
-    Accept: "application/json",
-    Authorization: `Bearer ${sessionToken}`
-  });
+  const headers = new Headers({ Accept: "application/json" });
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
   if (body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
 
   let response: Response;
   try {
-    response = await fetch(`${apiOrigin()}/v1/owner${path}`, {
+    response = await fetch(`${apiOrigin()}${urlPath}`, {
       method,
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -271,7 +338,19 @@ async function ownerRequest<T>(
     throw new SafiAuthApiError(response.status, code);
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
+}
+
+async function ownerRequest<T>(
+  path: string,
+  method: "GET" | "POST" | "DELETE",
+  sessionToken: string,
+  body?: unknown
+): Promise<T> {
+  return rawJsonRequest<T>(`/v1/owner${path}`, method, sessionToken, body);
 }
 
 export const ownerApi = {
@@ -416,5 +495,78 @@ export const ownerApi = {
       published: true
     }),
   getProductConfig: (token: string) =>
-    ownerRequest<Record<string, unknown>>("/product-config", "GET", token)
+    ownerRequest<Record<string, unknown>>("/product-config", "GET", token),
+  ownerWebLogin: (email: string, password: string) =>
+    rawJsonRequest<OwnerWebLoginResponse>("/v1/owner/web/login", "POST", null, {
+      email,
+      password
+    }),
+  ownerWebLogout: (token: string) => ownerRequest<undefined>("/web/session", "DELETE", token),
+  listCommunitySubmissions: (token: string) =>
+    ownerRequest<readonly OwnerCommunitySubmission[]>("/community/submissions", "GET", token),
+  reviewCommunitySubmission: (
+    token: string,
+    id: string,
+    status: "under_review" | "approved" | "rejected" | "changes_requested",
+    reviewerNotes: string
+  ) =>
+    ownerRequest<OwnerCommunitySubmission>(
+      `/community/submissions/${encodeURIComponent(id)}/review`,
+      "POST",
+      token,
+      { status, reviewer_notes: reviewerNotes }
+    ),
+  publishCommunitySubmission: (
+    token: string,
+    id: string,
+    payload: {
+      readonly slug: string;
+      readonly official_name: string;
+      readonly official_description: string;
+      readonly category?: string;
+      readonly release_notes?: string;
+    }
+  ) =>
+    ownerRequest<{
+      readonly template: OwnerOfficialTemplate;
+      readonly submission: OwnerCommunitySubmission;
+    }>(`/community/submissions/${encodeURIComponent(id)}/publish`, "POST", token, payload),
+  listOfficialTemplates: (token: string) =>
+    ownerRequest<readonly OwnerOfficialTemplate[]>("/templates/official", "GET", token),
+  setOfficialTemplateStatus: (token: string, templateId: string, active: boolean) =>
+    ownerRequest<OwnerOfficialTemplate>(
+      `/templates/official/${encodeURIComponent(templateId)}/status`,
+      "POST",
+      token,
+      { active }
+    ),
+  rollbackOfficialTemplate: (token: string, templateId: string, versionNumber: number) =>
+    ownerRequest<OwnerOfficialTemplate>(
+      `/templates/official/${encodeURIComponent(templateId)}/rollback`,
+      "POST",
+      token,
+      { version_number: versionNumber }
+    ),
+  listReleases: (token: string) =>
+    ownerRequest<readonly OwnerAppRelease[]>("/releases", "GET", token),
+  publishRelease: (
+    token: string,
+    payload: {
+      readonly version_code: number;
+      readonly version_name: string;
+      readonly channel: string;
+      readonly platform: string;
+      readonly download_url: string;
+      readonly file_size_bytes: number;
+      readonly sha256_hex: string;
+      readonly release_notes: string;
+    }
+  ) => ownerRequest<OwnerAppRelease>("/releases", "POST", token, payload),
+  approveDesktopPkceAuth: (payload: {
+    readonly request_id: string;
+    readonly state: string;
+    readonly email: string;
+    readonly password: string;
+  }) =>
+    rawJsonRequest<DesktopPkceApproveResponse>("/v1/auth/desktop/approve", "POST", null, payload)
 };

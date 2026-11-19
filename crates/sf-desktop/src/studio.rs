@@ -690,6 +690,7 @@ pub struct StudioStore {
     active_regions: Mutex<BTreeMap<String, (String, String)>>,
     storage_dir: Mutex<Option<PathBuf>>,
     active_session: Mutex<Option<ActiveStudioSession>>,
+    has_previously_authenticated: Mutex<bool>,
     offline_read_only: Mutex<bool>,
     last_online_verified_ms: Mutex<Option<u64>>,
     high_water_clock_ms: Mutex<u64>,
@@ -710,6 +711,7 @@ impl Default for StudioStore {
             active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(None),
             active_session: Mutex::new(None),
+            has_previously_authenticated: Mutex::new(false),
             offline_read_only: Mutex::new(false),
             last_online_verified_ms: Mutex::new(None),
             high_water_clock_ms: Mutex::new(0),
@@ -733,6 +735,7 @@ impl StudioStore {
     pub fn with_storage_dir(dir: PathBuf) -> Self {
         let authority = Arc::new(StudioSessionAuthority::new());
         let verifier: Arc<dyn StudioSessionVerifier> = authority.clone();
+        let has_prior_auth = dir.join("prior_auth.marker").is_file();
         Self {
             projects: Mutex::new(BTreeMap::new()),
             artifacts: Mutex::new(BTreeMap::new()),
@@ -740,6 +743,7 @@ impl StudioStore {
             active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(Some(dir)),
             active_session: Mutex::new(None),
+            has_previously_authenticated: Mutex::new(has_prior_auth),
             offline_read_only: Mutex::new(false),
             last_online_verified_ms: Mutex::new(None),
             high_water_clock_ms: Mutex::new(0),
@@ -757,6 +761,7 @@ impl StudioStore {
         authority: Arc<StudioSessionAuthority>,
         verifier: Arc<dyn StudioSessionVerifier>,
     ) -> Self {
+        let has_prior_auth = dir.join("prior_auth.marker").is_file();
         Self {
             projects: Mutex::new(BTreeMap::new()),
             artifacts: Mutex::new(BTreeMap::new()),
@@ -764,6 +769,7 @@ impl StudioStore {
             active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(Some(dir)),
             active_session: Mutex::new(None),
+            has_previously_authenticated: Mutex::new(has_prior_auth),
             offline_read_only: Mutex::new(false),
             last_online_verified_ms: Mutex::new(None),
             high_water_clock_ms: Mutex::new(0),
@@ -851,6 +857,15 @@ impl StudioStore {
         if let Ok(mut ro) = self.offline_read_only.lock() {
             *ro = false;
         }
+        if let Ok(mut prior) = self.has_previously_authenticated.lock() {
+            *prior = true;
+        }
+        if let Ok(dir_guard) = self.storage_dir.lock()
+            && let Some(dir) = dir_guard.as_ref()
+            && fs::create_dir_all(dir).is_ok()
+        {
+            let _ = fs::write(dir.join("prior_auth.marker"), b"v1\n");
+        }
         if let Ok(mut ts) = self.last_online_verified_ms.lock() {
             *ts = Some(effective_now);
         }
@@ -861,6 +876,7 @@ impl StudioStore {
             "authenticated": true,
             "mode": "online_authorized",
             "canExecuteProtectedOps": true,
+            "hasPreviouslyAuthenticated": true,
             "sessionId": verified.session_id,
             "workspaceId": verified.workspace_id,
             "expiresAtMs": verified.expires_at_ms,
@@ -886,22 +902,45 @@ impl StudioStore {
         if let Ok(mut hw) = self.high_water_clock_ms.lock() {
             *hw = 0;
         }
+        let has_prior = self
+            .has_previously_authenticated
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(false);
         serde_json::to_string(&serde_json::json!({
             "authenticated": false,
             "mode": "unauthenticated",
             "canExecuteProtectedOps": false,
+            "hasPreviouslyAuthenticated": has_prior,
         }))
         .map_err(|_| "SF-SYS-001".to_owned())
     }
 
-    /// Explicitly enters Offline Read-Only Mode so the user can open and inspect previously
-    /// saved local projects, datasets, dashboards, and reports without internet access while
-    /// strictly blocking all protected operations (`SF-AUTH-021`).
+    /// Explicitly enters Offline Read-Only Mode so a previously authenticated user can open and
+    /// inspect saved local projects, datasets, dashboards, and reports without internet access
+    /// while strictly blocking all protected operations (`SF-AUTH-021`).
+    ///
+    /// Fresh unauthenticated installations MUST NOT bypass online authentication via Offline Mode
+    /// and fail closed with [`AUTH_REQUIRED_CODE`] (`SF-AUTH-001`).
     ///
     /// # Errors
-    /// Returns `SF-SYS-010` or `SF-SYS-001` on internal failure.
+    /// Returns [`AUTH_REQUIRED_CODE`] (`SF-AUTH-001`) on a fresh unauthenticated installation,
+    /// or `SF-SYS-010` / `SF-SYS-001` on internal failure.
     pub fn enter_offline_read_only(&self) -> Result<String, String> {
         enforce_ipc_command("studio_enter_offline_readonly", crate::ipc_payload_len!())?;
+        let has_prior = self
+            .has_previously_authenticated
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(false);
+        let has_active = self
+            .active_session
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+        if !has_prior && !has_active {
+            return Err(AUTH_REQUIRED_CODE.to_owned());
+        }
         if let Ok(mut ro) = self.offline_read_only.lock() {
             *ro = true;
         }
@@ -916,6 +955,11 @@ impl StudioStore {
     pub fn authorization_status(&self) -> Result<String, String> {
         enforce_ipc_command("studio_authorization_status", crate::ipc_payload_len!())?;
         let read_only = self.offline_read_only.lock().map(|g| *g).unwrap_or(false);
+        let has_prior = self
+            .has_previously_authenticated
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(false);
         let session = self
             .active_session
             .lock()
@@ -933,6 +977,7 @@ impl StudioStore {
             "mode": mode,
             "readOnlyOffline": read_only,
             "canExecuteProtectedOps": can_execute,
+            "hasPreviouslyAuthenticated": has_prior || session.is_some(),
             "sessionId": session.as_ref().map(|s| &s.session_id),
             "workspaceId": session.as_ref().map(|s| &s.workspace_id),
             "lastOnlineVerifiedMs": last_verified,
@@ -4159,5 +4204,61 @@ mod tests {
         );
         let status_revoked = json(&test_result(store.authorization_status()));
         assert_eq!(status_revoked["mode"], serde_json::json!("unauthenticated"));
+    }
+
+    #[test]
+    fn fresh_unauthenticated_install_cannot_bypass_login_into_offline_read_only_mode() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!(
+            "safi-fresh-no-offline-bypass-{}-{nonce}",
+            std::process::id()
+        ));
+        test_result(fs::create_dir_all(&dir));
+        let fresh_store = StudioStore::with_storage_dir(dir.clone());
+
+        // Fresh unauthenticated installation has hasPreviouslyAuthenticated = false
+        let initial_status = json(&test_result(fresh_store.authorization_status()));
+        assert_eq!(initial_status["mode"], serde_json::json!("unauthenticated"));
+        assert_eq!(
+            initial_status["hasPreviouslyAuthenticated"],
+            serde_json::json!(false)
+        );
+        // Attempting to bypass login via Offline Read-Only Mode MUST fail closed with SF-AUTH-001!
+        assert_eq!(
+            fresh_store.enter_offline_read_only(),
+            Err(AUTH_REQUIRED_CODE.to_owned())
+        );
+
+        // Once the user completes a verified online login once, prior_auth.marker is persisted.
+        test_result(fresh_store.session_authority().register_session(
+            "sess_first_login",
+            "ws_fresh",
+            VALID_TOKEN,
+            INSTALLATION_ID,
+            200_000,
+        ));
+        test_result(fresh_store.set_auth_session(VALID_TOKEN, INSTALLATION_ID, 10_000));
+        assert!(dir.join("prior_auth.marker").is_file());
+
+        // After restarting Desktop offline, the previously authenticated user CAN inspect saved local projects read-only!
+        let restarted_store = StudioStore::with_storage_dir(dir.clone());
+        let restarted_status = json(&test_result(restarted_store.authorization_status()));
+        assert_eq!(
+            restarted_status["hasPreviouslyAuthenticated"],
+            serde_json::json!(true)
+        );
+        let offline_status = json(&test_result(restarted_store.enter_offline_read_only()));
+        assert_eq!(
+            offline_status["mode"],
+            serde_json::json!("offline_read_only")
+        );
+        assert_eq!(
+            offline_status["canExecuteProtectedOps"],
+            serde_json::json!(false)
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

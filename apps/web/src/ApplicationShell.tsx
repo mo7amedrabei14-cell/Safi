@@ -37,11 +37,14 @@ import { DesktopStudio } from "./desktop/DesktopStudio";
 import {
   clearStudioAuthSession,
   enterStudioOfflineReadOnly,
+  getStudioAuthorizationStatus,
   isDesktopRuntime,
   revalidateStudioSession,
   setStudioAuthSession
 } from "./desktop/studio-bridge";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
+import { OwnerWebPortal } from "./pages/OwnerWebPortal";
+import { DesktopBrowserAuthPage } from "./pages/DesktopBrowserAuthPage";
 import { canAnimate } from "./components/ui/motion-preference";
 import { postSafiHeartbeat, SafiAuthApiError } from "./lib/auth-api";
 import { getSafiDeviceIdentity } from "./lib/device-identity";
@@ -77,11 +80,35 @@ export function renderStudio(
         />
       );
     case "cleaning":
-      return <CleaningStudio lang={lang} onSelectTab={onSelectTab} />;
+      return desktopRuntime ? (
+        <CleaningStudio lang={lang} onSelectTab={onSelectTab} />
+      ) : (
+        <BentoCommandCenter
+          lang={lang}
+          onStart={() => onSelectTab("home")}
+          onOpenLibrary={() => onSelectTab("home")}
+        />
+      );
     case "recipes":
-      return <RecipesStudio lang={lang} onSelectTab={onSelectTab} />;
+      return desktopRuntime ? (
+        <RecipesStudio lang={lang} onSelectTab={onSelectTab} />
+      ) : (
+        <BentoCommandCenter
+          lang={lang}
+          onStart={() => onSelectTab("home")}
+          onOpenLibrary={() => onSelectTab("home")}
+        />
+      );
     case "charts":
-      return <ChartsStudio lang={lang} onSelectTab={onSelectTab} />;
+      return desktopRuntime ? (
+        <ChartsStudio lang={lang} onSelectTab={onSelectTab} />
+      ) : (
+        <BentoCommandCenter
+          lang={lang}
+          onStart={() => onSelectTab("home")}
+          onOpenLibrary={() => onSelectTab("home")}
+        />
+      );
     case "studio":
       return desktopRuntime ? (
         <DesktopStudio
@@ -92,12 +119,20 @@ export function renderStudio(
       ) : (
         <BentoCommandCenter
           lang={lang}
-          onStart={() => onSelectTab("cleaning")}
-          onOpenLibrary={() => onSelectTab("library")}
+          onStart={() => onSelectTab("home")}
+          onOpenLibrary={() => onSelectTab("home")}
         />
       );
     case "library":
-      return <LibraryStudio lang={lang} onSelectTab={onSelectTab} />;
+      return desktopRuntime ? (
+        <LibraryStudio lang={lang} onSelectTab={onSelectTab} />
+      ) : (
+        <BentoCommandCenter
+          lang={lang}
+          onStart={() => onSelectTab("home")}
+          onOpenLibrary={() => onSelectTab("home")}
+        />
+      );
     case "owner":
       return desktopRuntime && isOwner ? (
         <div className="safi-owner-frame">
@@ -111,8 +146,8 @@ export function renderStudio(
       ) : (
         <BentoCommandCenter
           lang={lang}
-          onStart={() => onSelectTab("cleaning")}
-          onOpenLibrary={() => onSelectTab("library")}
+          onStart={() => onSelectTab("home")}
+          onOpenLibrary={() => onSelectTab("home")}
         />
       );
     default: {
@@ -147,7 +182,17 @@ export function ApplicationShell({
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [ownerAccount, setOwnerAccount] = useState(false);
   const [offlineReadOnly, setOfflineReadOnly] = useState(false);
+  const [hasPreviouslyAuthenticated, setHasPreviouslyAuthenticated] = useState(false);
   const [revocationNotice, setRevocationNotice] = useState<string | null>(null);
+  const [browserRoute, setBrowserRoute] = useState<"showcase" | "owner" | "desktop-auth">(() => {
+    if (typeof window === "undefined" || isDesktopRuntime()) {
+      return "showcase";
+    }
+    const path = window.location.pathname.replace(/\/+$/, "").toLowerCase();
+    if (path === "/owner") return "owner";
+    if (path === "/auth/desktop") return "desktop-auth";
+    return "showcase";
+  });
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   useAnimatedFavicon();
@@ -156,12 +201,34 @@ export function ApplicationShell({
     onReady?.();
   }, [onReady]);
 
-  // Strict Phase 01 boundary:
-  // - Browser runtime: Showcase tabs only (NO Quad-Studio, NO Owner Console).
-  // - Desktop runtime: Showcase + Quad-Studio, plus Owner Console ONLY for server-verified Owner.
+  // Query native Desktop authorization state once on startup so fresh unauthenticated installs
+  // never expose the Offline Read-Only Mode button.
+  useEffect(() => {
+    if (!desktopRuntime) return;
+    let active = true;
+    void getStudioAuthorizationStatus()
+      .then((status) => {
+        if (active) {
+          setHasPreviouslyAuthenticated(Boolean(status.hasPreviouslyAuthenticated));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setHasPreviouslyAuthenticated(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [desktopRuntime]);
+
+  // Strict Runtime Boundary:
+  // - Browser runtime: Showcase website ONLY (NO Cleaning/Recipes/Charts/Library/Quad-Studio).
+  //   Owner web administration lives strictly at the protected `/owner` route.
+  // - Desktop runtime: Full local studios + Quad-Studio, plus Owner tab ONLY for server-verified Owner.
   const dockTabs = useMemo(() => {
     if (!desktopRuntime) {
-      return SHOWCASE_TABS;
+      return SHOWCASE_TABS.slice(0, 1);
     }
     return ownerAccount
       ? [...SHOWCASE_TABS, STUDIO_TAB, OWNER_TAB]
@@ -170,11 +237,11 @@ export function ApplicationShell({
 
   const selectTab = useCallback(
     (tab: SafiDockTabId): void => {
-      if (tab === "studio" && !desktopRuntime) {
+      if (!desktopRuntime) {
         setActiveTab("home");
         return;
       }
-      if (tab === "owner" && (!desktopRuntime || !ownerAccount)) {
+      if (tab === "owner" && !ownerAccount) {
         setActiveTab("home");
         return;
       }
@@ -264,6 +331,7 @@ export function ApplicationShell({
       setSessionToken(token);
       setSessionEmail(email);
       setOwnerAccount(desktopRuntime && owner);
+      setHasPreviouslyAuthenticated(true);
       setOfflineReadOnly(false);
       setRevocationNotice(null);
     },
@@ -296,14 +364,17 @@ export function ApplicationShell({
 
   const enterOfflineMode = useCallback(async (): Promise<void> => {
     if (!desktopRuntime) return;
+    if (!hasPreviouslyAuthenticated && !hasActiveSession) {
+      return;
+    }
     try {
       await enterStudioOfflineReadOnly();
     } catch {
-      // Fallback to read-only UI state; native Rust commands still fail closed.
+      return;
     }
     setOfflineReadOnly(true);
     setActiveTab("studio");
-  }, [desktopRuntime]);
+  }, [desktopRuntime, hasPreviouslyAuthenticated, hasActiveSession]);
 
   const revalidateOnlineAccess = useCallback(async (): Promise<void> => {
     if (!desktopRuntime || !sessionToken) return;
@@ -424,6 +495,49 @@ export function ApplicationShell({
     return null;
   }
 
+  // Protected Website Owner Portal (`/owner`) and Desktop Browser PKCE Auth (`/auth/desktop`)
+  if (!desktopRuntime && browserRoute === "owner") {
+    return (
+      <>
+        <AmbientBackground />
+        <div
+          className="safi-shell"
+          dir={lang === "ar" ? "rtl" : "ltr"}
+          data-runtime="owner-web-portal"
+        >
+          <main id="safi-main" className="safi-container safi-stage">
+            <OwnerWebPortal
+              lang={lang}
+              onBackToShowcase={() => {
+                if (typeof window !== "undefined") {
+                  window.history.pushState({}, "", "/");
+                }
+                setBrowserRoute("showcase");
+              }}
+            />
+          </main>
+        </div>
+      </>
+    );
+  }
+
+  if (!desktopRuntime && browserRoute === "desktop-auth") {
+    return (
+      <>
+        <AmbientBackground />
+        <div
+          className="safi-shell"
+          dir={lang === "ar" ? "rtl" : "ltr"}
+          data-runtime="desktop-browser-auth"
+        >
+          <main id="safi-main" className="safi-container safi-stage">
+            <DesktopBrowserAuthPage lang={lang} />
+          </main>
+        </div>
+      </>
+    );
+  }
+
   if (authenticationRequired) {
     return (
       <>
@@ -450,26 +564,28 @@ export function ApplicationShell({
             {revocationNotice}
           </div>
         ) : null}
-        <div
-          style={{
-            position: "fixed",
-            bottom: "1.25rem",
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 9998
-          }}
-        >
-          <button
-            type="button"
-            className="safi-btn"
-            data-enter-offline-readonly="true"
-            onClick={() => void enterOfflineMode()}
+        {hasPreviouslyAuthenticated ? (
+          <div
+            style={{
+              position: "fixed",
+              bottom: "1.25rem",
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 9998
+            }}
           >
-            {lang === "ar"
-              ? "فتح المشاريع المحفوظة محليًا (وضع القراءة فقط بدون إنترنت)"
-              : "Open Saved Local Projects (Offline Read-Only Mode)"}
-          </button>
-        </div>
+            <button
+              type="button"
+              className="safi-btn"
+              data-enter-offline-readonly="true"
+              onClick={() => void enterOfflineMode()}
+            >
+              {lang === "ar"
+                ? "فتح المشاريع المحفوظة محليًا (وضع القراءة فقط بدون إنترنت)"
+                : "Open Saved Local Projects (Offline Read-Only Mode)"}
+            </button>
+          </div>
+        ) : null}
         {accountAccessPortal}
         {authPortal}
         {passwordResetPortal}

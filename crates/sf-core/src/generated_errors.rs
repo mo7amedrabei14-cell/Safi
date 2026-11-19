@@ -137,6 +137,11 @@ impl ErrorCode {
         domain: ErrorDomain::Auth,
         number: 22,
     };
+    /// Registered error code `SF-AUTH-023`.
+    pub const SF_AUTH_023: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 23,
+    };
     /// Registered error code `SF-CAL-001`.
     pub const SF_CAL_001: Self = Self {
         domain: ErrorDomain::Cal,
@@ -361,6 +366,21 @@ impl ErrorCode {
     pub const SF_RCP_003: Self = Self {
         domain: ErrorDomain::Rcp,
         number: 3,
+    };
+    /// Registered error code `SF-RCP-005`.
+    pub const SF_RCP_005: Self = Self {
+        domain: ErrorDomain::Rcp,
+        number: 5,
+    };
+    /// Registered error code `SF-RCP-006`.
+    pub const SF_RCP_006: Self = Self {
+        domain: ErrorDomain::Rcp,
+        number: 6,
+    };
+    /// Registered error code `SF-RCP-007`.
+    pub const SF_RCP_007: Self = Self {
+        domain: ErrorDomain::Rcp,
+        number: 7,
     };
     /// Registered error code `SF-SYN-001`.
     pub const SF_SYN_001: Self = Self {
@@ -594,6 +614,7 @@ impl ErrorCode {
         Self::SF_AUTH_020,
         Self::SF_AUTH_021,
         Self::SF_AUTH_022,
+        Self::SF_AUTH_023,
         Self::SF_CAL_001,
         Self::SF_CAL_002,
         Self::SF_CAL_003,
@@ -639,6 +660,9 @@ impl ErrorCode {
         Self::SF_RCP_001,
         Self::SF_RCP_002,
         Self::SF_RCP_003,
+        Self::SF_RCP_005,
+        Self::SF_RCP_006,
+        Self::SF_RCP_007,
         Self::SF_SYN_001,
         Self::SF_SYN_002,
         Self::SF_SYN_003,
@@ -944,6 +968,16 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Online authorization expired or clock rollback detected",
         action_en: "Check your internet connection and system clock, then revalidate your session.",
         owner_note: "Short-lived online authorization lease expired or local clock moved backwards.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_023,
+        code_str: "SF-AUTH-023",
+        severity: ErrorSeverity::Error,
+        title_ar: "رمز تفويض سطح المكتب غير صالح أو منتهي الصلاحية أو مستخدم مسبقًا",
+        action_ar: "أعد بدء تسجيل الدخول من تطبيق سطح المكتب لإصدار رمز PKCE جديد.",
+        title_en: "Desktop PKCE authorization code is invalid, expired, or already used",
+        action_en: "Restart sign-in from the Desktop application to issue a fresh PKCE code.",
+        owner_note: "Desktop browser PKCE authorization code failed state, installation, verifier, or replay check.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_CAL_001,
@@ -1394,6 +1428,36 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "File schema or column structure changed",
         action_en: "Review the suggested column mapping for added or missing columns before applying the recipe.",
         owner_note: "Recipe column matcher detected schema drift between recipe source and new file.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_RCP_005,
+        code_str: "SF-RCP-005",
+        severity: ErrorSeverity::Error,
+        title_ar: "تصدير واستيراد ملفات الوصفات (.safitemplate) متاح للخطط المدفوعة أو VIP فقط",
+        action_ar: "قم بالترقية إلى خطة مدفوعة نشطة لتصدير أو استيراد ملفات الوصفات بين الحسابات.",
+        title_en: "Recipe file export/import (.safitemplate) requires an eligible paid plan or Friend VIP",
+        action_en: "Upgrade to an active paid subscription to export or import portable recipe files.",
+        owner_note: "Server entitlement check blocked Premium recipe export/import for Free or Trial account.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_RCP_006,
+        code_str: "SF-RCP-006",
+        severity: ErrorSeverity::Error,
+        title_ar: "المساهمة مرفوضة: يلزم الموافقة الصريحة وإزالة أي أسرار أو بيانات حساسة",
+        action_ar: "راجع خطوات الوصفة وتأكد من عدم وجود مفاتيح أو كلمات سر أو صفوف بيانات، ثم وافق على شروط المساهمة.",
+        title_en: "Community submission rejected: explicit consent required and secrets/data rows are forbidden",
+        action_en: "Review the recipe definition, remove any credentials or dataset rows, and accept the contribution terms.",
+        owner_note: "Community contribution guard blocked missing consent, embedded secrets, or raw dataset rows.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_RCP_007,
+        code_str: "SF-RCP-007",
+        severity: ErrorSeverity::Warn,
+        title_ar: "تم بلوغ الحد الشهري لمساهمات القوالب المجتمعية",
+        action_ar: "يمكنك إرسال مساهمات جديدة في بداية الشهر القادم.",
+        title_en: "Monthly community template submission limit reached",
+        action_en: "You can submit additional community templates at the start of next month.",
+        owner_note: "Anti-spam monthly community submission quota exceeded for this account.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_SYN_001,

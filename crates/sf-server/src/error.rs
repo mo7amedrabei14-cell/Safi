@@ -34,6 +34,10 @@ pub enum AuthError {
     DeviceProofInvalid,
     OfflineReadOnlyRequired,
     AuthorizationLeaseExpired,
+    DesktopAuthCodeInvalid,
+    PremiumRecipeEntitlementRequired,
+    CommunitySubmissionRejected,
+    CommunitySubmissionLimitReached,
     QuotaExceeded,
     DatasetLimitExceeded,
     AiQuotaExceeded,
@@ -80,6 +84,10 @@ impl AuthError {
             Self::DeviceProofInvalid => "SF-AUTH-020",
             Self::OfflineReadOnlyRequired => "SF-AUTH-021",
             Self::AuthorizationLeaseExpired => "SF-AUTH-022",
+            Self::DesktopAuthCodeInvalid => "SF-AUTH-023",
+            Self::PremiumRecipeEntitlementRequired => "SF-RCP-005",
+            Self::CommunitySubmissionRejected => "SF-RCP-006",
+            Self::CommunitySubmissionLimitReached => "SF-RCP-007",
             Self::QuotaExceeded => "SF-LIC-005",
             Self::DatasetLimitExceeded => "SF-LIC-006",
             Self::AiQuotaExceeded => "SF-LIC-007",
@@ -112,11 +120,13 @@ impl AuthError {
             | Self::DeviceReplaced
             | Self::DeviceProofInvalid
             | Self::AuthorizationLeaseExpired
+            | Self::DesktopAuthCodeInvalid
             | Self::InvalidWebhookSignature => StatusCode::UNAUTHORIZED,
             Self::InsufficientScope
             | Self::AccountSuspended
             | Self::OwnerRequired
             | Self::PaidPlanRequired
+            | Self::PremiumRecipeEntitlementRequired
             | Self::ChargebackRevoked
             | Self::OrgPermissionDenied => StatusCode::FORBIDDEN,
             Self::BackendUnavailable
@@ -132,6 +142,7 @@ impl AuthError {
             | Self::WebhookReplayWindow
             | Self::BillingOperationFailed
             | Self::CouponInvalid
+            | Self::CommunitySubmissionRejected
             | Self::SyncEnvelopeInvalid
             | Self::OrgMinSeatsRequired
             | Self::DatasetLimitExceeded => StatusCode::UNPROCESSABLE_ENTITY,
@@ -141,6 +152,7 @@ impl AuthError {
             Self::RateLimited
             | Self::OwnerMfaLocked
             | Self::QuotaExceeded
+            | Self::CommunitySubmissionLimitReached
             | Self::AiQuotaExceeded => StatusCode::TOO_MANY_REQUESTS,
             Self::ShareLinkInvalid => StatusCode::GONE,
         }
@@ -172,6 +184,18 @@ impl AuthError {
             Self::DeviceProofInvalid => "فشل التحقق التشفيري من هوية الجهاز",
             Self::OfflineReadOnlyRequired => "الوضع غير المتصل (للقراءة فقط)",
             Self::AuthorizationLeaseExpired => "انتهت مهلة تفويض الاتصال أو رُصد تلاعب بساعة النظام",
+            Self::DesktopAuthCodeInvalid => {
+                "رمز تفويض سطح المكتب غير صالح أو منتهي الصلاحية أو مستخدم مسبقًا"
+            }
+            Self::PremiumRecipeEntitlementRequired => {
+                "تصدير واستيراد ملفات الوصفات (.safitemplate) متاح للخطط المدفوعة أو VIP فقط"
+            }
+            Self::CommunitySubmissionRejected => {
+                "المساهمة مرفوضة: يلزم الموافقة الصريحة وإزالة أي أسرار أو بيانات حساسة"
+            }
+            Self::CommunitySubmissionLimitReached => {
+                "تم بلوغ الحد الشهري لمساهمات القوالب المجتمعية"
+            }
             Self::QuotaExceeded => "استنفدت حد العمليات الشهري لخطتك",
             Self::DatasetLimitExceeded => "يتجاوز الملف حد الصفوف أو الأعمدة المسموح لخطتك",
             Self::AiQuotaExceeded => "استنفدت حصة استخدام الذكاء الاصطناعي",

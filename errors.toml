@@ -881,3 +881,35 @@ action_ar = "تواصل مع الدعم لحل نزاع الفوترة وإعا�
 title_en = "Payment chargeback recorded and subscription revoked"
 action_en = "Contact support to resolve the billing dispute before reactivating."
 owner_note = "Verified payment provider chargeback webhook revoked paid entitlements immediately."
+
+[SF-AUTH-023]
+severity = "error"
+title_ar = "رمز تفويض سطح المكتب غير صالح أو منتهي الصلاحية أو مستخدم مسبقًا"
+action_ar = "أعد بدء تسجيل الدخول من تطبيق سطح المكتب لإصدار رمز PKCE جديد."
+title_en = "Desktop PKCE authorization code is invalid, expired, or already used"
+action_en = "Restart sign-in from the Desktop application to issue a fresh PKCE code."
+owner_note = "Desktop browser PKCE authorization code failed state, installation, verifier, or replay check."
+
+[SF-RCP-005]
+severity = "error"
+title_ar = "تصدير واستيراد ملفات الوصفات (.safitemplate) متاح للخطط المدفوعة أو VIP فقط"
+action_ar = "قم بالترقية إلى خطة مدفوعة نشطة لتصدير أو استيراد ملفات الوصفات بين الحسابات."
+title_en = "Recipe file export/import (.safitemplate) requires an eligible paid plan or Friend VIP"
+action_en = "Upgrade to an active paid subscription to export or import portable recipe files."
+owner_note = "Server entitlement check blocked Premium recipe export/import for Free or Trial account."
+
+[SF-RCP-006]
+severity = "error"
+title_ar = "المساهمة مرفوضة: يلزم الموافقة الصريحة وإزالة أي أسرار أو بيانات حساسة"
+action_ar = "راجع خطوات الوصفة وتأكد من عدم وجود مفاتيح أو كلمات سر أو صفوف بيانات، ثم وافق على شروط المساهمة."
+title_en = "Community submission rejected: explicit consent required and secrets/data rows are forbidden"
+action_en = "Review the recipe definition, remove any credentials or dataset rows, and accept the contribution terms."
+owner_note = "Community contribution guard blocked missing consent, embedded secrets, or raw dataset rows."
+
+[SF-RCP-007]
+severity = "warn"
+title_ar = "تم بلوغ الحد الشهري لمساهمات القوالب المجتمعية"
+action_ar = "يمكنك إرسال مساهمات جديدة في بداية الشهر القادم."
+title_en = "Monthly community template submission limit reached"
+action_en = "You can submit additional community templates at the start of next month."
+owner_note = "Anti-spam monthly community submission quota exceeded for this account."

@@ -36,6 +36,13 @@ import { SpotlightCard } from "../ui/SpotlightCard";
 import { canAnimate } from "../ui/motion-preference";
 import { LivePipelineVisualizer } from "./LivePipelineVisualizer";
 import { SmartDropzone } from "./SmartDropzone";
+import {
+  FALLBACK_RELEASE_MANIFEST,
+  fetchDesktopReleaseManifest,
+  formatBytes,
+  triggerDesktopInstallerDownload,
+  type DesktopReleaseManifest
+} from "../../lib/download";
 
 export interface BentoCommandCenterProps {
   readonly onStart?: () => void;
@@ -90,8 +97,8 @@ const LIVE_DEMO_ROWS = [
     labelEn: "Phone & Sensitive PII Masking",
     promptAr: "تشفير وإخفاء أرقام الهواتف والحسابات والبيانات الشخصية...",
     promptEn: "Mask sensitive phone numbers, emails & PII columns locally...",
-    toastAr: "✓ تم تأمين 4,950 سجل حساس بدون مغادرة جهازك",
-    toastEn: "✓ Masked 4,950 sensitive records 100% offline",
+    toastAr: "✓ تم تأمين 4,950 سجل حساس محليًا دون رفعها للسحابة",
+    toastEn: "✓ Masked 4,950 sensitive records locally with zero cloud upload",
     before: "+44-7700-900077  |  010-1234-5678",
     after: "+44-••••-••0077  |  010••••5678",
     tagAr: "محمي بالكامل ✓",
@@ -169,8 +176,10 @@ const VISUAL_EDITORS_TOOLS = [
     badgeEn: "Tool 05 • PDF Publisher",
     titleAr: "مُولّد تقارير PDF التنفيذية",
     titleEn: "Vector PDF Report Generator",
-    descAr: "يُنشئ تقرير PDF متجهيًا منسّقًا بجميع اللغات مع الملخص التنفيذي والجداول بدون إنترنت.",
-    descEn: "Compiles crisp multilingual vector PDF reports with summary KPIs completely offline.",
+    descAr:
+      "يُنشئ تقرير PDF متجهيًا منسّقًا بجميع اللغات مع الملخص التنفيذي والجداول محليًا على جهازك.",
+    descEn:
+      "Compiles crisp multilingual vector PDF reports with summary KPIs locally on your computer.",
     sampleBefore: "ملف بيانات خام بعد التنظيف",
     sampleAfter: "تقرير تنفيذي PDF جاهز للطباعة والعرض",
     metric: "Instant Vector PDF"
@@ -217,10 +226,11 @@ const WELL_ORGANIZED_CATEGORIES = [
     code: "04",
     titleAr: "حماية الخصوصية والتشفير المحلي",
     titleEn: "Local Privacy & PII Masking",
-    subtitleAr: "إخفاء البيانات الحساسة وتوليد بصمة تحقق رقمية بدون اتصال بالإنترنت.",
-    subtitleEn: "Masks sensitive personal fields with cryptographic verification 100% offline.",
-    tagAr: "100% على جهازك",
-    tagEn: "100% On-Device"
+    subtitleAr: "إخفاء البيانات الحساسة وبحث محلي شامل مع تشفير الخزنة على جهازك.",
+    subtitleEn:
+      "Masks sensitive personal fields locally with encrypted vault storage and fast on-device search.",
+    tagAr: "معالجة محلية على جهازك",
+    tagEn: "Local Processing"
   },
   {
     id: 4,
@@ -237,21 +247,23 @@ const WELL_ORGANIZED_CATEGORIES = [
 const MARQUEE_ITEMS_AR = [
   "توحيد النصوص والأسماء بجميع اللغات والترميزات العالمية بضغطة زر",
   "فحص صحة أرقام الهويات والحسابات البنكية والضرائب تلقائيًا",
-  "يعمل بالكامل على جهازك بدون إرسال أي ملف للإنترنت",
+  "يعالج بياناتك محليًا على جهازك مع صلاحيات حساب متصلة ووضع قراءة فقط عند انقطاع الإنترنت",
   "معالجة حتى 125,000 صف في الثانية الواحدة",
+  "بحث محلي شامل في ملفات Excel وCSV وWord وPowerPoint وPDF والنصوص",
   "إخفاء البيانات الشخصية الحساسة قبل مشاركة الملفات",
   "تصدير تقارير PDF متجهية أنيقة ورسوم بيانية جاهزة للعرض",
-  "حفظ خطوات التنظيف كقوالب جاهزة لإعادة استخدامها على أي ملف جديد"
+  "قوالب رسمية قابلة للتخصيص مع حفظ كوصفة جديدة وتبادل .safitemplate ومشاركة المجتمع"
 ] as const;
 
 const MARQUEE_ITEMS_EN = [
   "One-click universal multilingual text & character normalization",
   "Instant ID, IBAN, tax code & phone number validation",
-  "100% local desktop processing — zero files ever leave your device",
+  "Local desktop data processing — zero automatic cloud uploads; Offline Read-Only for saved projects",
   "Blazing 125,000 rows/second native Rust engine",
+  "Embedded local full-text search across Excel, CSV, DOCX, PPTX, PDF & TXT",
   "Automatic PII privacy masking before sharing spreadsheets",
   "Instant vector PDF reports & publication-ready charts",
-  "Reusable cleaning recipes for recurring monthly files"
+  "Official templates, Save as New Recipe, premium .safitemplate exchange & Share with SafiData"
 ] as const;
 
 const FEATURES_LIST = [
@@ -284,15 +296,15 @@ const FEATURES_LIST = [
   {
     id: "feat-privacy",
     icon: ShieldCheck,
-    metric: "100%",
-    metricLabelAr: "خصوصية على جهازك",
-    metricLabelEn: "On-Device Privacy",
-    titleAr: "بياناتك لا تغادر جهازك أبدًا",
-    titleEn: "Your Data Never Leaves Your Computer",
+    metric: "Local DB",
+    metricLabelAr: "معالجة محلية على جهازك",
+    metricLabelEn: "On-Device Data",
+    titleAr: "معالجة محلية لملفاتك بدون رفع سحابي تلقائي",
+    titleEn: "Your Files Stay Local — Zero Automatic Cloud Uploads",
     descAr:
-      "لا توجد سحابة إلكترونية ولا خوادم خارجية. جميع ملفات العملاء والرواتب والبيانات المالية تُعالج داخل تطبيق سطح المكتب على جهازك حتى عند فصل الإنترنت تمامًا.",
+      "تبقى ملفات الرواتب والعملاء والبيانات المالية في قاعدة بيانات محلية مشفّرة على جهازك. يتطلب تنفيذ العمليات المحمية تفويض الحساب عبر الإنترنت، بينما يظل استعراض المشاريع المحفوظة متاحًا في وضع القراءة فقط بدون إنترنت.",
     descEn:
-      "Zero cloud uploads. Sensitive payroll, customer, and financial spreadsheets stay strictly on your machine and work completely offline."
+      "Payroll, customer, and financial spreadsheets stay in an encrypted local database on your machine with zero automatic cloud uploads. Protected operations require online account authorization, while saved local projects remain viewable in Offline Read-Only Mode."
   },
   {
     id: "feat-charts",
@@ -383,10 +395,10 @@ const COMPARISON_ROWS = [
     cloudEn: "Slow upload/download bottlenecks"
   },
   {
-    featureAr: "3. الخصوصية والعمل بدون إنترنت (100% Offline)",
-    featureEn: "3. Complete Offline Privacy (100% On-Device)",
-    safiAr: "✓ يعمل 100% على جهازك بلا إنترنت نهائيًا",
-    safiEn: "✓ 100% Offline — files never leave your PC",
+    featureAr: "3. خصوصية البيانات المحلية ووضع القراءة فقط بدون إنترنت",
+    featureEn: "3. Local Data Privacy & Offline Read-Only Access",
+    safiAr: "✓ معالجة محلية بدون رفع سحابي تلقائي + وضع قراءة فقط للمحفوظات بدون إنترنت",
+    safiEn: "✓ Local data processing (zero auto-upload) + Offline Read-Only for saved projects",
     excelAr: "محلي لكن قد يزامن تلقائيًا مع السحابة",
     excelEn: "Local, but often auto-syncs to cloud",
     cloudAr: "✗ يشترط رفع بياناتك الحساسة لخادم خارجي",
@@ -463,8 +475,8 @@ const COMPARISON_ROWS = [
     cloudEn: "Requires exporting to a separate BI tool"
   },
   {
-    featureAr: "11. توليد تقارير PDF تنفيذية متجهية بدون إنترنت",
-    featureEn: "11. Instant Offline Vector PDF Report Generation",
+    featureAr: "11. توليد تقارير PDF تنفيذية متجهية محليًا على جهازك",
+    featureEn: "11. Instant On-Device Vector PDF Report Generation",
     safiAr: "✓ محرك PDF متجهي مدمج يصدر التقارير في ثوانٍ",
     safiEn: "✓ Embedded vector PDF engine exports in seconds",
     excelAr: "طباعة الجداول العريضة غالبًا ما تنقسم بشكل مشوّه",
@@ -498,6 +510,47 @@ export function BentoCommandCenter({
   const [showPromptSpec, setShowPromptSpec] = useState<boolean>(false);
   const [xraySplit, setXraySplit] = useState<number>(75);
   const [selectedOs, setSelectedOs] = useState<"windows" | "mac" | "linux">("windows");
+  const [releaseManifest, setReleaseManifest] =
+    useState<DesktopReleaseManifest>(FALLBACK_RELEASE_MANIFEST);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [downloadFeedback, setDownloadFeedback] = useState<{
+    readonly kind: "ok" | "err";
+    readonly text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetchDesktopReleaseManifest().then((manifest) => {
+      if (active) setReleaseManifest(manifest);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const activeArtifact = releaseManifest.platforms[selectedOs];
+
+  const handleDownloadInstaller = async (): Promise<void> => {
+    setDownloadBusy(true);
+    setDownloadFeedback(null);
+    const result = await triggerDesktopInstallerDownload(activeArtifact);
+    setDownloadBusy(false);
+    if (result.ok) {
+      setDownloadFeedback({
+        kind: "ok",
+        text: isAr
+          ? `بدأ تحميل ${activeArtifact.fileName ?? "المثبت"} (الإصدار v${releaseManifest.version}).`
+          : `Download started for ${activeArtifact.fileName ?? "installer"} (v${releaseManifest.version}).`
+      });
+    } else {
+      setDownloadFeedback({
+        kind: "err",
+        text: isAr
+          ? (result.errorAr ?? "تعذّر بدء التحميل.")
+          : (result.errorEn ?? "Could not start download.")
+      });
+    }
+  };
 
   // Continuous live stepping animation for Hero, Prompt-Motion, Visual Editors & Well Organized
   useEffect(() => {
@@ -661,8 +714,8 @@ export function BentoCommandCenter({
             }}
           >
             {isAr
-              ? "حوّل جداول Excel وCSV المليئة بالأخطاء والتكرار إلى بيانات نظيفة، محمية، وجاهزة للتقارير والرسوم البيانية في ثوانٍ — يعمل 100% على جهازك بدون إنترنت."
-              : "Transform messy Excel & CSV spreadsheets into clean, privacy-protected datasets and executive PDF reports in seconds — running 100% offline on your desktop."}
+              ? "حوّل جداول Excel وCSV المليئة بالأخطاء والتكرار إلى بيانات نظيفة، محمية، وجاهزة للتقارير والرسوم البيانية في ثوانٍ — بمعالجة محلية على جهازك دون رفع تلقائي للسحابة، مع تفويض حساب متصل ووضع قراءة فقط للمشاريع المحفوظة."
+              : "Transform messy Excel & CSV spreadsheets into clean, privacy-protected datasets and executive PDF reports in seconds — processed locally on your desktop with zero automatic cloud uploads, online account authorization, and Offline Read-Only access to saved projects."}
           </p>
 
           {/* ReactBits Magnetic + StarBorder CTA Buttons */}
@@ -723,7 +776,7 @@ export function BentoCommandCenter({
               value={100}
               decimals={0}
               suffix="% Local"
-              label={isAr ? "يعمل بلا إنترنت" : "Zero Cloud Uploads"}
+              label={isAr ? "بدون رفع سحابي تلقائي" : "Zero Cloud Uploads"}
             />
           </div>
         </div>
@@ -2325,30 +2378,72 @@ export function BentoCommandCenter({
             textAlign: "start"
           }}
         >
-          <div>
+          <div style={{ flex: "1 1 420px" }}>
             <div style={{ fontSize: "16px", fontWeight: 800 }}>
-              {selectedOs === "windows"
-                ? isAr
-                  ? "نسخة Windows الرسمية (64-bit MSI Installer)"
-                  : "Official Windows Installer (64-bit MSI)"
-                : selectedOs === "mac"
-                  ? isAr
-                    ? "نسخة macOS الشاملة (Universal DMG)"
-                    : "macOS Universal Build (Apple Silicon & Intel)"
-                  : isAr
-                    ? "نسخة Linux المحمولة (AppImage / Debian)"
-                    : "Linux Portable Package (AppImage / DEB)"}
+              {isAr ? activeArtifact.labelAr : activeArtifact.labelEn}
             </div>
             <div style={{ fontSize: "13px", color: "var(--text-secondary)", marginTop: "4px" }}>
               {isAr
-                ? "الإصدار v1.0.0 • يعمل بالكامل بدون إنترنت • يشمل محرك التنظيف واستوديو التقارير"
-                : "Version 1.0.0 • Works 100% Offline • Includes Cleaning Engine & PDF Report Studio"}
+                ? `الإصدار v${releaseManifest.version} • الحجم: ${formatBytes(activeArtifact.fileSizeBytes)} • معالجة محلية للبيانات + تفويض حساب متصل ووضع قراءة فقط للمحفوظات`
+                : `Version ${releaseManifest.version} • Size: ${formatBytes(activeArtifact.fileSizeBytes)} • Local data processing with online authorization & Offline Read-Only access`}
             </div>
+            {activeArtifact.sha256 ? (
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: "var(--text-secondary)",
+                  marginTop: "6px",
+                  fontFamily: "var(--font-mono, monospace)",
+                  wordBreak: "break-all"
+                }}
+                data-installer-sha256={activeArtifact.sha256}
+              >
+                SHA-256: {activeArtifact.sha256}
+              </div>
+            ) : null}
+            <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+              {isAr ? activeArtifact.signingNoticeAr : activeArtifact.signingNoticeEn}
+            </div>
+            {downloadFeedback !== null ? (
+              <div
+                role={downloadFeedback.kind === "err" ? "alert" : "status"}
+                data-download-feedback={downloadFeedback.kind}
+                style={{
+                  marginTop: "8px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color:
+                    downloadFeedback.kind === "err"
+                      ? "var(--safi-danger, #ef4444)"
+                      : "var(--safi-success, #10b981)"
+                }}
+              >
+                {downloadFeedback.text}
+              </div>
+            ) : null}
           </div>
 
-          <button type="button" className="safi-btn safi-btn-primary" onClick={onStart}>
+          <button
+            type="button"
+            className="safi-btn safi-btn-primary"
+            data-download-installer-btn="true"
+            disabled={downloadBusy || !activeArtifact.available}
+            onClick={() => void handleDownloadInstaller()}
+          >
             <Download size={16} aria-hidden="true" />
-            <span>{isAr ? "تحميل النسخة المباشرة" : "Download Installer"}</span>
+            <span>
+              {!activeArtifact.available
+                ? isAr
+                  ? "غير متاح بعد"
+                  : "Not Yet Published"
+                : downloadBusy
+                  ? isAr
+                    ? "جارٍ التحضير..."
+                    : "Preparing..."
+                  : isAr
+                    ? "تحميل مثبت سطح المكتب"
+                    : "Download Installer"}
+            </span>
           </button>
         </div>
       </section>
@@ -2357,8 +2452,8 @@ export function BentoCommandCenter({
       <div className="safi-visually-hidden" aria-hidden="true">
         <span>
           {isAr
-            ? "الإصدار الذهبي المعتمد v1.0.0-s5-gold • معالجة محلية 100% بلا إنترنت"
-            : "Certified Gold Edition v1.0.0-s5-gold • 100% offline on-device processing"}
+            ? "الإصدار الذهبي المعتمد v1.0.0-s5-gold • معالجة محلية على جهازك مع تفويض متصل ووضع قراءة فقط للمحفوظات"
+            : "Certified Gold Edition v1.0.0-s5-gold • Local on-device data processing with online authorization & Offline Read-Only"}
         </span>
         <span>{isAr ? "ابدأ الآن" : "Get started"}</span>
         <span>{isAr ? "استعرض القوالب" : "Browse templates"}</span>

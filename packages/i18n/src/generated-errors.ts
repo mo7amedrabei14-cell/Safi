@@ -26,6 +26,7 @@ export type SafiErrorCode =
   | "SF-AUTH-020"
   | "SF-AUTH-021"
   | "SF-AUTH-022"
+  | "SF-AUTH-023"
   | "SF-CAL-001"
   | "SF-CAL-002"
   | "SF-CAL-003"
@@ -71,6 +72,9 @@ export type SafiErrorCode =
   | "SF-RCP-001"
   | "SF-RCP-002"
   | "SF-RCP-003"
+  | "SF-RCP-005"
+  | "SF-RCP-006"
+  | "SF-RCP-007"
   | "SF-SYN-001"
   | "SF-SYN-002"
   | "SF-SYN-003"
@@ -162,6 +166,8 @@ export type SafiErrorTranslationKey =
   | "error.SF-AUTH-021.action"
   | "error.SF-AUTH-022.title"
   | "error.SF-AUTH-022.action"
+  | "error.SF-AUTH-023.title"
+  | "error.SF-AUTH-023.action"
   | "error.SF-CAL-001.title"
   | "error.SF-CAL-001.action"
   | "error.SF-CAL-002.title"
@@ -252,6 +258,12 @@ export type SafiErrorTranslationKey =
   | "error.SF-RCP-002.action"
   | "error.SF-RCP-003.title"
   | "error.SF-RCP-003.action"
+  | "error.SF-RCP-005.title"
+  | "error.SF-RCP-005.action"
+  | "error.SF-RCP-006.title"
+  | "error.SF-RCP-006.action"
+  | "error.SF-RCP-007.title"
+  | "error.SF-RCP-007.action"
   | "error.SF-SYN-001.title"
   | "error.SF-SYN-001.action"
   | "error.SF-SYN-002.title"
@@ -370,6 +382,7 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-AUTH-020",
   "SF-AUTH-021",
   "SF-AUTH-022",
+  "SF-AUTH-023",
   "SF-CAL-001",
   "SF-CAL-002",
   "SF-CAL-003",
@@ -415,6 +428,9 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-RCP-001",
   "SF-RCP-002",
   "SF-RCP-003",
+  "SF-RCP-005",
+  "SF-RCP-006",
+  "SF-RCP-007",
   "SF-SYN-001",
   "SF-SYN-002",
   "SF-SYN-003",
@@ -689,6 +705,16 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     titleEn: "Online authorization expired or clock rollback detected",
     actionEn: "Check your internet connection and system clock, then revalidate your session.",
     ownerNote: "Short-lived online authorization lease expired or local clock moved backwards."
+  },
+  "SF-AUTH-023": {
+    code: "SF-AUTH-023",
+    severity: "error",
+    titleAr: "رمز تفويض سطح المكتب غير صالح أو منتهي الصلاحية أو مستخدم مسبقًا",
+    actionAr: "أعد بدء تسجيل الدخول من تطبيق سطح المكتب لإصدار رمز PKCE جديد.",
+    titleEn: "Desktop PKCE authorization code is invalid, expired, or already used",
+    actionEn: "Restart sign-in from the Desktop application to issue a fresh PKCE code.",
+    ownerNote:
+      "Desktop browser PKCE authorization code failed state, installation, verifier, or replay check."
   },
   "SF-CAL-001": {
     code: "SF-CAL-001",
@@ -1101,6 +1127,39 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn:
       "Review the suggested column mapping for added or missing columns before applying the recipe.",
     ownerNote: "Recipe column matcher detected schema drift between recipe source and new file."
+  },
+  "SF-RCP-005": {
+    code: "SF-RCP-005",
+    severity: "error",
+    titleAr: "تصدير واستيراد ملفات الوصفات (.safitemplate) متاح للخطط المدفوعة أو VIP فقط",
+    actionAr: "قم بالترقية إلى خطة مدفوعة نشطة لتصدير أو استيراد ملفات الوصفات بين الحسابات.",
+    titleEn:
+      "Recipe file export/import (.safitemplate) requires an eligible paid plan or Friend VIP",
+    actionEn: "Upgrade to an active paid subscription to export or import portable recipe files.",
+    ownerNote:
+      "Server entitlement check blocked Premium recipe export/import for Free or Trial account."
+  },
+  "SF-RCP-006": {
+    code: "SF-RCP-006",
+    severity: "error",
+    titleAr: "المساهمة مرفوضة: يلزم الموافقة الصريحة وإزالة أي أسرار أو بيانات حساسة",
+    actionAr:
+      "راجع خطوات الوصفة وتأكد من عدم وجود مفاتيح أو كلمات سر أو صفوف بيانات، ثم وافق على شروط المساهمة.",
+    titleEn:
+      "Community submission rejected: explicit consent required and secrets/data rows are forbidden",
+    actionEn:
+      "Review the recipe definition, remove any credentials or dataset rows, and accept the contribution terms.",
+    ownerNote:
+      "Community contribution guard blocked missing consent, embedded secrets, or raw dataset rows."
+  },
+  "SF-RCP-007": {
+    code: "SF-RCP-007",
+    severity: "warn",
+    titleAr: "تم بلوغ الحد الشهري لمساهمات القوالب المجتمعية",
+    actionAr: "يمكنك إرسال مساهمات جديدة في بداية الشهر القادم.",
+    titleEn: "Monthly community template submission limit reached",
+    actionEn: "You can submit additional community templates at the start of next month.",
+    ownerNote: "Anti-spam monthly community submission quota exceeded for this account."
   },
   "SF-SYN-001": {
     code: "SF-SYN-001",
@@ -1538,6 +1597,8 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
     "يمكنك استعراض المشاريع المحفوظة محليًا للقراءة فقط. يلزم الاتصال بالإنترنت للاستيراد أو التنظيف أو التحليل أو التصدير.",
   "error.SF-AUTH-022.title": "انتهت مهلة تفويض الاتصال أو رُصد تلاعب بساعة النظام",
   "error.SF-AUTH-022.action": "تحقق من اتصال الإنترنت وتاريخ الجهاز ثم أعد التحقق من الجلسة.",
+  "error.SF-AUTH-023.title": "رمز تفويض سطح المكتب غير صالح أو منتهي الصلاحية أو مستخدم مسبقًا",
+  "error.SF-AUTH-023.action": "أعد بدء تسجيل الدخول من تطبيق سطح المكتب لإصدار رمز PKCE جديد.",
   "error.SF-CAL-001.title": "العمود المطلوب غير موجود في البيانات",
   "error.SF-CAL-001.action": "اختر عمودًا موجودًا أو أعد تسمية المرجع داخل المعادلة.",
   "error.SF-CAL-002.title": "صيغة المعادلة غير صحيحة",
@@ -1633,6 +1694,16 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-RCP-002.action": "تأكد من صحة عبارة السر وأعد المحاولة.",
   "error.SF-RCP-003.title": "تغيّر شكل الملف أو الأعمدة",
   "error.SF-RCP-003.action": "راجع المطابقة المقترحة للأعمدة الجديدة أو الناقصة قبل تطبيق الوصفة.",
+  "error.SF-RCP-005.title":
+    "تصدير واستيراد ملفات الوصفات (.safitemplate) متاح للخطط المدفوعة أو VIP فقط",
+  "error.SF-RCP-005.action":
+    "قم بالترقية إلى خطة مدفوعة نشطة لتصدير أو استيراد ملفات الوصفات بين الحسابات.",
+  "error.SF-RCP-006.title":
+    "المساهمة مرفوضة: يلزم الموافقة الصريحة وإزالة أي أسرار أو بيانات حساسة",
+  "error.SF-RCP-006.action":
+    "راجع خطوات الوصفة وتأكد من عدم وجود مفاتيح أو كلمات سر أو صفوف بيانات، ثم وافق على شروط المساهمة.",
+  "error.SF-RCP-007.title": "تم بلوغ الحد الشهري لمساهمات القوالب المجتمعية",
+  "error.SF-RCP-007.action": "يمكنك إرسال مساهمات جديدة في بداية الشهر القادم.",
   "error.SF-SYN-001.title": "حزمة المزامنة المشفرة غير صالحة أو تعرضت للتعديل",
   "error.SF-SYN-001.action": "أعد المزامنة من الجهاز الأصلي وتحقق من مفتاح الخزنة.",
   "error.SF-SYN-002.title": "تعارض في إصدار المزامنة",
@@ -1778,6 +1849,9 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-AUTH-022.title": "Online authorization expired or clock rollback detected",
   "error.SF-AUTH-022.action":
     "Check your internet connection and system clock, then revalidate your session.",
+  "error.SF-AUTH-023.title": "Desktop PKCE authorization code is invalid, expired, or already used",
+  "error.SF-AUTH-023.action":
+    "Restart sign-in from the Desktop application to issue a fresh PKCE code.",
   "error.SF-CAL-001.title": "The referenced column does not exist in the data",
   "error.SF-CAL-001.action": "Pick an existing column or fix the reference inside the formula.",
   "error.SF-CAL-002.title": "The formula syntax is invalid",
@@ -1884,6 +1958,17 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-RCP-003.title": "File schema or column structure changed",
   "error.SF-RCP-003.action":
     "Review the suggested column mapping for added or missing columns before applying the recipe.",
+  "error.SF-RCP-005.title":
+    "Recipe file export/import (.safitemplate) requires an eligible paid plan or Friend VIP",
+  "error.SF-RCP-005.action":
+    "Upgrade to an active paid subscription to export or import portable recipe files.",
+  "error.SF-RCP-006.title":
+    "Community submission rejected: explicit consent required and secrets/data rows are forbidden",
+  "error.SF-RCP-006.action":
+    "Review the recipe definition, remove any credentials or dataset rows, and accept the contribution terms.",
+  "error.SF-RCP-007.title": "Monthly community template submission limit reached",
+  "error.SF-RCP-007.action":
+    "You can submit additional community templates at the start of next month.",
   "error.SF-SYN-001.title": "Encrypted sync envelope is invalid or tampered",
   "error.SF-SYN-001.action": "Resync from the originating device and verify your vault key.",
   "error.SF-SYN-002.title": "Sync version conflict",

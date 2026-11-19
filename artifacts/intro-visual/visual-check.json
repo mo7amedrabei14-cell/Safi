@@ -28,27 +28,27 @@
       "visibleDataDots": 9,
       "visibleBars": 0
     },
-    "reactMountedAt": 2024.699999988079,
-    "motionStartedAt": 2024.7999999523163,
-    "motionCompletedAt": 2402.099999964237,
+    "reactMountedAt": 1727,
+    "motionStartedAt": 1727,
+    "motionCompletedAt": 2113.7999999523163,
     "applicationEntryMountedAt": null
   },
-  "motionStartDelayMs": 0.09999996423721313,
-  "entranceMotionDurationMs": 377.30000001192093,
-  "applicationEntryMountedAt": 4186.5,
+  "motionStartDelayMs": 0,
+  "entranceMotionDurationMs": 386.7999999523163,
+  "applicationEntryMountedAt": 3982.599999964237,
   "siteHandoff": {
     "authenticationGateMounted": false,
     "workspaceMounted": false,
     "applicationEntryMounted": false,
-    "motionCompletedAt": 2402.099999964237,
+    "motionCompletedAt": 2113.7999999523163,
     "introOpacity": 1,
-    "introClipPath": "circle(1715.5px at 1416px 639.688px)",
+    "introClipPath": "circle(1700.59px at 1416px 639.688px)",
     "arrowPath": "M 789.703125 639.6875 H 1416",
     "arrowDasharray": 626.297,
     "arrowDashoffset": 0,
-    "exitStartedAt": 3430.5
+    "exitStartedAt": 3183.7999999523163
   },
-  "exitDurationMs": 756,
+  "exitDurationMs": 798.6000000238419,
   "reducedMotionPassed": true,
   "pageErrors": []
 }

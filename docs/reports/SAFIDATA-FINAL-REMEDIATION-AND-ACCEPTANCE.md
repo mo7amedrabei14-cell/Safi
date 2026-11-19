@@ -1,29 +1,46 @@
-# صافي البيانات (SafiData) — تقرير القبول النهائي ومتابعة أمان وسلامة XLSB
+# صافي البيانات (SafiData) — تقرير القبول النهائي ومراجعة استنفاد الموارد وسلامة تيارات XLSB
 
-> أُعد هذا التقرير باللغة العربية البسيطة وفق `AGENTS.md` ومهارة `i-have-adhd`، وبالتحقق الفعلي على فرع `main` المنشور حاليًا على GitHub عند `96207381e89923ccceca9569de83b67c30731b5e` (حيث `HEAD` المحلي يطابق `origin/main` تمامًا) **دون** تنفيذ `commit` أو `push` أو إنشاء فروع أو `P0.06`. التغييرات الموثّقة أدناه موجودة في شجرة العمل المحلية ولم تُرفع بعد، وبالتالي لم يُرصد تشغيل GitHub CI عليها بعد.
-
----
-
-## 1. ما الذي أُنجز
-
-- **P0 — منع استنزاف الذاكرة غير المحدود في قراءة XLSB (`crates/sf-io/src/xlsb_reader.rs` و`crates/sf-io/src/workbook_intelligence.rs`)**:
-  - التحقق الصريح من إحداثيات الصف (`0..=1_048_575`) والعمود (`0..=16_383`) وإرجاع `SF-IMP-002` فورًا لأي إحداثي خارج حدود Excel.
-  - التحقق بحساب آمن من الفائض (`checked_*`) لمساحة النطاق الكثيف (`(max_r - min_r + 1) * (max_c - min_c + 1)` و`(max_r + 1) * (max_c + 1) <= 2_000_000`، وكذلك `span_rows <= max_rows_limit + 64`) بشكلٍ مستقل لكلٍ من `value_cells` و`formula_cells` **قبل** أي استدعاء لـ `calamine::Range::from_sparse()` وقبل تخصيص الشبكة الكثيفة في `build_worksheet_intelligence`، مع إرجاع `SF-IMP-005` دون الاعتماد على `catch_unwind`، وتقييد مساحة الخلايا المدمجة `BrtMergeCell` بـ `100_000` خلية.
-  - إضافة عيّنات ثنائية عدائية (`adversarial_sparse_corners.xlsb` لقيم `A1` + `XFD1048576`، و`adversarial_sparse_formula_corners.xlsb` لصيغ `A1` + `XFD1048576`) واختبارات انحدار تثبت الرفض الفوري بـ `SF-IMP-005`، بالإضافة إلى اختبار خلية منفردة عند `XFD1048576` وإحداثي خارج الحدود (`SF-IMP-002`).
-- **P1 — رفض تيارات BIFF12 التالفة والمبتورة + الحفاظ على كشف الصيغ غير المدعومة**:
-  - تحويل `Biff12Iter::next_record()` إلى `Result<Option<(u16, &[u8])>, SafiError>` للتمييز الصارم بين نهاية الملف النظيفة (`Ok(None)`) وبين التلف أو البتر (بتر معرّف السجل ثنائي البايت، بت استمرار خاطئ، طول `varint` مبتور أو لا ينتهي عند 4 بايت، أو بتر جسم السجل)، مع التحقق من إغلاق سجلات البداية/النهاية (`Book`/`Sheet`/`SST`/`Styles`/`Comments`) وتمرير الأخطاء بـ `?` دون أي نجاح جزئي صامت، وتغطية ذلك بعيّنة `malformed_truncated_sheet.xlsb` واختبارات بتر `workbook.bin` و`varint`.
-  - منع إسقاط الصيغ غير المفكوكة في `0x0008..=0x000B` أو خفض نتائجها المخزنة مؤقتًا إلى `LiteralValue`: تُسجَّل الصيغة صراحةً بالعلامة `=(unsupported BIFF12 formula)` مع الاحتفاظ بالقيمة المخزنة في `cached_value` وتصنيفها كـ `FormulaVerificationStatus::UnsupportedFormula` وضمّها في عدد الصيغ المكتشفة والتحذيرات الشفافة (`outside local recalculation ... undecoded binary`)، مع اختبار انحدار على عيّنة `xlsb_unsupported_formula_cached.xlsb`.
-- **P2 — توحيد إسقاط الرسم الجغرافي وحذف `tools/vendor/picomatch/` غير المستخدم**:
-  - توحيد إحداثيات رسم `Geographic` بين لوحة سطح المكتب (`DashboardChartsView.tsx`) وكبسولة `.safi.html` (`crates/sf-recipe/src/studio_capsule.rs`) ورسوم SVG والعروض المصدّرة (`apps/web/src/utils/quad-studio-engine.ts`) عبر دالة `computeRegionalCoordinatePct` المطابقة حرفيًا لـ `geo_region_coords` في `crates/sf-recipe/src/datagraph.rs` مع الإقرار الصريح `"Regional coordinate scatter (no GIS boundaries implied)"` واختبار تطابق آلي في `quad-studio-engine.test.ts`.
-  - التحقق من عدم وجود أي مرجع برمجي أو بنوي لـ `tools/vendor/picomatch/` وحذف المجلد بالكامل من شجرة العمل مع الإبقاء على الاعتماد الرسمي `"picomatch": "4.0.7"` في `package.json` و`pnpm-lock.yaml`.
+> أُعد هذا التقرير باللغة العربية البسيطة وفق `AGENTS.md` ومهارة `i-have-adhd`، وبالتحقق الفعلي على فرع `main` عند الالتزام المنشور حاليًا على GitHub (`0409edc79d9b3254d8d763bb123e88f770e2b1fa`). يتطابق `HEAD` المحلي مع `origin/main` تمامًا (`0409edc79d9b3254d8d763bb123e88f770e2b1fa`)، بينما تقع إصلاحات هذه الجولة (P0 وP1 وP2) كـ تعديلات محلية غير مُلتزمة على قمة `0409edc79d9b3254d8d763bb123e88f770e2b1fa` تنفيذًا لتعليمات عدم تنفيذ `commit` أو `push` أو إنشاء فروع أو بدء `P0.06`.
 
 ---
 
-## 2. كيف تجرّبه بنفسك
+## 1. حالة المزامنة والتاريخ بين المحلي وGitHub (`origin/main`)
 
-1. فحص حالة Git والتأكد من المطابقة مع `origin/main`:
+- **الفرع النشط**: `main`
+- **`HEAD` المحلي**: `0409edc79d9b3254d8d763bb123e88f770e2b1fa`
+- **`origin/main` البعيد (`git ls-remote origin refs/heads/main`)**: `0409edc79d9b3254d8d763bb123e88f770e2b1fa` (متطابقان تمامًا)
+- **تسلسل الالتزامات المنشورة حتى الآن على `main`**:
+  1. `2255a5b` — `style: apply repository formatters`
+  2. `008fe42` — `Update`
+  3. `fdc13b6` — `Update`
+  4. `9620738` — `Update` (نشر إصلاحات الدمج والـ XLSB الأصلية و`picomatch@4.0.7`)
+  5. `0409edc` (`0409edc79d9b3254d8d763bb123e88f770e2b1fa`) — `Update` (نشر إصلاحات الجولة السابقة: حد النطاق الكثيف لـ XLSB ورفض تيارات BIFF12 المبتورة وحفظ الصيغ غير المفكوكة وحذف `tools/vendor/picomatch/`)
+- **حالة شجرة العمل الحالية**: تعديلات محلية غير مُلتزمة وغير مرفوعة فوق `0409edc79d9b3254d8d763bb123e88f770e2b1fa` لإصلاحات هذه الجولة فقط؛ لم يُنفَّذ أي `commit` أو `push` أو `deploy`.
+- **حالة GitHub Actions CI**: **أدلة تشغيل GitHub CI غير متوفرة/غير مرصودة هنا** لا للالتزام `0409edc79d9b3254d8d763bb123e88f770e2b1fa` ولا للتعديلات المحلية غير المرفوعة، ولا يُدّعى في هذا التقرير نجاح GitHub CI دون رابط تشغيل فعلي ناجح للالتزام المطابق.
+
+---
+
+## 2. ما الذي أُنجز في هذه الجولة
+
+- **P0 — تقييد عدد سجلات الخلايا ورفض التكرار على نفس الإحداثي (`crates/sf-io/src/xlsb_reader.rs` و`crates/sf-io/tests/real_workbooks_regression.rs`)**:
+  - فرض حدود صريحة مستقلة لعدد السجلات (`MAX_VALUE_CELL_RECORDS = 2_000_000`، `MAX_FORMULA_CELL_RECORDS = 2_000_000`، `MAX_SHEET_CELL_RECORDS = 2_000_000`، `MAX_SHEET_ROW_HEADERS = 1_048_576`، `MAX_SHARED_STRINGS = 2_000_000`، `MAX_MERGE_RECORDS = 100_000`) داخل `ExtentTracker` (عبر `checked_add(1)` ورفض `SF-IMP-005` `XlsbCellRecordCountLimitExceeded` قبل تعديل الحالة أو الإدراج في `value_cells`/`formula_cells`، ومع إعادة التحقق داخل `validate()`).
+  - منع تكرار سجلات الخلايا على نفس الإحداثي `(row, col)` عبر `seen_cell_coords: HashSet<(u32, u32)>` مقيّد الحجم قبل الإدراج: أي سجل خلية مكرر (`0x0001..=0x000B`) يُرفض فورًا بـ `SF-IMP-002` (`DuplicateXlsbCellCoordinate`) عند أول تكرار قبل نمو المتجهات أو استدعاء `calamine::Range::from_sparse()`.
+  - الإبقاء على التحقق المستقل لنطاقي القيم والصيغ، وإضافة اختبارات انحدار عدائية: أرشيف XLSB غير مضغوط (`Stored`) يحوي `10,000` سجل قيمة مكرر عند `A1`، وآخر يحوي `10,000` سجل صيغة مكرر عند `A1` (يتجاوز نسبة ضغط ZIP لاختبار قارئ BIFF12 مباشرة)، بالإضافة إلى اختبارات وحدة لـ `ExtentTracker::with_max_records` و`parse_xlsb_package_with_record_limits` تثبت الرفض قبل نمو المتجهات أو `Range::from_sparse()`.
+- **P1 — فرض حدود وترتيب تيارات BIFF12 بصرامة (`crates/sf-io/src/xlsb_reader.rs` و`crates/sf-io/tests/real_workbooks_regression.rs`)**:
+  - استبدال الفحص الشرطي `if saw_begin && !saw_end` بآلة حالة إلزامية `StreamBoundaryGuard` (إضافة إلى `OptionalSectionGuard` لأقسام `BrtBeginSheetData`/`BrtEndSheetData` و`BrtBeginCellXFs`/`BrtEndCellXFs` وحارس تداخل التعليقات `0x027B`/`0x027C`) عبر تيارات: المصنف (`0x0083`/`0x0084`)، وأوراق العمل (`0x0081`/`0x0082`)، والأنماط (`0x0116`/`0x0117`)، والنصوص المشتركة (`0x009F`/`0x00A0`)، والتعليقات (`0x0274`/`0x0275`).
+  - رفض جميع حالات الإخلال الست بـ `SF-IMP-002`: غياب علامتي البداية والنهاية معًا، ظهور النهاية قبل البداية، تكرار البداية، تكرار النهاية، ظهور أي سجل قبل البداية، وظهور أي سجل بعد النهاية، مع الاستمرار في التمييز الصارم بين نهاية الملف النظيفة (`Ok(None)`) والبيانات المبتورة (`Err(SF-IMP-002)`).
+  - تغطية جميع الحالات الست باختبارات وحدة (`stream_boundary_guard_enforces_strict_biff12_framing_across_all_streams`) واختبارات تكامل شاملة على ملفات XLSB كاملة للمصنف وورقة العمل و`styles.bin` و`sharedStrings.bin` و`comments1.bin`.
+- **P2 — تطابق تطبيع Unicode في الرسم الجغرافي (`apps/web/src/utils/quad-studio-engine.ts` و`apps/web/src/utils/quad-studio-engine.test.ts` و`crates/sf-recipe/src/datagraph/tests.rs`)**:
+  - استبدال `label.trim().toLowerCase()` في TypeScript بدالة `toAsciiLowerCase(label.trim())` (`A-Z` -> `a-z` فقط) المطابقة تمامًا لـ `label.trim().to_ascii_lowercase()` في Rust (`geo_region_coords`)، مع توثيق القاعدة المشتركة (تطبيع ASCII فقط لمطابقة المناطق المعروفة، وتجزئة بايتات UTF-8 الأصلية غير المعدّلة للفئات غير المعروفة).
+  - إضافة اختبارات انحدار متناظرة في Rust (`datagraph/tests.rs`) وTypeScript (`quad-studio-engine.test.ts`) لتسميات فئات غير معروفة تحتوي على أحرف Unicode كبيرة غير لاتينية (`"ÜBER_NORD_ÖST"` -> `(73, 21)`، `"İSTANBUL_SÜD"` -> `(52, 62)`، وعلامة كلفن `"DA\u212AAHL"` -> `(49, 27)` التي كان `toLowerCase()` يحوّلها خطأً إلى Delta `(48, 28)`).
+
+---
+
+## 3. كيف تجرّبه بنفسك
+
+1. فحص حالة Git والمطابقة مع `origin/main`:
    - `git branch --show-current` و`git rev-parse HEAD` و`git ls-remote origin refs/heads/main` و`git status --short`
-2. فحص Rust وTauri (بما فيها اختبارات XLSB العدائية الجديدة في `sf-io`):
+2. فحص Rust وTauri (بما فيها اختبارات حدود السجلات وتكرار الإحداثيات وحدود التيارات وتطابق Unicode الجغرافي):
    - `cargo fmt --all -- --check`
    - `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check`
    - `cargo clippy --workspace --all-targets -- -D warnings`
@@ -36,78 +53,60 @@
    - `pnpm run check:contrast` و`pnpm audit --audit-level=moderate`
    - `py -3 -B tools/verify-i18n.py` و`py -3 -B tools/verify-security.py` و`py -3 -B tools/gen-errors.py --check` و`py -3 -B tools/verify-migrations.py`
    - `& "C:\Program Files\Git\bin\bash.exe" tools/check-no-network.sh --self-test` ثم `tools/check-no-network.sh`
-4. فحص إعدادات الإطلاق والبناء والمتصفح الحقيقي والصادرات الـ 9 وسطح المكتب E2E:
+4. فحص إعدادات الإطلاق والبناء والكبسولة والصادرات الـ 9 وتكامل سطح المكتب E2E:
    - `node tools/verify-desktop-build-config.mjs` ثم `pnpm run build`
-   - `node tools/verify-intro-visual.mjs`
-   - `node tools/verify-ux-e2e.mjs`
-   - تعيين `PLAYWRIGHT_MODULE_URL` إلى Playwright المحلي ثم `node tools/verify-device-identity.mjs`
    - `node tools/verify-capsule-chromium.mjs`
    - `node tools/verify-exports-roundtrip.mjs`
    - `node tools/verify-studio-desktop-e2e.mjs`
+   - `node tools/verify-intro-visual.mjs` و`node tools/verify-ux-e2e.mjs` و`node tools/verify-device-identity.mjs`
 
 ---
 
-## 3. نتائج التحقق النهائية (على آخر نسخة كود نهائية دون أي تعديل لاحق)
+## 4. نتائج التحقق النهائية (بعد آخر تعديل في الكود، مع رموز الخروج الدقيقة)
 
-| الفحص / الأمر | النتيجة الفعلية المرصودة | أرقام وملاحظات موثقة من التشغيل الأخير |
-| :--- | :--- | :--- |
-| مطابقة `HEAD` مع `origin/main` | مطابق | `96207381e89923ccceca9569de83b67c30731b5e` على المحلي وعلى `refs/heads/main` في `origin` |
-| تعارضات الدمج + `tools/vendor` + `git diff --check` | ناجح | `0` علامات تعارض، `0` مراجع لـ `vendor/picomatch` أو `tools/vendor` في الكود والاعتماديات، `git diff --check` خروج `0` |
-| `cargo fmt --check` و`cargo clippy --all-targets -- -D warnings` (Workspace + `src-tauri`) | ناجح | `0` تحذيرات و`0` أخطاء |
-| `cargo test --workspace` | ناجح (مع 3 متجاهلة) | **`294` ناجح، `0` فشل، `3` متجاهلة** (`#[ignore]` في `sf-server` تتطلب PostgreSQL 18 عبر `SF_TEST_DATABASE_URL`) — تشمل `42` اختبار وحدة و`10` اختبارات انحدار في `sf-io` |
-| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` | ناجح (مع 1 متجاهل) | **`2` ناجح، `0` فشل، `1` متجاهل** (`benchmark_native_session_verifier_performance` قياس أداء TLS يدوي) |
-| `pnpm install --frozen-lockfile --ignore-scripts` | ناجح | `Lockfile is up to date` (`all 9 workspace projects`) |
-| `pnpm run format:check` / `typecheck` / `lint` | ناجح | خروج `0` عبر 8 مشاريع في `pnpm -r` |
-| `pnpm run test` (Vitest) | ناجح | **`66` ملف اختبار / `232` اختبارًا ناجحًا، `0` فشل، `0` تخطي** (يشمل اختبار تطابق إحداثيات `Geographic` مع `datagraph.rs`) |
-| `pnpm run check:contrast` | ناجح | `46` زوج نص (`min 4.58:1 >= 4.5:1`) و`36` زوج واجهة/رسوم (`min 4.37:1 >= 3.0:1`) + نجاح `--self-test` |
-| `pnpm audit --audit-level=moderate` | ناجح | `No known vulnerabilities found` (`picomatch@4.0.7` الرسمي في `devDependencies` فقط) |
-| `verify-i18n.py` / `verify-security.py` / `gen-errors.py --check` / `verify-migrations.py` / `check-no-network.sh` | ناجح | `28` مفتاح i18n؛ `110` مهام موثقة؛ `errors.toml` مطابق؛ `6` أزواج هجرة DB؛ `0` اعتماديات شبكة في `10` حزم محرك (+ نجاح `--self-test`) |
-| `node tools/verify-desktop-build-config.mjs` ثم `pnpm run build` | ناجح | رفض الأصول المفقودة/المحجوزة/غير HTTPS في الويب وTauri Release، ومطابقة `https://ci-verify.safidata.dev` بين الحزمة و`safi-desktop.exe`، ثم استعادة بناء الإنتاج القياسي |
-| `node tools/verify-intro-visual.mjs` | ناجح | `1440x900` (3G + 4x CPU): دخول `377.3ms`، خروج `756ms`، `reducedMotionPassed: true`، `pageErrors: []` |
-| `node tools/verify-ux-e2e.mjs` | ناجح | مصفوفة المقاسات الـ 7 (`tabAlignedDelta: 0` بما فيها `320x700` RTL)، تمرير نافذة الدخول، `authMountCount: 1`، `0` عناصر سطح مكتب في الموقع العام |
-| `node tools/verify-device-identity.mjs` | ناجح | معرّف التثبيت ثابت عبر الصفحات في IndexedDB (`stableAcrossPages: true`, `localStorageUsed: false`) |
-| `node tools/verify-capsule-chromium.mjs` | ناجح | `.safi.html` عبر `file://`: `scripts: 0`, `imagesLoaded: 1`, `externalRequests: 0`, `consoleErrors: 0`, `pageErrors: 0` |
-| `node tools/verify-exports-roundtrip.mjs` | ناجح | التحقق المستقل عبر Python (`xlsx_sheets`: 4 أوراق، `png_colors`: 8، `pdf_pages`: 7 عند `xref=660742`) + `21` رسم SVG متميز (`svgWidth: 420`) + مشغل `.safi.html` (`slideNodes: 10`, `zeroSizedSvgs: 0`) |
-| `node tools/verify-studio-desktop-e2e.mjs` | ناجح | كامل خطوات سطح المكتب ضد `sf-server` الحقيقي و`studio_ipc_harness` (بما فيها `messy_enterprise.xlsx` و`enterprise_binary.xlsb` والتصفية المتقاطعة والتصدير الذري) |
-| الحفاظ على الموقع العام مقارنةً بـ `50d473581ab0e2318bf149cded2e0ee6061527f6` | ناجح | `0` ملفات معدّلة في `apps/site`، `packages/`، `apps/web/src/pages`، `home`، `layout`، `brand`، `App.tsx`، و`ApplicationShell.tsx` |
+| الفحص / الأمر | رمز الخروج | النتيجة الفعلية والأرقام الموثقة |
+| :--- | :---: | :--- |
+| `cargo fmt --all -- --check` + `src-tauri` | `0` | مطابق بالكامل |
+| `cargo clippy --workspace --all-targets -- -D warnings` + `src-tauri` | `0` | `0` تحذيرات و`0` أخطاء |
+| `cargo test --workspace` | `0` | **`300` ناجح، `0` فشل، `3` متجاهلة** (`#[ignore]` في `sf-server` تتطلب PostgreSQL 18 عبر `SF_TEST_DATABASE_URL`) — تشمل `45` اختبار وحدة و`12` اختبار انحدار في `sf-io` + اختبار `geo_region_coords` الجديد في `sf-recipe` |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` | `0` | **`2` ناجح، `0` فشل، `1` متجاهل** (`benchmark_native_session_verifier_performance` قياس أداء TLS يدوي) |
+| `pnpm install --frozen-lockfile --ignore-scripts` | `0` | `Lockfile is up to date` (`all 9 workspace projects`) |
+| `pnpm run format:check` / `typecheck` / `lint` | `0` | نجاح كامل عبر 8 مشاريع في `pnpm -r` |
+| `pnpm run test` (Vitest) | `0` | **`66` ملف اختبار / `232` اختبارًا ناجحًا، `0` فشل، `0` تخطي** (يشمل اختبار تطابق التطبيع ASCII-only وUnicode في `quad-studio-engine.test.ts`) |
+| `pnpm run check:contrast` | `0` | `46` زوج نص (`min 4.58:1 >= 4.5:1`) و`36` زوج واجهة/رسوم (`min 4.37:1 >= 3.0:1`) + نجاح `--self-test` |
+| `pnpm audit --audit-level=moderate` | `0` | `No known vulnerabilities found` |
+| `verify-i18n.py` / `verify-security.py` / `gen-errors.py --check` / `verify-migrations.py` | `0` | `28` مفتاح i18n؛ `110` مهام موثقة؛ `errors.toml` مطابق؛ `6` أزواج هجرة DB |
+| `tools/check-no-network.sh --self-test` و`tools/check-no-network.sh` (Git Bash) | `0` | اجتياز الاختبار السلبي؛ `0` اعتماديات شبكة في `10` حزم محرك |
+| `node tools/verify-desktop-build-config.mjs` ثم `pnpm run build` | `0` | رفض الأصول غير الصالحة في الويب وTauri Release، ومطابقة `https://ci-verify.safidata.dev` بين الحزمة و`safi-desktop.exe`، واستعادة بناء الإنتاج القياسي |
+| `node tools/verify-capsule-chromium.mjs` | `0` | `.safi.html` عبر `file://`: `scripts: 0`, `imagesLoaded: 1`, `externalRequests: 0`, `consoleErrors: 0`, `pageErrors: 0` |
+| `node tools/verify-exports-roundtrip.mjs` | `0` | تحقق Python المستقل (`xlsx_sheets`: 4 أوراق، `png_colors`: 8، `pdf_pages`: 7 عند `xref=660742`) + `21` رسم SVG متميز (`svgWidth: 420`) + مشغل `.safi.html` (`slideNodes: 10`, `zeroSizedSvgs: 0`) |
+| `node tools/verify-studio-desktop-e2e.mjs` | `0` | كامل الخطوات ضد `sf-server` الحقيقي و`studio_ipc_harness` (`messy_enterprise.xlsx` و`enterprise_binary.xlsb` والتصفية المتقاطعة والتصدير الذري)؛ ملاحظة: تجاوز التشغيل الأول مهلة `page.goto` (30 ثانية) تحت ضغط بناء `sf-server` ثم اجتاز بالكامل عند إعادة التشغيل المنفصل بخروج `0` |
+| `node tools/verify-intro-visual.mjs` / `verify-ux-e2e.mjs` / `verify-device-identity.mjs` | `0` | دخول `386.8ms`، خروج `798.6ms`، `reducedMotionPassed: true`، مصفوفة المقاسات الـ 7 (`tabAlignedDelta: 0`)، `authMountCount: 1`، معرّف IndexedDB ثابت (`localStorageUsed: false`)، و`0` عناصر سطح مكتب في الموقع العام |
 
 ---
 
-## 4. ما الذي لم يكتمل أو بقي مقيدًا بحدود البيئة أو التصميم (بصراحة تامة)
+## 5. ما الذي فشل أو لم يكتمل أو بقي مقيدًا (بصراحة تامة)
 
-- **حالة GitHub CI**: لم تُلتزم التغييرات الحالية ولم تُرفع إلى `origin/main` احترامًا لتعليمات عدم تنفيذ `commit` أو `push`، ولذلك لم يُرصد بعد تشغيل GitHub Actions CI على هذه التغييرات المحلية.
-- **اختبارات متجاهلة محليًا (4 اختبارات إجمالًا)**:
-  - `3` اختبارات في `sf-server` (`#[ignore]`) تتطلب مثيل PostgreSQL 18 حيًا عبر `SF_TEST_DATABASE_URL` غير المتوفر في هذه البيئة.
+- **أدلة GitHub Actions CI غير متوفرة**: لم تُرفع تعديلات هذه الجولة احترامًا لعدم تنفيذ `commit` أو `push`، ولم يُرصد هنا أي تشغيل GitHub CI للالتزام `0409edc79d9b3254d8d763bb123e88f770e2b1fa` أو للنسخة المحلية المعدّلة.
+- **4 اختبارات متجاهلة محليًا**:
+  - `3` اختبارات في `sf-server` (`#[ignore]`) تتطلب مثيل PostgreSQL 18 حيًا عبر `SF_TEST_DATABASE_URL`.
   - `1` اختبار أداء يدوي في `apps/desktop/src-tauri` (`benchmark_native_session_verifier_performance`).
-- **إطار اختبار سطح المكتب**: يشغّل `tools/verify-studio-desktop-e2e.mjs` خادم `sf-server` الحقيقي و`studio_ipc_harness` الحقيقي داخل Chromium (عبر جسر `__TAURI_INTERNALS__`) وليس عبر WebDriver خارجي لنافذة WebView2 الأصلية، مع تحقق إضافي من بناء Release الحقيقي `safi-desktop.exe` عبر `verify-desktop-build-config.mjs`.
-- **قيود رسم `Geographic`**: الرسم هو مخطط تبعثر إحداثي للمناطق المصرية المعروفة وتوزيع حتمي للفئات غير المعرّفة (مطابق الآن عبر لوحة سطح المكتب وكبسولة `.safi.html` وSVG المصدّر) وليس محرك خرائط GIS حدوديًا، وهو ما يُعرض صراحةً في التسمية التوضيحية.
-- **بيئة Windows لـ `check-no-network.sh`**: يتطلب التشغيل عبر Git Bash (`C:\Program Files\Git\bin\bash.exe`) لأن `bash` الافتراضي قد يفتح WSL دون `cargo.exe`.
+- **إطار اختبار سطح المكتب**: `verify-studio-desktop-e2e.mjs` يختبر واجهة Chromium مقابل خادم `sf-server` الحقيقي ومحرك `studio_ipc_harness` الحقيقي وليس عبر WebDriver خارجي لنافذة WebView2 الأصلية، مع تحقق مستقل من بناء Release الحقيقي `safi-desktop.exe`.
 
 ---
 
-## 5. قرارات أحتاجها منك
+## 6. قرارات أحتاجها منك
 
-- مراجعة التغييرات المحلية غير المُلتزمة (إصلاحات P0/P1 لـ XLSB، توحيد إحداثيات `Geographic`، وحذف `tools/vendor/picomatch/`) واعتمادها قبل الإذن بعملية `commit` و`push` إلى `main` وتشغيل GitHub CI عليها.
+- مراجعة الفروقات المحلية الحالية فوق `0409edc79d9b3254d8d763bb123e88f770e2b1fa` واعتمادها قبل الإذن بعملية `commit` و`push` إلى `main` للتحقق النهائي عبر GitHub Actions CI.
 
 ---
 
-## 6. الملفات التي تغيّرت أو أُضيفت أو حُذفت (من `git status --short` الحالي)
+## 7. الملفات التي تغيّرت في شجرة العمل المحلية فوق `0409edc79d9b3254d8d763bb123e88f770e2b1fa`
 
-- **المرجع الأساسي على `main`**: `96207381e89923ccceca9569de83b67c30731b5e` (مطابق لـ `origin/main`).
-- **محرك XLSB وذكاء المصنفات واختباراته**:
-  - `crates/sf-io/src/xlsb_reader.rs` (معدّل)
-  - `crates/sf-io/src/workbook_intelligence.rs` (معدّل)
-  - `crates/sf-io/tests/real_workbooks_regression.rs` (معدّل)
-  - `tests/fixtures/generate_workbooks.py` (معدّل)
-  - `tests/fixtures/workbooks/adversarial_sparse_corners.xlsb` (مضاف)
-  - `tests/fixtures/workbooks/adversarial_sparse_formula_corners.xlsb` (مضاف)
-  - `tests/fixtures/workbooks/malformed_truncated_sheet.xlsb` (مضاف)
-  - `tests/fixtures/workbooks/xlsb_unsupported_formula_cached.xlsb` (مضاف)
-- **توحيد الرسم الجغرافي واختباره**:
-  - `apps/web/src/utils/quad-studio-engine.ts` (معدّل)
-  - `apps/web/src/utils/quad-studio-engine.test.ts` (معدّل)
-- **إزالة الحزمة المورّدة القديمة غير المستخدمة**:
-  - `tools/vendor/picomatch/` (محذوف بالكامل — 10 ملفات)
-- **التقرير ومخرجات التحقق البصري المحدّثة**:
-  - `docs/reports/SAFIDATA-FINAL-REMEDIATION-AND-ACCEPTANCE.md` (معدّل)
-  - `artifacts/intro-visual/` (تحديثات التشغيل الأخير لـ `intro-auth-gate-handoff.png` و`intro-opening-motion.png` و`studio-desktop-e2e.png` و`visual-check.json` وملفات `studio-e2e/`)
+- `crates/sf-io/src/xlsb_reader.rs` — حدود صريحة لعدد سجلات الخلايا والقيم والصيغ ورفض الإحداثيات المكررة قبل نمو المتجهات + `StreamBoundaryGuard` و`OptionalSectionGuard` لجميع تيارات BIFF12 + 3 اختبارات وحدة جديدة.
+- `crates/sf-io/tests/real_workbooks_regression.rs` — اختبارات تكامل عدائية لـ `10,000` سجل قيمة وصيغة مكرر عند `A1` (بأرشيف `Stored`) وجميع حالات إخلال حدود تيارات BIFF12 الست (المصنف وورقة العمل والأنماط والنصوص المشتركة والتعليقات).
+- `crates/sf-recipe/src/datagraph/tests.rs` — اختبار تطابق إحداثيات `geo_region_coords` لتسميات Unicode غير اللاتينية ذات الأحرف الكبيرة.
+- `apps/web/src/utils/quad-studio-engine.ts` — دالة `toAsciiLowerCase` وتوثيق قاعدة التطبيع المشتركة مع Rust.
+- `apps/web/src/utils/quad-studio-engine.test.ts` — اختبار تطابق `computeRegionalCoordinatePct` و`renderChartSvg("Geographic", ...)` مع Rust لنفس تسميات Unicode الكبيرة (`"ÜBER_NORD_ÖST"` و`"DA\u212AAHL"` و`"İSTANBUL_SÜD"`).
+- `docs/reports/SAFIDATA-FINAL-REMEDIATION-AND-ACCEPTANCE.md` — تحديث التقرير بالكامل ليطابق `0409edc79d9b3254d8d763bb123e88f770e2b1fa` ويعكس الحالة الحقيقية والنتائج الدقيقة.
+- `artifacts/intro-visual/` — مخرجات التشغيل الأخير لسكربتات التحقق البصري وDesktop E2E (`intro-auth-gate-handoff.png` و`intro-opening-motion.png` و`studio-desktop-e2e.png` و`visual-check.json` و`studio-e2e/`).

@@ -783,3 +783,51 @@ fn compute_chart_series_filtered_narrows_rows_for_cross_filter() -> Result<(), S
     );
     Ok(())
 }
+
+#[test]
+fn geo_region_coords_handles_non_ascii_uppercase_unknown_labels_deterministically()
+-> Result<(), SafiError> {
+    // Exact cross-language parity with TypeScript `computeRegionalCoordinatePct`
+    // (`apps/web/src/utils/quad-studio-engine.ts`): ASCII-only lowercasing for region lookup
+    // + raw UTF-8 byte hash fallback for unknown categories.
+    assert_eq!(super::geo_region_coords("ÜBER_NORD_ÖST", 0), (73, 21));
+    assert_eq!(super::geo_region_coords("DA\u{212A}AHL", 1), (49, 27));
+    assert_eq!(super::geo_region_coords("İSTANBUL_SÜD", 2), (52, 62));
+
+    let source = table(&[
+        (
+            "region",
+            &["ÜBER_NORD_ÖST", "DA\u{212A}AHL", "İSTANBUL_SÜD"],
+        ),
+        ("amount", &["300", "200", "100"]),
+    ])?;
+    let graph = DataGraph::new(SourceId::new("src_geo_unicode")?, source, 1)?;
+    let series =
+        graph.compute_chart_series(ChartType::Geographic, AggFunc::Sum, "amount", "region")?;
+    assert_eq!(series.points.len(), 3);
+    assert_eq!(
+        (
+            series.points[0].label.as_str(),
+            series.points[0].x_pct,
+            series.points[0].y_pct
+        ),
+        ("ÜBER_NORD_ÖST", 73, 21)
+    );
+    assert_eq!(
+        (
+            series.points[1].label.as_str(),
+            series.points[1].x_pct,
+            series.points[1].y_pct
+        ),
+        ("DA\u{212A}AHL", 49, 27)
+    );
+    assert_eq!(
+        (
+            series.points[2].label.as_str(),
+            series.points[2].x_pct,
+            series.points[2].y_pct
+        ),
+        ("İSTANBUL_SÜD", 52, 62)
+    );
+    Ok(())
+}

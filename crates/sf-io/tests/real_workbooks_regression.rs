@@ -554,3 +554,336 @@ fn preserves_undecoded_xlsb_formula_as_unsupported_with_cached_value_and_warning
 
     Ok(())
 }
+
+fn build_in_memory_xlsb_with_parts(
+    wb_bin: &[u8],
+    sheet_bin: &[u8],
+    extra_parts: &[(&str, &[u8])],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("[Content_Types].xml", opts)?;
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/></Types>"#,
+        )?;
+        zip.start_file("xl/workbook.bin", opts)?;
+        zip.write_all(wb_bin)?;
+        zip.start_file("xl/_rels/workbook.bin.rels", opts)?;
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.bin"/></Relationships>"#,
+        )?;
+        zip.start_file("xl/worksheets/sheet1.bin", opts)?;
+        zip.write_all(sheet_bin)?;
+        for (path, bytes) in extra_parts {
+            zip.start_file(*path, opts)?;
+            zip.write_all(bytes)?;
+        }
+        zip.finish()?;
+    }
+    Ok(cursor.into_inner())
+}
+
+fn build_in_memory_xlsb_stored(
+    wb_bin: &[u8],
+    sheet_bin: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        // Use Stored (uncompressed) so high-repetition BIFF12 payloads pass the ZIP
+        // decompression-ratio check and directly exercise the BIFF12 parser's own guards.
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("[Content_Types].xml", opts)?;
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/></Types>"#,
+        )?;
+        zip.start_file("xl/workbook.bin", opts)?;
+        zip.write_all(wb_bin)?;
+        zip.start_file("xl/_rels/workbook.bin.rels", opts)?;
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.bin"/></Relationships>"#,
+        )?;
+        zip.start_file("xl/worksheets/sheet1.bin", opts)?;
+        zip.write_all(sheet_bin)?;
+        zip.finish()?;
+    }
+    Ok(cursor.into_inner())
+}
+
+#[test]
+fn rejects_xlsb_repeated_cell_records_at_identical_coordinates_before_vector_growth()
+-> Result<(), Box<dyn std::error::Error>> {
+    // 1. 10,000 repeated value cell records at identical coordinate (0, 0) / A1:
+    // stored uncompressed so ZIP ratio checks do not mask the BIFF12 parser;
+    // bounding box is only 1x1, yet must be rejected immediately on the first duplicate
+    // before unbounded `value_cells` vector growth or `Range::from_sparse()`.
+    let mut rk_payload = Vec::new();
+    rk_payload.extend_from_slice(&0u32.to_le_bytes()); // col 0
+    rk_payload.extend_from_slice(&0u32.to_le_bytes()); // style 0
+    rk_payload.extend_from_slice(&((42u32 << 2) | 0x02).to_le_bytes()); // RK int 42
+    let rk_rec = encode_biff12_record(0x0002, &rk_payload);
+
+    let mut dup_val_sheet = Vec::new();
+    dup_val_sheet.extend_from_slice(&encode_biff12_record(0x0081, &[]));
+    dup_val_sheet.extend_from_slice(&encode_biff12_record(0x0091, &[]));
+    dup_val_sheet.extend_from_slice(&encode_biff12_record(0x0000, &0u32.to_le_bytes()));
+    for _ in 0..10_000 {
+        dup_val_sheet.extend_from_slice(&rk_rec);
+    }
+    dup_val_sheet.extend_from_slice(&encode_biff12_record(0x0092, &[]));
+    dup_val_sheet.extend_from_slice(&encode_biff12_record(0x0082, &[]));
+
+    let dup_val_xlsb = build_in_memory_xlsb_stored(&minimal_valid_workbook_bin(), &dup_val_sheet)?;
+    let dup_val_err = ingest_workbook_universal(
+        Cursor::new(dup_val_xlsb),
+        PlatformLimits::DESKTOP_CLI,
+        Some("repeated_values_a1.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("repeated value cell records at identical coordinate A1 must fail")?;
+    assert_eq!(dup_val_err.code(), ErrorCode::SF_IMP_002);
+
+    // 2. 10,000 repeated formula cell records (`BrtFmlaNum`) at identical coordinate (0, 0) / A1:
+    // must be rejected before unbounded `formula_cells` growth or `Range::from_sparse()`.
+    let mut fmla_payload = Vec::new();
+    fmla_payload.extend_from_slice(&0u32.to_le_bytes()); // col 0
+    fmla_payload.extend_from_slice(&0u32.to_le_bytes()); // style 0
+    fmla_payload.extend_from_slice(&100.0f64.to_le_bytes()); // cached num
+    fmla_payload.extend_from_slice(&0u16.to_le_bytes()); // grbitFlags
+    fmla_payload.extend_from_slice(&3u32.to_le_bytes()); // cce
+    fmla_payload.extend_from_slice(&[0x1E, 0x64, 0x00]); // PtgInt(100)
+    let fmla_rec = encode_biff12_record(0x0009, &fmla_payload);
+
+    let mut dup_fmla_sheet = Vec::new();
+    dup_fmla_sheet.extend_from_slice(&encode_biff12_record(0x0081, &[]));
+    dup_fmla_sheet.extend_from_slice(&encode_biff12_record(0x0091, &[]));
+    dup_fmla_sheet.extend_from_slice(&encode_biff12_record(0x0000, &0u32.to_le_bytes()));
+    for _ in 0..10_000 {
+        dup_fmla_sheet.extend_from_slice(&fmla_rec);
+    }
+    dup_fmla_sheet.extend_from_slice(&encode_biff12_record(0x0092, &[]));
+    dup_fmla_sheet.extend_from_slice(&encode_biff12_record(0x0082, &[]));
+
+    let dup_fmla_xlsb =
+        build_in_memory_xlsb_stored(&minimal_valid_workbook_bin(), &dup_fmla_sheet)?;
+    let dup_fmla_err = ingest_workbook_universal(
+        Cursor::new(dup_fmla_xlsb),
+        PlatformLimits::DESKTOP_CLI,
+        Some("repeated_formulas_a1.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("repeated formula cell records at identical coordinate A1 must fail")?;
+    assert_eq!(dup_fmla_err.code(), ErrorCode::SF_IMP_002);
+
+    Ok(())
+}
+
+#[test]
+fn rejects_xlsb_stream_boundary_violations_across_workbook_worksheet_and_supporting_parts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let valid_wb = minimal_valid_workbook_bin();
+    let valid_sheet = [
+        encode_biff12_record(0x0081, &[]),
+        encode_biff12_record(0x0091, &[]),
+        encode_biff12_record(0x0092, &[]),
+        encode_biff12_record(0x0082, &[]),
+    ]
+    .concat();
+
+    let mut bundle_sh = Vec::new();
+    bundle_sh.extend_from_slice(&0u32.to_le_bytes());
+    bundle_sh.extend_from_slice(&1u32.to_le_bytes());
+    bundle_sh.extend_from_slice(&encode_xl_wide_string("rId1"));
+    bundle_sh.extend_from_slice(&encode_xl_wide_string("Sheet1"));
+    let bundle_rec = encode_biff12_record(0x009C, &bundle_sh);
+    let row_rec = encode_biff12_record(0x0000, &0u32.to_le_bytes());
+
+    // Workbook stream boundary violations (all 6 required cases)
+    let bad_workbooks: [(&str, Vec<u8>); 5] = [
+        ("wb_missing_both", bundle_rec.clone()),
+        (
+            "wb_end_before_begin",
+            [
+                encode_biff12_record(0x0084, &[]),
+                encode_biff12_record(0x0083, &[]),
+                bundle_rec.clone(),
+            ]
+            .concat(),
+        ),
+        (
+            "wb_duplicate_begin",
+            [
+                encode_biff12_record(0x0083, &[]),
+                encode_biff12_record(0x0083, &[]),
+                bundle_rec.clone(),
+                encode_biff12_record(0x0084, &[]),
+            ]
+            .concat(),
+        ),
+        (
+            "wb_duplicate_end",
+            [
+                encode_biff12_record(0x0083, &[]),
+                bundle_rec.clone(),
+                encode_biff12_record(0x0084, &[]),
+                encode_biff12_record(0x0084, &[]),
+            ]
+            .concat(),
+        ),
+        (
+            "wb_record_after_end",
+            [
+                encode_biff12_record(0x0083, &[]),
+                bundle_rec.clone(),
+                encode_biff12_record(0x0084, &[]),
+                bundle_rec,
+            ]
+            .concat(),
+        ),
+    ];
+
+    for (label, wb_bytes) in &bad_workbooks {
+        let xlsb = build_in_memory_xlsb(wb_bytes, &valid_sheet)?;
+        let err = ingest_workbook_universal(
+            Cursor::new(xlsb),
+            PlatformLimits::DESKTOP_CLI,
+            Some(&format!("{label}.xlsb")),
+            None,
+        )
+        .err()
+        .ok_or_else(|| format!("workbook boundary case '{label}' must fail"))?;
+        assert_eq!(err.code(), ErrorCode::SF_IMP_002, "case {label}");
+    }
+
+    // Worksheet stream boundary violations (all 6 required cases)
+    let bad_sheets: [(&str, Vec<u8>); 5] = [
+        ("ws_missing_both", row_rec.clone()),
+        (
+            "ws_end_before_begin",
+            [
+                encode_biff12_record(0x0082, &[]),
+                encode_biff12_record(0x0081, &[]),
+            ]
+            .concat(),
+        ),
+        (
+            "ws_duplicate_begin",
+            [
+                encode_biff12_record(0x0081, &[]),
+                encode_biff12_record(0x0081, &[]),
+                encode_biff12_record(0x0082, &[]),
+            ]
+            .concat(),
+        ),
+        (
+            "ws_duplicate_end",
+            [
+                encode_biff12_record(0x0081, &[]),
+                encode_biff12_record(0x0082, &[]),
+                encode_biff12_record(0x0082, &[]),
+            ]
+            .concat(),
+        ),
+        (
+            "ws_record_after_end",
+            [
+                encode_biff12_record(0x0081, &[]),
+                encode_biff12_record(0x0082, &[]),
+                row_rec,
+            ]
+            .concat(),
+        ),
+    ];
+
+    for (label, ws_bytes) in &bad_sheets {
+        let xlsb = build_in_memory_xlsb(&valid_wb, ws_bytes)?;
+        let err = ingest_workbook_universal(
+            Cursor::new(xlsb),
+            PlatformLimits::DESKTOP_CLI,
+            Some(&format!("{label}.xlsb")),
+            None,
+        )
+        .err()
+        .ok_or_else(|| format!("worksheet boundary case '{label}' must fail"))?;
+        assert_eq!(err.code(), ErrorCode::SF_IMP_002, "case {label}");
+    }
+
+    // Supporting BIFF12 parts: Styles (`0x0116`/`0x0117`), Shared Strings (`0x009F`/`0x00A0`),
+    // and Comments (`0x0274`/`0x0275`) must also enforce strict Begin/End framing when present.
+    let bad_styles_missing = encode_biff12_record(0x002C, &[0, 0, 0, 0, 0, 0]);
+    let xlsb_bad_styles = build_in_memory_xlsb_with_parts(
+        &valid_wb,
+        &valid_sheet,
+        &[("xl/styles.bin", &bad_styles_missing)],
+    )?;
+    assert_eq!(
+        ingest_workbook_universal(
+            Cursor::new(xlsb_bad_styles),
+            PlatformLimits::DESKTOP_CLI,
+            Some("bad_styles.xlsb"),
+            None,
+        )
+        .err()
+        .map(|e| e.code()),
+        Some(ErrorCode::SF_IMP_002)
+    );
+
+    let bad_sst_after_end = [
+        encode_biff12_record(0x009F, &[]),
+        encode_biff12_record(0x00A0, &[]),
+        encode_biff12_record(0x0013, &[0, 0, 0, 0, 0]),
+    ]
+    .concat();
+    let xlsb_bad_sst = build_in_memory_xlsb_with_parts(
+        &valid_wb,
+        &valid_sheet,
+        &[("xl/sharedStrings.bin", &bad_sst_after_end)],
+    )?;
+    assert_eq!(
+        ingest_workbook_universal(
+            Cursor::new(xlsb_bad_sst),
+            PlatformLimits::DESKTOP_CLI,
+            Some("bad_sst.xlsb"),
+            None,
+        )
+        .err()
+        .map(|e| e.code()),
+        Some(ErrorCode::SF_IMP_002)
+    );
+
+    let ws_rels_with_comments = br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdC1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments1.bin"/></Relationships>"#;
+    let bad_comments_reversed = [
+        encode_biff12_record(0x0275, &[]),
+        encode_biff12_record(0x0274, &[]),
+    ]
+    .concat();
+    let xlsb_bad_comments = build_in_memory_xlsb_with_parts(
+        &valid_wb,
+        &valid_sheet,
+        &[
+            ("xl/worksheets/_rels/sheet1.bin.rels", ws_rels_with_comments),
+            ("xl/comments1.bin", &bad_comments_reversed),
+        ],
+    )?;
+    assert_eq!(
+        ingest_workbook_universal(
+            Cursor::new(xlsb_bad_comments),
+            PlatformLimits::DESKTOP_CLI,
+            Some("bad_comments.xlsb"),
+            None,
+        )
+        .err()
+        .map(|e| e.code()),
+        Some(ErrorCode::SF_IMP_002)
+    );
+
+    Ok(())
+}

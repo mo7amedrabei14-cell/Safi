@@ -184,19 +184,17 @@ describe("Unified Quad-Studio Engine (Phases 5, 6, 7, 8)", () => {
     expect(computeRegionalCoordinatePct("Giza", 2)).toEqual({ xPct: 44, yPct: 46 });
     expect(computeRegionalCoordinatePct("أسوان", 3)).toEqual({ xPct: 56, yPct: 82 });
 
-    // Deterministic UTF-8 hash fallback matches Rust `geo_region_coords` (`x in 18..=81, y in 20..=79`)
-    const unknownA = computeRegionalCoordinatePct("NorthZone", 2);
-    const unknownB = computeRegionalCoordinatePct("NorthZone", 2);
-    expect(unknownA).toEqual(unknownB);
-    expect(unknownA.xPct).toBeGreaterThanOrEqual(18);
-    expect(unknownA.xPct).toBeLessThanOrEqual(81);
-    expect(unknownA.yPct).toBeGreaterThanOrEqual(20);
-    expect(unknownA.yPct).toBeLessThanOrEqual(79);
+    // Deterministic UTF-8 hash fallback matches Rust `geo_region_coords` (`x in 18..=81, y in 20..=79`),
+    // including non-ASCII uppercase unknown labels and Unicode characters whose JS `.toLowerCase()`
+    // would diverge from Rust `to_ascii_lowercase()` (e.g. Kelvin sign U+212A `'K'`).
+    expect(computeRegionalCoordinatePct("ÜBER_NORD_ÖST", 0)).toEqual({ xPct: 73, yPct: 21 });
+    expect(computeRegionalCoordinatePct("DA\u212AAHL", 1)).toEqual({ xPct: 49, yPct: 27 });
+    expect(computeRegionalCoordinatePct("İSTANBUL_SÜD", 2)).toEqual({ xPct: 52, yPct: 62 });
 
     const svg = renderChartSvg("Geographic", "Regional Sales", [
       { label: "Cairo", value: 5000 },
       { label: "Alexandria", value: 4000 },
-      { label: "Giza", value: 2000 }
+      { label: "İSTANBUL_SÜD", value: 2000 }
     ]);
     expect(svg).toContain('data-geo-projection="regional-coordinate-scatter"');
     expect(svg).toContain('data-geo-backdrop="1"');
@@ -204,6 +202,7 @@ describe("Unified Quad-Studio Engine (Phases 5, 6, 7, 8)", () => {
     expect(svg).toContain('data-geo-y-pct="42"');
     expect(svg).toContain('data-geo-x-pct="30"');
     expect(svg).toContain('data-geo-y-pct="22"');
+    expect(svg).toContain('data-geo-x-pct="52" data-geo-y-pct="62"');
     expect(svg).toContain("no GIS boundaries implied");
   });
 });

@@ -857,17 +857,30 @@ export function applyDashboardEdit(
 }
 
 /**
+ * ASCII-only lowercasing (`A-Z` -> `a-z`) matching Rust `str::to_ascii_lowercase()` byte-for-byte
+ * so non-ASCII Unicode uppercase characters (such as `Ü`, `Ö`, `İ`, or Kelvin sign `K`) never
+ * diverge between Rust `geo_region_coords` and TypeScript `computeRegionalCoordinatePct`.
+ */
+function toAsciiLowerCase(input: string): string {
+  return input.replace(/[A-Z]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 32));
+}
+
+/**
  * Deterministic regional/category coordinate scatter projection aligned byte-for-byte with
  * Rust `geo_region_coords` (`crates/sf-recipe/src/datagraph.rs`) so Desktop Dashboard,
  * offline `.safi.html` capsule, and exported presentations/SVGs share identical coordinates.
- * Recognized Egyptian regions map to relative `(xPct, yPct)` scatter positions; unmapped
- * categories distribute deterministically without implying GIS boundary geometry.
+ *
+ * Shared normalization rule:
+ * 1. Keyword lookup uses `toAsciiLowerCase(label.trim())` (matching Rust `label.trim().to_ascii_lowercase()`).
+ * 2. Recognized Egyptian regions map to fixed relative `(xPct, yPct)` scatter positions.
+ * 3. Unmapped categories hash the original UTF-8 bytes of `label` (unmodified) with `fallbackIndex * 37`
+ *    and multiplier `31` in 32-bit unsigned wrapping arithmetic without implying GIS boundary geometry.
  */
 export function computeRegionalCoordinatePct(
   label: string,
   fallbackIndex: number
 ): { readonly xPct: number; readonly yPct: number } {
-  const lower = label.trim().toLowerCase();
+  const lower = toAsciiLowerCase(label.trim());
   if (lower.includes("alex") || label.includes("الإسكندرية") || label.includes("اسكندرية")) {
     return { xPct: 30, yPct: 22 };
   }

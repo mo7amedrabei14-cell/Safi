@@ -23,8 +23,9 @@ use sf_desktop::commands::{enforce_ipc_command, json_serialized_len};
 use sf_desktop::deep_link::DeepLinkAction;
 use sf_desktop::studio::{
     parse_installation_uuid, parse_safi_session_token, StudioSessionAuthority,
-    StudioSessionVerifier, StudioStore, VerifiedStudioSession, AUTH_BACKEND_UNAVAILABLE_CODE,
-    AUTH_CONFIG_MISSING_CODE, AUTH_EXPIRED_CODE, AUTH_REQUIRED_CODE, AUTH_REVOKED_CODE,
+    StudioSessionVerifier, StudioStore, VerifiedStudioSession, AUTH_ACCOUNT_SUSPENDED_CODE,
+    AUTH_BACKEND_UNAVAILABLE_CODE, AUTH_CONFIG_MISSING_CODE, AUTH_DEVICE_PROOF_INVALID_CODE,
+    AUTH_DEVICE_REPLACED_CODE, AUTH_EXPIRED_CODE, AUTH_REQUIRED_CODE, AUTH_REVOKED_CODE,
 };
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -252,6 +253,9 @@ impl DesktopShellSessionVerifier {
                 match code.as_deref() {
                     Some("SF-AUTH-002") => Err(AUTH_EXPIRED_CODE.to_owned()),
                     Some("SF-AUTH-003") => Err(AUTH_REVOKED_CODE.to_owned()),
+                    Some("SF-AUTH-009") => Err(AUTH_ACCOUNT_SUSPENDED_CODE.to_owned()),
+                    Some("SF-AUTH-019") => Err(AUTH_DEVICE_REPLACED_CODE.to_owned()),
+                    Some("SF-AUTH-020") => Err(AUTH_DEVICE_PROOF_INVALID_CODE.to_owned()),
                     _ => Err(AUTH_REQUIRED_CODE.to_owned()),
                 }
             }
@@ -486,6 +490,21 @@ fn studio_set_auth_session(
 #[tauri::command]
 fn studio_clear_auth_session(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
     store.clear_auth_session()
+}
+
+#[tauri::command]
+fn studio_authorization_status(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.authorization_status()
+}
+
+#[tauri::command]
+fn studio_enter_offline_readonly(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.enter_offline_read_only()
+}
+
+#[tauri::command]
+fn studio_revalidate_session(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.revalidate_session(now_ms())
 }
 
 #[tauri::command]
@@ -914,6 +933,9 @@ fn studio_generated_handler(
         pick_deliverable_file,
         studio_set_auth_session,
         studio_clear_auth_session,
+        studio_authorization_status,
+        studio_enter_offline_readonly,
+        studio_revalidate_session,
         studio_open_file,
         studio_select_region,
         studio_workbook_details,

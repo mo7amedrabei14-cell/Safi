@@ -36,11 +36,14 @@ import { LibraryStudio } from "./components/studios/LibraryStudio";
 import { DesktopStudio } from "./desktop/DesktopStudio";
 import {
   clearStudioAuthSession,
+  enterStudioOfflineReadOnly,
   isDesktopRuntime,
+  revalidateStudioSession,
   setStudioAuthSession
 } from "./desktop/studio-bridge";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { canAnimate } from "./components/ui/motion-preference";
+import { postSafiHeartbeat, SafiAuthApiError } from "./lib/auth-api";
 import { getSafiDeviceIdentity } from "./lib/device-identity";
 import { applySafiLang, getInitialSafiLang } from "./lib/locale";
 import { applySafiTheme, getInitialSafiTheme, syncDomTheme, type SafiThemeId } from "./lib/theme";
@@ -55,11 +58,14 @@ export function renderStudio(
     readonly desktopRuntime?: boolean;
     readonly sessionToken?: string | null;
     readonly isOwner?: boolean;
+    readonly readOnlyOffline?: boolean;
+    readonly onRevalidateOnline?: () => void;
   }
 ): ReactNode {
   const desktopRuntime = options?.desktopRuntime ?? false;
   const sessionToken = options?.sessionToken ?? null;
   const isOwner = options?.isOwner ?? false;
+  const readOnlyOffline = options?.readOnlyOffline ?? false;
 
   switch (tab) {
     case "home":
@@ -78,7 +84,11 @@ export function renderStudio(
       return <ChartsStudio lang={lang} onSelectTab={onSelectTab} />;
     case "studio":
       return desktopRuntime ? (
-        <DesktopStudio lang={lang} />
+        <DesktopStudio
+          lang={lang}
+          readOnlyOffline={readOnlyOffline}
+          onRevalidateOnline={options?.onRevalidateOnline}
+        />
       ) : (
         <BentoCommandCenter
           lang={lang}
@@ -136,6 +146,8 @@ export function ApplicationShell({
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [ownerAccount, setOwnerAccount] = useState(false);
+  const [offlineReadOnly, setOfflineReadOnly] = useState(false);
+  const [revocationNotice, setRevocationNotice] = useState<string | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   useAnimatedFavicon();
@@ -235,9 +247,10 @@ export function ApplicationShell({
       ? (activeTabConfig?.label ?? "الرئيسية")
       : (activeTabConfig?.labelEn ?? "Website");
 
-  // Phase 01 runtime separation: Desktop mandates product login; public browser Showcase opens freely.
+  // Phase 01 runtime separation: Desktop mandates product login unless user explicitly enters
+  // Offline Read-Only Mode to inspect previously saved local projects.
   const hasActiveSession = sessionToken !== null && sessionToken.trim().length > 0;
-  const authenticationRequired = desktopRuntime && !hasActiveSession;
+  const authenticationRequired = desktopRuntime && !hasActiveSession && !offlineReadOnly;
   const verificationSheetOpen = initialVerificationToken !== null && accountOpen && !resetOpen;
   const authModalOpen =
     !resetOpen && !verificationSheetOpen && (authenticationRequired || accountOpen);
@@ -251,24 +264,115 @@ export function ApplicationShell({
       setSessionToken(token);
       setSessionEmail(email);
       setOwnerAccount(desktopRuntime && owner);
+      setOfflineReadOnly(false);
+      setRevocationNotice(null);
     },
     [desktopRuntime]
   );
 
-  const clearSessionAndLock = useCallback(async (): Promise<void> => {
+  const clearSessionAndLock = useCallback(
+    async (notice?: string): Promise<void> => {
+      try {
+        if (desktopRuntime) {
+          await clearStudioAuthSession();
+        }
+      } catch {
+        // Always lock client state even if native IPC clear throws.
+      } finally {
+        setSessionToken(null);
+        setSessionEmail(null);
+        setOwnerAccount(false);
+        setOfflineReadOnly(false);
+        if (notice !== undefined) {
+          setRevocationNotice(notice);
+        }
+        if (activeTab === "owner") {
+          setActiveTab("home");
+        }
+      }
+    },
+    [desktopRuntime, activeTab]
+  );
+
+  const enterOfflineMode = useCallback(async (): Promise<void> => {
+    if (!desktopRuntime) return;
     try {
-      if (desktopRuntime) {
-        await clearStudioAuthSession();
-      }
-    } finally {
-      setSessionToken(null);
-      setSessionEmail(null);
-      setOwnerAccount(false);
-      if (activeTab === "owner") {
-        setActiveTab("home");
-      }
+      await enterStudioOfflineReadOnly();
+    } catch {
+      // Fallback to read-only UI state; native Rust commands still fail closed.
     }
-  }, [desktopRuntime, activeTab]);
+    setOfflineReadOnly(true);
+    setActiveTab("studio");
+  }, [desktopRuntime]);
+
+  const revalidateOnlineAccess = useCallback(async (): Promise<void> => {
+    if (!desktopRuntime || !sessionToken) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      await enterOfflineMode();
+      return;
+    }
+    try {
+      await postSafiHeartbeat(sessionToken);
+      try {
+        await revalidateStudioSession();
+      } catch {
+        // Native store may already be synchronized or in test harness.
+      }
+      setOfflineReadOnly(false);
+      setRevocationNotice(null);
+    } catch (err) {
+      if (err instanceof SafiAuthApiError) {
+        if (err.status === 0 || err.code === "SF-AUTH-005") {
+          await enterOfflineMode();
+          return;
+        }
+        if (err.code === "SF-AUTH-019") {
+          await clearSessionAndLock(
+            lang === "ar"
+              ? "تم تفعيل حسابك على جهاز آخر. تم تسجيل خروج هذا الجهاز تلقائيًا (SF-AUTH-019)."
+              : "Your account was activated on another device. This device has been signed out automatically (SF-AUTH-019)."
+          );
+          return;
+        }
+        if (
+          err.code === "SF-AUTH-003" ||
+          err.code === "SF-AUTH-009" ||
+          err.code === "SF-AUTH-002" ||
+          err.status === 401 ||
+          err.status === 403
+        ) {
+          await clearSessionAndLock(
+            lang === "ar"
+              ? `انتهت صلاحية الجلسة أو تم إلغاؤها من الخادم (${err.code ?? `HTTP ${err.status}`}). يرجى تسجيل الدخول مرة أخرى.`
+              : `Your session is no longer authorized by the server (${err.code ?? `HTTP ${err.status}`}). Please sign in again.`
+          );
+          return;
+        }
+      }
+      await enterOfflineMode();
+    }
+  }, [desktopRuntime, sessionToken, lang, enterOfflineMode, clearSessionAndLock]);
+
+  // Automatic 30-second online authorization heartbeat + instant offline/online transition listeners.
+  useEffect(() => {
+    if (!desktopRuntime || !sessionToken) return;
+    const onOffline = (): void => {
+      void enterOfflineMode();
+    };
+    const onOnline = (): void => {
+      void revalidateOnlineAccess();
+    };
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    const interval = window.setInterval(() => {
+      void revalidateOnlineAccess();
+    }, 30_000);
+    return () => {
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+      window.clearInterval(interval);
+    };
+  }, [desktopRuntime, sessionToken, enterOfflineMode, revalidateOnlineAccess]);
 
   const accountAccessPortal =
     initialVerificationToken === null ? null : (
@@ -323,6 +427,49 @@ export function ApplicationShell({
   if (authenticationRequired) {
     return (
       <>
+        {revocationNotice !== null ? (
+          <div
+            role="alert"
+            data-session-revoked-banner="true"
+            style={{
+              position: "fixed",
+              top: "1rem",
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 9999,
+              maxWidth: "36rem",
+              padding: "0.875rem 1.25rem",
+              borderRadius: "0.75rem",
+              background: "var(--safi-surface-elevated, #1c1917)",
+              border: "1px solid var(--safi-danger, #ef4444)",
+              color: "var(--safi-text, #fafaf9)",
+              fontWeight: 600,
+              boxShadow: "0 12px 32px rgba(0,0,0,0.4)"
+            }}
+          >
+            {revocationNotice}
+          </div>
+        ) : null}
+        <div
+          style={{
+            position: "fixed",
+            bottom: "1.25rem",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 9998
+          }}
+        >
+          <button
+            type="button"
+            className="safi-btn"
+            data-enter-offline-readonly="true"
+            onClick={() => void enterOfflineMode()}
+          >
+            {lang === "ar"
+              ? "فتح المشاريع المحفوظة محليًا (وضع القراءة فقط بدون إنترنت)"
+              : "Open Saved Local Projects (Offline Read-Only Mode)"}
+          </button>
+        </div>
         {accountAccessPortal}
         {authPortal}
         {passwordResetPortal}
@@ -362,7 +509,9 @@ export function ApplicationShell({
               {renderStudio(activeTab, selectTab, lang, {
                 desktopRuntime,
                 sessionToken,
-                isOwner: ownerAccount
+                isOwner: ownerAccount,
+                readOnlyOffline: offlineReadOnly,
+                onRevalidateOnline: () => void revalidateOnlineAccess()
               })}
             </div>
           </main>

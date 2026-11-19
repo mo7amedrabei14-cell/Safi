@@ -169,9 +169,15 @@ type Aggregate = (typeof AGGREGATES)[number];
 
 export interface DesktopStudioProps {
   readonly lang?: SafiLang;
+  readonly readOnlyOffline?: boolean;
+  readonly onRevalidateOnline?: (() => void) | undefined;
 }
 
-export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
+export function DesktopStudio({
+  lang = "en",
+  readOnlyOffline = false,
+  onRevalidateOnline
+}: DesktopStudioProps): ReactNode {
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const desktop = isDesktopRuntime();
   const [state, setState] = useState<DesktopStudioState | null>(null);
@@ -657,11 +663,50 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
         </p>
       </header>
 
+      {readOnlyOffline ? (
+        <div
+          role="status"
+          aria-live="polite"
+          data-offline-readonly="true"
+          className="safi-desktop-studio__note"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.75rem",
+            padding: "0.875rem 1rem",
+            borderRadius: "0.75rem",
+            border: "1px solid var(--safi-warning, #f59e0b)",
+            background: "rgba(245, 158, 11, 0.12)"
+          }}
+        >
+          <span>
+            {L(
+              "وضع عدم الاتصال (قراءة فقط — SF-AUTH-021): يمكنك فتح ومشاهدة المشاريع المحفوظة محليًا، ولكن الاستيراد والتعديل والتنظيف والتحليل والتصدير والذكاء الاصطناعي تتطلب اتصالًا بالإنترنت وتفويضًا ساريًا.",
+              "Offline Read-Only Mode (SF-AUTH-021): You can open and view previously saved local projects, but importing, editing, cleaning, analyzing, exporting, and AI require an active online connection and server authorization."
+            )}
+          </span>
+          {onRevalidateOnline !== undefined ? (
+            <button
+              type="button"
+              className="safi-btn"
+              data-revalidate-online-btn="true"
+              onClick={onRevalidateOnline}
+            >
+              <RefreshCw size={14} aria-hidden="true" />{" "}
+              {L("إعادة التحقق عبر الإنترنت", "Reconnect & Revalidate")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="safi-desktop-studio__toolbar">
         <button
           type="button"
           onClick={() => void openFile()}
-          disabled={busy}
+          disabled={busy || readOnlyOffline}
+          data-testid="desktop-open-file-btn"
           data-tutorial-target="open-workbook"
         >
           <FileSpreadsheet size={16} aria-hidden="true" />
@@ -674,34 +719,44 @@ export function DesktopStudio({ lang = "en" }: DesktopStudioProps): ReactNode {
             "Imports .xlsx/.xlsm/.xls/.ods/.csv/.tsv locally and audits visible & hidden sheets."
           )}
         />
-        <button type="button" onClick={() => void save()} disabled={state === null}>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={state === null || readOnlyOffline}
+          data-testid="desktop-save-btn"
+        >
           <Save size={16} aria-hidden="true" /> {L("حفظ", "Save")}
         </button>
-        <button type="button" onClick={() => void restore()} disabled={busy}>
+        <button type="button" onClick={() => void restore()} disabled={busy || readOnlyOffline}>
           {L("استعادة", "Restore")}
         </button>
         <button
           type="button"
           onClick={() => void run(() => undo(PROJECT))}
-          disabled={state === null || busy}
+          disabled={state === null || busy || readOnlyOffline}
         >
           <Undo2 size={16} aria-hidden="true" /> {L("تراجع", "Undo")}
         </button>
         <button
           type="button"
           onClick={() => void run(() => redo(PROJECT))}
-          disabled={state === null || busy}
+          disabled={state === null || busy || readOnlyOffline}
         >
           <Redo2 size={16} aria-hidden="true" /> {L("إعادة", "Redo")}
         </button>
-        <button type="button" onClick={() => void writeCapsule()} disabled={state === null || busy}>
+        <button
+          type="button"
+          onClick={() => void writeCapsule()}
+          disabled={state === null || busy || readOnlyOffline}
+          data-testid="desktop-export-capsule-btn"
+        >
           <Download size={16} aria-hidden="true" />
           {L("تصدير كبسولة (.safi.html)", "Export capsule (.safi.html)")}
         </button>
         <button
           type="button"
           onClick={() => setExportModalOpen(true)}
-          disabled={state === null || busy}
+          disabled={state === null || busy || readOnlyOffline}
           data-testid="open-export-deliverable-btn"
           data-tutorial-target="export-deliverable-btn"
         >

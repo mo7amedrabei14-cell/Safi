@@ -39,11 +39,29 @@ export interface ElevatedOwnerSession {
 
 export interface OwnerStatsResponse {
   readonly total_users: number;
+  readonly verified_phone_users?: number;
   readonly suspended_users: number;
+  readonly active_devices?: number;
+  readonly total_coupons?: number;
+  readonly total_coupon_redemptions?: number;
+  readonly open_support_tickets?: number;
+  readonly organizations_count?: number;
   readonly maintenance_mode: boolean;
   readonly billing_providers: {
     readonly paddle: string;
     readonly paymob: string;
+  };
+  readonly revenue?: {
+    readonly total_invoices: number;
+    readonly paid_invoices: number;
+    readonly refunded_invoices: number;
+    readonly chargeback_invoices: number;
+    readonly gross_usd_minor: number;
+    readonly gross_egp_minor: number;
+    readonly refunded_usd_minor: number;
+    readonly refunded_egp_minor: number;
+    readonly chargeback_usd_minor: number;
+    readonly chargeback_egp_minor: number;
   };
   readonly entitlements: {
     readonly active_trials: number;
@@ -62,6 +80,83 @@ export interface OwnerStatsResponse {
     readonly pii_masked_total: number;
     readonly ai_calls_used_total: number;
   };
+}
+
+export interface OwnerCouponRecord {
+  readonly id: string;
+  readonly code: string;
+  readonly discount_kind: "percent" | "fixed_usd" | "fixed_egp";
+  readonly discount_value: number;
+  readonly enabled: boolean;
+  readonly archived: boolean;
+  readonly expires_at: number | null;
+  readonly max_redemptions: number | null;
+  readonly redemptions_count: number;
+}
+
+export interface OwnerDeviceRecord {
+  readonly device_id: string;
+  readonly user_id: string;
+  readonly device_name: string;
+  readonly status: "active" | "replaced_by_new_device" | "revoked_by_owner" | "signed_out";
+  readonly session_generation: number;
+  readonly last_seen_at: number;
+}
+
+export interface OwnerDeviceReplacementEvent {
+  readonly id: string;
+  readonly user_id: string;
+  readonly trigger_kind: string;
+  readonly reason: string;
+  readonly new_session_generation: number;
+  readonly created_at: number;
+}
+
+export interface OwnerDevicesOverviewResponse {
+  readonly devices: readonly OwnerDeviceRecord[];
+  readonly replacements: readonly OwnerDeviceReplacementEvent[];
+}
+
+export interface OwnerOrganizationRow {
+  readonly organization: {
+    readonly id: string;
+    readonly name: string;
+    readonly purchased_seats: number;
+    readonly owner_user_id: string;
+  };
+  readonly active_members: number;
+}
+
+export interface OwnerSupportTicket {
+  readonly id: string;
+  readonly user_id: string;
+  readonly subject: string;
+  readonly body: string;
+  readonly status: string;
+  readonly priority: string;
+  readonly owner_notes: string;
+}
+
+export interface OwnerAnnouncement {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly severity: string;
+  readonly published: boolean;
+  readonly created_at: number;
+}
+
+export interface OwnerCustomerProfileResponse {
+  readonly account: OwnerAccountView["account"];
+  readonly entitlements: OwnerAccountView["entitlements"];
+  readonly invoices: readonly {
+    readonly external_invoice_id: string;
+    readonly amount_minor: number;
+    readonly currency: string;
+    readonly status: string;
+  }[];
+  readonly devices: readonly OwnerDeviceRecord[];
+  readonly device_replacements: readonly OwnerDeviceReplacementEvent[];
 }
 
 export interface OwnerAccountView {
@@ -251,5 +346,75 @@ export const ownerApi = {
       description
     }),
   listAuditLogs: (token: string) =>
-    ownerRequest<OwnerAuditLogsResponse>("/audit-logs", "GET", token)
+    ownerRequest<OwnerAuditLogsResponse>("/audit-logs", "GET", token),
+  getCustomerProfile: (token: string, userId: string) =>
+    ownerRequest<OwnerCustomerProfileResponse>(
+      `/accounts/${encodeURIComponent(userId)}/profile`,
+      "GET",
+      token
+    ),
+  listDevices: (token: string) =>
+    ownerRequest<OwnerDevicesOverviewResponse>("/devices", "GET", token),
+  resetAccountDevices: (token: string, userId: string, reason: string) =>
+    ownerRequest<OwnerDeviceReplacementEvent>(
+      `/accounts/${encodeURIComponent(userId)}/devices/reset`,
+      "POST",
+      token,
+      { reason }
+    ),
+  recordChargeback: (
+    token: string,
+    externalInvoiceId: string,
+    workspaceId: string,
+    userId: string
+  ) =>
+    ownerRequest<unknown>("/billing/chargeback", "POST", token, {
+      external_invoice_id: externalInvoiceId,
+      workspace_id: workspaceId,
+      user_id: userId
+    }),
+  listCoupons: (token: string) =>
+    ownerRequest<readonly OwnerCouponRecord[]>("/coupons", "GET", token),
+  createCoupon: (
+    token: string,
+    payload: {
+      readonly code: string;
+      readonly discount_kind: "percent" | "fixed_usd" | "fixed_egp";
+      readonly discount_value: number;
+      readonly max_redemptions?: number;
+      readonly expires_at?: number;
+    }
+  ) => ownerRequest<OwnerCouponRecord>("/coupons", "POST", token, payload),
+  updateCoupon: (
+    token: string,
+    code: string,
+    payload: { readonly enabled?: boolean; readonly archived?: boolean }
+  ) =>
+    ownerRequest<OwnerCouponRecord>(`/coupons/${encodeURIComponent(code)}`, "POST", token, payload),
+  listOrganizations: (token: string) =>
+    ownerRequest<readonly OwnerOrganizationRow[]>("/organizations", "GET", token),
+  listSupportTickets: (token: string) =>
+    ownerRequest<readonly OwnerSupportTicket[]>("/support/tickets", "GET", token),
+  updateSupportTicket: (
+    token: string,
+    id: string,
+    payload: { readonly status?: string; readonly owner_notes?: string }
+  ) =>
+    ownerRequest<OwnerSupportTicket>(
+      `/support/tickets/${encodeURIComponent(id)}`,
+      "POST",
+      token,
+      payload
+    ),
+  listAnnouncements: (token: string) =>
+    ownerRequest<readonly OwnerAnnouncement[]>("/announcements", "GET", token),
+  createAnnouncement: (token: string, title: string, body: string, severity = "info") =>
+    ownerRequest<OwnerAnnouncement>("/announcements", "POST", token, {
+      title,
+      body,
+      severity,
+      published: true
+    }),
+  getProductConfig: (token: string) =>
+    ownerRequest<Record<string, unknown>>("/product-config", "GET", token)
 };

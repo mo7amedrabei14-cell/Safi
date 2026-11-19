@@ -18,6 +18,7 @@ use sf_server::auth::cache::{AuthCache, InMemoryAuthCache, ValkeyAuthCache};
 use sf_server::auth::repository::{SqlxApiKeyRepository, SqlxSessionRepository};
 use sf_server::auth::service::AuthService;
 use sf_server::config::ServerConfig;
+use sf_server::pg_store::PgControlPlaneStore;
 use sf_server::{app, AppState};
 
 #[tokio::main]
@@ -82,7 +83,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Arc::new(SqlxSessionRepository::new(pool.clone())),
         cache,
     );
-    let mut state = AppState::with_config(auth, config.clone());
+    let mut state = AppState::with_config(auth, config.clone())
+        .with_pg_store(PgControlPlaneStore::new(pool.clone()));
 
     // Load sealed platform_owner (if already bootstrapped) into OwnerMfaService.
     if let Ok(Some(row)) = sqlx::query("SELECT owner_user_id FROM platform_owner LIMIT 1")

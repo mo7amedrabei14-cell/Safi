@@ -117,6 +117,26 @@ impl ErrorCode {
         domain: ErrorDomain::Auth,
         number: 18,
     };
+    /// Registered error code `SF-AUTH-019`.
+    pub const SF_AUTH_019: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 19,
+    };
+    /// Registered error code `SF-AUTH-020`.
+    pub const SF_AUTH_020: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 20,
+    };
+    /// Registered error code `SF-AUTH-021`.
+    pub const SF_AUTH_021: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 21,
+    };
+    /// Registered error code `SF-AUTH-022`.
+    pub const SF_AUTH_022: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 22,
+    };
     /// Registered error code `SF-CAL-001`.
     pub const SF_CAL_001: Self = Self {
         domain: ErrorDomain::Cal,
@@ -306,6 +326,16 @@ impl ErrorCode {
     pub const SF_PAY_004: Self = Self {
         domain: ErrorDomain::Pay,
         number: 4,
+    };
+    /// Registered error code `SF-PAY-005`.
+    pub const SF_PAY_005: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 5,
+    };
+    /// Registered error code `SF-PAY-006`.
+    pub const SF_PAY_006: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 6,
     };
     /// Registered error code `SF-PRF-001`.
     pub const SF_PRF_001: Self = Self {
@@ -560,6 +590,10 @@ impl ErrorCode {
         Self::SF_AUTH_016,
         Self::SF_AUTH_017,
         Self::SF_AUTH_018,
+        Self::SF_AUTH_019,
+        Self::SF_AUTH_020,
+        Self::SF_AUTH_021,
+        Self::SF_AUTH_022,
         Self::SF_CAL_001,
         Self::SF_CAL_002,
         Self::SF_CAL_003,
@@ -598,6 +632,8 @@ impl ErrorCode {
         Self::SF_PAY_002,
         Self::SF_PAY_003,
         Self::SF_PAY_004,
+        Self::SF_PAY_005,
+        Self::SF_PAY_006,
         Self::SF_PRF_001,
         Self::SF_PRF_002,
         Self::SF_RCP_001,
@@ -868,6 +904,46 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Owner TOTP encryption key is not configured",
         action_en: "Configure SAFI_TOTP_ENCRYPTION_KEY in the server environment.",
         owner_note: "Missing or malformed 32-byte key for encrypting owner TOTP secrets at rest.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_019,
+        code_str: "SF-AUTH-019",
+        severity: ErrorSeverity::Error,
+        title_ar: "تم تفعيل حسابك على جهاز آخر",
+        action_ar: "تم تسجيل خروج هذا الجهاز تلقائيًا لحماية حسابك. سجّل الدخول مجددًا إذا أردت نقل التنشيط لهذا الجهاز.",
+        title_en: "Your account was activated on another device",
+        action_en: "This device was automatically signed out because only one active device is allowed per account.",
+        owner_note: "Single-active-device policy revoked the previous device/session when a new device logged in.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_020,
+        code_str: "SF-AUTH-020",
+        severity: ErrorSeverity::Error,
+        title_ar: "فشل التحقق التشفيري من هوية الجهاز",
+        action_ar: "أعد تسجيل الدخول لتسجيل مفتاح جهاز موثق. لا يمكن نقل ملفات الجلسة بين الأجهزة.",
+        title_en: "Cryptographic device identity verification failed",
+        action_en: "Sign in again to register a verified device key. Session credentials cannot be copied across devices.",
+        owner_note: "Ed25519 device proof signature, public key binding, or timestamp freshness failed.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_021,
+        code_str: "SF-AUTH-021",
+        severity: ErrorSeverity::Warn,
+        title_ar: "الوضع غير المتصل (للقراءة فقط)",
+        action_ar: "يمكنك استعراض المشاريع المحفوظة محليًا للقراءة فقط. يلزم الاتصال بالإنترنت للاستيراد أو التنظيف أو التحليل أو التصدير.",
+        title_en: "Offline read-only mode — internet connection required",
+        action_en: "You can view saved local projects read-only. Reconnect to the internet to import, clean, analyze, edit dashboards, export, or use AI.",
+        owner_note: "Protected operation blocked because valid online server authorization is not present.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_022,
+        code_str: "SF-AUTH-022",
+        severity: ErrorSeverity::Error,
+        title_ar: "انتهت مهلة تفويض الاتصال أو رُصد تلاعب بساعة النظام",
+        action_ar: "تحقق من اتصال الإنترنت وتاريخ الجهاز ثم أعد التحقق من الجلسة.",
+        title_en: "Online authorization expired or clock rollback detected",
+        action_en: "Check your internet connection and system clock, then revalidate your session.",
+        owner_note: "Short-lived online authorization lease expired or local clock moved backwards.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_CAL_001,
@@ -1248,6 +1324,26 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Billing operation could not be completed",
         action_en: "Review subscription status or refund policy window and retry.",
         owner_note: "Invalid subscription state transition or refund window policy violation.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_005,
+        code_str: "SF-PAY-005",
+        severity: ErrorSeverity::Error,
+        title_ar: "رمز الخصم غير صالح أو منتهي الصلاحية أو غير مؤهل",
+        action_ar: "تحقق من شروط الكوبون والخطط المؤهلة والحد الأقصى للاستخدام.",
+        title_en: "Coupon is invalid, expired, ineligible, or redemption limit reached",
+        action_en: "Check the promotion rules, eligible plans, and redemption limits.",
+        owner_note: "Server-side coupon validation rejected redemption.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_006,
+        code_str: "SF-PAY-006",
+        severity: ErrorSeverity::Error,
+        title_ar: "تم تسجيل نزاع دفع (Chargeback) وإيقاف الاشتراك",
+        action_ar: "تواصل مع الدعم لحل نزاع الفوترة وإعادة تفعيل الاشتراك.",
+        title_en: "Payment chargeback recorded and subscription revoked",
+        action_en: "Contact support to resolve the billing dispute before reactivating.",
+        owner_note: "Verified payment provider chargeback webhook revoked paid entitlements immediately.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_PRF_001,

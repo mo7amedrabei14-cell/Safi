@@ -486,6 +486,30 @@ export function createRequestTracker(): RequestTracker {
   };
 }
 
+export interface DesktopAuthorizationStatus {
+  readonly mode: "online_authorized" | "offline_read_only" | "unauthenticated";
+  readonly readOnlyOffline: boolean;
+  readonly canExecuteProtectedOps: boolean;
+  readonly sessionId: string | null;
+  readonly workspaceId: string | null;
+  readonly lastOnlineVerifiedMs: number | null;
+}
+
+/** Queries native Desktop authorization state (`online_authorized` | `offline_read_only` | `unauthenticated`). */
+export async function getStudioAuthorizationStatus(): Promise<DesktopAuthorizationStatus> {
+  return JSON.parse(await call("studio_authorization_status")) as DesktopAuthorizationStatus;
+}
+
+/** Transitions native Desktop store into Offline Read-Only Mode (saved projects viewable, all protected ops blocked with SF-AUTH-021). */
+export async function enterStudioOfflineReadOnly(): Promise<DesktopAuthorizationStatus> {
+  return JSON.parse(await call("studio_enter_offline_readonly")) as DesktopAuthorizationStatus;
+}
+
+/** Revalidates preserved Desktop session online when connectivity returns before re-enabling protected ops. */
+export async function revalidateStudioSession(): Promise<DesktopAuthorizationStatus> {
+  return JSON.parse(await call("studio_revalidate_session")) as DesktopAuthorizationStatus;
+}
+
 /** Binds the verified Safi session token and device installation UUID inside the native Tauri store. */
 export async function setStudioAuthSession(
   token: string,

@@ -3,6 +3,7 @@ pub mod capabilities;
 pub mod commands;
 pub mod content;
 pub mod deep_link;
+pub mod device_identity;
 pub mod engine_bridge;
 pub mod error;
 pub mod installer;

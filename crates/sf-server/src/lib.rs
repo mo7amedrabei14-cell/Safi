@@ -8,18 +8,22 @@ pub mod auth;
 pub mod billing;
 pub mod config;
 pub mod cors;
+pub mod coupons;
+pub mod device_authority;
 pub mod encrypted_sync;
 pub mod entitlements;
 pub mod error;
 pub mod log_center;
 pub mod organizations;
 pub mod owner_mfa;
+pub mod pg_store;
 pub mod routes;
 pub mod routes_updates;
 pub mod updater;
 pub mod zero_trust;
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::Request;
@@ -32,14 +36,18 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use auth::account::AccountAuthService;
+use auth::repository::InMemorySessionRepository;
 use auth::service::AuthService;
 use billing::BillingService;
 use config::ServerConfig;
+use coupons::CouponService;
+use device_authority::DeviceAuthorityService;
 use encrypted_sync::EncryptedSyncService;
 use entitlements::EntitlementService;
 use log_center::AuditLogCenter;
 use organizations::OrganizationService;
 use owner_mfa::OwnerMfaService;
+use pg_store::{DurableServerSnapshot, DurableStateJournal, PgControlPlaneStore};
 use updater::ReleaseAndLicenseSigner;
 
 /// Request identifier attached by the middleware and echoed in the response header.
@@ -93,6 +101,32 @@ pub struct RateBucket {
     pub count: u32,
 }
 
+/// Customer support ticket tracked in the Owner Control Center (Section 9.10).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupportTicket {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub workspace_id: Uuid,
+    pub subject: String,
+    pub body: String,
+    pub status: String,
+    pub priority: String,
+    pub owner_notes: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Platform announcement or update notice controlled by the Owner (Section 9.11).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformAnnouncement {
+    pub id: Uuid,
+    pub title: String,
+    pub body: String,
+    pub severity: String,
+    pub published: bool,
+    pub created_at: i64,
+}
+
 /// Mutable control-plane & auth-extension state shared across handlers.
 #[derive(Debug, Default)]
 pub struct ControlPlaneState {
@@ -100,6 +134,8 @@ pub struct ControlPlaneState {
     pub maintenance_reason: Option<String>,
     pub feature_flags: BTreeMap<String, FeatureFlag>,
     pub managed_accounts: HashMap<Uuid, ManagedAccountRecord>,
+    pub support_tickets: Vec<SupportTicket>,
+    pub announcements: Vec<PlatformAnnouncement>,
     pub phone_otps: HashMap<Uuid, PendingPhoneOtp>,
     pub oauth_states: HashMap<String, PendingOAuthState>,
     pub rate_limits: HashMap<String, RateBucket>,
@@ -114,11 +150,16 @@ pub struct AppState {
     pub owner_mfa: OwnerMfaService,
     pub entitlements: EntitlementService,
     pub billing: BillingService,
+    pub coupons: CouponService,
+    pub device_authority: DeviceAuthorityService,
     pub organizations: OrganizationService,
     pub encrypted_sync: EncryptedSyncService,
     pub signer: ReleaseAndLicenseSigner,
     pub log_center: AuditLogCenter,
     pub control_plane: Arc<RwLock<ControlPlaneState>>,
+    pub pg_store: Option<PgControlPlaneStore>,
+    pub journal: Option<DurableStateJournal>,
+    pub in_memory_sessions: Option<Arc<InMemorySessionRepository>>,
 }
 
 impl AppState {
@@ -140,6 +181,7 @@ impl AppState {
         );
         let signer =
             ReleaseAndLicenseSigner::new(config.update_signing_seed, config.license_signing_seed);
+        let device_authority = DeviceAuthorityService::new();
         Self {
             config: Arc::new(config),
             auth: Arc::new(auth),
@@ -147,12 +189,99 @@ impl AppState {
             owner_mfa,
             entitlements,
             billing,
+            coupons: CouponService::new(),
+            device_authority,
             organizations: OrganizationService::new(),
             encrypted_sync: EncryptedSyncService::new(),
             signer,
             log_center: AuditLogCenter::new(),
             control_plane: Arc::new(RwLock::new(ControlPlaneState::default())),
+            pg_store: None,
+            journal: None,
+            in_memory_sessions: None,
         }
+    }
+
+    /// Attach the PostgreSQL 18 SQLx control-plane repository (migrations `0007..0010`).
+    #[must_use]
+    pub fn with_pg_store(mut self, pg_store: PgControlPlaneStore) -> Self {
+        self.pg_store = Some(pg_store);
+        self
+    }
+
+    /// Attach a local crash-safe atomic disk journal and restore any previously committed snapshot.
+    pub async fn with_durable_journal(
+        mut self,
+        path: impl Into<PathBuf>,
+        in_memory_sessions: Option<Arc<InMemorySessionRepository>>,
+    ) -> Result<Self, error::AuthError> {
+        let journal = DurableStateJournal::new(path);
+        self.in_memory_sessions = in_memory_sessions;
+        if let Some(snap) = journal.load()? {
+            self.device_authority
+                .import_snapshot(snap.device_authority)
+                .await;
+            self.coupons.import_snapshot(snap.coupons).await;
+            self.entitlements.import_snapshot(snap.entitlements).await;
+            self.billing.import_snapshot(snap.billing).await;
+            self.owner_mfa.import_snapshot(snap.owner_mfa).await;
+            self.log_center.import_entries(snap.audit_entries).await;
+            if let Some(repo) = &self.in_memory_sessions {
+                repo.import_snapshot(snap.sessions).await;
+            }
+            let mut cp = self.control_plane.write().await;
+            cp.maintenance_mode = snap.maintenance_mode;
+            cp.maintenance_reason = snap.maintenance_reason;
+            cp.feature_flags = snap.feature_flags;
+            cp.managed_accounts = snap
+                .managed_accounts
+                .into_iter()
+                .map(|a| (a.user_id, a))
+                .collect();
+            cp.support_tickets = snap.support_tickets;
+            cp.announcements = snap.announcements;
+        }
+        self.journal = Some(journal);
+        Ok(self)
+    }
+
+    /// Atomically flush all critical control-plane, device, coupon, billing, MFA, and audit state
+    /// to the durable journal (when configured).
+    pub async fn persist_durable_state(&self) {
+        let Some(journal) = &self.journal else {
+            return;
+        };
+        let cp = self.control_plane.read().await;
+        let maintenance_mode = cp.maintenance_mode;
+        let maintenance_reason = cp.maintenance_reason.clone();
+        let feature_flags = cp.feature_flags.clone();
+        let managed_accounts: Vec<ManagedAccountRecord> =
+            cp.managed_accounts.values().cloned().collect();
+        let support_tickets = cp.support_tickets.clone();
+        let announcements = cp.announcements.clone();
+        drop(cp);
+
+        let sessions = match &self.in_memory_sessions {
+            Some(repo) => repo.export_snapshot().await,
+            None => Default::default(),
+        };
+
+        let snapshot = DurableServerSnapshot {
+            device_authority: self.device_authority.export_snapshot().await,
+            coupons: self.coupons.export_snapshot().await,
+            entitlements: self.entitlements.export_snapshot().await,
+            billing: self.billing.export_snapshot().await,
+            owner_mfa: self.owner_mfa.export_snapshot().await,
+            sessions,
+            maintenance_mode,
+            maintenance_reason,
+            feature_flags,
+            managed_accounts,
+            support_tickets,
+            announcements,
+            audit_entries: self.log_center.export_entries().await,
+        };
+        let _ = journal.write_atomic(&snapshot);
     }
 
     /// Attach the public account lifecycle without changing API-key/session routes.
@@ -172,6 +301,7 @@ impl AppState {
             .await
             .managed_accounts
             .insert(record.user_id, record);
+        self.persist_durable_state().await;
     }
 }
 

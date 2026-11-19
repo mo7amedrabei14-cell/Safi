@@ -29,19 +29,28 @@ use crate::auth::middleware::{
     require_any_credential, require_api_key, require_session, AnyCredentialGuard, ApiKeyGuard,
     SessionGuard,
 };
-use crate::auth::session::SessionView;
+use crate::auth::session::{parse_session_token, token_hash, SessionView};
 use crate::auth::{unix_now, AuthenticatedSession, Principal, Scope};
 use crate::billing::{
-    BillingEventRecord, CheckoutRequest, CheckoutResponse, InvoiceRecord, PaymobTransactionObj,
+    resolve_provider_and_price, BillingEventRecord, BillingRevenueSummary, CheckoutRequest,
+    CheckoutResponse, InvoiceRecord, PaymobTransactionObj,
 };
 use crate::config::ReadinessReport;
+use crate::coupons::{
+    CouponPreviewResponse, CouponRecord, CouponRedemptionRecord, CreateCouponRequest,
+    PreviewCouponRequest, UpdateCouponRequest,
+};
+use crate::device_authority::{
+    DeviceAuthorityService, DeviceReplacementEvent, DeviceStatus, RegisteredDeviceRecord,
+    SignedOnlineAuthorizationLease,
+};
 use crate::encrypted_sync::{
     CreateShareLinkRequest, CreatedShareLink, EncryptedSyncRecord, PushEncryptedSyncRequest,
     ShareLinkRecord,
 };
 use crate::entitlements::{
     ConsumeUsageRequest, ConsumeUsageResult, EffectiveEntitlements, EntitlementAggregateStats,
-    PlanTier, SubscriptionState, UsageKind,
+    PlanTier, SubscriptionState, UsageKind, ORG_MIN_SEATS,
 };
 use crate::error::AuthError;
 use crate::log_center::{AuditLogEntry, AuditOutcome};
@@ -51,7 +60,7 @@ use crate::routes_updates::{get_latest_update, issue_offline_license};
 use crate::zero_trust::{require_owner_mfa, OwnerAccessGuard};
 use crate::{
     get_server_version, AppState, FeatureFlag, ManagedAccountRecord, PendingOAuthState,
-    PendingPhoneOtp, RateBucket,
+    PendingPhoneOtp, PlatformAnnouncement, RateBucket, SupportTicket,
 };
 
 #[derive(Debug, Serialize)]
@@ -311,26 +320,42 @@ pub async fn confirm_password_reset(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct HttpLoginRequest {
+    #[serde(flatten)]
+    pub login: LoginAccountRequest,
+    #[serde(default)]
+    pub device_public_key_hex: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct EnrichedLoginResponse {
     pub token: String,
     pub session: SessionView,
     pub is_owner: bool,
     pub mfa_required: bool,
+    pub device_id: Uuid,
+    pub session_generation: u64,
+    pub previous_device_revoked: bool,
+    pub lease: SignedOnlineAuthorizationLease,
 }
 
-/// Verify credentials and issue a device-bound `sfs_*` session token with server-side `is_owner`.
+/// Verify credentials, atomically replace any previous active device (enforcing strict
+/// 1-account = 1-active-device exclusivity), and issue a device-bound `sfs_*` session token
+/// plus an initial 60-second Ed25519-signed Online Authorization Lease.
 pub async fn login_account(
     State(state): State<AppState>,
-    Json(body): Json<LoginAccountRequest>,
+    Json(body): Json<HttpLoginRequest>,
 ) -> Result<(StatusCode, Json<EnrichedLoginResponse>), AuthError> {
     check_rate_limit(&state, "auth:login", 40).await?;
-    let email_norm = body.email.trim().to_ascii_lowercase();
+    let email_norm = body.login.email.trim().to_ascii_lowercase();
+    let device_name_copy = body.login.device_name.clone();
+    let installation_id = body.login.installation_id;
     let service: &AccountAuthService = state
         .account_auth
         .as_deref()
         .ok_or(AuthError::BackendUnavailable)?;
-    let issued = service.login(body).await?;
+    let issued = service.login(body.login).await?;
     let authenticated = state.auth.authenticate_session(&issued.token).await?;
     let user_id = authenticated.principal.user_id;
     let workspace_id = authenticated.principal.workspace_id;
@@ -351,6 +376,37 @@ pub async fn login_account(
         }
     }
 
+    let (active_device, previous_device_id) = state
+        .device_authority
+        .activate_device_atomically(
+            user_id,
+            workspace_id,
+            &device_name_copy,
+            installation_id,
+            body.device_public_key_hex,
+            issued.session.id,
+            authenticated.token_hash.clone(),
+        )
+        .await?;
+
+    if let Some(prev_id) = previous_device_id {
+        state
+            .log_center
+            .record(
+                Some(user_id),
+                "auth.device.replaced",
+                "device",
+                prev_id.to_string(),
+                AuditOutcome::Allowed,
+                Some(json!({ "previous_device_id": prev_id })),
+                Some(json!({
+                    "new_device_id": active_device.device_id,
+                    "session_generation": active_device.session_generation,
+                })),
+            )
+            .await;
+    }
+
     state
         .upsert_managed_account(ManagedAccountRecord {
             user_id,
@@ -364,6 +420,24 @@ pub async fn login_account(
         .await;
 
     let is_owner = state.owner_mfa.is_owner_user(user_id).await;
+    let now = unix_now();
+    let entitlements = state
+        .entitlements
+        .effective_at(workspace_id, user_id, is_owner, now)
+        .await;
+    let lease = DeviceAuthorityService::sign_online_lease(
+        issued.session.id,
+        user_id,
+        workspace_id,
+        Some(active_device.device_id),
+        active_device.session_generation,
+        entitlements,
+        true,
+        state.config.license_signing_seed,
+        now,
+    );
+    state.persist_durable_state().await;
+
     Ok((
         StatusCode::CREATED,
         Json(EnrichedLoginResponse {
@@ -371,8 +445,109 @@ pub async fn login_account(
             session: issued.session,
             is_owner,
             mfa_required: is_owner,
+            device_id: active_device.device_id,
+            session_generation: active_device.session_generation,
+            previous_device_revoked: previous_device_id.is_some(),
+            lease,
         }),
     ))
+}
+
+/// `POST /v1/auth/authorize` and `POST /v1/auth/heartbeat`:
+/// Authoritative online authorization & single-device check returning a fresh 60-second
+/// Ed25519-signed Online Authorization Lease.
+///
+/// Explicitly distinguishes:
+/// - `SF-AUTH-019` (`DeviceReplaced`) when another device took over the account
+/// - `SF-AUTH-020` (`DeviceProofInvalid`) when the Ed25519 device proof signature fails
+/// - `SF-AUTH-009` (`AccountSuspended`) when the Owner suspended the account
+/// - `SF-AUTH-003` (`Revoked`) when logged out or reset by Owner
+pub async fn online_authorize_or_heartbeat(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<SignedOnlineAuthorizationLease>, AuthError> {
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .ok_or(AuthError::InvalidCredentials)?;
+
+    let raw_tok = parse_session_token(bearer).ok_or(AuthError::InvalidCredentials)?;
+    let presented_hash = token_hash(raw_tok);
+
+    // Check explicit device replacement reason BEFORE generic session error so Device A
+    // receives exact SF-AUTH-019 ("Your account was activated on another device").
+    if let Some(reason) = state
+        .device_authority
+        .revocation_reason_for_token_hash(&presented_hash)
+        .await
+    {
+        return Err(match reason {
+            DeviceStatus::ReplacedByNewDevice => AuthError::DeviceReplaced,
+            _ => AuthError::Revoked,
+        });
+    }
+
+    let session = state.auth.authenticate_session(bearer).await?;
+    let user_id = session.principal.user_id;
+    let workspace_id = session.principal.workspace_id;
+
+    // Enforce account suspension.
+    if state
+        .control_plane
+        .read()
+        .await
+        .managed_accounts
+        .get(&user_id)
+        .is_some_and(|a| a.suspended)
+    {
+        return Err(AuthError::AccountSuspended);
+    }
+
+    // Optional Ed25519 cryptographic device proof headers (`X-Safi-Device-Signature`, `X-Safi-Device-Timestamp`).
+    let device_sig_header = match (
+        headers
+            .get("x-safi-device-signature")
+            .and_then(|v| v.to_str().ok()),
+        headers
+            .get("x-safi-device-timestamp")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<i64>().ok()),
+    ) {
+        (Some(sig), Some(ts)) => Some((sig, ts)),
+        _ => None,
+    };
+
+    let now = unix_now();
+    let (device, session_generation) = state
+        .device_authority
+        .verify_active_session_device(
+            user_id,
+            session.session_id,
+            &session.token_hash,
+            device_sig_header,
+            now,
+        )
+        .await?;
+
+    let is_owner = state.owner_mfa.is_owner_user(user_id).await;
+    let entitlements = state
+        .entitlements
+        .effective_at(workspace_id, user_id, is_owner, now)
+        .await;
+    let lease = DeviceAuthorityService::sign_online_lease(
+        session.session_id,
+        user_id,
+        workspace_id,
+        device.map(|d| d.device_id),
+        session_generation,
+        entitlements,
+        true,
+        state.config.license_signing_seed,
+        now,
+    );
+    Ok(Json(lease))
 }
 
 #[derive(Debug, Deserialize)]
@@ -768,9 +943,16 @@ pub async fn owner_mfa_recover(
 #[derive(Debug, Serialize)]
 pub struct OwnerStatsResponse {
     pub total_users: usize,
+    pub verified_phone_users: usize,
     pub suspended_users: usize,
+    pub active_devices: usize,
+    pub total_coupons: usize,
+    pub total_coupon_redemptions: usize,
+    pub open_support_tickets: usize,
+    pub organizations_count: usize,
     pub maintenance_mode: bool,
     pub billing_providers: Value,
+    pub revenue: BillingRevenueSummary,
     pub entitlements: EntitlementAggregateStats,
 }
 
@@ -778,16 +960,43 @@ pub struct OwnerStatsResponse {
 pub async fn owner_stats(State(state): State<AppState>) -> Json<OwnerStatsResponse> {
     let cp = state.control_plane.read().await;
     let total_users = cp.managed_accounts.len();
+    let verified_phone_users = cp
+        .managed_accounts
+        .values()
+        .filter(|a| a.verified_phone.is_some())
+        .count();
     let suspended_users = cp.managed_accounts.values().filter(|a| a.suspended).count();
+    let open_support_tickets = cp
+        .support_tickets
+        .iter()
+        .filter(|t| t.status != "resolved" && t.status != "closed")
+        .count();
     let maintenance_mode = cp.maintenance_mode;
     drop(cp);
 
+    let all_devices = state.device_authority.list_all_devices().await;
+    let active_devices = all_devices
+        .iter()
+        .filter(|d| d.status == DeviceStatus::Active)
+        .count();
+    let total_coupons = state.coupons.list_coupons().await.len();
+    let total_coupon_redemptions = state.coupons.list_redemptions().await.len();
+    let organizations_count = state.organizations.list_all_orgs().await.len();
+    let revenue = state.billing.revenue_summary().await;
     let entitlements = state.entitlements.aggregate_stats(unix_now()).await;
+
     Json(OwnerStatsResponse {
         total_users,
+        verified_phone_users,
         suspended_users,
+        active_devices,
+        total_coupons,
+        total_coupon_redemptions,
+        open_support_tickets,
+        organizations_count,
         maintenance_mode,
         billing_providers: state.billing.provider_status_json(),
+        revenue,
         entitlements,
     })
 }
@@ -930,6 +1139,16 @@ pub async fn owner_suspend_account(
     acc.suspended = true;
     drop(cp);
 
+    let _ = state.auth.revoke_all_user_sessions(target_user_id).await;
+    let _ = state
+        .device_authority
+        .owner_reset_devices(
+            session.principal.user_id,
+            target_user_id,
+            "account_suspended",
+        )
+        .await;
+
     state
         .log_center
         .record(
@@ -942,6 +1161,7 @@ pub async fn owner_suspend_account(
             Some(json!({ "suspended": true })),
         )
         .await;
+    state.persist_durable_state().await;
     Ok(Json(
         json!({ "user_id": target_user_id, "suspended": true }),
     ))
@@ -1208,6 +1428,427 @@ pub async fn owner_audit_logs(State(state): State<AppState>) -> Json<AuditLogsRe
 }
 
 // ============================================================================
+// EXTENDED 14-SECTION OWNER CONTROL CENTER (PROFILE, DEVICES, COUPONS,
+// CHARGEBACKS, ORGANIZATIONS, SUPPORT, ANNOUNCEMENTS, PRODUCT CONFIG)
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+pub struct OwnerCustomerProfileResponse {
+    pub account: ManagedAccountRecord,
+    pub entitlements: EffectiveEntitlements,
+    pub invoices: Vec<InvoiceRecord>,
+    pub devices: Vec<RegisteredDeviceRecord>,
+    pub device_replacements: Vec<DeviceReplacementEvent>,
+}
+
+/// `GET /v1/owner/accounts/{user_id}/profile` — complete customer profile drill-down (Section 9.3).
+pub async fn owner_customer_profile(
+    State(state): State<AppState>,
+    Path(target_user_id): Path<Uuid>,
+) -> Result<Json<OwnerCustomerProfileResponse>, AuthError> {
+    let acc = state
+        .control_plane
+        .read()
+        .await
+        .managed_accounts
+        .get(&target_user_id)
+        .cloned()
+        .ok_or(AuthError::InvalidRequest)?;
+    let is_owner = state.owner_mfa.is_owner_user(target_user_id).await;
+    let entitlements = state
+        .entitlements
+        .effective_at(acc.workspace_id, target_user_id, is_owner, unix_now())
+        .await;
+    let invoices = state.billing.list_invoices(acc.workspace_id).await;
+    let devices = state
+        .device_authority
+        .list_devices_for_user(target_user_id)
+        .await;
+    let device_replacements = state
+        .device_authority
+        .list_replacements_for_user(target_user_id)
+        .await;
+    Ok(Json(OwnerCustomerProfileResponse {
+        account: acc,
+        entitlements,
+        invoices,
+        devices,
+        device_replacements,
+    }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct OwnerDevicesOverviewResponse {
+    pub devices: Vec<RegisteredDeviceRecord>,
+    pub replacements: Vec<DeviceReplacementEvent>,
+}
+
+/// `GET /v1/owner/devices` — all registered devices & replacement audit events (Section 9.8).
+pub async fn owner_list_devices(
+    State(state): State<AppState>,
+) -> Json<OwnerDevicesOverviewResponse> {
+    let devices = state.device_authority.list_all_devices().await;
+    let replacements = state.device_authority.list_recent_replacements(100).await;
+    Json(OwnerDevicesOverviewResponse {
+        devices,
+        replacements,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetDevicesRequest {
+    pub reason: String,
+}
+
+/// `POST /v1/owner/accounts/{user_id}/devices/reset` — audited Owner device reset (step-up TOTP).
+pub async fn owner_reset_account_devices(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Path(target_user_id): Path<Uuid>,
+    Json(body): Json<ResetDevicesRequest>,
+) -> Result<Json<DeviceReplacementEvent>, AuthError> {
+    let event = state
+        .device_authority
+        .owner_reset_devices(session.principal.user_id, target_user_id, &body.reason)
+        .await?;
+    state.auth.revoke_all_user_sessions(target_user_id).await?;
+    if let Some(pg) = &state.pg_store {
+        let _ = pg.persist_device_replacement(&event).await;
+    }
+    let audit = state
+        .log_center
+        .record(
+            Some(session.principal.user_id),
+            "owner.devices.reset",
+            "user",
+            target_user_id.to_string(),
+            AuditOutcome::Allowed,
+            None,
+            Some(json!({
+                "reason": event.reason,
+                "new_session_generation": event.new_session_generation,
+            })),
+        )
+        .await;
+    if let Some(pg) = &state.pg_store {
+        let _ = pg.insert_audit_entry(&audit).await;
+    }
+    state.persist_durable_state().await;
+    Ok(Json(event))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecordChargebackRequest {
+    pub external_invoice_id: String,
+    pub workspace_id: Uuid,
+    pub user_id: Uuid,
+}
+
+/// `POST /v1/owner/billing/chargeback` — record chargeback & immediately revoke paid entitlements.
+pub async fn owner_record_chargeback(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<RecordChargebackRequest>,
+) -> Result<Json<InvoiceRecord>, AuthError> {
+    let inv = state
+        .billing
+        .record_chargeback(
+            &body.external_invoice_id,
+            body.workspace_id,
+            body.user_id,
+            unix_now(),
+        )
+        .await?;
+    state
+        .log_center
+        .record(
+            Some(session.principal.user_id),
+            "owner.billing.chargeback",
+            "invoice",
+            body.external_invoice_id,
+            AuditOutcome::Allowed,
+            None,
+            Some(json!({ "status": inv.status, "workspace_id": inv.workspace_id })),
+        )
+        .await;
+    state.persist_durable_state().await;
+    Ok(Json(inv))
+}
+
+/// `GET /v1/owner/billing/invoices` — list all invoices across the platform.
+pub async fn owner_list_all_invoices(State(state): State<AppState>) -> Json<Vec<InvoiceRecord>> {
+    Json(state.billing.list_all_invoices().await)
+}
+
+/// `GET /v1/owner/coupons` — list all coupons (Section 9.7).
+pub async fn owner_list_coupons(State(state): State<AppState>) -> Json<Vec<CouponRecord>> {
+    Json(state.coupons.list_coupons().await)
+}
+
+/// `POST /v1/owner/coupons` — create a promotional coupon (step-up TOTP).
+pub async fn owner_create_coupon(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<CreateCouponRequest>,
+) -> Result<(StatusCode, Json<CouponRecord>), AuthError> {
+    let coupon = state
+        .coupons
+        .create_coupon(session.principal.user_id, body)
+        .await?;
+    if let Some(pg) = &state.pg_store {
+        let _ = pg.upsert_coupon(&coupon).await;
+    }
+    state
+        .log_center
+        .record(
+            Some(session.principal.user_id),
+            "owner.coupon.create",
+            "coupon",
+            coupon.code.clone(),
+            AuditOutcome::Allowed,
+            None,
+            serde_json::to_value(&coupon).ok(),
+        )
+        .await;
+    state.persist_durable_state().await;
+    Ok((StatusCode::CREATED, Json(coupon)))
+}
+
+/// `POST /v1/owner/coupons/{code}` — update/disable/archive a coupon (step-up TOTP).
+pub async fn owner_update_coupon(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Path(code): Path<String>,
+    Json(body): Json<UpdateCouponRequest>,
+) -> Result<Json<CouponRecord>, AuthError> {
+    let updated = state.coupons.update_coupon(&code, body).await?;
+    if let Some(pg) = &state.pg_store {
+        let _ = pg.upsert_coupon(&updated).await;
+    }
+    state
+        .log_center
+        .record(
+            Some(session.principal.user_id),
+            "owner.coupon.update",
+            "coupon",
+            updated.code.clone(),
+            AuditOutcome::Allowed,
+            None,
+            serde_json::to_value(&updated).ok(),
+        )
+        .await;
+    state.persist_durable_state().await;
+    Ok(Json(updated))
+}
+
+/// `GET /v1/owner/coupons/redemptions` — audit ledger of all coupon redemptions.
+pub async fn owner_coupon_redemptions(
+    State(state): State<AppState>,
+) -> Json<Vec<CouponRedemptionRecord>> {
+    Json(state.coupons.list_redemptions().await)
+}
+
+#[derive(Debug, Serialize)]
+pub struct OwnerOrganizationRow {
+    pub organization: Organization,
+    pub active_members: u32,
+}
+
+/// `GET /v1/owner/organizations` — all organizations & seat usage (Section 9.9).
+pub async fn owner_list_organizations(
+    State(state): State<AppState>,
+) -> Json<Vec<OwnerOrganizationRow>> {
+    let rows = state
+        .organizations
+        .list_all_orgs()
+        .await
+        .into_iter()
+        .map(|(organization, active_members)| OwnerOrganizationRow {
+            organization,
+            active_members,
+        })
+        .collect();
+    Json(rows)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateTicketRequest {
+    pub user_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
+    pub subject: String,
+    pub body: String,
+    pub priority: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateTicketRequest {
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub owner_notes: Option<String>,
+}
+
+/// `GET /v1/owner/support/tickets` — list customer support tickets (Section 9.10).
+pub async fn owner_list_tickets(State(state): State<AppState>) -> Json<Vec<SupportTicket>> {
+    Json(state.control_plane.read().await.support_tickets.clone())
+}
+
+/// `POST /v1/owner/support/tickets` — record a support ticket.
+pub async fn owner_create_ticket(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<CreateTicketRequest>,
+) -> Result<(StatusCode, Json<SupportTicket>), AuthError> {
+    let subj = body.subject.trim();
+    if subj.is_empty() || subj.len() > 200 || body.body.trim().is_empty() {
+        return Err(AuthError::InvalidRequest);
+    }
+    let now = unix_now();
+    let ticket = SupportTicket {
+        id: Uuid::now_v7(),
+        user_id: body.user_id.unwrap_or(session.principal.user_id),
+        workspace_id: body.workspace_id.unwrap_or(session.principal.workspace_id),
+        subject: subj.to_owned(),
+        body: body.body.trim().to_owned(),
+        status: "open".to_owned(),
+        priority: body.priority.unwrap_or_else(|| "normal".to_owned()),
+        owner_notes: String::new(),
+        created_at: now,
+        updated_at: now,
+    };
+    state
+        .control_plane
+        .write()
+        .await
+        .support_tickets
+        .push(ticket.clone());
+    state.persist_durable_state().await;
+    Ok((StatusCode::CREATED, Json(ticket)))
+}
+
+/// `POST /v1/owner/support/tickets/{id}` — update ticket status/priority/notes.
+pub async fn owner_update_ticket(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<UpdateTicketRequest>,
+) -> Result<Json<SupportTicket>, AuthError> {
+    let updated = {
+        let mut cp = state.control_plane.write().await;
+        let t = cp
+            .support_tickets
+            .iter_mut()
+            .find(|t| t.id == ticket_id)
+            .ok_or(AuthError::InvalidRequest)?;
+        if let Some(s) = body.status {
+            t.status = s;
+        }
+        if let Some(p) = body.priority {
+            t.priority = p;
+        }
+        if let Some(n) = body.owner_notes {
+            t.owner_notes = n;
+        }
+        t.updated_at = unix_now();
+        t.clone()
+    };
+    state
+        .log_center
+        .record(
+            Some(session.principal.user_id),
+            "owner.support.ticket.update",
+            "support_ticket",
+            ticket_id.to_string(),
+            AuditOutcome::Allowed,
+            None,
+            Some(json!({ "status": updated.status, "priority": updated.priority })),
+        )
+        .await;
+    state.persist_durable_state().await;
+    Ok(Json(updated))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateAnnouncementRequest {
+    pub title: String,
+    pub body: String,
+    pub severity: Option<String>,
+    #[serde(default = "default_true")]
+    pub published: bool,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+/// `GET /v1/owner/announcements` — list platform announcements (Section 9.11).
+pub async fn owner_list_announcements(
+    State(state): State<AppState>,
+) -> Json<Vec<PlatformAnnouncement>> {
+    Json(state.control_plane.read().await.announcements.clone())
+}
+
+/// `POST /v1/owner/announcements` — publish an announcement.
+pub async fn owner_create_announcement(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<CreateAnnouncementRequest>,
+) -> Result<(StatusCode, Json<PlatformAnnouncement>), AuthError> {
+    let title = body.title.trim();
+    if title.is_empty() || title.len() > 200 || body.body.trim().is_empty() {
+        return Err(AuthError::InvalidRequest);
+    }
+    let ann = PlatformAnnouncement {
+        id: Uuid::now_v7(),
+        title: title.to_owned(),
+        body: body.body.trim().to_owned(),
+        severity: body.severity.unwrap_or_else(|| "info".to_owned()),
+        published: body.published,
+        created_at: unix_now(),
+    };
+    state
+        .control_plane
+        .write()
+        .await
+        .announcements
+        .push(ann.clone());
+    if let Some(pg) = &state.pg_store {
+        let _ = pg
+            .insert_announcement(&ann, session.principal.user_id)
+            .await;
+    }
+    state
+        .log_center
+        .record(
+            Some(session.principal.user_id),
+            "owner.announcement.create",
+            "announcement",
+            ann.id.to_string(),
+            AuditOutcome::Allowed,
+            None,
+            Some(json!({ "title": ann.title, "published": ann.published })),
+        )
+        .await;
+    state.persist_durable_state().await;
+    Ok((StatusCode::CREATED, Json(ann)))
+}
+
+/// `GET /v1/owner/product-config` — non-secret business & integration configuration (Section 9.12).
+pub async fn owner_product_config(State(state): State<AppState>) -> Json<Value> {
+    let readiness = state.config.readiness_report();
+    Json(json!({
+        "server_version": get_server_version(),
+        "readiness": readiness,
+        "online_lease_ttl_secs": crate::device_authority::ONLINE_LEASE_TTL_SECS,
+        "online_heartbeat_secs": crate::device_authority::ONLINE_HEARTBEAT_SECS,
+        "refund_window_days": 3,
+        "trial_days": 7,
+        "free_plan_ops_per_month": crate::entitlements::FREE_OPS_PER_MONTH,
+        "free_plan_max_rows": crate::entitlements::FREE_MAX_ROWS,
+        "org_min_seats": ORG_MIN_SEATS,
+    }))
+}
+
+// ============================================================================
 // ENTITLEMENTS, BILLING, ORGANIZATIONS, ENCRYPTED SYNC & AI ROUTER ROUTES
 // ============================================================================
 
@@ -1304,7 +1945,37 @@ pub async fn billing_status(State(state): State<AppState>) -> Json<Value> {
     Json(state.billing.provider_status_json())
 }
 
-/// `POST /v1/billing/checkout` — create Paddle (USD) or Paymob (EGP) checkout session.
+/// `POST /v1/billing/coupons/preview` — server-authoritative coupon validation & discount preview.
+pub async fn billing_preview_coupon(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Json(body): Json<PreviewCouponRequest>,
+) -> Result<Json<CouponPreviewResponse>, AuthError> {
+    let seats = body.seats.unwrap_or(1);
+    let (_provider, currency, original_minor) =
+        resolve_provider_and_price(&body.billing_country_iso2, body.product, seats);
+    let has_prior_invoices = !state
+        .billing
+        .list_invoices(session.principal.workspace_id)
+        .await
+        .is_empty();
+    let preview = state
+        .coupons
+        .preview_at(
+            &body.code,
+            session.principal.user_id,
+            body.product,
+            original_minor,
+            currency,
+            !has_prior_invoices,
+            unix_now(),
+        )
+        .await?;
+    Ok(Json(preview))
+}
+
+/// `POST /v1/billing/checkout` — create Paddle (USD) or Paymob (EGP) checkout session
+/// with optional server-authoritative coupon validation & atomic redemption.
 pub async fn billing_checkout(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
@@ -1312,7 +1983,42 @@ pub async fn billing_checkout(
 ) -> Result<Json<CheckoutResponse>, AuthError> {
     body.workspace_id = session.principal.workspace_id;
     body.user_id = session.principal.user_id;
-    let resp = state.billing.create_checkout(&body).await?;
+
+    let (discount_minor, applied_code) = if let Some(ref code) = body.coupon_code {
+        let seats = body.seats.unwrap_or(1);
+        let (_provider, currency, original_minor) =
+            resolve_provider_and_price(&body.billing_country_iso2, body.product, seats);
+        let has_prior_invoices = !state
+            .billing
+            .list_invoices(body.workspace_id)
+            .await
+            .is_empty();
+        let redemption = state
+            .coupons
+            .redeem_at(
+                code,
+                body.user_id,
+                body.workspace_id,
+                body.product,
+                original_minor,
+                currency,
+                !has_prior_invoices,
+                unix_now(),
+            )
+            .await?;
+        if let Some(pg) = &state.pg_store {
+            let _ = pg.insert_coupon_redemption(&redemption).await;
+        }
+        state.persist_durable_state().await;
+        (redemption.discount_amount_minor, Some(redemption.code))
+    } else {
+        (0, None)
+    };
+
+    let resp = state
+        .billing
+        .create_checkout_with_discount(&body, discount_minor, applied_code)
+        .await?;
     Ok(Json(resp))
 }
 
@@ -1343,6 +2049,7 @@ pub async fn paddle_webhook(
         .billing
         .process_paddle_webhook(sig, &raw_body, unix_now())
         .await?;
+    state.persist_durable_state().await;
     Ok(Json(rec))
 }
 
@@ -1361,6 +2068,7 @@ pub async fn paymob_webhook(
         .billing
         .process_paymob_webhook(&query.hmac, &tx, unix_now())
         .await?;
+    state.persist_durable_state().await;
     Ok(Json(rec))
 }
 
@@ -1602,6 +2310,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/entitlements/me", get(get_my_entitlements))
         .route("/v1/entitlements/consume", post(consume_entitlement))
         .route("/v1/entitlements/trial/claim", post(claim_trial))
+        .route("/v1/billing/coupons/preview", post(billing_preview_coupon))
         .route("/v1/billing/checkout", post(billing_checkout))
         .route("/v1/billing/invoices", get(billing_invoices))
         // Organizations & encrypted sync
@@ -1635,7 +2344,29 @@ pub fn build_router(state: AppState) -> Router {
     let owner_elevated_routes = Router::new()
         .route("/v1/owner/stats", get(owner_stats))
         .route("/v1/owner/accounts", get(owner_list_accounts))
+        .route(
+            "/v1/owner/accounts/{user_id}/profile",
+            get(owner_customer_profile),
+        )
+        .route("/v1/owner/devices", get(owner_list_devices))
         .route("/v1/owner/billing/events", get(owner_billing_events))
+        .route("/v1/owner/billing/invoices", get(owner_list_all_invoices))
+        .route("/v1/owner/coupons", get(owner_list_coupons))
+        .route(
+            "/v1/owner/coupons/redemptions",
+            get(owner_coupon_redemptions),
+        )
+        .route("/v1/owner/organizations", get(owner_list_organizations))
+        .route(
+            "/v1/owner/support/tickets",
+            get(owner_list_tickets).post(owner_create_ticket),
+        )
+        .route("/v1/owner/support/tickets/{id}", post(owner_update_ticket))
+        .route(
+            "/v1/owner/announcements",
+            get(owner_list_announcements).post(owner_create_announcement),
+        )
+        .route("/v1/owner/product-config", get(owner_product_config))
         .route("/v1/owner/system/maintenance", get(owner_get_maintenance))
         .route(
             "/v1/owner/feature-flags",
@@ -1670,6 +2401,10 @@ pub fn build_router(state: AppState) -> Router {
             post(owner_reactivate_account),
         )
         .route(
+            "/v1/owner/accounts/{user_id}/devices/reset",
+            post(owner_reset_account_devices),
+        )
+        .route(
             "/v1/owner/subscriptions/{workspace_id}/extend-trial",
             post(owner_extend_trial),
         )
@@ -1678,6 +2413,12 @@ pub fn build_router(state: AppState) -> Router {
             post(owner_cancel_subscription),
         )
         .route("/v1/owner/billing/refund", post(owner_issue_refund))
+        .route(
+            "/v1/owner/billing/chargeback",
+            post(owner_record_chargeback),
+        )
+        .route("/v1/owner/coupons", post(owner_create_coupon))
+        .route("/v1/owner/coupons/{code}", post(owner_update_coupon))
         .route("/v1/owner/system/maintenance", post(owner_set_maintenance))
         .route_layer(from_fn_with_state(
             OwnerAccessGuard {
@@ -1707,6 +2448,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/auth/reset-password", post(confirm_password_reset))
         .route("/v1/auth/password/reset", post(confirm_password_reset))
         .route("/v1/auth/login", post(login_account))
+        .route("/v1/auth/authorize", post(online_authorize_or_heartbeat))
+        .route("/v1/auth/heartbeat", post(online_authorize_or_heartbeat))
         .route("/v1/auth/oauth/{provider}/start", get(oauth_start))
         .route("/v1/billing/status", get(billing_status))
         .route("/v1/billing/webhooks/paddle", post(paddle_webhook))

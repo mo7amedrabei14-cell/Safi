@@ -174,3 +174,27 @@ export function postSafiAuth<T>(path: string, body: unknown): Promise<T> {
 export function deleteSafiAuth(path: string, sessionToken: string): Promise<void> {
   return sendAuthRequest<undefined>(path, "DELETE", undefined, sessionToken);
 }
+
+export interface OnlineAuthorizationLeaseResponse {
+  readonly payload: {
+    readonly session_id: string;
+    readonly user_id: string;
+    readonly workspace_id: string;
+    readonly device_id: string | null;
+    readonly session_generation: number;
+    readonly server_time_secs: number;
+    readonly expires_at_secs: number;
+    readonly heartbeat_interval_secs: number;
+    readonly can_execute_protected_ops: boolean;
+  };
+  readonly signature_hex: string | null;
+}
+
+export function postSafiHeartbeat(sessionToken: string): Promise<OnlineAuthorizationLeaseResponse> {
+  return sendAuthRequest<OnlineAuthorizationLeaseResponse>(
+    "/v1/auth/heartbeat",
+    "POST",
+    undefined,
+    sessionToken
+  );
+}

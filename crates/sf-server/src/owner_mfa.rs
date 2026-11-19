@@ -201,7 +201,7 @@ pub struct PlatformOwnerRecord {
 }
 
 /// Stored encrypted TOTP credential (never holds plaintext secret).
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StoredTotpCredential {
     pub user_id: Uuid,
     pub secret_ciphertext: Vec<u8>,
@@ -228,7 +228,7 @@ impl fmt::Debug for StoredTotpCredential {
 }
 
 /// Stored hashed single-use recovery code.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredRecoveryCode {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -237,7 +237,7 @@ pub struct StoredRecoveryCode {
 }
 
 /// Time-bound elevated Owner session state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ElevatedOwnerSession {
     pub session_id: Uuid,
     pub user_id: Uuid,
@@ -280,6 +280,15 @@ pub struct OwnerMfaStatus {
     pub step_up_fresh: bool,
     pub recovery_codes_remaining: usize,
     pub locked_until: Option<i64>,
+}
+
+/// Serializable snapshot of Owner MFA state (TOTP secrets remain ChaCha20-Poly1305 encrypted).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OwnerMfaSnapshot {
+    pub owner: Option<PlatformOwnerRecord>,
+    pub totp: Vec<StoredTotpCredential>,
+    pub recovery_codes: Vec<StoredRecoveryCode>,
+    pub elevated_sessions: Vec<ElevatedOwnerSession>,
 }
 
 #[derive(Default)]
@@ -743,6 +752,30 @@ impl OwnerMfaService {
             recovery_codes_remaining,
             locked_until,
         }
+    }
+
+    /// Export Owner MFA state (TOTP secrets remain encrypted at rest).
+    pub async fn export_snapshot(&self) -> OwnerMfaSnapshot {
+        let guard = self.state.read().await;
+        OwnerMfaSnapshot {
+            owner: guard.owner.clone(),
+            totp: guard.totp.values().cloned().collect(),
+            recovery_codes: guard.recovery_codes.clone(),
+            elevated_sessions: guard.elevated_sessions.values().cloned().collect(),
+        }
+    }
+
+    /// Restore Owner MFA state from a durable snapshot.
+    pub async fn import_snapshot(&self, snap: OwnerMfaSnapshot) {
+        let mut guard = self.state.write().await;
+        guard.owner = snap.owner;
+        guard.totp = snap.totp.into_iter().map(|c| (c.user_id, c)).collect();
+        guard.recovery_codes = snap.recovery_codes;
+        guard.elevated_sessions = snap
+            .elevated_sessions
+            .into_iter()
+            .map(|s| (s.session_id, s))
+            .collect();
     }
 
     /// Inspect encrypted storage in tests to verify secret is never stored in plaintext.

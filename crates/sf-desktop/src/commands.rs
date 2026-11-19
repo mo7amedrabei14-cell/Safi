@@ -20,7 +20,7 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 51] = [
+pub const ALLOWED_COMMANDS: [&str; 54] = [
     "app_info",
     "take_pending_deep_link",
     "pick_input_file",
@@ -29,6 +29,9 @@ pub const ALLOWED_COMMANDS: [&str; 51] = [
     "pick_deliverable_file",
     "studio_set_auth_session",
     "studio_clear_auth_session",
+    "studio_authorization_status",
+    "studio_enter_offline_readonly",
+    "studio_revalidate_session",
     "studio_open_file",
     "studio_select_region",
     "studio_workbook_details",
@@ -73,6 +76,37 @@ pub const ALLOWED_COMMANDS: [&str; 51] = [
     "studio_export_capsule",
     "studio_export_deliverable",
 ];
+
+/// Access classification separating offline read-only viewing of saved local projects
+/// from protected operations that strictly require live online server authorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandAccessClass {
+    /// Allowed locally in Offline Read-Only Mode to inspect previously saved projects,
+    /// datasets, dashboards, and reports without mutating or exporting anything.
+    ReadOnlyOffline,
+    /// Strictly requires a valid online server authorization lease + active sole device +
+    /// active subscription. Fails closed offline with `SF-AUTH-021`.
+    ProtectedOnline,
+}
+
+/// Classify a desktop IPC command as read-only offline vs protected online.
+#[must_use]
+pub fn classify_command_access(command: &str) -> CommandAccessClass {
+    match command {
+        "app_info"
+        | "take_pending_deep_link"
+        | "studio_authorization_status"
+        | "studio_enter_offline_readonly"
+        | "studio_revalidate_session"
+        | "studio_list_projects"
+        | "studio_load_project"
+        | "studio_state"
+        | "studio_rows_page"
+        | "studio_workbook_details"
+        | "studio_list_templates" => CommandAccessClass::ReadOnlyOffline,
+        _ => CommandAccessClass::ProtectedOnline,
+    }
+}
 
 /// Authorise an IPC command by exact name.
 ///

@@ -67,16 +67,45 @@ pub struct CheckoutRequest {
     pub product: CheckoutProduct,
     pub billing_country_iso2: String,
     pub seats: Option<u32>,
+    #[serde(default)]
+    pub coupon_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckoutResponse {
     pub provider: BillingProvider,
     pub currency: BillingCurrency,
+    pub original_amount_minor: u64,
+    pub discount_amount_minor: u64,
     pub amount_minor: u64,
+    pub applied_coupon_code: Option<String>,
     pub provider_status: IntegrationStatus,
     pub checkout_session_id: Option<String>,
     pub checkout_url: Option<String>,
+}
+
+/// Revenue and billing summary computed from actual invoices & webhook events.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BillingRevenueSummary {
+    pub total_invoices: usize,
+    pub paid_invoices: usize,
+    pub refunded_invoices: usize,
+    pub chargeback_invoices: usize,
+    pub gross_usd_minor: u64,
+    pub gross_egp_minor: u64,
+    pub refunded_usd_minor: u64,
+    pub refunded_egp_minor: u64,
+    pub chargeback_usd_minor: u64,
+    pub chargeback_egp_minor: u64,
+}
+
+/// Serializable snapshot of billing state for durable restart persistence.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BillingSnapshot {
+    pub processed_events: Vec<(String, String)>,
+    pub last_event_ts_by_workspace: Vec<(Uuid, i64)>,
+    pub events: Vec<BillingEventRecord>,
+    pub invoices: Vec<InvoiceRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +164,8 @@ pub struct PaymobTransactionObj {
     pub is_auth: bool,
     pub is_capture: bool,
     pub is_refunded: bool,
+    #[serde(default)]
+    pub is_chargeback: bool,
     pub is_standalone_payment: bool,
     pub is_voided: bool,
     pub order_id: u64,
@@ -376,12 +407,24 @@ impl BillingService {
         &self,
         req: &CheckoutRequest,
     ) -> Result<CheckoutResponse, AuthError> {
+        self.create_checkout_with_discount(req, 0, None).await
+    }
+
+    /// Initiate checkout applying a server-verified coupon discount (never client-supplied amounts).
+    pub async fn create_checkout_with_discount(
+        &self,
+        req: &CheckoutRequest,
+        discount_minor: u64,
+        applied_coupon_code: Option<String>,
+    ) -> Result<CheckoutResponse, AuthError> {
         let seats = req.seats.unwrap_or(1);
         if req.product == CheckoutProduct::OrganizationSeatAnnual && seats < ORG_MIN_SEATS {
             return Err(AuthError::OrgMinSeatsRequired);
         }
-        let (provider, currency, amount_minor) =
+        let (provider, currency, original_amount_minor) =
             resolve_provider_and_price(&req.billing_country_iso2, req.product, seats);
+        let bounded_discount = discount_minor.min(original_amount_minor);
+        let amount_minor = original_amount_minor.saturating_sub(bounded_discount);
 
         let configured = match provider {
             BillingProvider::Paddle => self.paddle_configured(),
@@ -404,7 +447,10 @@ impl BillingService {
         Ok(CheckoutResponse {
             provider,
             currency,
+            original_amount_minor,
+            discount_amount_minor: bounded_discount,
             amount_minor,
+            applied_coupon_code,
             provider_status: IntegrationStatus::Configured,
             checkout_session_id: Some(session_id),
             checkout_url: Some(checkout_url),
@@ -620,6 +666,32 @@ impl BillingService {
                     .await?;
                 Ok("refund_processed".to_owned())
             }
+            "adjustment.chargeback" | "chargeback.created" => {
+                if let Some(inv_id) = &event.invoice_id {
+                    let _ = self
+                        .mark_invoice_chargeback(
+                            inv_id,
+                            event.workspace_id,
+                            BillingProvider::Paddle,
+                            BillingCurrency::Usd,
+                            event.amount_minor.unwrap_or(0),
+                            now_secs,
+                        )
+                        .await;
+                }
+                self.entitlements
+                    .apply_subscription_update(
+                        event.workspace_id,
+                        event.user_id,
+                        PlanTier::Free,
+                        SubscriptionState::Canceled,
+                        1,
+                        Some(now_secs),
+                        now_secs,
+                    )
+                    .await?;
+                Ok("chargeback_revoked".to_owned())
+            }
             _ => Ok("unhandled_event_logged".to_owned()),
         }
     }
@@ -657,7 +729,31 @@ impl BillingService {
             }
         }
 
-        let outcome = if tx.is_refunded || tx.is_voided {
+        let outcome = if tx.is_chargeback {
+            let inv_id = format!("inv_paymob_{}", tx.id);
+            let _ = self
+                .mark_invoice_chargeback(
+                    &inv_id,
+                    tx.workspace_id,
+                    BillingProvider::Paymob,
+                    BillingCurrency::Egp,
+                    tx.amount_cents,
+                    now_secs,
+                )
+                .await;
+            self.entitlements
+                .apply_subscription_update(
+                    tx.workspace_id,
+                    tx.user_id,
+                    PlanTier::Free,
+                    SubscriptionState::Canceled,
+                    1,
+                    Some(now_secs),
+                    now_secs,
+                )
+                .await?;
+            "paymob_chargeback_revoked".to_owned()
+        } else if tx.is_refunded || tx.is_voided {
             self.entitlements
                 .apply_subscription_update(
                     tx.workspace_id,
@@ -835,6 +931,148 @@ impl BillingService {
             .collect()
     }
 
+    /// Record a dispute/chargeback and immediately revoke paid entitlements.
+    pub async fn record_chargeback(
+        &self,
+        external_invoice_id: &str,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        now_secs: i64,
+    ) -> Result<InvoiceRecord, AuthError> {
+        let invoice = self
+            .mark_invoice_chargeback(
+                external_invoice_id,
+                workspace_id,
+                BillingProvider::Manual,
+                BillingCurrency::Usd,
+                0,
+                now_secs,
+            )
+            .await;
+        self.entitlements
+            .apply_subscription_update(
+                invoice.workspace_id,
+                user_id,
+                PlanTier::Free,
+                SubscriptionState::Canceled,
+                1,
+                Some(now_secs),
+                now_secs,
+            )
+            .await?;
+        let mut guard = self.store.write().await;
+        guard.events.push(BillingEventRecord {
+            id: Uuid::now_v7(),
+            provider: invoice.provider,
+            external_event_id: format!("chg_{}", Uuid::now_v7().simple()),
+            event_type: "chargeback.recorded".to_owned(),
+            workspace_id: Some(invoice.workspace_id),
+            occurred_at: now_secs,
+            processed_at: now_secs,
+            outcome: "chargeback_revoked".to_owned(),
+        });
+        Ok(invoice)
+    }
+
+    async fn mark_invoice_chargeback(
+        &self,
+        external_invoice_id: &str,
+        workspace_id: Uuid,
+        provider: BillingProvider,
+        currency: BillingCurrency,
+        amount_minor: u64,
+        now_secs: i64,
+    ) -> InvoiceRecord {
+        let mut guard = self.store.write().await;
+        let inv = guard
+            .invoices
+            .entry(external_invoice_id.to_owned())
+            .or_insert_with(|| InvoiceRecord {
+                id: Uuid::now_v7(),
+                workspace_id,
+                provider,
+                external_invoice_id: external_invoice_id.to_owned(),
+                amount_minor,
+                currency,
+                status: "chargeback".to_owned(),
+                issued_at: now_secs,
+                refunded_at: Some(now_secs),
+            });
+        inv.status = "chargeback".to_owned();
+        inv.refunded_at = Some(now_secs);
+        inv.clone()
+    }
+
+    /// Return all invoices across the platform (for Owner Billing & Revenue Analytics).
+    pub async fn list_all_invoices(&self) -> Vec<InvoiceRecord> {
+        let mut out: Vec<InvoiceRecord> =
+            self.store.read().await.invoices.values().cloned().collect();
+        out.sort_by_key(|a| std::cmp::Reverse(a.issued_at));
+        out
+    }
+
+    /// Compute real revenue & refund/chargeback summary from persisted invoices.
+    pub async fn revenue_summary(&self) -> BillingRevenueSummary {
+        let guard = self.store.read().await;
+        let mut summary = BillingRevenueSummary::default();
+        for inv in guard.invoices.values() {
+            summary.total_invoices += 1;
+            match inv.status.as_str() {
+                "paid" => {
+                    summary.paid_invoices += 1;
+                    match inv.currency {
+                        BillingCurrency::Usd => summary.gross_usd_minor += inv.amount_minor,
+                        BillingCurrency::Egp => summary.gross_egp_minor += inv.amount_minor,
+                    }
+                }
+                "refunded" => {
+                    summary.refunded_invoices += 1;
+                    match inv.currency {
+                        BillingCurrency::Usd => summary.refunded_usd_minor += inv.amount_minor,
+                        BillingCurrency::Egp => summary.refunded_egp_minor += inv.amount_minor,
+                    }
+                }
+                "chargeback" => {
+                    summary.chargeback_invoices += 1;
+                    match inv.currency {
+                        BillingCurrency::Usd => summary.chargeback_usd_minor += inv.amount_minor,
+                        BillingCurrency::Egp => summary.chargeback_egp_minor += inv.amount_minor,
+                    }
+                }
+                _ => {}
+            }
+        }
+        summary
+    }
+
+    /// Export serializable billing state for durable restart persistence.
+    pub async fn export_snapshot(&self) -> BillingSnapshot {
+        let guard = self.store.read().await;
+        BillingSnapshot {
+            processed_events: guard.processed_events.iter().cloned().collect(),
+            last_event_ts_by_workspace: guard
+                .last_event_ts_by_workspace
+                .iter()
+                .map(|(k, v)| (*k, *v))
+                .collect(),
+            events: guard.events.clone(),
+            invoices: guard.invoices.values().cloned().collect(),
+        }
+    }
+
+    /// Restore billing state from a durable snapshot.
+    pub async fn import_snapshot(&self, snap: BillingSnapshot) {
+        let mut guard = self.store.write().await;
+        guard.processed_events = snap.processed_events.into_iter().collect();
+        guard.last_event_ts_by_workspace = snap.last_event_ts_by_workspace.into_iter().collect();
+        guard.events = snap.events;
+        guard.invoices = snap
+            .invoices
+            .into_iter()
+            .map(|i| (i.external_invoice_id.clone(), i))
+            .collect();
+    }
+
     /// Current timestamp helper.
     #[must_use]
     pub fn now() -> i64 {
@@ -880,6 +1118,7 @@ mod tests {
                 product: CheckoutProduct::IndividualMonthly,
                 billing_country_iso2: "US".to_owned(),
                 seats: None,
+                coupon_code: None,
             })
             .await
             .unwrap_err();
@@ -907,6 +1146,7 @@ mod tests {
                 product: CheckoutProduct::IndividualMonthly,
                 billing_country_iso2: "EG".to_owned(),
                 seats: None,
+                coupon_code: None,
             })
             .await
             .expect("eg checkout");
@@ -921,6 +1161,7 @@ mod tests {
                 product: CheckoutProduct::IndividualAnnual,
                 billing_country_iso2: "US".to_owned(),
                 seats: None,
+                coupon_code: None,
             })
             .await
             .expect("us checkout");
@@ -936,6 +1177,7 @@ mod tests {
                     product: CheckoutProduct::OrganizationSeatAnnual,
                     billing_country_iso2: "US".to_owned(),
                     seats: Some(2),
+                    coupon_code: None,
                 })
                 .await
                 .unwrap_err(),
@@ -1071,6 +1313,7 @@ mod tests {
             is_auth: false,
             is_capture: false,
             is_refunded: false,
+            is_chargeback: false,
             is_standalone_payment: true,
             is_voided: false,
             order_id: 778899,

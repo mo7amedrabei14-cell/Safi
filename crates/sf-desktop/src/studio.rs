@@ -36,7 +36,8 @@ use sf_recipe::studio_capsule::{
 use sf_recipe::studio_dsl::{apply_command, parse_command, render_narrative};
 use sf_recipe::studio_templates::{TEMPLATES, instantiate as instantiate_tpl, template_by_id};
 
-use crate::commands::enforce_ipc_command;
+use crate::commands::{CommandAccessClass, classify_command_access, enforce_ipc_command};
+use crate::vault::{VaultKey, decrypt_vault_payload, encrypt_vault_payload};
 
 /// Largest file the desktop app will import (`50 MiB`, matching the drop zone copy).
 pub const MAX_STUDIO_IMPORT_BYTES: u64 = 50 * 1024 * 1024;
@@ -59,8 +60,26 @@ pub const AUTH_REVOKED_CODE: &str = "SF-AUTH-003";
 /// Code returned when the authentication backend cannot be reached or returns a server error.
 pub const AUTH_BACKEND_UNAVAILABLE_CODE: &str = "SF-AUTH-005";
 
+/// Code returned when an account has been suspended by the Platform Owner.
+pub const AUTH_ACCOUNT_SUSPENDED_CODE: &str = "SF-AUTH-009";
+
+/// Code returned when this device was automatically deactivated because another device signed in.
+pub const AUTH_DEVICE_REPLACED_CODE: &str = "SF-AUTH-019";
+
+/// Code returned when the cryptographic Ed25519 device proof is invalid.
+pub const AUTH_DEVICE_PROOF_INVALID_CODE: &str = "SF-AUTH-020";
+
+/// Code returned when a protected operation is attempted while offline in Read-Only mode.
+pub const AUTH_OFFLINE_READ_ONLY_CODE: &str = "SF-AUTH-021";
+
+/// Code returned when the online authorization lease expired or local clock rollback was detected.
+pub const AUTH_LEASE_CLOCK_ROLLBACK_CODE: &str = "SF-AUTH-022";
+
 /// Code returned when the account-service origin (`SAFI_API_BASE_URL`) is missing or invalid.
 pub const AUTH_CONFIG_MISSING_CODE: &str = "SF-SYS-031";
+
+/// Maximum tolerated backward clock jump (5 seconds) before failing closed with `SF-AUTH-022`.
+const MAX_CLOCK_ROLLBACK_TOLERANCE_MS: u64 = 5_000;
 
 const SESSION_TOKEN_PREFIX: &str = "sfs_";
 const SESSION_RANDOM_HEX_LEN: usize = 64;
@@ -662,7 +681,7 @@ fn system_now_ms() -> u64 {
 }
 
 /// Open Studio projects, keyed by the identifier the UI chose, guarded by a fail-closed
-/// native session and single-device gate.
+/// native session, single-device, clock-rollback, and offline read-only gate.
 #[derive(Debug)]
 pub struct StudioStore {
     projects: Mutex<BTreeMap<String, DataGraph>>,
@@ -671,6 +690,10 @@ pub struct StudioStore {
     active_regions: Mutex<BTreeMap<String, (String, String)>>,
     storage_dir: Mutex<Option<PathBuf>>,
     active_session: Mutex<Option<ActiveStudioSession>>,
+    offline_read_only: Mutex<bool>,
+    last_online_verified_ms: Mutex<Option<u64>>,
+    high_water_clock_ms: Mutex<u64>,
+    vault_key: Mutex<Option<VaultKey>>,
     authority: Arc<StudioSessionAuthority>,
     verifier: Arc<dyn StudioSessionVerifier>,
     clock_ms: Mutex<Option<u64>>,
@@ -687,6 +710,10 @@ impl Default for StudioStore {
             active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(None),
             active_session: Mutex::new(None),
+            offline_read_only: Mutex::new(false),
+            last_online_verified_ms: Mutex::new(None),
+            high_water_clock_ms: Mutex::new(0),
+            vault_key: Mutex::new(None),
             authority,
             verifier,
             clock_ms: Mutex::new(None),
@@ -713,6 +740,10 @@ impl StudioStore {
             active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(Some(dir)),
             active_session: Mutex::new(None),
+            offline_read_only: Mutex::new(false),
+            last_online_verified_ms: Mutex::new(None),
+            high_water_clock_ms: Mutex::new(0),
+            vault_key: Mutex::new(None),
             authority,
             verifier,
             clock_ms: Mutex::new(None),
@@ -733,9 +764,21 @@ impl StudioStore {
             active_regions: Mutex::new(BTreeMap::new()),
             storage_dir: Mutex::new(Some(dir)),
             active_session: Mutex::new(None),
+            offline_read_only: Mutex::new(false),
+            last_online_verified_ms: Mutex::new(None),
+            high_water_clock_ms: Mutex::new(0),
+            vault_key: Mutex::new(None),
             authority,
             verifier,
             clock_ms: Mutex::new(None),
+        }
+    }
+
+    /// Configures an optional local Argon2id + ChaCha20-Poly1305 vault key for encrypting
+    /// saved `.safi.enc` local project bundles at rest on the customer's computer.
+    pub fn set_local_vault_key(&self, key: Option<VaultKey>) {
+        if let Ok(mut guard) = self.vault_key.lock() {
+            *guard = key;
         }
     }
 
@@ -805,8 +848,19 @@ impl StudioStore {
             verified: verified.clone(),
         });
         drop(slot);
+        if let Ok(mut ro) = self.offline_read_only.lock() {
+            *ro = false;
+        }
+        if let Ok(mut ts) = self.last_online_verified_ms.lock() {
+            *ts = Some(effective_now);
+        }
+        if let Ok(mut hw) = self.high_water_clock_ms.lock() {
+            *hw = effective_now;
+        }
         serde_json::to_string(&serde_json::json!({
             "authenticated": true,
+            "mode": "online_authorized",
+            "canExecuteProtectedOps": true,
             "sessionId": verified.session_id,
             "workspaceId": verified.workspace_id,
             "expiresAtMs": verified.expires_at_ms,
@@ -826,21 +880,137 @@ impl StudioStore {
             .map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
         *slot = None;
         drop(slot);
+        if let Ok(mut ro) = self.offline_read_only.lock() {
+            *ro = false;
+        }
+        if let Ok(mut hw) = self.high_water_clock_ms.lock() {
+            *hw = 0;
+        }
         serde_json::to_string(&serde_json::json!({
-            "authenticated": false
+            "authenticated": false,
+            "mode": "unauthenticated",
+            "canExecuteProtectedOps": false,
         }))
         .map_err(|_| "SF-SYS-001".to_owned())
     }
 
+    /// Explicitly enters Offline Read-Only Mode so the user can open and inspect previously
+    /// saved local projects, datasets, dashboards, and reports without internet access while
+    /// strictly blocking all protected operations (`SF-AUTH-021`).
+    ///
+    /// # Errors
+    /// Returns `SF-SYS-010` or `SF-SYS-001` on internal failure.
+    pub fn enter_offline_read_only(&self) -> Result<String, String> {
+        enforce_ipc_command("studio_enter_offline_readonly", crate::ipc_payload_len!())?;
+        if let Ok(mut ro) = self.offline_read_only.lock() {
+            *ro = true;
+        }
+        self.authorization_status()
+    }
+
+    /// Returns the current native authorization state (`online_authorized`, `offline_read_only`,
+    /// or `unauthenticated`) for the Desktop UI banner and capability gating.
+    ///
+    /// # Errors
+    /// Returns `SF-SYS-010` or `SF-SYS-001` on internal failure.
+    pub fn authorization_status(&self) -> Result<String, String> {
+        enforce_ipc_command("studio_authorization_status", crate::ipc_payload_len!())?;
+        let read_only = self.offline_read_only.lock().map(|g| *g).unwrap_or(false);
+        let session = self
+            .active_session
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|s| s.verified.clone()));
+        let last_verified = self.last_online_verified_ms.lock().ok().and_then(|g| *g);
+        let (mode, can_execute) = if read_only {
+            ("offline_read_only", false)
+        } else if session.is_some() {
+            ("online_authorized", true)
+        } else {
+            ("unauthenticated", false)
+        };
+        serde_json::to_string(&serde_json::json!({
+            "mode": mode,
+            "readOnlyOffline": read_only,
+            "canExecuteProtectedOps": can_execute,
+            "sessionId": session.as_ref().map(|s| &s.session_id),
+            "workspaceId": session.as_ref().map(|s| &s.workspace_id),
+            "lastOnlineVerifiedMs": last_verified,
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Revalidates the preserved session against the online server when internet returns,
+    /// checking session validity, active sole device, and account status before leaving
+    /// Offline Read-Only Mode.
+    ///
+    /// # Errors
+    /// Returns `SF-AUTH-001`, `SF-AUTH-002`, `SF-AUTH-003`, `SF-AUTH-005`, `SF-AUTH-009`,
+    /// or `SF-AUTH-019` on validation failure.
+    pub fn revalidate_session(&self, now_ms: u64) -> Result<String, String> {
+        enforce_ipc_command("studio_revalidate_session", crate::ipc_payload_len!())?;
+        let active = {
+            let guard = self
+                .active_session
+                .lock()
+                .map_err(|_| AUTH_REQUIRED_CODE.to_owned())?;
+            guard.clone().ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?
+        };
+        let effective_now = self.effective_now_ms(Some(now_ms));
+        match self
+            .verifier
+            .verify_session(&active.token, &active.installation_id, effective_now)
+        {
+            Ok(verified) => {
+                if let Ok(mut guard) = self.active_session.lock() {
+                    *guard = Some(ActiveStudioSession {
+                        token: active.token,
+                        installation_id: active.installation_id,
+                        verified,
+                    });
+                }
+                if let Ok(mut ro) = self.offline_read_only.lock() {
+                    *ro = false;
+                }
+                if let Ok(mut ts) = self.last_online_verified_ms.lock() {
+                    *ts = Some(effective_now);
+                }
+                if let Ok(mut hw) = self.high_water_clock_ms.lock() {
+                    *hw = effective_now;
+                }
+                self.authorization_status()
+            }
+            Err(code) if code == AUTH_BACKEND_UNAVAILABLE_CODE => {
+                // Still offline: stay cleanly in Offline Read-Only Mode without losing credentials.
+                if let Ok(mut ro) = self.offline_read_only.lock() {
+                    *ro = true;
+                }
+                Err(code)
+            }
+            Err(code) => {
+                // Device replaced (SF-AUTH-019), revoked (SF-AUTH-003), suspended (SF-AUTH-009),
+                // or expired (SF-AUTH-002): wipe active session immediately.
+                if let Ok(mut guard) = self.active_session.lock() {
+                    *guard = None;
+                }
+                if let Ok(mut ro) = self.offline_read_only.lock() {
+                    *ro = false;
+                }
+                Err(code)
+            }
+        }
+    }
+
     /// Enforces the native command allowlist, `MAX_IPC_BYTES` canonical serialized-JSON argument
-    /// ceiling (1 MiB checked prior to state mutation; does not cap pre-parse raw wire bytes inside
-    /// WebView2/Tauri), and fail-closed session + single-device verification before any sensitive
-    /// command executes.
+    /// ceiling, Offline Read-Only vs Protected Online separation, monotonic local clock rollback
+    /// protection (`SF-AUTH-022`), and fail-closed session + single-device verification.
     ///
     /// # Errors
     /// Returns `SF-SYS-010`, `SF-SYS-007`, [`AUTH_REQUIRED_CODE`] (`SF-AUTH-001`),
     /// [`AUTH_EXPIRED_CODE`] (`SF-AUTH-002`), [`AUTH_REVOKED_CODE`] (`SF-AUTH-003`),
-    /// [`AUTH_BACKEND_UNAVAILABLE_CODE`] (`SF-AUTH-005`), or [`AUTH_CONFIG_MISSING_CODE`] (`SF-SYS-031`).
+    /// [`AUTH_BACKEND_UNAVAILABLE_CODE`] (`SF-AUTH-005`), [`AUTH_DEVICE_REPLACED_CODE`] (`SF-AUTH-019`),
+    /// [`AUTH_OFFLINE_READ_ONLY_CODE`] (`SF-AUTH-021`), [`AUTH_LEASE_CLOCK_ROLLBACK_CODE`] (`SF-AUTH-022`),
+    /// or [`AUTH_CONFIG_MISSING_CODE`] (`SF-SYS-031`).
     pub fn gate_command(
         &self,
         command: &str,
@@ -848,6 +1018,22 @@ impl StudioStore {
         caller_now_ms: Option<u64>,
     ) -> Result<VerifiedStudioSession, String> {
         enforce_ipc_command(command, payload_len)?;
+        let access_class = classify_command_access(command);
+        let is_offline_ro = self.offline_read_only.lock().map(|g| *g).unwrap_or(false);
+
+        if is_offline_ro {
+            if access_class == CommandAccessClass::ReadOnlyOffline {
+                return Ok(VerifiedStudioSession {
+                    session_id: "offline-readonly".to_owned(),
+                    workspace_id: "local-offline".to_owned(),
+                    token_hash: String::new(),
+                    installation_hash: String::new(),
+                    expires_at_ms: 0,
+                });
+            }
+            return Err(AUTH_OFFLINE_READ_ONLY_CODE.to_owned());
+        }
+
         let active = {
             let guard = self
                 .active_session
@@ -856,11 +1042,38 @@ impl StudioStore {
             guard.clone().ok_or_else(|| AUTH_REQUIRED_CODE.to_owned())?
         };
         let now_ms = self.effective_now_ms(caller_now_ms);
+
+        // Monotonic local clock rollback guard: prevent extending an online session by setting
+        // the OS clock backwards.
+        {
+            let mut hw = self
+                .high_water_clock_ms
+                .lock()
+                .map_err(|_| AUTH_LEASE_CLOCK_ROLLBACK_CODE.to_owned())?;
+            if *hw > 0 && now_ms.saturating_add(MAX_CLOCK_ROLLBACK_TOLERANCE_MS) < *hw {
+                return Err(AUTH_LEASE_CLOCK_ROLLBACK_CODE.to_owned());
+            }
+            if now_ms > *hw {
+                *hw = now_ms;
+            }
+        }
+
         match self
             .verifier
             .verify_session(&active.token, &active.installation_id, now_ms)
         {
-            Ok(verified) => Ok(verified),
+            Ok(verified) => {
+                if let Ok(mut ts) = self.last_online_verified_ms.lock() {
+                    *ts = Some(now_ms);
+                }
+                Ok(verified)
+            }
+            Err(code) if code == AUTH_BACKEND_UNAVAILABLE_CODE => {
+                // Network dropped while authenticated: preserve credentials for automatic
+                // reconnection revalidation, and fail closed with SF-AUTH-005 until the app
+                // explicitly transitions into Offline Read-Only Mode (`enter_offline_read_only`).
+                Err(code)
+            }
             Err(code) => {
                 if let Ok(mut guard) = self.active_session.lock() {
                     *guard = None;
@@ -930,16 +1143,39 @@ impl StudioStore {
         let dir = self.resolve_storage_dir()?;
         let mut entries = Vec::new();
         let read_dir = fs::read_dir(&dir).map_err(|_| EXPORT_FAILED_CODE.to_owned())?;
+        let maybe_key = self.vault_key.lock().ok().and_then(|g| g.clone());
         for item in read_dir {
             let Ok(entry) = item else { continue };
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            let file_name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            // Ignore any temporary crash-recovery files (`.tmp`).
+            if file_name.ends_with(".tmp") {
                 continue;
             }
-            let Ok(raw) = fs::read_to_string(&path) else {
+            let raw_json = if file_name.ends_with(".safi.enc") {
+                let Some(ref key) = maybe_key else { continue };
+                let Ok(cipher) = fs::read(&path) else {
+                    continue;
+                };
+                let Ok(plain) = decrypt_vault_payload(key, &cipher) else {
+                    continue;
+                };
+                let Ok(text) = String::from_utf8(plain) else {
+                    continue;
+                };
+                text
+            } else if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                let Ok(raw) = fs::read_to_string(&path) else {
+                    continue;
+                };
+                raw
+            } else {
                 continue;
             };
-            if let Ok(bundle) = serde_json::from_str::<StudioProjectBundle>(&raw) {
+            if let Ok(bundle) = serde_json::from_str::<StudioProjectBundle>(&raw_json) {
                 let valid = bundle_checksum(
                     bundle.schema_version,
                     &bundle.project_id,
@@ -954,6 +1190,7 @@ impl StudioStore {
                     "displayName": bundle.display_name,
                     "updatedAtMs": bundle.updated_at_ms,
                     "validChecksum": valid,
+                    "encrypted": file_name.ends_with(".safi.enc"),
                 }));
             }
         }
@@ -1226,12 +1463,23 @@ impl StudioStore {
             checksum_blake3,
         };
         let encoded = serde_json::to_string(&bundle).map_err(|_| "SF-SYS-001".to_owned())?;
-        let target = dir.join(format!("{safe_id}.safi.json"));
-        write_atomic(&target, &encoded)?;
+        let maybe_key = self.vault_key.lock().ok().and_then(|g| g.clone());
+        let encrypted = if let Some(key) = maybe_key {
+            let cipher = encrypt_vault_payload(&key, encoded.as_bytes())
+                .map_err(|_| "SF-SYS-023".to_owned())?;
+            let target = dir.join(format!("{safe_id}.safi.enc"));
+            write_atomic_bytes(&target, &cipher)?;
+            true
+        } else {
+            let target = dir.join(format!("{safe_id}.safi.json"));
+            write_atomic(&target, &encoded)?;
+            false
+        };
         serde_json::to_string(&serde_json::json!({
             "id": bundle.project_id,
             "displayName": bundle.display_name,
             "updatedAtMs": bundle.updated_at_ms,
+            "encrypted": encrypted,
         }))
         .map_err(|_| "SF-SYS-001".to_owned())
     }
@@ -1245,11 +1493,13 @@ impl StudioStore {
         self.list_project_bundles_unlocked()
     }
 
-    /// Loads a saved `.safi.json` project bundle, checks `BLAKE3` integrity (`SF-CAL-008`),
-    /// restores both `DataGraph` and creative artifacts into `project`, and returns its state.
+    /// Loads a saved `.safi.json` or encrypted `.safi.enc` project bundle, checks `BLAKE3`
+    /// integrity (`SF-CAL-008`), restores both `DataGraph` and creative artifacts into `project`,
+    /// and returns its state.
     ///
     /// # Errors
-    /// [`AUTH_REQUIRED_CODE`], `SF-SYS-001` when missing/unreadable, or `SF-CAL-008` on checksum mismatch.
+    /// [`AUTH_REQUIRED_CODE`], `SF-SYS-001` when missing/unreadable, `SF-SYS-024` on vault
+    /// decryption failure, or `SF-CAL-008` on checksum mismatch.
     pub fn load_project_bundle(
         &self,
         project: &str,
@@ -1260,8 +1510,22 @@ impl StudioStore {
         self.gate_command("studio_load_project", payload_len, Some(now_ms))?;
         let safe_id = validate_project_id(saved_id)?;
         let dir = self.resolve_storage_dir()?;
-        let path = dir.join(format!("{safe_id}.safi.json"));
-        let raw = fs::read_to_string(&path).map_err(|_| "SF-SYS-001".to_owned())?;
+        let enc_path = dir.join(format!("{safe_id}.safi.enc"));
+        let json_path = dir.join(format!("{safe_id}.safi.json"));
+        let raw = if enc_path.exists() {
+            let key = self
+                .vault_key
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .ok_or_else(|| "SF-SYS-024".to_owned())?;
+            let cipher = fs::read(&enc_path).map_err(|_| "SF-SYS-001".to_owned())?;
+            let plain =
+                decrypt_vault_payload(&key, &cipher).map_err(|_| "SF-SYS-024".to_owned())?;
+            String::from_utf8(plain).map_err(|_| "SF-SYS-024".to_owned())?
+        } else {
+            fs::read_to_string(&json_path).map_err(|_| "SF-SYS-001".to_owned())?
+        };
         let bundle: StudioProjectBundle =
             serde_json::from_str(&raw).map_err(|_| "SF-SYS-001".to_owned())?;
         let expected = bundle_checksum(
@@ -3709,5 +3973,191 @@ mod tests {
         test_result(store.export_deliverable("p21", &out_bin, true, &payload_b64));
         let written = test_result(fs::read(&out_bin));
         assert!(written.starts_with(b"%PDF-1.7"));
+    }
+
+    #[derive(Debug)]
+    struct ToggleOfflineVerifier {
+        authority: Arc<StudioSessionAuthority>,
+        offline: Mutex<bool>,
+    }
+
+    impl StudioSessionVerifier for ToggleOfflineVerifier {
+        fn verify_session(
+            &self,
+            token: &str,
+            installation_id: &str,
+            now_ms: u64,
+        ) -> Result<VerifiedStudioSession, String> {
+            let is_offline = self.offline.lock().map(|g| *g).unwrap_or(false);
+            if is_offline {
+                return Err(AUTH_BACKEND_UNAVAILABLE_CODE.to_owned());
+            }
+            self.authority
+                .verify_session(token, installation_id, now_ms)
+        }
+    }
+
+    #[test]
+    fn offline_readonly_preserves_saved_projects_blocks_protected_ops_and_revalidates_on_reconnect()
+    {
+        let dir = test_result(tempfile::tempdir());
+        let storage = dir.path().join("projects");
+        let csv_path = dir.path().join("sales.csv");
+        let capsule_path = dir.path().join("out.safi.html");
+        let export_path = dir.path().join("out.csv");
+        test_result(fs::write(&csv_path, CSV));
+
+        let authority = Arc::new(StudioSessionAuthority::new());
+        let verifier = Arc::new(ToggleOfflineVerifier {
+            authority: authority.clone(),
+            offline: Mutex::new(false),
+        });
+        let store = StudioStore::with_storage_dir_and_verifier(
+            storage.clone(),
+            authority.clone(),
+            verifier.clone(),
+        );
+        store.set_clock_ms(Some(10_000));
+
+        // 1. Online: sign in, import dataset, save project locally with encrypted vault key.
+        let salt = [0x99u8; 16];
+        let vault_key = test_result(VaultKey::derive_from_passphrase(
+            "local-project-vault-key",
+            &salt,
+        ));
+        store.set_local_vault_key(Some(vault_key));
+        test_result(authority.register_session(
+            "sess_offline_1",
+            "ws_offline",
+            VALID_TOKEN,
+            INSTALLATION_ID,
+            200_000,
+        ));
+        test_result(store.set_auth_session(VALID_TOKEN, INSTALLATION_ID, 10_000));
+        test_result(store.open_file("p_saved", &csv_path, 10_500));
+        let saved_meta = json(&test_result(
+            store.save_project_bundle("p_saved", "q1_sales", "Q1 Sales", 11_000),
+        ));
+        assert_eq!(saved_meta["encrypted"], serde_json::json!(true));
+        // Prove zero plaintext exists on disk in encrypted `.safi.enc`.
+        let enc_bytes = test_result(fs::read(storage.join("q1_sales.safi.enc")));
+        assert!(!enc_bytes.windows(5).any(|w| w == b"Cairo"));
+
+        // Leave a simulated crash `.tmp` file in storage dir; it must never break loading.
+        test_result(fs::write(
+            storage.join("q1_sales.safi.enc.tmp"),
+            b"corrupt-partial-write",
+        ));
+
+        // 2. Go offline: enter Offline Read-Only Mode.
+        if let Ok(mut flag) = verifier.offline.lock() {
+            *flag = true;
+        }
+        let status_off = json(&test_result(store.enter_offline_read_only()));
+        assert_eq!(status_off["mode"], serde_json::json!("offline_read_only"));
+        assert_eq!(
+            status_off["canExecuteProtectedOps"],
+            serde_json::json!(false)
+        );
+
+        // 3. Offline Read-Only: customer CAN list, load, view state, and paginate saved local project.
+        let listed = json(&test_result(store.list_project_bundles()));
+        assert_eq!(listed.as_array().map(Vec::len), Some(1));
+        let loaded = json(&test_result(
+            store.load_project_bundle("p_ro", "q1_sales", 12_000),
+        ));
+        assert_eq!(loaded["rowCount"], serde_json::json!(3));
+        let st = json(&test_result(store.state("p_ro")));
+        assert_eq!(st["rowCount"], serde_json::json!(3));
+        let page = json(&test_result(store.rows_page("p_ro", "{}")));
+        assert_eq!(page["rows"].as_array().map(Vec::len), Some(3));
+
+        // 4. Offline Read-Only: EVERY protected operation MUST fail closed with SF-AUTH-021!
+        for (name, res) in [
+            ("open_file", store.open_file("p_ro", &csv_path, 12_500)),
+            (
+                "set_cell",
+                store.set_cell("p_ro", 0, "amount", "999", 12_500),
+            ),
+            (
+                "define_metric",
+                store.define_metric("p_ro", "m_off", "Off", None, "SUM(amount)", 12_500),
+            ),
+            ("grouped", store.grouped("p_ro", "SUM", "amount", "region")),
+            (
+                "chart_data",
+                store.chart_data("p_ro", "bar", "SUM", "amount", "region"),
+            ),
+            ("narrative", store.narrative("p_ro", "Summary")),
+            ("set_artifacts", store.set_artifacts("p_ro", "{}")),
+            (
+                "save_project",
+                store.save_project_bundle("p_ro", "q1_sales", "Mutated", 12_500),
+            ),
+            ("delete_project", store.delete_project_bundle("q1_sales")),
+            (
+                "export_capsule",
+                store.export_capsule("p_ro", &capsule_path, CAPSULE),
+            ),
+            (
+                "export_deliverable",
+                store.export_deliverable("p_ro", &export_path, false, "a,b\n1,2\n"),
+            ),
+        ] {
+            assert_eq!(
+                res,
+                Err(AUTH_OFFLINE_READ_ONLY_CODE.to_owned()),
+                "offline protected command {name} must fail closed with SF-AUTH-021"
+            );
+        }
+
+        // Local saved project remains completely intact after blocked offline attempts.
+        assert!(!export_path.exists());
+        assert!(!capsule_path.exists());
+
+        // 5. Reconnect with still-valid session -> revalidate restores online mode & protected ops.
+        if let Ok(mut flag) = verifier.offline.lock() {
+            *flag = false;
+        }
+        let status_back = json(&test_result(store.revalidate_session(15_000)));
+        assert_eq!(status_back["mode"], serde_json::json!("online_authorized"));
+        assert_eq!(
+            status_back["canExecuteProtectedOps"],
+            serde_json::json!(true)
+        );
+        test_result(store.set_cell("p_ro", 0, "amount", "125", 16_000));
+
+        // 6. Local clock rollback attack (>5s backwards during active session) -> SF-AUTH-022!
+        store.set_clock_ms(Some(50_000));
+        test_result(store.state("p_ro"));
+        store.set_clock_ms(Some(40_000)); // Rolled back 10s!
+        assert_eq!(
+            store.set_cell("p_ro", 0, "amount", "200", 40_000),
+            Err(AUTH_LEASE_CLOCK_ROLLBACK_CODE.to_owned())
+        );
+
+        // 7. Go offline again, have Device B take over account on server, then reconnect ->
+        //    Device A MUST be rejected on reconnect and wiped cleanly!
+        store.set_clock_ms(Some(55_000));
+        if let Ok(mut flag) = verifier.offline.lock() {
+            *flag = true;
+        }
+        test_result(store.enter_offline_read_only());
+        test_result(authority.register_session(
+            "sess_device_b",
+            "ws_offline",
+            SECOND_DEVICE_TOKEN,
+            OTHER_INSTALLATION_ID,
+            200_000,
+        ));
+        if let Ok(mut flag) = verifier.offline.lock() {
+            *flag = false;
+        }
+        assert_eq!(
+            store.revalidate_session(60_000),
+            Err(AUTH_REVOKED_CODE.to_owned())
+        );
+        let status_revoked = json(&test_result(store.authorization_status()));
+        assert_eq!(status_revoked["mode"], serde_json::json!("unauthenticated"));
     }
 }

@@ -157,6 +157,16 @@ impl AuditLogCenter {
         }
         true
     }
+
+    /// Export all hash-chained audit entries for durable persistence.
+    pub async fn export_entries(&self) -> Vec<AuditLogEntry> {
+        self.entries.read().await.clone()
+    }
+
+    /// Restore hash-chained audit entries from durable persistence.
+    pub async fn import_entries(&self, entries: Vec<AuditLogEntry>) {
+        *self.entries.write().await = entries;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

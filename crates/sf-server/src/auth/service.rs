@@ -232,6 +232,11 @@ impl AuthService {
         Ok(())
     }
 
+    /// Revoke all active sessions and devices for a user immediately.
+    pub async fn revoke_all_user_sessions(&self, user_id: Uuid) -> Result<(), AuthError> {
+        self.sessions.revoke_all_for_user(user_id, unix_now()).await
+    }
+
     async fn load_api_key(&self, prefix: &str) -> Result<Option<ApiKeyRecord>, AuthError> {
         let cache_key = api_key_cache_key(prefix);
         if let Some(raw) = self.cache.get(&cache_key).await? {

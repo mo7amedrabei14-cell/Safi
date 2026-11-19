@@ -130,6 +130,8 @@ pub trait SessionRepository: Send + Sync {
     async fn touch(&self, id: Uuid, at: i64) -> Result<(), AuthError>;
     /// Mark a session revoked.
     async fn revoke(&self, id: Uuid, at: i64) -> Result<(), AuthError>;
+    /// Revoke all active sessions and devices for a user (e.g., Owner device reset or suspension).
+    async fn revoke_all_for_user(&self, user_id: Uuid, at: i64) -> Result<(), AuthError>;
 }
 
 /// Process-local API-key repository for tests.
@@ -176,12 +178,19 @@ impl ApiKeyRepository for InMemoryApiKeyRepository {
 }
 
 /// Process-local device row used by the deterministic test repository.
-#[derive(Clone)]
-struct InMemoryDeviceRecord {
-    id: Uuid,
-    user_id: Uuid,
-    installation_key_hash: [u8; 32],
-    revoked: bool,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InMemoryDeviceRecord {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub installation_key_hash: [u8; 32],
+    pub revoked: bool,
+}
+
+/// Serializable snapshot of in-memory sessions & devices for local restart durability.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InMemorySessionSnapshot {
+    pub records: Vec<SessionRecord>,
+    pub devices: Vec<InMemoryDeviceRecord>,
 }
 
 #[derive(Default)]
@@ -201,6 +210,22 @@ impl InMemorySessionRepository {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Export all sessions & devices for durable restart testing.
+    pub async fn export_snapshot(&self) -> InMemorySessionSnapshot {
+        let guard = self.state.read().await;
+        InMemorySessionSnapshot {
+            records: guard.records.clone(),
+            devices: guard.devices.clone(),
+        }
+    }
+
+    /// Restore sessions & devices from a persisted snapshot.
+    pub async fn import_snapshot(&self, snapshot: InMemorySessionSnapshot) {
+        let mut guard = self.state.write().await;
+        guard.records = snapshot.records;
+        guard.devices = snapshot.devices;
     }
 }
 
@@ -306,6 +331,19 @@ impl SessionRepository for InMemorySessionRepository {
         if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
             record.revoked = true;
             record.last_seen_at = at;
+        }
+        Ok(())
+    }
+
+    async fn revoke_all_for_user(&self, user_id: Uuid, at: i64) -> Result<(), AuthError> {
+        let mut state = self.state.write().await;
+        for record in state.records.iter_mut().filter(|r| r.user_id == user_id) {
+            record.revoked = true;
+            record.device_revoked = true;
+            record.last_seen_at = at;
+        }
+        for device in state.devices.iter_mut().filter(|d| d.user_id == user_id) {
+            device.revoked = true;
         }
         Ok(())
     }
@@ -707,6 +745,32 @@ impl SessionRepository for SqlxSessionRepository {
             "UPDATE sessions SET revoked_at = to_timestamp($2) WHERE id = $1 AND revoked_at IS NULL",
         )
         .bind(id)
+        .bind(at)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| backend_error())?;
+        transaction.commit().await.map_err(|_| backend_error())?;
+        Ok(())
+    }
+
+    async fn revoke_all_for_user(&self, user_id: Uuid, at: i64) -> Result<(), AuthError> {
+        let mut transaction = self.pool.begin().await.map_err(|_| backend_error())?;
+        sqlx::query("SELECT set_config('app.auth_lookup', 'true', true)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(|_| backend_error())?;
+        sqlx::query(
+            "UPDATE devices SET revoked_at = to_timestamp($2) WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(at)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| backend_error())?;
+        sqlx::query(
+            "UPDATE sessions SET revoked_at = to_timestamp($2), revocation_reason = 'owner_reset' WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(user_id)
         .bind(at)
         .execute(&mut *transaction)
         .await

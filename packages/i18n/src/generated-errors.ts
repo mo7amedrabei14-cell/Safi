@@ -22,6 +22,10 @@ export type SafiErrorCode =
   | "SF-AUTH-016"
   | "SF-AUTH-017"
   | "SF-AUTH-018"
+  | "SF-AUTH-019"
+  | "SF-AUTH-020"
+  | "SF-AUTH-021"
+  | "SF-AUTH-022"
   | "SF-CAL-001"
   | "SF-CAL-002"
   | "SF-CAL-003"
@@ -60,6 +64,8 @@ export type SafiErrorCode =
   | "SF-PAY-002"
   | "SF-PAY-003"
   | "SF-PAY-004"
+  | "SF-PAY-005"
+  | "SF-PAY-006"
   | "SF-PRF-001"
   | "SF-PRF-002"
   | "SF-RCP-001"
@@ -148,6 +154,14 @@ export type SafiErrorTranslationKey =
   | "error.SF-AUTH-017.action"
   | "error.SF-AUTH-018.title"
   | "error.SF-AUTH-018.action"
+  | "error.SF-AUTH-019.title"
+  | "error.SF-AUTH-019.action"
+  | "error.SF-AUTH-020.title"
+  | "error.SF-AUTH-020.action"
+  | "error.SF-AUTH-021.title"
+  | "error.SF-AUTH-021.action"
+  | "error.SF-AUTH-022.title"
+  | "error.SF-AUTH-022.action"
   | "error.SF-CAL-001.title"
   | "error.SF-CAL-001.action"
   | "error.SF-CAL-002.title"
@@ -224,6 +238,10 @@ export type SafiErrorTranslationKey =
   | "error.SF-PAY-003.action"
   | "error.SF-PAY-004.title"
   | "error.SF-PAY-004.action"
+  | "error.SF-PAY-005.title"
+  | "error.SF-PAY-005.action"
+  | "error.SF-PAY-006.title"
+  | "error.SF-PAY-006.action"
   | "error.SF-PRF-001.title"
   | "error.SF-PRF-001.action"
   | "error.SF-PRF-002.title"
@@ -348,6 +366,10 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-AUTH-016",
   "SF-AUTH-017",
   "SF-AUTH-018",
+  "SF-AUTH-019",
+  "SF-AUTH-020",
+  "SF-AUTH-021",
+  "SF-AUTH-022",
   "SF-CAL-001",
   "SF-CAL-002",
   "SF-CAL-003",
@@ -386,6 +408,8 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-PAY-002",
   "SF-PAY-003",
   "SF-PAY-004",
+  "SF-PAY-005",
+  "SF-PAY-006",
   "SF-PRF-001",
   "SF-PRF-002",
   "SF-RCP-001",
@@ -622,6 +646,49 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     titleEn: "Owner TOTP encryption key is not configured",
     actionEn: "Configure SAFI_TOTP_ENCRYPTION_KEY in the server environment.",
     ownerNote: "Missing or malformed 32-byte key for encrypting owner TOTP secrets at rest."
+  },
+  "SF-AUTH-019": {
+    code: "SF-AUTH-019",
+    severity: "error",
+    titleAr: "تم تفعيل حسابك على جهاز آخر",
+    actionAr:
+      "تم تسجيل خروج هذا الجهاز تلقائيًا لحماية حسابك. سجّل الدخول مجددًا إذا أردت نقل التنشيط لهذا الجهاز.",
+    titleEn: "Your account was activated on another device",
+    actionEn:
+      "This device was automatically signed out because only one active device is allowed per account.",
+    ownerNote:
+      "Single-active-device policy revoked the previous device/session when a new device logged in."
+  },
+  "SF-AUTH-020": {
+    code: "SF-AUTH-020",
+    severity: "error",
+    titleAr: "فشل التحقق التشفيري من هوية الجهاز",
+    actionAr: "أعد تسجيل الدخول لتسجيل مفتاح جهاز موثق. لا يمكن نقل ملفات الجلسة بين الأجهزة.",
+    titleEn: "Cryptographic device identity verification failed",
+    actionEn:
+      "Sign in again to register a verified device key. Session credentials cannot be copied across devices.",
+    ownerNote: "Ed25519 device proof signature, public key binding, or timestamp freshness failed."
+  },
+  "SF-AUTH-021": {
+    code: "SF-AUTH-021",
+    severity: "warn",
+    titleAr: "الوضع غير المتصل (للقراءة فقط)",
+    actionAr:
+      "يمكنك استعراض المشاريع المحفوظة محليًا للقراءة فقط. يلزم الاتصال بالإنترنت للاستيراد أو التنظيف أو التحليل أو التصدير.",
+    titleEn: "Offline read-only mode — internet connection required",
+    actionEn:
+      "You can view saved local projects read-only. Reconnect to the internet to import, clean, analyze, edit dashboards, export, or use AI.",
+    ownerNote:
+      "Protected operation blocked because valid online server authorization is not present."
+  },
+  "SF-AUTH-022": {
+    code: "SF-AUTH-022",
+    severity: "error",
+    titleAr: "انتهت مهلة تفويض الاتصال أو رُصد تلاعب بساعة النظام",
+    actionAr: "تحقق من اتصال الإنترنت وتاريخ الجهاز ثم أعد التحقق من الجلسة.",
+    titleEn: "Online authorization expired or clock rollback detected",
+    actionEn: "Check your internet connection and system clock, then revalidate your session.",
+    ownerNote: "Short-lived online authorization lease expired or local clock moved backwards."
   },
   "SF-CAL-001": {
     code: "SF-CAL-001",
@@ -970,6 +1037,24 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     titleEn: "Billing operation could not be completed",
     actionEn: "Review subscription status or refund policy window and retry.",
     ownerNote: "Invalid subscription state transition or refund window policy violation."
+  },
+  "SF-PAY-005": {
+    code: "SF-PAY-005",
+    severity: "error",
+    titleAr: "رمز الخصم غير صالح أو منتهي الصلاحية أو غير مؤهل",
+    actionAr: "تحقق من شروط الكوبون والخطط المؤهلة والحد الأقصى للاستخدام.",
+    titleEn: "Coupon is invalid, expired, ineligible, or redemption limit reached",
+    actionEn: "Check the promotion rules, eligible plans, and redemption limits.",
+    ownerNote: "Server-side coupon validation rejected redemption."
+  },
+  "SF-PAY-006": {
+    code: "SF-PAY-006",
+    severity: "error",
+    titleAr: "تم تسجيل نزاع دفع (Chargeback) وإيقاف الاشتراك",
+    actionAr: "تواصل مع الدعم لحل نزاع الفوترة وإعادة تفعيل الاشتراك.",
+    titleEn: "Payment chargeback recorded and subscription revoked",
+    actionEn: "Contact support to resolve the billing dispute before reactivating.",
+    ownerNote: "Verified payment provider chargeback webhook revoked paid entitlements immediately."
   },
   "SF-PRF-001": {
     code: "SF-PRF-001",
@@ -1442,6 +1527,17 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
     "تحقق من حالة التهيئة في قاعدة البيانات؛ لا يُسمح بالتهيئة إلا مرة واحدة.",
   "error.SF-AUTH-018.title": "مفتاح تشفير التحقق الثنائي غير مهيأ على الخادم",
   "error.SF-AUTH-018.action": "هيئ المتغير SAFI_TOTP_ENCRYPTION_KEY في بيئة الخادم.",
+  "error.SF-AUTH-019.title": "تم تفعيل حسابك على جهاز آخر",
+  "error.SF-AUTH-019.action":
+    "تم تسجيل خروج هذا الجهاز تلقائيًا لحماية حسابك. سجّل الدخول مجددًا إذا أردت نقل التنشيط لهذا الجهاز.",
+  "error.SF-AUTH-020.title": "فشل التحقق التشفيري من هوية الجهاز",
+  "error.SF-AUTH-020.action":
+    "أعد تسجيل الدخول لتسجيل مفتاح جهاز موثق. لا يمكن نقل ملفات الجلسة بين الأجهزة.",
+  "error.SF-AUTH-021.title": "الوضع غير المتصل (للقراءة فقط)",
+  "error.SF-AUTH-021.action":
+    "يمكنك استعراض المشاريع المحفوظة محليًا للقراءة فقط. يلزم الاتصال بالإنترنت للاستيراد أو التنظيف أو التحليل أو التصدير.",
+  "error.SF-AUTH-022.title": "انتهت مهلة تفويض الاتصال أو رُصد تلاعب بساعة النظام",
+  "error.SF-AUTH-022.action": "تحقق من اتصال الإنترنت وتاريخ الجهاز ثم أعد التحقق من الجلسة.",
   "error.SF-CAL-001.title": "العمود المطلوب غير موجود في البيانات",
   "error.SF-CAL-001.action": "اختر عمودًا موجودًا أو أعد تسمية المرجع داخل المعادلة.",
   "error.SF-CAL-002.title": "صيغة المعادلة غير صحيحة",
@@ -1523,6 +1619,10 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-PAY-003.action": "أعد إرسال الحدث من لوحة مزود الدفع وتحقق من مزامنة ساعة الخادم.",
   "error.SF-PAY-004.title": "تعذّر تنفيذ عملية الفوترة المطلوبة",
   "error.SF-PAY-004.action": "راجع حالة الاشتراك أو نافذة الاسترداد ثم أعد المحاولة.",
+  "error.SF-PAY-005.title": "رمز الخصم غير صالح أو منتهي الصلاحية أو غير مؤهل",
+  "error.SF-PAY-005.action": "تحقق من شروط الكوبون والخطط المؤهلة والحد الأقصى للاستخدام.",
+  "error.SF-PAY-006.title": "تم تسجيل نزاع دفع (Chargeback) وإيقاف الاشتراك",
+  "error.SF-PAY-006.action": "تواصل مع الدعم لحل نزاع الفوترة وإعادة تفعيل الاشتراك.",
   "error.SF-PRF-001.title": "لسنا متأكدين من نوع هذا العمود",
   "error.SF-PRF-001.action": "راجع الاقتراح أو اشرح لنا معنى العمود.",
   "error.SF-PRF-002.title": "قيمة درجة الثقة غير صالحة",
@@ -1666,6 +1766,18 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-AUTH-017.action": "Check the platform_owner table; bootstrap is one-time and sealed.",
   "error.SF-AUTH-018.title": "Owner TOTP encryption key is not configured",
   "error.SF-AUTH-018.action": "Configure SAFI_TOTP_ENCRYPTION_KEY in the server environment.",
+  "error.SF-AUTH-019.title": "Your account was activated on another device",
+  "error.SF-AUTH-019.action":
+    "This device was automatically signed out because only one active device is allowed per account.",
+  "error.SF-AUTH-020.title": "Cryptographic device identity verification failed",
+  "error.SF-AUTH-020.action":
+    "Sign in again to register a verified device key. Session credentials cannot be copied across devices.",
+  "error.SF-AUTH-021.title": "Offline read-only mode — internet connection required",
+  "error.SF-AUTH-021.action":
+    "You can view saved local projects read-only. Reconnect to the internet to import, clean, analyze, edit dashboards, export, or use AI.",
+  "error.SF-AUTH-022.title": "Online authorization expired or clock rollback detected",
+  "error.SF-AUTH-022.action":
+    "Check your internet connection and system clock, then revalidate your session.",
   "error.SF-CAL-001.title": "The referenced column does not exist in the data",
   "error.SF-CAL-001.action": "Pick an existing column or fix the reference inside the formula.",
   "error.SF-CAL-002.title": "The formula syntax is invalid",
@@ -1756,6 +1868,10 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
     "Redeliver the event from the payment provider and verify server clock sync.",
   "error.SF-PAY-004.title": "Billing operation could not be completed",
   "error.SF-PAY-004.action": "Review subscription status or refund policy window and retry.",
+  "error.SF-PAY-005.title": "Coupon is invalid, expired, ineligible, or redemption limit reached",
+  "error.SF-PAY-005.action": "Check the promotion rules, eligible plans, and redemption limits.",
+  "error.SF-PAY-006.title": "Payment chargeback recorded and subscription revoked",
+  "error.SF-PAY-006.action": "Contact support to resolve the billing dispute before reactivating.",
   "error.SF-PRF-001.title": "We are not sure about this column's type",
   "error.SF-PRF-001.action": "Review the suggestion or tell us what this column represents.",
   "error.SF-PRF-002.title": "Invalid confidence score value",

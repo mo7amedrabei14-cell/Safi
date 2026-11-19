@@ -31,11 +31,18 @@ import { SafiAuthApiError } from "../lib/auth-api";
 import {
   ownerApi,
   type OwnerAccountView,
+  type OwnerAnnouncement,
   type OwnerAuditLogEntry,
   type OwnerBillingEvent,
+  type OwnerCouponRecord,
+  type OwnerCustomerProfileResponse,
+  type OwnerDeviceRecord,
+  type OwnerDeviceReplacementEvent,
   type OwnerFeatureFlag,
   type OwnerMfaStatus,
+  type OwnerOrganizationRow,
   type OwnerStatsResponse,
+  type OwnerSupportTicket,
   type TotpEnrollmentBundle
 } from "../lib/owner-api";
 
@@ -46,7 +53,15 @@ export interface OwnerDashboardProps {
   readonly isOwner?: boolean;
 }
 
-type OwnerPanelTab = "overview" | "accounts" | "billing" | "system" | "audit";
+type OwnerPanelTab =
+  | "overview"
+  | "accounts"
+  | "billing"
+  | "coupons"
+  | "devices"
+  | "orgs"
+  | "system"
+  | "audit";
 
 export function OwnerDashboard({
   lang = "en",
@@ -68,7 +83,21 @@ export function OwnerDashboard({
   const [featureFlags, setFeatureFlags] = useState<readonly OwnerFeatureFlag[]>([]);
   const [auditEntries, setAuditEntries] = useState<readonly OwnerAuditLogEntry[]>([]);
   const [chainValid, setChainValid] = useState<boolean>(true);
+  const [coupons, setCoupons] = useState<readonly OwnerCouponRecord[]>([]);
+  const [devices, setDevices] = useState<readonly OwnerDeviceRecord[]>([]);
+  const [replacements, setReplacements] = useState<readonly OwnerDeviceReplacementEvent[]>([]);
+  const [organizations, setOrganizations] = useState<readonly OwnerOrganizationRow[]>([]);
+  const [tickets, setTickets] = useState<readonly OwnerSupportTicket[]>([]);
+  const [announcements, setAnnouncements] = useState<readonly OwnerAnnouncement[]>([]);
+  const [productConfig, setProductConfig] = useState<Record<string, unknown> | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<OwnerCustomerProfileResponse | null>(null);
 
+  const [newCouponCode, setNewCouponCode] = useState("");
+  const [newCouponPct, setNewCouponPct] = useState("20");
+  const [newCouponMax, setNewCouponMax] = useState("100");
+  const [deviceResetReason, setDeviceResetReason] = useState("");
+  const [newAnnTitle, setNewAnnTitle] = useState("");
+  const [newAnnBody, setNewAnnBody] = useState("");
   const [newFlagKey, setNewFlagKey] = useState("");
   const [newFlagDesc, setNewFlagDesc] = useState("");
   const [refundInvoiceId, setRefundInvoiceId] = useState("");
@@ -111,6 +140,24 @@ export function OwnerDashboard({
       setFeatureFlags(flagsRes);
       setAuditEntries(auditRes.entries);
       setChainValid(auditRes.is_chain_valid);
+
+      const extended = await Promise.allSettled([
+        ownerApi.listCoupons(token),
+        ownerApi.listDevices(token),
+        ownerApi.listOrganizations(token),
+        ownerApi.listSupportTickets(token),
+        ownerApi.listAnnouncements(token),
+        ownerApi.getProductConfig(token)
+      ]);
+      if (extended[0].status === "fulfilled") setCoupons(extended[0].value);
+      if (extended[1].status === "fulfilled") {
+        setDevices(extended[1].value.devices);
+        setReplacements(extended[1].value.replacements);
+      }
+      if (extended[2].status === "fulfilled") setOrganizations(extended[2].value);
+      if (extended[3].status === "fulfilled") setTickets(extended[3].value);
+      if (extended[4].status === "fulfilled") setAnnouncements(extended[4].value);
+      if (extended[5].status === "fulfilled") setProductConfig(extended[5].value);
     },
     [accountQuery]
   );
@@ -440,9 +487,12 @@ export function OwnerDashboard({
         {(
           [
             ["overview", isAr ? "نظرة عامة" : "Overview"],
-            ["accounts", isAr ? "المستخدمون وVIP" : "Users & Friend VIP"],
-            ["billing", isAr ? "الفوترة والاسترداد" : "Billing & Refunds"],
-            ["system", isAr ? "الصيانة والأعلام" : "Maintenance & Flags"],
+            ["accounts", isAr ? "المستخدمون وVIP" : "Users & Profiles"],
+            ["billing", isAr ? "الفوترة والاسترداد" : "Billing & Revenue"],
+            ["coupons", isAr ? "الكوبونات والعروض" : "Coupons & Promos"],
+            ["devices", isAr ? "الأجهزة والجلسات" : "Devices & Sessions"],
+            ["orgs", isAr ? "المؤسسات والدعم" : "Orgs, Support & Notices"],
+            ["system", isAr ? "الإعدادات والأعلام" : "Config & Flags"],
             ["audit", isAr ? "سجل التدقيق" : "Audit Chain"]
           ] as const
         ).map(([id, label]) => (
@@ -568,6 +618,21 @@ export function OwnerDashboard({
                           : "Active"}
                     </td>
                     <td className="safi-owner-row-actions">
+                      <button
+                        type="button"
+                        className="safi-btn"
+                        disabled={busy}
+                        onClick={() => {
+                          void ownerApi
+                            .getCustomerProfile(sessionToken, row.account.user_id)
+                            .then((prof) => setSelectedProfile(prof))
+                            .catch((err: unknown) =>
+                              setNotice({ kind: "err", text: formatApiError(err) })
+                            );
+                        }}
+                      >
+                        {isAr ? "الملف" : "Profile"}
+                      </button>
                       {row.entitlements.effective_plan !== "friend_vip" ? (
                         <button
                           type="button"
@@ -792,6 +857,253 @@ export function OwnerDashboard({
               </li>
             ))}
           </ul>
+          {productConfig !== null ? (
+            <div>
+              <h3>{isAr ? "إعدادات المنتج والتفويض" : "Product & Authorization Config"}</h3>
+              <pre className="safi-mono">{JSON.stringify(productConfig, null, 2)}</pre>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {panelTab === "coupons" ? (
+        <section className="safi-panel">
+          <h2>{isAr ? "إدارة الكوبونات والعروض" : "Promotions & Coupons Management"}</h2>
+          <div className="safi-owner-inline-form">
+            <input
+              type="text"
+              value={newCouponCode}
+              onChange={(e) => setNewCouponCode(e.currentTarget.value)}
+              placeholder="LAUNCH25"
+              dir="ltr"
+            />
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={newCouponPct}
+              onChange={(e) => setNewCouponPct(e.currentTarget.value)}
+              placeholder="20%"
+              dir="ltr"
+            />
+            <input
+              type="number"
+              min={1}
+              value={newCouponMax}
+              onChange={(e) => setNewCouponMax(e.currentTarget.value)}
+              placeholder="Max redemptions"
+              dir="ltr"
+            />
+            <button
+              type="button"
+              className="safi-btn safi-btn-primary"
+              disabled={busy || newCouponCode.trim().length < 3}
+              onClick={() =>
+                void runOwnerAction(
+                  () =>
+                    ownerApi.createCoupon(sessionToken, {
+                      code: newCouponCode.trim().toUpperCase(),
+                      discount_kind: "percent",
+                      discount_value: Math.max(1, Math.min(100, Number(newCouponPct) || 10)),
+                      max_redemptions: Math.max(1, Number(newCouponMax) || 100)
+                    }),
+                  "تم إنشاء الكوبون بنجاح.",
+                  "Coupon created."
+                )
+              }
+            >
+              {isAr ? "إنشاء كوبون" : "Create Coupon"}
+            </button>
+          </div>
+          {coupons.length === 0 ? (
+            <p>{isAr ? "لا توجد كوبونات مسجلة بعد." : "No coupons created yet."}</p>
+          ) : (
+            <ul>
+              {coupons.map((c) => (
+                <li key={c.id}>
+                  <strong>{c.code}</strong> ({c.discount_kind}: {c.discount_value}) —{" "}
+                  {c.redemptions_count}/{c.max_redemptions ?? "∞"} —{" "}
+                  {c.enabled ? (isAr ? "مفعل" : "Enabled") : isAr ? "معطل" : "Disabled"}{" "}
+                  <button
+                    type="button"
+                    className="safi-btn"
+                    disabled={busy}
+                    onClick={() =>
+                      void runOwnerAction(
+                        () => ownerApi.updateCoupon(sessionToken, c.code, { enabled: !c.enabled }),
+                        "تم تحديث حالة الكوبون.",
+                        "Coupon status updated."
+                      )
+                    }
+                  >
+                    {c.enabled ? (isAr ? "تعطيل" : "Disable") : isAr ? "تفعيل" : "Enable"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
+      {panelTab === "devices" ? (
+        <section className="safi-panel">
+          <h2>
+            {isAr
+              ? "إدارة الأجهزة النشطة وإعادة التعيين المدققة"
+              : "Active Devices & Audited Device Reset"}
+          </h2>
+          <div className="safi-owner-inline-form">
+            <input
+              type="text"
+              value={deviceResetReason}
+              onChange={(e) => setDeviceResetReason(e.currentTarget.value)}
+              placeholder={
+                isAr ? "سبب إعادة تعيين الجهاز (إلزامي)" : "Device reset reason (required)"
+              }
+            />
+          </div>
+          {devices.length === 0 ? (
+            <p>{isAr ? "لا توجد أجهزة مسجلة بعد." : "No registered devices yet."}</p>
+          ) : (
+            <ul>
+              {devices.map((d) => (
+                <li key={d.device_id}>
+                  <strong>{d.device_name}</strong> — {d.status} (gen #{d.session_generation}){" "}
+                  {d.status === "active" ? (
+                    <button
+                      type="button"
+                      className="safi-btn"
+                      disabled={busy || deviceResetReason.trim().length === 0}
+                      onClick={() =>
+                        void runOwnerAction(
+                          () =>
+                            ownerApi.resetAccountDevices(
+                              sessionToken,
+                              d.user_id,
+                              deviceResetReason.trim()
+                            ),
+                          "تم إلغاء الجهاز وإعادة التعيين بنجاح.",
+                          "Account devices reset and audited."
+                        )
+                      }
+                    >
+                      {isAr ? "إلغاء الجهاز" : "Reset Device"}
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          <h3>{isAr ? "سجل استبدال الأجهزة" : "Device Replacement Audit History"}</h3>
+          <ul>
+            {replacements.map((ev) => (
+              <li key={ev.id}>
+                <strong>{ev.trigger_kind}</strong> — {ev.reason} (gen #{ev.new_session_generation})
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {panelTab === "orgs" ? (
+        <section className="safi-panel">
+          <h2>
+            {isAr ? "المؤسسات وتذاكر الدعم والإعلانات" : "Organizations, Support & Announcements"}
+          </h2>
+          <h3>
+            {isAr ? "المؤسسات" : "Organizations"} ({organizations.length})
+          </h3>
+          <ul>
+            {organizations.map((row) => (
+              <li key={row.organization.id}>
+                <strong>{row.organization.name}</strong> — {row.active_members}/
+                {row.organization.purchased_seats} seats
+              </li>
+            ))}
+          </ul>
+          <h3>
+            {isAr ? "تذاكر الدعم" : "Support Tickets"} ({tickets.length})
+          </h3>
+          <ul>
+            {tickets.map((t) => (
+              <li key={t.id}>
+                <strong>{t.subject}</strong> [{t.status} / {t.priority}] — {t.body}{" "}
+                {t.status !== "resolved" ? (
+                  <button
+                    type="button"
+                    className="safi-btn"
+                    disabled={busy}
+                    onClick={() =>
+                      void runOwnerAction(
+                        () =>
+                          ownerApi.updateSupportTicket(sessionToken, t.id, { status: "resolved" }),
+                        "تم إغلاق التذكرة.",
+                        "Ticket marked resolved."
+                      )
+                    }
+                  >
+                    {isAr ? "تم الحل" : "Resolve"}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <h3>{isAr ? "الإعلانات والتحديثات" : "Announcements & Updates"}</h3>
+          <div className="safi-owner-inline-form">
+            <input
+              type="text"
+              value={newAnnTitle}
+              onChange={(e) => setNewAnnTitle(e.currentTarget.value)}
+              placeholder={isAr ? "عنوان الإعلان" : "Announcement title"}
+            />
+            <input
+              type="text"
+              value={newAnnBody}
+              onChange={(e) => setNewAnnBody(e.currentTarget.value)}
+              placeholder={isAr ? "نص الإعلان" : "Announcement body"}
+            />
+            <button
+              type="button"
+              className="safi-btn"
+              disabled={busy || newAnnTitle.trim().length === 0 || newAnnBody.trim().length === 0}
+              onClick={() =>
+                void runOwnerAction(
+                  () =>
+                    ownerApi.createAnnouncement(
+                      sessionToken,
+                      newAnnTitle.trim(),
+                      newAnnBody.trim()
+                    ),
+                  "تم نشر الإعلان.",
+                  "Announcement published."
+                )
+              }
+            >
+              {isAr ? "نشر" : "Publish"}
+            </button>
+          </div>
+          <ul>
+            {announcements.map((a) => (
+              <li key={a.id}>
+                <strong>{a.title}</strong> ({a.severity}) — {a.body}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {selectedProfile !== null ? (
+        <section className="safi-panel">
+          <h3>
+            {isAr ? "ملف العميل التفصيلي:" : "Customer Profile:"} {selectedProfile.account.email}
+          </h3>
+          <p>
+            Plan: {selectedProfile.entitlements.effective_plan} | Devices:{" "}
+            {selectedProfile.devices.length} | Invoices: {selectedProfile.invoices.length}
+          </p>
+          <button type="button" className="safi-btn" onClick={() => setSelectedProfile(null)}>
+            {isAr ? "إغلاق الملف" : "Close Profile"}
+          </button>
         </section>
       ) : null}
 

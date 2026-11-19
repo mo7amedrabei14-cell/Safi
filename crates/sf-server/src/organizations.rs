@@ -213,6 +213,23 @@ impl OrganizationService {
         Ok(member)
     }
 
+    /// List all organizations with active seat counts for the Owner Control Center.
+    pub async fn list_all_orgs(&self) -> Vec<(Organization, u32)> {
+        let guard = self.store.read().await;
+        guard
+            .orgs
+            .values()
+            .map(|org| {
+                let active_members = guard
+                    .members
+                    .iter()
+                    .filter(|m| m.organization_id == org.id && m.removed_at.is_none())
+                    .count() as u32;
+                (org.clone(), active_members)
+            })
+            .collect()
+    }
+
     /// Remove a member (requires Owner or Admin; cannot remove the org Owner).
     pub async fn remove_member(
         &self,

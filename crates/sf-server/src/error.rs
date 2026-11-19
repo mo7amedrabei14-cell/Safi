@@ -30,6 +30,10 @@ pub enum AuthError {
     OwnerStepUpRequired,
     OwnerBootstrapSealed,
     OwnerTotpKeyMissing,
+    DeviceReplaced,
+    DeviceProofInvalid,
+    OfflineReadOnlyRequired,
+    AuthorizationLeaseExpired,
     QuotaExceeded,
     DatasetLimitExceeded,
     AiQuotaExceeded,
@@ -38,6 +42,8 @@ pub enum AuthError {
     InvalidWebhookSignature,
     WebhookReplayWindow,
     BillingOperationFailed,
+    CouponInvalid,
+    ChargebackRevoked,
     SyncEnvelopeInvalid,
     SyncVersionConflict,
     ShareLinkInvalid,
@@ -70,6 +76,10 @@ impl AuthError {
             Self::OwnerStepUpRequired => "SF-AUTH-016",
             Self::OwnerBootstrapSealed => "SF-AUTH-017",
             Self::OwnerTotpKeyMissing => "SF-AUTH-018",
+            Self::DeviceReplaced => "SF-AUTH-019",
+            Self::DeviceProofInvalid => "SF-AUTH-020",
+            Self::OfflineReadOnlyRequired => "SF-AUTH-021",
+            Self::AuthorizationLeaseExpired => "SF-AUTH-022",
             Self::QuotaExceeded => "SF-LIC-005",
             Self::DatasetLimitExceeded => "SF-LIC-006",
             Self::AiQuotaExceeded => "SF-LIC-007",
@@ -78,6 +88,8 @@ impl AuthError {
             Self::InvalidWebhookSignature => "SF-PAY-002",
             Self::WebhookReplayWindow => "SF-PAY-003",
             Self::BillingOperationFailed => "SF-PAY-004",
+            Self::CouponInvalid => "SF-PAY-005",
+            Self::ChargebackRevoked => "SF-PAY-006",
             Self::SyncEnvelopeInvalid => "SF-SYN-001",
             Self::SyncVersionConflict => "SF-SYN-002",
             Self::ShareLinkInvalid => "SF-SYN-003",
@@ -97,15 +109,20 @@ impl AuthError {
             | Self::Revoked
             | Self::OwnerMfaRequired
             | Self::OwnerStepUpRequired
+            | Self::DeviceReplaced
+            | Self::DeviceProofInvalid
+            | Self::AuthorizationLeaseExpired
             | Self::InvalidWebhookSignature => StatusCode::UNAUTHORIZED,
             Self::InsufficientScope
             | Self::AccountSuspended
             | Self::OwnerRequired
             | Self::PaidPlanRequired
+            | Self::ChargebackRevoked
             | Self::OrgPermissionDenied => StatusCode::FORBIDDEN,
             Self::BackendUnavailable
             | Self::OAuthNotConfigured
             | Self::OwnerTotpKeyMissing
+            | Self::OfflineReadOnlyRequired
             | Self::BillingNotConfigured
             | Self::OrgSsoNotConfigured
             | Self::AiProviderNotConfigured => StatusCode::SERVICE_UNAVAILABLE,
@@ -114,6 +131,7 @@ impl AuthError {
             | Self::InvalidPhoneOtp
             | Self::WebhookReplayWindow
             | Self::BillingOperationFailed
+            | Self::CouponInvalid
             | Self::SyncEnvelopeInvalid
             | Self::OrgMinSeatsRequired
             | Self::DatasetLimitExceeded => StatusCode::UNPROCESSABLE_ENTITY,
@@ -150,6 +168,10 @@ impl AuthError {
             Self::OwnerStepUpRequired => "يلزم إعادة التحقق الثنائي لتنفيذ هذا الإجراء الحساس",
             Self::OwnerBootstrapSealed => "تعذّر تهيئة مالك المنصة لأنها مغلقة أو غير صالحة",
             Self::OwnerTotpKeyMissing => "مفتاح تشفير التحقق الثنائي غير مهيأ على الخادم",
+            Self::DeviceReplaced => "تم تفعيل حسابك على جهاز آخر",
+            Self::DeviceProofInvalid => "فشل التحقق التشفيري من هوية الجهاز",
+            Self::OfflineReadOnlyRequired => "الوضع غير المتصل (للقراءة فقط)",
+            Self::AuthorizationLeaseExpired => "انتهت مهلة تفويض الاتصال أو رُصد تلاعب بساعة النظام",
             Self::QuotaExceeded => "استنفدت حد العمليات الشهري لخطتك",
             Self::DatasetLimitExceeded => "يتجاوز الملف حد الصفوف أو الأعمدة المسموح لخطتك",
             Self::AiQuotaExceeded => "استنفدت حصة استخدام الذكاء الاصطناعي",
@@ -158,6 +180,8 @@ impl AuthError {
             Self::InvalidWebhookSignature => "توقيع إشعار الدفع غير صالح",
             Self::WebhookReplayWindow => "توقيت إشعار الدفع خارج النافذة المسموحة",
             Self::BillingOperationFailed => "تعذّر تنفيذ عملية الفوترة المطلوبة",
+            Self::CouponInvalid => "رمز الخصم غير صالح أو منتهي الصلاحية أو غير مؤهل",
+            Self::ChargebackRevoked => "تم تسجيل نزاع دفع (Chargeback) وإيقاف الاشتراك",
             Self::SyncEnvelopeInvalid => "حزمة المزامنة المشفرة غير صالحة أو تعرضت للتعديل",
             Self::SyncVersionConflict => "تعارض في إصدار المزامنة",
             Self::ShareLinkInvalid => "رابط المشاركة المشفر منتهي الصلاحية أو ملغى",

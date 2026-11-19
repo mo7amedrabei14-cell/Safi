@@ -183,6 +183,17 @@ pub struct EntitlementAggregateStats {
     pub ai_calls_used_total: u64,
 }
 
+/// Serializable snapshot of entitlement & usage state for durable restart persistence.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EntitlementSnapshot {
+    pub workspaces: Vec<WorkspaceEntitlementRecord>,
+    pub monthly: Vec<((Uuid, String), MonthlyUsage)>,
+    pub idempotency: Vec<(Uuid, String)>,
+    pub claimed_trial_emails: Vec<String>,
+    pub claimed_trial_phones: Vec<String>,
+    pub claimed_trial_devices: Vec<String>,
+}
+
 #[derive(Default)]
 struct EntitlementStore {
     workspaces: HashMap<Uuid, WorkspaceEntitlementRecord>,
@@ -641,6 +652,38 @@ impl EntitlementService {
             .workspaces
             .get(&workspace_id)
             .cloned()
+    }
+
+    /// Export full entitlement state for durable restart persistence.
+    pub async fn export_snapshot(&self) -> EntitlementSnapshot {
+        let guard = self.store.read().await;
+        EntitlementSnapshot {
+            workspaces: guard.workspaces.values().cloned().collect(),
+            monthly: guard
+                .monthly
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            idempotency: guard.idempotency.iter().cloned().collect(),
+            claimed_trial_emails: guard.claimed_trial_emails.iter().cloned().collect(),
+            claimed_trial_phones: guard.claimed_trial_phones.iter().cloned().collect(),
+            claimed_trial_devices: guard.claimed_trial_devices.iter().cloned().collect(),
+        }
+    }
+
+    /// Restore full entitlement state from a durable snapshot.
+    pub async fn import_snapshot(&self, snap: EntitlementSnapshot) {
+        let mut guard = self.store.write().await;
+        guard.workspaces = snap
+            .workspaces
+            .into_iter()
+            .map(|w| (w.workspace_id, w))
+            .collect();
+        guard.monthly = snap.monthly.into_iter().collect();
+        guard.idempotency = snap.idempotency.into_iter().collect();
+        guard.claimed_trial_emails = snap.claimed_trial_emails.into_iter().collect();
+        guard.claimed_trial_phones = snap.claimed_trial_phones.into_iter().collect();
+        guard.claimed_trial_devices = snap.claimed_trial_devices.into_iter().collect();
     }
 }
 

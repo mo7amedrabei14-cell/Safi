@@ -67,6 +67,56 @@ impl ErrorCode {
         domain: ErrorDomain::Auth,
         number: 8,
     };
+    /// Registered error code `SF-AUTH-009`.
+    pub const SF_AUTH_009: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 9,
+    };
+    /// Registered error code `SF-AUTH-010`.
+    pub const SF_AUTH_010: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 10,
+    };
+    /// Registered error code `SF-AUTH-011`.
+    pub const SF_AUTH_011: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 11,
+    };
+    /// Registered error code `SF-AUTH-012`.
+    pub const SF_AUTH_012: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 12,
+    };
+    /// Registered error code `SF-AUTH-013`.
+    pub const SF_AUTH_013: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 13,
+    };
+    /// Registered error code `SF-AUTH-014`.
+    pub const SF_AUTH_014: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 14,
+    };
+    /// Registered error code `SF-AUTH-015`.
+    pub const SF_AUTH_015: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 15,
+    };
+    /// Registered error code `SF-AUTH-016`.
+    pub const SF_AUTH_016: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 16,
+    };
+    /// Registered error code `SF-AUTH-017`.
+    pub const SF_AUTH_017: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 17,
+    };
+    /// Registered error code `SF-AUTH-018`.
+    pub const SF_AUTH_018: Self = Self {
+        domain: ErrorDomain::Auth,
+        number: 18,
+    };
     /// Registered error code `SF-CAL-001`.
     pub const SF_CAL_001: Self = Self {
         domain: ErrorDomain::Cal,
@@ -217,6 +267,46 @@ impl ErrorCode {
         domain: ErrorDomain::Lic,
         number: 4,
     };
+    /// Registered error code `SF-LIC-005`.
+    pub const SF_LIC_005: Self = Self {
+        domain: ErrorDomain::Lic,
+        number: 5,
+    };
+    /// Registered error code `SF-LIC-006`.
+    pub const SF_LIC_006: Self = Self {
+        domain: ErrorDomain::Lic,
+        number: 6,
+    };
+    /// Registered error code `SF-LIC-007`.
+    pub const SF_LIC_007: Self = Self {
+        domain: ErrorDomain::Lic,
+        number: 7,
+    };
+    /// Registered error code `SF-LIC-008`.
+    pub const SF_LIC_008: Self = Self {
+        domain: ErrorDomain::Lic,
+        number: 8,
+    };
+    /// Registered error code `SF-PAY-001`.
+    pub const SF_PAY_001: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 1,
+    };
+    /// Registered error code `SF-PAY-002`.
+    pub const SF_PAY_002: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 2,
+    };
+    /// Registered error code `SF-PAY-003`.
+    pub const SF_PAY_003: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 3,
+    };
+    /// Registered error code `SF-PAY-004`.
+    pub const SF_PAY_004: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 4,
+    };
     /// Registered error code `SF-PRF-001`.
     pub const SF_PRF_001: Self = Self {
         domain: ErrorDomain::Prf,
@@ -241,6 +331,36 @@ impl ErrorCode {
     pub const SF_RCP_003: Self = Self {
         domain: ErrorDomain::Rcp,
         number: 3,
+    };
+    /// Registered error code `SF-SYN-001`.
+    pub const SF_SYN_001: Self = Self {
+        domain: ErrorDomain::Syn,
+        number: 1,
+    };
+    /// Registered error code `SF-SYN-002`.
+    pub const SF_SYN_002: Self = Self {
+        domain: ErrorDomain::Syn,
+        number: 2,
+    };
+    /// Registered error code `SF-SYN-003`.
+    pub const SF_SYN_003: Self = Self {
+        domain: ErrorDomain::Syn,
+        number: 3,
+    };
+    /// Registered error code `SF-SYN-004`.
+    pub const SF_SYN_004: Self = Self {
+        domain: ErrorDomain::Syn,
+        number: 4,
+    };
+    /// Registered error code `SF-SYN-005`.
+    pub const SF_SYN_005: Self = Self {
+        domain: ErrorDomain::Syn,
+        number: 5,
+    };
+    /// Registered error code `SF-SYN-006`.
+    pub const SF_SYN_006: Self = Self {
+        domain: ErrorDomain::Syn,
+        number: 6,
     };
     /// Registered error code `SF-SYS-001`.
     pub const SF_SYS_001: Self = Self {
@@ -367,6 +487,11 @@ impl ErrorCode {
         domain: ErrorDomain::Sys,
         number: 31,
     };
+    /// Registered error code `SF-SYS-032`.
+    pub const SF_SYS_032: Self = Self {
+        domain: ErrorDomain::Sys,
+        number: 32,
+    };
     /// Registered error code `SF-UNK-001`.
     pub const SF_UNK_001: Self = Self {
         domain: ErrorDomain::Unk,
@@ -425,6 +550,16 @@ impl ErrorCode {
         Self::SF_AUTH_006,
         Self::SF_AUTH_007,
         Self::SF_AUTH_008,
+        Self::SF_AUTH_009,
+        Self::SF_AUTH_010,
+        Self::SF_AUTH_011,
+        Self::SF_AUTH_012,
+        Self::SF_AUTH_013,
+        Self::SF_AUTH_014,
+        Self::SF_AUTH_015,
+        Self::SF_AUTH_016,
+        Self::SF_AUTH_017,
+        Self::SF_AUTH_018,
         Self::SF_CAL_001,
         Self::SF_CAL_002,
         Self::SF_CAL_003,
@@ -455,11 +590,25 @@ impl ErrorCode {
         Self::SF_LIC_002,
         Self::SF_LIC_003,
         Self::SF_LIC_004,
+        Self::SF_LIC_005,
+        Self::SF_LIC_006,
+        Self::SF_LIC_007,
+        Self::SF_LIC_008,
+        Self::SF_PAY_001,
+        Self::SF_PAY_002,
+        Self::SF_PAY_003,
+        Self::SF_PAY_004,
         Self::SF_PRF_001,
         Self::SF_PRF_002,
         Self::SF_RCP_001,
         Self::SF_RCP_002,
         Self::SF_RCP_003,
+        Self::SF_SYN_001,
+        Self::SF_SYN_002,
+        Self::SF_SYN_003,
+        Self::SF_SYN_004,
+        Self::SF_SYN_005,
+        Self::SF_SYN_006,
         Self::SF_SYS_001,
         Self::SF_SYS_002,
         Self::SF_SYS_003,
@@ -485,6 +634,7 @@ impl ErrorCode {
         Self::SF_SYS_026,
         Self::SF_SYS_030,
         Self::SF_SYS_031,
+        Self::SF_SYS_032,
         Self::SF_UNK_001,
         Self::SF_UPD_001,
         Self::SF_UPD_002,
@@ -523,8 +673,8 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         code: ErrorCode::SF_AIX_001,
         code_str: "SF-AIX-001",
         severity: ErrorSeverity::Warn,
-        title_ar: "????? ?????? ????????? ??? ???? ?????? ?? ??? ??? ???????",
-        action_ar: "???? ???? ???? ??????? ?????? ?? ??????? ?? ?????????? ?? ???? ????? DSL ???????? ??????? ??? ????? ???????? ????????.",
+        title_ar: "مزود الذكاء الاصطناعي غير مهيأ أو غير متاح دون اتصال",
+        action_ar: "هيئ مزودًا محليًا أو معتمدًا في الإعدادات، أو أرسل أوامر DSL المهيكلة مباشرة دون الاعتماد على مزود خارجي.",
         title_en: "Natural-language AI provider is not configured or is blocked offline",
         action_en: "Configure a local/approved OpenAI-compatible provider or submit validated structured DSL JSON directly.",
         owner_note: "Natural-language prompt requested while no local/approved model is configured or reachable.",
@@ -533,8 +683,8 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         code: ErrorCode::SF_AIX_002,
         code_str: "SF-AIX-002",
         severity: ErrorSeverity::Error,
-        title_ar: "?? ??? ??????? ?????? ????????? ???? ???????? ????? ??????? ????????",
-        action_ar: "???? ??? DSL ??????? ????? ??????? ?? ?????? ???????? ?? ??? ????????.",
+        title_ar: "تم رفض استجابة الذكاء الاصطناعي بواسطة مدقق أوامر Rust",
+        action_ar: "راجع أمر DSL المقترح وصحّح الحقول أو العمليات غير الصالحة ثم أعد المحاولة.",
         title_en: "AI response rejected by the Rust DSL schema validator",
         action_en: "Inspect the proposed structured DSL command, fix any invalid fields or operations, and retry.",
         owner_note: "Untrusted AI JSON failed strict StudioCommand deserialization or validation.",
@@ -618,6 +768,106 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Account already registered",
         action_en: "Sign in to the existing account instead of creating a duplicate.",
         owner_note: "Normalized email or verified phone already exists; never log the submitted identity values.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_009,
+        code_str: "SF-AUTH-009",
+        severity: ErrorSeverity::Error,
+        title_ar: "الحساب موقوف مؤقتًا",
+        action_ar: "تواصل مع الدعم لمراجعة حالة حسابك.",
+        title_en: "Account is suspended",
+        action_en: "Contact support to review your account status.",
+        owner_note: "Account disabled or suspended by platform owner.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_010,
+        code_str: "SF-AUTH-010",
+        severity: ErrorSeverity::Error,
+        title_ar: "تجاوزت الحد المسموح للمحاولات",
+        action_ar: "انتظر قليلًا ثم أعد المحاولة.",
+        title_en: "Too many authentication attempts",
+        action_en: "Wait a moment and try again.",
+        owner_note: "Rate limit or lockout threshold exceeded on authentication endpoint.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_011,
+        code_str: "SF-AUTH-011",
+        severity: ErrorSeverity::Error,
+        title_ar: "رمز التحقق عبر الهاتف غير صالح أو منتهي الصلاحية",
+        action_ar: "اطلب رمزًا جديدًا ثم أدخله قبل انتهاء صلاحيته.",
+        title_en: "Phone verification code is invalid or expired",
+        action_en: "Request a new code and enter it before it expires.",
+        owner_note: "Phone OTP verification failed or exceeded attempt cap.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_012,
+        code_str: "SF-AUTH-012",
+        severity: ErrorSeverity::Error,
+        title_ar: "تسجيل الدخول الخارجي غير مهيأ أو الحالة غير صالحة",
+        action_ar: "استخدم تسجيل الدخول بالبريد وكلمة المرور أو تواصل مع الدعم.",
+        title_en: "OAuth sign-in is not configured or state is invalid",
+        action_en: "Use email and password sign-in or contact support.",
+        owner_note: "OAuth provider credentials are not configured or state/PKCE verification failed.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_013,
+        code_str: "SF-AUTH-013",
+        severity: ErrorSeverity::Error,
+        title_ar: "الوصول محصور بمالك المنصة",
+        action_ar: "هذا الإجراء متاح لحساب مالك المنصة المعتمد فقط.",
+        title_en: "Owner privileges required",
+        action_en: "This action is restricted to the designated platform owner account.",
+        owner_note: "Caller user_id does not match the sealed platform_owner record.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_014,
+        code_str: "SF-AUTH-014",
+        severity: ErrorSeverity::Error,
+        title_ar: "التحقق الثنائي لمالك المنصة مطلوب أو الرمز غير صحيح",
+        action_ar: "أدخل الرمز المكوّن من 6 أرقام من تطبيق Google Authenticator ثم أعد المحاولة.",
+        title_en: "Owner TOTP verification is required or invalid",
+        action_en: "Enter the current 6-digit code from Google Authenticator and retry.",
+        owner_note: "RFC 6238 TOTP verification failed, code was replayed, or elevated session expired.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_015,
+        code_str: "SF-AUTH-015",
+        severity: ErrorSeverity::Error,
+        title_ar: "تم قفل التحقق الثنائي مؤقتًا بعد محاولات فاشلة",
+        action_ar: "انتظر انتهاء مهلة القفل ثم استخدم رمزًا جديدًا أو رمز استرداد.",
+        title_en: "Owner MFA is temporarily locked",
+        action_en: "Wait until the lockout expires, then use a fresh code or recovery code.",
+        owner_note: "Failed TOTP/recovery attempts exceeded lockout threshold.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_016,
+        code_str: "SF-AUTH-016",
+        severity: ErrorSeverity::Error,
+        title_ar: "يلزم إعادة التحقق الثنائي لتنفيذ هذا الإجراء الحساس",
+        action_ar: "أعد إدخال رمز Google Authenticator الحالي لتأكيد العملية.",
+        title_en: "Step-up TOTP verification required",
+        action_en: "Re-enter your current Google Authenticator code to authorize this sensitive action.",
+        owner_note: "High-risk owner action called without a fresh step-up TOTP verification.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_017,
+        code_str: "SF-AUTH-017",
+        severity: ErrorSeverity::Error,
+        title_ar: "تعذّر تهيئة مالك المنصة لأنها مغلقة أو غير صالحة",
+        action_ar: "تحقق من حالة التهيئة في قاعدة البيانات؛ لا يُسمح بالتهيئة إلا مرة واحدة.",
+        title_en: "Owner bootstrap is already sealed or invalid",
+        action_en: "Check the platform_owner table; bootstrap is one-time and sealed.",
+        owner_note: "Repeated or unauthorized owner bootstrap attempt blocked.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_AUTH_018,
+        code_str: "SF-AUTH-018",
+        severity: ErrorSeverity::Error,
+        title_ar: "مفتاح تشفير التحقق الثنائي غير مهيأ على الخادم",
+        action_ar: "هيئ المتغير SAFI_TOTP_ENCRYPTION_KEY في بيئة الخادم.",
+        title_en: "Owner TOTP encryption key is not configured",
+        action_en: "Configure SAFI_TOTP_ENCRYPTION_KEY in the server environment.",
+        owner_note: "Missing or malformed 32-byte key for encrypting owner TOTP secrets at rest.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_CAL_001,
@@ -920,6 +1170,86 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         owner_note: "The device fingerprint in the signed license does not match the current device.",
     },
     ErrorCatalogEntry {
+        code: ErrorCode::SF_LIC_005,
+        code_str: "SF-LIC-005",
+        severity: ErrorSeverity::Error,
+        title_ar: "استنفدت حد العمليات الشهري لخطتك",
+        action_ar: "قم بالترقية أو اشترِ حزمة رصيد إضافية للمتابعة.",
+        title_en: "Monthly operation limit reached",
+        action_en: "Upgrade your plan or purchase a credit pack to continue.",
+        owner_note: "Free plan 5 operations/month quota exhausted with zero credits.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_LIC_006,
+        code_str: "SF-LIC-006",
+        severity: ErrorSeverity::Error,
+        title_ar: "يتجاوز الملف حد الصفوف أو الأعمدة المسموح لخطتك",
+        action_ar: "قم بالترقية أو استخدم الدفع لكل ملف لمعالجة ملفات أكبر.",
+        title_en: "File exceeds plan row or column limits",
+        action_en: "Upgrade your plan or use Pay-Per-File to process larger datasets.",
+        owner_note: "Dataset row/column count exceeds active plan limit.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_LIC_007,
+        code_str: "SF-LIC-007",
+        severity: ErrorSeverity::Error,
+        title_ar: "استنفدت حصة استخدام الذكاء الاصطناعي",
+        action_ar: "انتظر تجديد الحصة الشهرية أو قم بالترقية للاستمرار في استخدام المساعد.",
+        title_en: "AI call quota reached",
+        action_en: "Wait for the monthly reset or upgrade to continue using AI assistance.",
+        owner_note: "AI call budget exhausted or unavailable on Free plan.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_LIC_008,
+        code_str: "SF-LIC-008",
+        severity: ErrorSeverity::Error,
+        title_ar: "هذه الميزة متاحة للخطط المدفوعة فقط",
+        action_ar: "اشترك في خطة فردية أو مؤسسية لتفعيل هذه الميزة.",
+        title_en: "This feature requires an active paid plan",
+        action_en: "Subscribe to an Individual or Organization plan to unlock this feature.",
+        owner_note: "Entitlement check denied paid-only capability.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_001,
+        code_str: "SF-PAY-001",
+        severity: ErrorSeverity::Error,
+        title_ar: "بوابة الدفع غير مهيأة بعد",
+        action_ar: "أكمل إعداد بيانات مزود الدفع في بيئة الخادم قبل التفعيل.",
+        title_en: "Billing provider is not configured",
+        action_en: "Complete payment provider configuration in the server environment first.",
+        owner_note: "Paddle or Paymob environment credentials are NOT_CONFIGURED.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_002,
+        code_str: "SF-PAY-002",
+        severity: ErrorSeverity::Error,
+        title_ar: "توقيع إشعار الدفع غير صالح",
+        action_ar: "تحقق من سر التوقيع الخاص بمزود الدفع؛ تم رفض الطلب.",
+        title_en: "Invalid payment webhook signature",
+        action_en: "Verify the payment provider webhook secret; request rejected.",
+        owner_note: "HMAC-SHA256 (Paddle) or HMAC-SHA512 (Paymob) signature verification failed.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_003,
+        code_str: "SF-PAY-003",
+        severity: ErrorSeverity::Error,
+        title_ar: "توقيت إشعار الدفع خارج النافذة المسموحة",
+        action_ar: "أعد إرسال الحدث من لوحة مزود الدفع وتحقق من مزامنة ساعة الخادم.",
+        title_en: "Payment webhook timestamp outside replay window",
+        action_en: "Redeliver the event from the payment provider and verify server clock sync.",
+        owner_note: "Webhook timestamp exceeded anti-replay tolerance window.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_004,
+        code_str: "SF-PAY-004",
+        severity: ErrorSeverity::Error,
+        title_ar: "تعذّر تنفيذ عملية الفوترة المطلوبة",
+        action_ar: "راجع حالة الاشتراك أو نافذة الاسترداد ثم أعد المحاولة.",
+        title_en: "Billing operation could not be completed",
+        action_en: "Review subscription status or refund policy window and retry.",
+        owner_note: "Invalid subscription state transition or refund window policy violation.",
+    },
+    ErrorCatalogEntry {
         code: ErrorCode::SF_PRF_001,
         code_str: "SF-PRF-001",
         severity: ErrorSeverity::Info,
@@ -968,6 +1298,66 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "File schema or column structure changed",
         action_en: "Review the suggested column mapping for added or missing columns before applying the recipe.",
         owner_note: "Recipe column matcher detected schema drift between recipe source and new file.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYN_001,
+        code_str: "SF-SYN-001",
+        severity: ErrorSeverity::Error,
+        title_ar: "حزمة المزامنة المشفرة غير صالحة أو تعرضت للتعديل",
+        action_ar: "أعد المزامنة من الجهاز الأصلي وتحقق من مفتاح الخزنة.",
+        title_en: "Encrypted sync envelope is invalid or tampered",
+        action_en: "Resync from the originating device and verify your vault key.",
+        owner_note: "Client-side encrypted sync payload failed structural or integrity validation.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYN_002,
+        code_str: "SF-SYN-002",
+        severity: ErrorSeverity::Warn,
+        title_ar: "تعارض في إصدار المزامنة",
+        action_ar: "حدّث النسخة المحلية أولًا ثم أعد حفظ التعديلات.",
+        title_en: "Sync version conflict",
+        action_en: "Pull the latest encrypted revision before pushing local updates.",
+        owner_note: "Optimistic concurrency version mismatch during encrypted sync.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYN_003,
+        code_str: "SF-SYN-003",
+        severity: ErrorSeverity::Error,
+        title_ar: "رابط المشاركة المشفر منتهي الصلاحية أو ملغى",
+        action_ar: "اطلب من صاحب الملف إنشاء رابط مشاركة جديد.",
+        title_en: "Encrypted share link is expired or revoked",
+        action_en: "Ask the file owner to create a new share link.",
+        owner_note: "Share link token revoked or past expires_at.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYN_004,
+        code_str: "SF-SYN-004",
+        severity: ErrorSeverity::Error,
+        title_ar: "الحد الأدنى للمؤسسات هو 3 مقاعد",
+        action_ar: "اختر 3 مقاعد على الأقل لإنشاء أو تعديل خطة المؤسسة.",
+        title_en: "Organization plans require at least 3 seats",
+        action_en: "Select at least 3 seats to create or update an organization plan.",
+        owner_note: "Organization seat count below approved minimum of 3.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYN_005,
+        code_str: "SF-SYN-005",
+        severity: ErrorSeverity::Error,
+        title_ar: "ليست لديك صلاحية لإدارة هذه المؤسسة",
+        action_ar: "اطلب من مالك المؤسسة أو مديرها تنفيذ هذا الإجراء.",
+        title_en: "Organization permission denied",
+        action_en: "Ask an organization owner or admin to perform this action.",
+        owner_note: "Caller lacks required organization role.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYN_006,
+        code_str: "SF-SYN-006",
+        severity: ErrorSeverity::Error,
+        title_ar: "الدخول الموحد (SSO/SCIM) غير مهيأ بعد",
+        action_ar: "أكمل إعداد موفر الهوية المؤسسي في الإعدادات اليدوية أولًا.",
+        title_en: "Enterprise SSO/SCIM is not configured",
+        action_en: "Complete enterprise identity provider configuration first.",
+        owner_note: "SSO/SCIM adapter invoked while external IdP configuration is NOT_CONFIGURED.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_SYS_001,
@@ -1218,6 +1608,16 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Account service address is not configured",
         action_en: "Reinstall a build that includes a valid SAFI_API_BASE_URL, or contact support.",
         owner_note: "The installed desktop build has no valid HTTPS API origin; it must fail closed instead of calling a local address.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_SYS_032,
+        code_str: "SF-SYS-032",
+        severity: ErrorSeverity::Fatal,
+        title_ar: "إعدادات الخادم غير مكتملة لوضع الإنتاج",
+        action_ar: "أكمل المتغيرات الإلزامية في دليل الإعداد اليدوي ثم أعد تشغيل الخادم.",
+        title_en: "Server configuration is incomplete for production mode",
+        action_en: "Configure all required environment variables from the Manual Setup Map and restart.",
+        owner_note: "Production fail-closed startup check detected missing or invalid required security config.",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_UNK_001,

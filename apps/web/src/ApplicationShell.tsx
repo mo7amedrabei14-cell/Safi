@@ -1,17 +1,26 @@
 /**
- * `apps/web/src/App.tsx`
+ * `apps/web/src/ApplicationShell.tsx`
  *
- * SafiData — Apple.com Flagship Product Website Shell
- * - Supports live Arabic (`rtl`) & English (`ltr`) switching
- * - Supports 2-mode theme toggle (Daylight / Midnight)
- * - Automatically plays the cinematic Intro Splash before entering the website
+ * SafiData Runtime Boundary Shell (Phase 01):
+ * - Synchronous runtime detection (`isDesktopRuntime()`) with zero first-render flash.
+ * - Public browser build renders the Showcase freely without mandatory product login and
+ *   NEVER exposes Desktop Quad-Studio or Owner Control Plane controls.
+ * - Packaged Desktop build enforces mandatory login, binds the native session, exposes
+ *   Quad-Studio, and exposes the Owner Control Plane ONLY when the server confirms Owner
+ *   status via authenticated session metadata (zero hardcoded owner email on client).
  */
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { AmbientBackground } from "./components/motion/AmbientBackground";
 import { SmoothScrollProvider } from "./components/motion/SmoothScrollProvider";
-import { DOCK_TABS, FloatingGlassDock, STUDIO_TAB } from "./components/layout/FloatingGlassDock";
+import {
+  DOCK_TABS,
+  FloatingGlassDock,
+  OWNER_TAB,
+  SHOWCASE_TABS,
+  STUDIO_TAB
+} from "./components/layout/FloatingGlassDock";
 import type { SafiDockTabId, SafiLang } from "./components/layout/FloatingGlassDock";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { SettingsSheet } from "./components/layout/SettingsSheet";
@@ -25,22 +34,33 @@ import { RecipesStudio } from "./components/studios/RecipesStudio";
 import { ChartsStudio } from "./components/studios/ChartsStudio";
 import { LibraryStudio } from "./components/studios/LibraryStudio";
 import { DesktopStudio } from "./desktop/DesktopStudio";
-import { isDesktopRuntime } from "./desktop/studio-bridge";
+import {
+  clearStudioAuthSession,
+  isDesktopRuntime,
+  setStudioAuthSession
+} from "./desktop/studio-bridge";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { canAnimate } from "./components/ui/motion-preference";
-import { clearStudioAuthSession, setStudioAuthSession } from "./desktop/studio-bridge";
 import { getSafiDeviceIdentity } from "./lib/device-identity";
 import { applySafiLang, getInitialSafiLang } from "./lib/locale";
 import { applySafiTheme, getInitialSafiTheme, syncDomTheme, type SafiThemeId } from "./lib/theme";
-import { isOwnerEmail } from "./lib/auth-rules";
 
 export const SHELL_TABS: readonly SafiDockTabId[] = DOCK_TABS.map((tab) => tab.id);
 
 export function renderStudio(
   tab: SafiDockTabId,
   onSelectTab: (tab: SafiDockTabId) => void,
-  lang: SafiLang = "en"
+  lang: SafiLang = "en",
+  options?: {
+    readonly desktopRuntime?: boolean;
+    readonly sessionToken?: string | null;
+    readonly isOwner?: boolean;
+  }
 ): ReactNode {
+  const desktopRuntime = options?.desktopRuntime ?? false;
+  const sessionToken = options?.sessionToken ?? null;
+  const isOwner = options?.isOwner ?? false;
+
   switch (tab) {
     case "home":
       return (
@@ -57,14 +77,33 @@ export function renderStudio(
     case "charts":
       return <ChartsStudio lang={lang} onSelectTab={onSelectTab} />;
     case "studio":
-      return <DesktopStudio lang={lang} />;
+      return desktopRuntime ? (
+        <DesktopStudio lang={lang} />
+      ) : (
+        <BentoCommandCenter
+          lang={lang}
+          onStart={() => onSelectTab("cleaning")}
+          onOpenLibrary={() => onSelectTab("library")}
+        />
+      );
     case "library":
       return <LibraryStudio lang={lang} onSelectTab={onSelectTab} />;
     case "owner":
-      return (
+      return desktopRuntime && isOwner ? (
         <div className="safi-owner-frame">
-          <OwnerDashboard lang={lang} onSelectTab={onSelectTab} />
+          <OwnerDashboard
+            lang={lang}
+            onSelectTab={onSelectTab}
+            sessionToken={sessionToken}
+            isOwner={isOwner}
+          />
         </div>
+      ) : (
+        <BentoCommandCenter
+          lang={lang}
+          onStart={() => onSelectTab("cleaning")}
+          onOpenLibrary={() => onSelectTab("library")}
+        />
       );
     default: {
       const exhaustive: never = tab;
@@ -86,8 +125,8 @@ export function ApplicationShell({
   initialVerificationToken = null,
   initialResetToken = null
 }: ApplicationShellProps): ReactNode {
+  const [desktopRuntime] = useState<boolean>(() => isDesktopRuntime());
   const [activeTab, setActiveTab] = useState<SafiDockTabId>("home");
-  const [desktopRuntime, setDesktopRuntime] = useState(false);
   const [theme, setTheme] = useState<SafiThemeId>(getInitialSafiTheme);
   const [lang, setLang] = useState<SafiLang>(getInitialSafiLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -105,15 +144,32 @@ export function ApplicationShell({
     onReady?.();
   }, [onReady]);
 
-  useEffect(() => {
-    setDesktopRuntime(isDesktopRuntime());
-  }, []);
+  // Strict Phase 01 boundary:
+  // - Browser runtime: Showcase tabs only (NO Quad-Studio, NO Owner Console).
+  // - Desktop runtime: Showcase + Quad-Studio, plus Owner Console ONLY for server-verified Owner.
+  const dockTabs = useMemo(() => {
+    if (!desktopRuntime) {
+      return SHOWCASE_TABS;
+    }
+    return ownerAccount
+      ? [...SHOWCASE_TABS, STUDIO_TAB, OWNER_TAB]
+      : [...SHOWCASE_TABS, STUDIO_TAB];
+  }, [desktopRuntime, ownerAccount]);
 
-  const dockTabs = desktopRuntime ? [...DOCK_TABS, STUDIO_TAB] : DOCK_TABS;
-
-  const selectTab = useCallback((tab: SafiDockTabId): void => {
-    setActiveTab(tab);
-  }, []);
+  const selectTab = useCallback(
+    (tab: SafiDockTabId): void => {
+      if (tab === "studio" && !desktopRuntime) {
+        setActiveTab("home");
+        return;
+      }
+      if (tab === "owner" && (!desktopRuntime || !ownerAccount)) {
+        setActiveTab("home");
+        return;
+      }
+      setActiveTab(tab);
+    },
+    [desktopRuntime, ownerAccount]
+  );
 
   const selectTheme = useCallback((nextTheme: SafiThemeId): void => {
     applySafiTheme(nextTheme);
@@ -137,7 +193,7 @@ export function ApplicationShell({
   }, [lang]);
 
   useEffect(() => {
-    if (sessionToken === null) return;
+    if (desktopRuntime && sessionToken === null) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -149,7 +205,7 @@ export function ApplicationShell({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [sessionToken]);
+  }, [desktopRuntime, sessionToken]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -173,41 +229,46 @@ export function ApplicationShell({
     };
   }, [activeTab, lang]);
 
-  const activeTabConfig = DOCK_TABS.find((tab) => tab.id === activeTab);
+  const activeTabConfig = dockTabs.find((tab) => tab.id === activeTab);
   const activeLabel =
     lang === "ar"
       ? (activeTabConfig?.label ?? "الرئيسية")
       : (activeTabConfig?.labelEn ?? "Website");
 
-  const authenticationRequired = sessionToken === null || sessionToken.trim().length === 0;
+  // Phase 01 runtime separation: Desktop mandates product login; public browser Showcase opens freely.
+  const hasActiveSession = sessionToken !== null && sessionToken.trim().length > 0;
+  const authenticationRequired = desktopRuntime && !hasActiveSession;
   const verificationSheetOpen = initialVerificationToken !== null && accountOpen && !resetOpen;
   const authModalOpen =
     !resetOpen && !verificationSheetOpen && (authenticationRequired || accountOpen);
 
   const bindSessionAndUnlock = useCallback(
     async (token: string, email: string, owner: boolean): Promise<void> => {
-      if (isDesktopRuntime()) {
+      if (desktopRuntime) {
         const device = await getSafiDeviceIdentity();
         await setStudioAuthSession(token, device.installationId);
       }
       setSessionToken(token);
       setSessionEmail(email);
-      setOwnerAccount(owner);
+      setOwnerAccount(desktopRuntime && owner);
     },
-    []
+    [desktopRuntime]
   );
 
   const clearSessionAndLock = useCallback(async (): Promise<void> => {
     try {
-      if (isDesktopRuntime()) {
+      if (desktopRuntime) {
         await clearStudioAuthSession();
       }
     } finally {
       setSessionToken(null);
       setSessionEmail(null);
       setOwnerAccount(false);
+      if (activeTab === "owner") {
+        setActiveTab("home");
+      }
     }
-  }, []);
+  }, [desktopRuntime, activeTab]);
 
   const accountAccessPortal =
     initialVerificationToken === null ? null : (
@@ -217,7 +278,7 @@ export function ApplicationShell({
         lang={lang}
         verificationToken={initialVerificationToken}
         sessionToken={sessionToken}
-        onAuthenticated={(token, email) => bindSessionAndUnlock(token, email, isOwnerEmail(email))}
+        onAuthenticated={(token, email) => bindSessionAndUnlock(token, email, false)}
         onLoggedOut={() => clearSessionAndLock()}
       />
     );
@@ -231,10 +292,13 @@ export function ApplicationShell({
       theme={theme}
       sessionToken={sessionToken}
       sessionEmail={sessionEmail}
+      sessionIsOwner={ownerAccount}
       onAuthenticated={(session) =>
         bindSessionAndUnlock(session.token, session.email, session.isOwner)
       }
-      onOwnerDetected={() => setOwnerAccount(true)}
+      onOwnerDetected={() => {
+        if (desktopRuntime) setOwnerAccount(true);
+      }}
       onSignedOut={() => clearSessionAndLock()}
       onForgotPassword={() => {
         setAccountOpen(false);
@@ -270,7 +334,11 @@ export function ApplicationShell({
     <>
       <AmbientBackground />
       <SmoothScrollProvider>
-        <div className="safi-shell" dir={lang === "ar" ? "rtl" : "ltr"}>
+        <div
+          className="safi-shell"
+          dir={lang === "ar" ? "rtl" : "ltr"}
+          data-runtime={desktopRuntime ? "desktop" : "showcase"}
+        >
           <FloatingGlassDock
             tabs={dockTabs}
             activeTab={activeTab}
@@ -282,8 +350,8 @@ export function ApplicationShell({
             lang={lang}
             onToggleLang={toggleLang}
             onOpenAccount={() => setAccountOpen(true)}
-            authenticated={true}
-            ownerAccount={ownerAccount}
+            authenticated={hasActiveSession}
+            ownerAccount={desktopRuntime && ownerAccount}
           />
 
           <main id="safi-main" className="safi-container safi-stage">
@@ -291,7 +359,11 @@ export function ApplicationShell({
               {lang === "ar" ? `الآن في ${activeLabel}` : `You are viewing ${activeLabel}`}
             </p>
             <div ref={stageRef} key={`${activeTab}-${lang}`} data-active-tab={activeTab}>
-              {renderStudio(activeTab, selectTab, lang)}
+              {renderStudio(activeTab, selectTab, lang, {
+                desktopRuntime,
+                sessionToken,
+                isOwner: ownerAccount
+              })}
             </div>
           </main>
 
@@ -309,10 +381,11 @@ export function ApplicationShell({
             theme={theme}
             onSelectTheme={selectTheme}
           />
-          {accountAccessPortal ?? authPortal}
-          {passwordResetPortal}
         </div>
       </SmoothScrollProvider>
+      {accountAccessPortal}
+      {authPortal}
+      {passwordResetPortal}
     </>
   );
 }

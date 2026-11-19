@@ -22,7 +22,7 @@ describe("SafiData startup and application shell", () => {
     expect(html).not.toContain("data-safi-word");
   });
 
-  it("keeps ApplicationShell empty until introComplete becomes true", () => {
+  it("keeps ApplicationShell empty until introComplete becomes true and opens public Showcase freely in browser", () => {
     const gated = renderToString(
       createElement(ApplicationShell, { onReady: noop, introComplete: false })
     );
@@ -35,15 +35,12 @@ describe("SafiData startup and application shell", () => {
 
     expect(SHELL_TABS).toEqual(["home", "cleaning", "recipes", "charts", "library", "owner"]);
     expect(DOCK_TABS).toHaveLength(6);
-    expect(html).toContain("SAFIDATA IDENTITY");
-    expect(html).toContain("Sign In");
-    expect(html).toContain('class="safi-auth-modal"');
-    expect(html).not.toContain('class="safi-shell"');
-    expect(html).not.toContain('class="safi-topbar"');
-    expect(html).not.toContain('data-active-tab="home"');
-    expect(html).not.toContain("Intelligent Universal Data Engineering");
-    expect(html).not.toContain("⌘K");
-    expect(html).toContain('role="dialog"');
+    expect(html).toContain('class="safi-shell"');
+    expect(html).toContain('class="safi-topbar"');
+    expect(html).toContain('data-runtime="showcase"');
+    expect(html).toContain('data-active-tab="home"');
+    expect(html).not.toContain("Owner App");
+    expect(html).not.toContain("Quad-Studio");
   });
 
   it("keeps the PWA name and public share card aligned with the English default", () => {
@@ -79,26 +76,33 @@ describe("SafiData startup and application shell", () => {
     expect(html).not.toContain("مرحبًا بك في منصة صافي البيانات");
   });
 
-  it("renders a distinct studio for every tab", () => {
+  it("renders a distinct studio for every tab and gates Owner to verified Desktop sessions", () => {
     const expectations: Array<[string, string]> = [
       ["home", "الإصدار الذهبي المعتمد"],
       ["cleaning", "مختبر التنقية والخصوصية"],
       ["recipes", "محرك الوصفات الحتمية"],
       ["charts", "التحقق من تباين WCAG 2.2 AA"],
-      ["library", "مكتبة القوالب وتقارير الجودة"],
-      ["owner", "لوحة تحكم المالك"]
+      ["library", "مكتبة القوالب وتقارير الجودة"]
     ];
 
-    for (const tab of SHELL_TABS) {
-      const html = renderToString(renderStudio(tab, noop, "ar"));
-      const match = expectations.find(([id]) => id === tab);
-      expect(match).toBeDefined();
-      expect(html).toContain(match?.[1] ?? "");
+    for (const [tab, marker] of expectations) {
+      const html = renderToString(renderStudio(tab as (typeof SHELL_TABS)[number], noop, "ar"));
+      expect(html).toContain(marker);
     }
 
-    const owner = renderToString(renderStudio("owner", noop, "ar"));
-    expect(owner.split("انشر تحديثًا").length - 1).toBe(1);
-    expect(owner).toContain("6. الأمان وسجل التدقيق");
-    expect(owner).toContain("safi-owner-frame");
+    // Browser / non-owner never renders OwnerDashboard.
+    const browserOwner = renderToString(renderStudio("owner", noop, "ar"));
+    expect(browserOwner).not.toContain("safi-owner-frame");
+
+    // Verified Desktop Owner renders the real MFA-gated OwnerDashboard frame.
+    const desktopOwner = renderToString(
+      renderStudio("owner", noop, "ar", {
+        desktopRuntime: true,
+        isOwner: true,
+        sessionToken: "sfs_test_token"
+      })
+    );
+    expect(desktopOwner).toContain("safi-owner-frame");
+    expect(desktopOwner).toContain("Google Authenticator");
   });
 });

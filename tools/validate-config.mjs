@@ -28,21 +28,29 @@ function deepEqual(actual, expected, label) {
   }
 }
 
+const rawConfigText = readFileSync(configPath, "utf8");
 let cfg;
 try {
-  cfg = JSON.parse(readFileSync(configPath, "utf8"));
+  cfg = JSON.parse(rawConfigText);
 } catch (error) {
   console.error(`business.json INVALID: ${error.message}`);
   process.exit(1);
 }
 
-const OWNER_EMAIL = "mo7amed.rabei14@gmail.com";
+// Security invariant: never hardcode personal/owner emails in config/business.json.
+if (cfg.owner?.email !== undefined) {
+  fail("owner.email must not be hardcoded in config/business.json");
+}
+if (cfg.roles?.owner?.email_match !== undefined) {
+  fail("roles.owner.email_match must not be hardcoded in config/business.json");
+}
 
 // Brand and owner
 equal(cfg.brand?.name_en, "SafiData", "brand.name_en");
 equal(cfg.brand?.name_ar, "صافي البيانات", "brand.name_ar");
 equal(cfg.brand?.status, "CONFIRMED_V1", "brand.status");
-equal(cfg.owner?.email, OWNER_EMAIL, "owner.email");
+equal(cfg.owner?.identity_mode, "internal_immutable_user_id", "owner.identity_mode");
+equal(cfg.owner?.mfa_policy, "rfc6238_totp_google_authenticator", "owner.mfa_policy");
 equal(cfg.owner?.strict_single_owner_lock, true, "owner.strict_single_owner_lock");
 deepEqual(
   cfg.owner?.exclusive_permissions,
@@ -57,7 +65,7 @@ deepEqual(
   ],
   "owner.exclusive_permissions"
 );
-equal(cfg.support?.email, OWNER_EMAIL, "support.email");
+equal(cfg.support?.email, "support@safidata.app", "support.email");
 equal(cfg.support?.show_publicly, true, "support.show_publicly");
 
 // Authentication
@@ -73,17 +81,17 @@ deepEqual(cfg.auth?.oauth_providers, ["google", "apple", "github"], "auth.oauth_
 equal(cfg.auth?.motion_animations_enabled, true, "auth.motion_animations_enabled");
 
 // Roles
-equal(cfg.roles?.owner?.email_match, OWNER_EMAIL, "roles.owner.email_match");
+equal(
+  cfg.roles?.owner?.identity_resolution,
+  "server_platform_owner_table",
+  "roles.owner.identity_resolution"
+);
 equal(cfg.roles?.owner?.full_platform_access, true, "roles.owner.full_platform_access");
 equal(cfg.roles?.owner?.owner_console_access, true, "roles.owner.owner_console_access");
 const friend = cfg.roles?.friend;
 equal(friend?.label_ar, "صديق المالك (VIP Friend)", "roles.friend.label_ar");
 equal(friend?.label_en, "Owner's Friend (VIP)", "roles.friend.label_en");
-equal(
-  friend?.["granted_ exclusively_by"],
-  OWNER_EMAIL,
-  "roles.friend.granted_ exclusively_by"
-);
+equal(friend?.granted_exclusively_by, "owner", "roles.friend.granted_exclusively_by");
 deepEqual(friend?.price, { USD: 0, EGP: 0 }, "roles.friend.price");
 equal(friend?.all_paid_features_open, true, "roles.friend.all_paid_features_open");
 equal(friend?.removes_watermark, true, "roles.friend.removes_watermark");
@@ -363,10 +371,10 @@ equal(cfg.hosting?.egypt_option, "later", "hosting.egypt_option");
 // Languages and AI
 deepEqual(
   cfg.languages?.launch,
-  ["ar", "en", "fr", "es", "tr", "fa", "ur"],
+  ["en", "ar", "fr", "es", "tr", "fa", "ur"],
   "languages.launch"
 );
-equal(cfg.languages?.default, "ar", "languages.default");
+equal(cfg.languages?.default, "en", "languages.default");
 deepEqual(cfg.languages?.rtl, ["ar", "fa", "ur"], "languages.rtl");
 
 equal(cfg.ai?.in_1_0, true, "ai.in_1_0");

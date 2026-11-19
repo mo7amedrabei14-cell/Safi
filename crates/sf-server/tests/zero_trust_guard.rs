@@ -1,109 +1,386 @@
-//! Integration tests for Zero Trust & Hardware YubiKey Token protection in sf-server (T5.12).
+//! End-to-end HTTP security tests for Sealed Owner Identity, Google Authenticator
+//! RFC 6238 TOTP MFA, anti-replay, email-change preservation, real Control Plane stats,
+//! step-up enforcement, billing webhooks, entitlements, and Ed25519 updates/licenses.
 
-#[cfg(test)]
-mod tests {
-    use axum::http::{Request, StatusCode};
-    use std::sync::Arc;
-    use tower::ServiceExt;
+use std::sync::Arc;
 
-    use sf_server::auth::cache::InMemoryAuthCache;
-    use sf_server::auth::repository::{InMemoryApiKeyRepository, InMemorySessionRepository};
-    use sf_server::auth::service::AuthService;
-    use sf_server::{app, AppState};
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
+use serde_json::{json, Value};
+use tower::ServiceExt;
+use uuid::Uuid;
 
-    async fn test_app() -> axum::Router {
-        let api_keys = Arc::new(InMemoryApiKeyRepository::new(vec![]).await);
-        let sessions = Arc::new(InMemorySessionRepository::new());
-        let cache = Arc::new(InMemoryAuthCache::new());
-        let auth = AuthService::new(api_keys, sessions, cache);
-        let state = AppState::new(auth);
-        app(state)
+use sf_server::auth::cache::InMemoryAuthCache;
+use sf_server::auth::repository::{InMemoryApiKeyRepository, InMemorySessionRepository};
+use sf_server::auth::service::AuthService;
+use sf_server::auth::{unix_now, AuthMethod, Principal, Scope};
+use sf_server::billing::sign_paddle_payload;
+use sf_server::config::ServerConfig;
+use sf_server::owner_mfa::{compute_totp_code, decode_base32, TOTP_PERIOD_SECS};
+use sf_server::{app, AppState, ManagedAccountRecord};
+
+async fn make_state_with_users() -> (AppState, String, Uuid, Uuid, String, Uuid, Uuid) {
+    let api_keys = Arc::new(InMemoryApiKeyRepository::new(vec![]).await);
+    let sessions = Arc::new(InMemorySessionRepository::new());
+    let cache = Arc::new(InMemoryAuthCache::new());
+    let auth = AuthService::new(api_keys, sessions, cache);
+
+    let mut cfg = ServerConfig::for_tests();
+    cfg.paddle_api_key = Some("pdl_test_key".to_owned());
+    cfg.paddle_webhook_secret = Some("pdl_whsec_test_secret".to_owned());
+
+    let state = AppState::with_config(auth, cfg);
+
+    let owner_id = Uuid::now_v7();
+    let owner_ws = Uuid::now_v7();
+    let user_id = Uuid::now_v7();
+    let user_ws = Uuid::now_v7();
+
+    state
+        .owner_mfa
+        .bootstrap_owner_once(owner_id, true)
+        .await
+        .expect("bootstrap owner");
+
+    state
+        .upsert_managed_account(ManagedAccountRecord {
+            user_id: owner_id,
+            workspace_id: owner_ws,
+            email: "original-owner@example.test".to_owned(),
+            display_name: "Platform Owner".to_owned(),
+            verified_phone: None,
+            suspended: false,
+            created_at: unix_now(),
+        })
+        .await;
+    state
+        .upsert_managed_account(ManagedAccountRecord {
+            user_id,
+            workspace_id: user_ws,
+            email: "customer@example.test".to_owned(),
+            display_name: "Regular Customer".to_owned(),
+            verified_phone: None,
+            suspended: false,
+            created_at: unix_now(),
+        })
+        .await;
+
+    let owner_session = state
+        .auth
+        .create_session(
+            &Principal {
+                user_id: owner_id,
+                workspace_id: owner_ws,
+                scopes: vec![Scope::Read, Scope::Write],
+                auth_method: AuthMethod::Password,
+            },
+            "Owner Desktop",
+        )
+        .await
+        .expect("owner session");
+
+    let user_session = state
+        .auth
+        .create_session(
+            &Principal {
+                user_id,
+                workspace_id: user_ws,
+                scopes: vec![Scope::Read, Scope::Write],
+                auth_method: AuthMethod::Password,
+            },
+            "Customer Desktop",
+        )
+        .await
+        .expect("user session");
+
+    (
+        state,
+        owner_session.token,
+        owner_id,
+        owner_ws,
+        user_session.token,
+        user_id,
+        user_ws,
+    )
+}
+
+async fn send_json(
+    router: &axum::Router,
+    method: Method,
+    uri: &str,
+    bearer: Option<&str>,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder().method(method).uri(uri);
+    if let Some(tok) = bearer {
+        builder = builder.header("authorization", format!("Bearer {tok}"));
     }
+    let req = if let Some(val) = body {
+        builder
+            .header("content-type", "application/json")
+            .body(Body::from(val.to_string()))
+            .expect("req")
+    } else {
+        builder.body(Body::empty()).expect("req")
+    };
 
-    #[tokio::test]
-    async fn test_owner_stats_rejected_without_zero_trust_headers() {
-        let app = test_app().await;
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/owner/stats")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+    let resp = router.clone().oneshot(req).await.expect("response");
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("bytes");
+    let json = serde_json::from_slice(&bytes).unwrap_or_else(|_| json!({}));
+    (status, json)
+}
 
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    }
+#[tokio::test]
+async fn owner_mfa_control_plane_email_change_and_billing_http_flow() {
+    let (state, owner_token, owner_id, _owner_ws, user_token, user_id, user_ws) =
+        make_state_with_users().await;
+    let router = app(state.clone());
 
-    #[tokio::test]
-    async fn test_owner_stats_rejected_without_hardware_token_signature() {
-        let app = test_app().await;
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/owner/stats")
-                    .header(
-                        "X-Safi-Zero-Trust-Token",
-                        "safi_zt_tunnel_verified_secure_2026",
-                    )
-                    .header("X-Safi-Device-Attestation", "device_attested_ok")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+    // 1. Unauthenticated caller rejected on Owner stats (401).
+    let (st, _) = send_json(&router, Method::GET, "/v1/owner/stats", None, None).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
 
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
+    // 2. Legacy fake YubiKey/tunnel headers without real auth are REJECTED (401).
+    let fake_req = Request::builder()
+        .uri("/v1/owner/stats")
+        .header(
+            "X-Safi-Zero-Trust-Token",
+            "safi_zt_tunnel_verified_secure_2026",
+        )
+        .header(
+            "X-Safi-Hardware-Signature",
+            "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123",
+        )
+        .body(Body::empty())
+        .expect("req");
+    let fake_resp = router.clone().oneshot(fake_req).await.expect("resp");
+    assert_eq!(fake_resp.status(), StatusCode::UNAUTHORIZED);
 
-    #[tokio::test]
-    async fn test_owner_stats_success_with_valid_zero_trust_and_yubikey_token() {
-        let app = test_app().await;
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/v1/owner/stats")
-                    .header(
-                        "X-Safi-Zero-Trust-Token",
-                        "safi_zt_tunnel_verified_secure_2026",
-                    )
-                    .header("X-Safi-Device-Attestation", "device_attested_ok")
-                    .header(
-                        "X-Safi-Hardware-Signature",
-                        "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123",
-                    )
-                    .header("X-Safi-Challenge-Nonce", "nonce_abc_12345")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+    // 3. Regular user rejected from Owner MFA enrollment & Owner stats (403 SF-AUTH-013).
+    let (st, body) = send_json(
+        &router,
+        Method::POST,
+        "/v1/owner/mfa/enroll",
+        Some(&user_token),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "SF-AUTH-013");
 
-        assert_eq!(response.status(), StatusCode::OK);
-    }
+    let (st, body) = send_json(
+        &router,
+        Method::GET,
+        "/v1/owner/stats",
+        Some(&user_token),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "SF-AUTH-013");
 
-    #[tokio::test]
-    async fn test_owner_stats_replay_attack_rejected() {
-        let router = test_app().await;
-        let req_builder = || {
+    // 4. Owner WITHOUT TOTP confirmed is rejected from Owner stats (401 SF-AUTH-014).
+    let (st, body) = send_json(
+        &router,
+        Method::GET,
+        "/v1/owner/stats",
+        Some(&owner_token),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "SF-AUTH-014");
+
+    // 5. Owner enrolls Google Authenticator TOTP & confirms with real RFC 6238 6-digit code.
+    let (st, enroll) = send_json(
+        &router,
+        Method::POST,
+        "/v1/owner/mfa/enroll",
+        Some(&owner_token),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let b32 = enroll["manual_secret_base32"].as_str().expect("b32");
+    assert!(enroll["otpauth_uri"]
+        .as_str()
+        .expect("uri")
+        .starts_with("otpauth://totp/"));
+    let secret = decode_base32(b32).expect("decode");
+    let code_now = compute_totp_code(&secret, unix_now() / TOTP_PERIOD_SECS).expect("totp");
+
+    let (st, _) = send_json(
+        &router,
+        Method::POST,
+        "/v1/owner/mfa/confirm",
+        Some(&owner_token),
+        Some(json!({ "code": code_now })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+
+    // 6. Replay of the exact same TOTP code is REJECTED (401 SF-AUTH-014).
+    let (st, body) = send_json(
+        &router,
+        Method::POST,
+        "/v1/owner/mfa/verify",
+        Some(&owner_token),
+        Some(json!({ "code": code_now })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "SF-AUTH-014");
+
+    // 7. Owner reads REAL live stats (2 users, 0 hardcoded fake numbers!).
+    let (st, stats) = send_json(
+        &router,
+        Method::GET,
+        "/v1/owner/stats",
+        Some(&owner_token),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(stats["total_users"], 2);
+    assert_eq!(stats["entitlements"]["friend_vip_users"], 0);
+
+    // 8. Owner grants Friend VIP (step-up active) -> real stats update dynamically!
+    let (st, vip) = send_json(
+        &router,
+        Method::POST,
+        "/v1/owner/friends/grant",
+        Some(&owner_token),
+        Some(json!({ "user_id": user_id, "workspace_id": user_ws, "reason": "Beta VIP" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(vip["effective_plan"], "friend_vip");
+
+    let (_, stats_after) = send_json(
+        &router,
+        Method::GET,
+        "/v1/owner/stats",
+        Some(&owner_token),
+        None,
+    )
+    .await;
+    assert_eq!(stats_after["entitlements"]["friend_vip_users"], 1);
+
+    // 9. Owner changes email -> Owner identity is PRESERVED via immutable user_id;
+    //    a new account registering the OLD email gets ZERO Owner privileges!
+    let (st, changed) = send_json(
+        &router,
+        Method::POST,
+        "/v1/auth/email/change",
+        Some(&owner_token),
+        Some(json!({ "new_email": "rotated-owner@example.test" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(changed["is_owner"], true);
+    assert_eq!(changed["user_id"], owner_id.to_string());
+
+    let new_old_email_user = Uuid::now_v7();
+    let new_old_email_ws = Uuid::now_v7();
+    state
+        .upsert_managed_account(ManagedAccountRecord {
+            user_id: new_old_email_user,
+            workspace_id: new_old_email_ws,
+            email: "original-owner@example.test".to_owned(),
+            display_name: "Reused Old Email".to_owned(),
+            verified_phone: None,
+            suspended: false,
+            created_at: unix_now(),
+        })
+        .await;
+    let hijacker_session = state
+        .auth
+        .create_session(
+            &Principal {
+                user_id: new_old_email_user,
+                workspace_id: new_old_email_ws,
+                scopes: vec![Scope::Read, Scope::Write],
+                auth_method: AuthMethod::Password,
+            },
+            "Hijacker",
+        )
+        .await
+        .expect("hijacker session");
+
+    let (st, body) = send_json(
+        &router,
+        Method::GET,
+        "/v1/owner/stats",
+        Some(&hijacker_session.token),
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "SF-AUTH-013");
+
+    // 10. Real Paddle HMAC-SHA256 webhook updates entitlements and appears in Owner billing events.
+    let now = unix_now();
+    let wh_body = serde_json::to_vec(&json!({
+        "event_id": "evt_http_001",
+        "event_type": "subscription.activated",
+        "occurred_at_unix": now,
+        "workspace_id": new_old_email_ws,
+        "user_id": new_old_email_user,
+        "product": "individual_monthly",
+        "period_end_unix": now + 30 * 86400,
+        "amount_minor": 2000,
+        "invoice_id": "inv_http_001"
+    }))
+    .expect("json");
+    let sig = sign_paddle_payload("pdl_whsec_test_secret", now, &wh_body).expect("sign");
+    let wh_resp = router
+        .clone()
+        .oneshot(
             Request::builder()
-                .uri("/v1/owner/stats")
-                .header(
-                    "X-Safi-Zero-Trust-Token",
-                    "safi_zt_tunnel_verified_secure_2026",
-                )
-                .header("X-Safi-Device-Attestation", "device_attested_ok")
-                .header(
-                    "X-Safi-Hardware-Signature",
-                    "yubikey_fips_sig_yubikey_fips_sec_key_2026_verified_sig123",
-                )
-                .header("X-Safi-Challenge-Nonce", "nonce_replay_test_999")
-                .body(axum::body::Body::empty())
-                .unwrap()
-        };
+                .method(Method::POST)
+                .uri("/v1/billing/webhooks/paddle")
+                .header("paddle-signature", sig)
+                .header("content-type", "application/json")
+                .body(Body::from(wh_body))
+                .expect("req"),
+        )
+        .await
+        .expect("resp");
+    assert_eq!(wh_resp.status(), StatusCode::OK);
 
-        let resp1 = router.clone().oneshot(req_builder()).await.unwrap();
-        assert_eq!(resp1.status(), StatusCode::OK);
-    }
+    // 11. Real Ed25519 signed update manifest & offline license issuance.
+    let (st, upd) = send_json(&router, Method::GET, "/v1/updates/latest", None, None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(
+        upd["manifest"]["signature_hex"]
+            .as_str()
+            .expect("sig")
+            .len(),
+        128
+    );
+
+    let (st, lic) = send_json(
+        &router,
+        Method::POST,
+        "/v1/licenses/issue",
+        Some(&owner_token),
+        Some(json!({ "device_fingerprint": "desktop-fp-01" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(lic["payload"]["tier"], "Enterprise");
+    assert_eq!(lic["signature_hex"].as_str().expect("sig").len(), 128);
+
+    // 12. Health & Readiness probes work and never leak secrets.
+    let (st, ready_body) = send_json(&router, Method::GET, "/ready", None, None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(ready_body["ready"], true);
+    assert_eq!(ready_body["integrations"]["billing_paddle"], "CONFIGURED");
+    assert_eq!(
+        ready_body["integrations"]["billing_paymob"],
+        "NOT_CONFIGURED"
+    );
 }

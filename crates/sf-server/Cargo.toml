@@ -7,18 +7,27 @@ edition = "2021"
 argon2 = "=0.6.0"
 async-trait = "=0.1.92"
 axum = "=0.8.4"
+base64 = "=0.22.1"
 blake3 = "=1.5.5"
+ed25519-dalek = { version = "=2.2.0", features = ["serde"] }
 hex = "=0.4.3"
+hmac = "=0.12.1"
 lettre = { version = "=0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls", "rustls", "ring", "webpki-roots"] }
 rand = "=0.8.8"
 redis = { version = "=0.32.7", default-features = false, features = ["tokio-comp"] }
+ring = "=0.17.14"
 serde = { version = "=1.0.217", features = ["derive"] }
 serde_json = "=1.0.135"
+sha1 = "=0.10.7"
+sha2 = "=0.10.9"
 sqlx = { version = "=0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "uuid"] }
 subtle = "=2.6.1"
+time = { version = "=0.3.44", features = ["formatting"] }
 tokio = { version = "=1.54.1", features = ["full"] }
 tracing = "=0.1.44"
+url = "=2.5.8"
 uuid = { version = "=1.10.0", features = ["serde", "v4", "v7"] }
+zeroize = { version = "=1.9.1", features = ["zeroize_derive"] }
 
 [dev-dependencies]
 tower = { version = "=0.5.3", features = ["util"] }

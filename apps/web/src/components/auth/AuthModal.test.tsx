@@ -19,7 +19,7 @@ describe("SafiData motion auth portal", () => {
     expect(html).toContain('aria-label="Continue with Google"');
     expect(html).toContain("Email address");
     expect(html).toContain("Password");
-    expect(html).toContain("mo7amed.rabei14@gmail.com");
+    expect(html).not.toContain("@gmail.com");
   });
 
   it("exposes the eight-character minimum with a live meter and an eye toggle", () => {
@@ -42,20 +42,21 @@ describe("SafiData motion auth portal", () => {
     expect(source).toContain("DUPLICATE_ACCOUNT_MESSAGE_AR");
     expect(source).toContain("Go to sign in");
     expect(source).toContain('switchMode("signin")');
-    expect(source).toContain("isOwnerEmail(normalizedEmail)");
+    expect(source).toContain("result.is_owner === true");
   });
 
-  it("renders the verified owner badge for an owner session", () => {
+  it("renders the verified platform owner badge strictly from server-confirmed sessionIsOwner", () => {
     const html = renderToString(
       createElement(AuthModal, {
         open: true,
         onClose: noop,
         sessionToken: "sfs_owner_session",
-        sessionEmail: "mo7amed.rabei14@gmail.com"
+        sessionEmail: "owner@example.test",
+        sessionIsOwner: true
       })
     );
 
-    expect(html).toContain("Verified Owner — Mohamed Rabea");
+    expect(html).toContain("Verified Platform Owner");
     expect(html).not.toContain("sfs_owner_session");
   });
   it("isolates its bespoke thin scrollbar and renders animated tabs, form stage, and pointer-only magnet/glare layers", () => {

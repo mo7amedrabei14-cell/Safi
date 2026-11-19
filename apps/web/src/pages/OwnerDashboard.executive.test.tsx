@@ -3,85 +3,48 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { OwnerDashboard } from "./OwnerDashboard";
 
-describe("Executive owner dashboard", () => {
-  it("shows the strict owner identity and all three time horizons", () => {
+describe("Real Owner Control Plane (Google Authenticator TOTP + sealed identity)", () => {
+  it("denies access by default when no server-authenticated Owner session is provided", () => {
     const html = renderToString(createElement(OwnerDashboard, { lang: "en" }));
 
-    expect(html).toContain("mo7amed.rabei14@gmail.com");
-    expect(html).toContain('aria-label="Time horizon filter"');
-    expect(html).toContain('data-horizon="monthly"');
-    expect(html).toContain("Monthly");
-    expect(html).toContain("Quarterly (Q1–Q4)");
-    expect(html).toContain("Annual");
-    expect(html).toContain("MoM%");
+    expect(html).toContain('data-owner-access="denied"');
+    expect(html).toContain("SF-AUTH-013");
+    expect(html).toContain("Google Authenticator");
+    // Must NEVER expose fake hardcoded metrics or YubiKey stubs.
+    expect(html).not.toContain("14280");
+    expect(html).not.toContain("509800");
+    expect(html).not.toContain("YubiKey");
   });
 
-  it("lists every detailed user segment and its price", () => {
-    const html = renderToString(createElement(OwnerDashboard, { lang: "en" }));
-
-    for (const label of [
-      "Total users",
-      "Active 7-day trials",
-      "Free plan users",
-      "Individual monthly subscribers",
-      "Individual annual subscribers",
-      "Organization seats",
-      "Friend VIP members",
-      "Credit pack buyers (25 ops)",
-      "Pay-per-file buyers",
-      "Monthly recurring revenue (USD)",
-      "Monthly recurring revenue (EGP)",
-      "Annual recurring revenue (USD)",
-      "Annual recurring revenue (EGP)",
-      "Trial-to-paid conversion",
-      "Churn rate",
-      "Rows cleaned",
-      "PII fields masked",
-      "AI calls used"
-    ]) {
-      expect(html).toContain(label);
-    }
-
-    expect(html).toContain("1,000 EGP / $20");
-    expect(html).toContain("8,400 EGP / $168");
-    expect(html).toContain("850 EGP / $17");
-    expect(html).toContain("400");
-  });
-
-  it("keeps the Friend VIP manager and the full subscriber action table", () => {
-    const html = renderToString(createElement(OwnerDashboard, { lang: "en" }));
-
-    expect(html).toContain("Owner Friend VIP access manager");
-    expect(html).toContain("Grant full Friend access for free");
-    expect(html).toContain("Subscriber and operations management");
-    expect(html).toContain("Promote to Friend VIP");
-    expect(html).toContain("Extend trial");
-    expect(html).toContain("Cancel subscription");
-    expect(html).toContain("Issue refund (within 3 days)");
-    expect(html).toContain("Suspend account");
-    expect(html).toContain('type="search"');
-  });
-
-  it("keeps the six-card console and refuses every non-owner viewer", () => {
-    const ownerHtml = renderToString(createElement(OwnerDashboard, { lang: "en" }));
-    expect(ownerHtml).toContain("1. Publish an update");
-
-    const denied = renderToString(
-      createElement(OwnerDashboard, { lang: "en", viewerEmail: "friend@example.test" })
+  it("gates an authenticated Owner behind real Google Authenticator RFC 6238 TOTP MFA", () => {
+    const html = renderToString(
+      createElement(OwnerDashboard, {
+        lang: "en",
+        isOwner: true,
+        sessionToken: "sfs_test_session_token_for_render"
+      })
     );
-    expect(denied).toContain("reserved for the exclusive owner");
-    expect(denied).toContain("mo7amed.rabei14@gmail.com");
-    expect(denied).not.toContain("1. Publish an update");
+
+    expect(html).toContain('data-owner-mfa="required"');
+    expect(html).toContain("Google Authenticator");
+    expect(html).toContain("RFC 6238");
+    expect(html).not.toContain('data-owner-access="granted"');
+    expect(html).not.toMatch(/[\u0600-\u06FF]/);
   });
 
-  it("renders Arabic executive copy and never leaks Arabic into English", () => {
-    const arabic = renderToString(createElement(OwnerDashboard, { lang: "ar" }));
-    expect(arabic).toContain("المالك الحصري المعتمد");
-    expect(arabic).toContain("ربع سنوي (Q1–Q4)");
-    expect(arabic).toContain("إدارة صلاحية أصدقاء المالك");
-    expect(arabic).toContain("تمديد التجربة");
+  it("renders clean Arabic MFA and denial copy when lang is ar", () => {
+    const deniedAr = renderToString(createElement(OwnerDashboard, { lang: "ar" }));
+    expect(deniedAr).toContain("الوصول محصور بمالك المنصة المعتمد");
+    expect(deniedAr).toContain("Google Authenticator");
 
-    const english = renderToString(createElement(OwnerDashboard, { lang: "en" }));
-    expect(english).not.toMatch(/[\u0600-\u06FF]/);
+    const mfaAr = renderToString(
+      createElement(OwnerDashboard, {
+        lang: "ar",
+        isOwner: true,
+        sessionToken: "sfs_test_session_token_for_render"
+      })
+    );
+    expect(mfaAr).toContain("التحقق الثنائي لمالك المنصة (Google Authenticator)");
+    expect(mfaAr).toContain("أدخل الرمز المكوّن من 6 أرقام");
   });
 });

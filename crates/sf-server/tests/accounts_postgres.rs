@@ -9,11 +9,18 @@ use sf_server::accounts::{
     AccountStatus, CustomerAccountService, SqlxCustomerAccountRepository, SubscriptionEventDraft,
     SubscriptionEventType,
 };
-use sf_server::auth::identity::OWNER_EMAIL;
 use sf_server::error::AuthError;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+fn pg_test_owner_id() -> Uuid {
+    Uuid::from_u128(0x0195_0000_0000_7000_8000_0000_0000_0099)
+}
+
+fn pg_test_customer_id() -> Uuid {
+    Uuid::from_u128(0x0195_0000_0000_7000_8000_0000_0000_0098)
+}
 
 async fn insert_customer(
     admin: &PgPool,
@@ -107,27 +114,29 @@ async fn owner_reads_and_updates_customers_across_workspaces() {
     )
     .await;
 
-    let service =
-        CustomerAccountService::new(Arc::new(SqlxCustomerAccountRepository::new(app.clone())));
+    let service = CustomerAccountService::new(
+        Arc::new(SqlxCustomerAccountRepository::new(app.clone())),
+        pg_test_owner_id(),
+    );
 
     assert_eq!(
         service
-            .list_accounts("customer@example.test")
+            .list_accounts(pg_test_customer_id())
             .await
             .unwrap_err(),
-        AuthError::InsufficientScope,
+        AuthError::OwnerRequired,
         "a non-owner must not read the customer database"
     );
     assert_eq!(
         service
-            .suspend_account("customer@example.test", user_b, 1)
+            .suspend_account(pg_test_customer_id(), user_b, 1)
             .await
             .unwrap_err(),
-        AuthError::InsufficientScope
+        AuthError::OwnerRequired
     );
 
     let accounts = service
-        .list_accounts(OWNER_EMAIL)
+        .list_accounts(pg_test_owner_id())
         .await
         .expect("owner reads every customer workspace");
     let alpha = accounts
@@ -148,7 +157,7 @@ async fn owner_reads_and_updates_customers_across_workspaces() {
     assert_eq!(beta.workspace_id, workspace_b);
 
     service
-        .suspend_account(OWNER_EMAIL, user_b, 1_780_000_000)
+        .suspend_account(pg_test_owner_id(), user_b, 1_780_000_000)
         .await
         .expect("owner suspends the beta account");
 
@@ -160,7 +169,7 @@ async fn owner_reads_and_updates_customers_across_workspaces() {
     .await
     .expect("suspension timestamp is persisted");
     assert_eq!(suspended_at, Some(1_780_000_000));
-    let accounts = service.list_accounts(OWNER_EMAIL).await.unwrap();
+    let accounts = service.list_accounts(pg_test_owner_id()).await.unwrap();
     assert_eq!(
         accounts
             .iter()
@@ -171,7 +180,7 @@ async fn owner_reads_and_updates_customers_across_workspaces() {
     );
 
     service
-        .restore_account(OWNER_EMAIL, user_b)
+        .restore_account(pg_test_owner_id(), user_b)
         .await
         .expect("owner restores the beta account");
     let restored: bool = sqlx::query_scalar("SELECT suspended_at IS NULL FROM users WHERE id = $1")
@@ -183,7 +192,7 @@ async fn owner_reads_and_updates_customers_across_workspaces() {
 
     let event_id = service
         .record_subscription_event(
-            OWNER_EMAIL,
+            pg_test_owner_id(),
             &SubscriptionEventDraft {
                 workspace_id: workspace_a,
                 subscription_id: Some(subscription_a),
@@ -303,8 +312,10 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
     )
     .await;
 
-    let service =
-        CustomerAccountService::new(Arc::new(SqlxCustomerAccountRepository::new(app.clone())));
+    let service = CustomerAccountService::new(
+        Arc::new(SqlxCustomerAccountRepository::new(app.clone())),
+        pg_test_owner_id(),
+    );
 
     let at: i64 = sqlx::query_scalar(
         "SELECT EXTRACT(EPOCH FROM TIMESTAMPTZ '2026-01-31 00:00:00+00')::bigint",
@@ -326,7 +337,7 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
     .expect("March end timestamp");
 
     let free = service
-        .current_subscription(OWNER_EMAIL, workspace_id)
+        .current_subscription(pg_test_owner_id(), workspace_id)
         .await
         .expect("owner reads the current subscription")
         .expect("the free subscription exists");
@@ -335,14 +346,14 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
     assert_eq!(
         service
             .change_plan(
-                "customer@example.test",
+                pg_test_customer_id(),
                 workspace_id,
                 "individual_monthly",
                 at
             )
             .await
             .unwrap_err(),
-        AuthError::InsufficientScope,
+        AuthError::OwnerRequired,
         "a non-owner must not change a plan"
     );
 
@@ -374,7 +385,7 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
 
     assert_eq!(
         service
-            .change_plan(OWNER_EMAIL, workspace_id, "individual_monthly", at)
+            .change_plan(pg_test_owner_id(), workspace_id, "individual_monthly", at)
             .await
             .unwrap_err(),
         AuthError::BackendUnavailable,
@@ -405,7 +416,7 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
     assert_eq!(events_after_failure, 0);
 
     let changed = service
-        .change_plan(OWNER_EMAIL, workspace_id, "individual_monthly", at)
+        .change_plan(pg_test_owner_id(), workspace_id, "individual_monthly", at)
         .await
         .expect("owner changes the plan");
     assert_eq!(changed.plan_code, "individual_monthly");
@@ -421,14 +432,20 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
     assert_eq!(workspace_plan, "individual_monthly");
 
     let renewed = service
-        .renew_subscription(OWNER_EMAIL, workspace_id, at, Some(2000), Some("USD"))
+        .renew_subscription(
+            pg_test_owner_id(),
+            workspace_id,
+            at,
+            Some(2000),
+            Some("USD"),
+        )
         .await
         .expect("owner renews the subscription");
     assert_eq!(renewed.current_period_end, Some(end_of_march));
     assert!(!renewed.cancel_at_period_end);
 
     let scheduled = service
-        .cancel_subscription(OWNER_EMAIL, workspace_id, at + 3_600, true)
+        .cancel_subscription(pg_test_owner_id(), workspace_id, at + 3_600, true)
         .await
         .expect("owner schedules cancellation");
     assert_eq!(scheduled.status, "active");
@@ -436,14 +453,14 @@ async fn subscription_lifecycle_is_atomic_and_audited() {
     assert_eq!(scheduled.canceled_at, None);
 
     let canceled = service
-        .cancel_subscription(OWNER_EMAIL, workspace_id, at + 7_200, false)
+        .cancel_subscription(pg_test_owner_id(), workspace_id, at + 7_200, false)
         .await
         .expect("owner cancels immediately");
     assert_eq!(canceled.status, "canceled");
     assert_eq!(canceled.canceled_at, Some(at + 7_200));
     assert_eq!(
         service
-            .current_subscription(OWNER_EMAIL, workspace_id)
+            .current_subscription(pg_test_owner_id(), workspace_id)
             .await
             .unwrap(),
         None,

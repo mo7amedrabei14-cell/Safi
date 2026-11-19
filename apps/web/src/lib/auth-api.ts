@@ -10,6 +10,8 @@ export interface SafiAuthSession {
 export interface SafiLoginResponse {
   readonly token: string;
   readonly session: SafiAuthSession;
+  readonly is_owner?: boolean;
+  readonly mfa_required?: boolean;
 }
 
 export class SafiAuthConfigurationError extends Error {

@@ -2,9 +2,11 @@
  * Pure authentication rules shared by the auth portal and its tests.
  *
  * Every threshold comes from `config/business.json` through
- * `lib/business-config.ts`; nothing is duplicated in the interface.
+ * `lib/business-config.ts`. Owner privilege is NEVER determined from an email
+ * address on the client; it is resolved exclusively by the backend from the
+ * immutable sealed `platform_owner.owner_user_id` table.
  */
-import { MIN_PASSWORD_LENGTH, OWNER_EMAIL } from "./business-config";
+import { MIN_PASSWORD_LENGTH } from "./business-config";
 
 export interface ExistingAccountIdentity {
   readonly normalizedEmail: string;
@@ -42,10 +44,6 @@ export function normalizePhone(raw: string): string {
   if (digits.length === 12 && digits.startsWith("20")) return digits.slice(2);
   if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
   return digits;
-}
-
-export function isOwnerEmail(raw: string): boolean {
-  return normalizeEmail(raw) === OWNER_EMAIL;
 }
 
 export function meetsMinPasswordLength(password: string): boolean {

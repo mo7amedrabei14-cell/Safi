@@ -47,6 +47,9 @@ try {
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
   const context = await browser.newContext();
   const page = await context.newPage();
+  await page.addInitScript(() => {
+    window.__TAURI_INTERNALS__ = { invoke: async () => ({ ok: true }) };
+  });
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
 
   await page.locator(".safi-intro-skip").click();
@@ -103,7 +106,10 @@ try {
     first.installationId,
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
   );
-  assert.equal(first.platform, "web");
+  assert.ok(
+    first.platform === "windows" || first.platform === "linux" || first.platform === "macos",
+    `Expected desktop platform, received ${first.platform}`
+  );
   assert.equal(second.installationId, first.installationId);
   assert.equal(second.platform, "web");
 

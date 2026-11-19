@@ -7,7 +7,8 @@
     "note": "Centralized in config/business.json and packages/brand."
   },
   "owner": {
-    "email": "mo7amed.rabei14@gmail.com",
+    "identity_mode": "internal_immutable_user_id",
+    "mfa_policy": "rfc6238_totp_google_authenticator",
     "strict_single_owner_lock": true,
     "exclusive_permissions": [
       "access_owner_dashboard",
@@ -20,7 +21,7 @@
     ]
   },
   "support": {
-    "email": "mo7amed.rabei14@gmail.com",
+    "email": "support@safidata.app",
     "show_publicly": true
   },
   "auth": {
@@ -33,14 +34,14 @@
   },
   "roles": {
     "owner": {
-      "email_match": "mo7amed.rabei14@gmail.com",
+      "identity_resolution": "server_platform_owner_table",
       "full_platform_access": true,
       "owner_console_access": true
     },
     "friend": {
       "label_ar": "صديق المالك (VIP Friend)",
       "label_en": "Owner's Friend (VIP)",
-      "granted_ exclusively_by": "mo7amed.rabei14@gmail.com",
+      "granted_exclusively_by": "owner",
       "price": { "USD": 0, "EGP": 0 },
       "all_paid_features_open": true,
       "removes_watermark": true,
@@ -213,8 +214,8 @@
     "egypt_option": "later"
   },
   "languages": {
-    "launch": ["ar", "en", "fr", "es", "tr", "fa", "ur"],
-    "default": "ar",
+    "launch": ["en", "ar", "fr", "es", "tr", "fa", "ur"],
+    "default": "en",
     "rtl": ["ar", "fa", "ur"]
   },
   "ai": {

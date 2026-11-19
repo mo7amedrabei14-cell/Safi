@@ -7,7 +7,7 @@
  * - Eight-character password floor (from `config/business.json`) with a live
  *   green check and an eye visibility toggle.
  * - Duplicate-account guard with a one-click path to the Sign In tab.
- * - Owner recognition for `mo7amed.rabei14@gmail.com`.
+ * - Server-authoritative session & Owner identity (zero hardcoded owner email).
  */
 import type {
   FormEvent,
@@ -45,18 +45,12 @@ import {
   DUPLICATE_ACCOUNT_MESSAGE_EN,
   PASSWORD_TOO_SHORT_MESSAGE_AR,
   PASSWORD_TOO_SHORT_MESSAGE_EN,
-  isOwnerEmail,
   meetsMinPasswordLength,
   normalizeEmail,
   validateSignUp,
   type ExistingAccountIdentity
 } from "../../lib/auth-rules";
-import {
-  MIN_PASSWORD_LENGTH,
-  OAUTH_PROVIDERS,
-  OWNER_EMAIL,
-  TRIAL_DAYS
-} from "../../lib/business-config";
+import { MIN_PASSWORD_LENGTH, OAUTH_PROVIDERS, TRIAL_DAYS } from "../../lib/business-config";
 import { canAnimate } from "../ui/motion-preference";
 
 export type AuthMode = "signin" | "signup";
@@ -80,6 +74,7 @@ export interface AuthModalProps {
   readonly existingAccounts?: readonly ExistingAccountIdentity[];
   readonly sessionToken?: string | null;
   readonly sessionEmail?: string | null;
+  readonly sessionIsOwner?: boolean;
   readonly onSignedOut?: () => void | Promise<void>;
   readonly onForgotPassword?: () => void;
 }
@@ -242,7 +237,8 @@ export function AuthModal({
   onOAuth,
   existingAccounts = [],
   sessionToken = null,
-  sessionEmail = null,
+  sessionEmail: _sessionEmail = null,
+  sessionIsOwner = false,
   onSignedOut,
   onForgotPassword
 }: AuthModalProps): ReactNode {
@@ -259,7 +255,6 @@ export function AuthModal({
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [ownerRecognized, setOwnerRecognized] = useState(() => isOwnerEmail(email));
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
   const tablistRef = useRef<HTMLDivElement | null>(null);
@@ -691,17 +686,16 @@ export function AuthModal({
           installation_id: device.installationId,
           platform: device.platform
         });
-        const owner = isOwnerEmail(normalizedEmail);
+        const owner = result.is_owner === true;
         await onAuthenticated?.({ token: result.token, email: normalizedEmail, isOwner: owner });
-        setOwnerRecognized(owner);
         setPassword("");
         if (owner) onOwnerDetected?.(normalizedEmail);
         setFeedback({
           kind: "success",
           message: owner
             ? isAr
-              ? "👑 تم التعرف على حساب المالك الموثق وفتح جميع صلاحيات الإدارة."
-              : "👑 Verified owner account recognized. Full administration is unlocked."
+              ? "تم تسجيل الدخول لحساب المالك. أكمل التحقق عبر Google Authenticator لفتح لوحة الإدارة."
+              : "Owner account signed in. Complete Google Authenticator verification to unlock administration."
             : isAr
               ? "تم تسجيل الدخول بنجاح."
               : "Signed in successfully."
@@ -799,7 +793,7 @@ export function AuthModal({
 
   if (!open) return null;
 
-  const ownerSession = sessionEmail !== null && isOwnerEmail(sessionEmail);
+  const ownerSession = sessionToken !== null && sessionIsOwner;
 
   return (
     <div
@@ -868,12 +862,8 @@ export function AuthModal({
           <div className="safi-auth-session">
             {ownerSession ? (
               <div className="safi-owner-verified" role="status">
-                <span aria-hidden="true">👑</span>
-                <span>
-                  {isAr
-                    ? "حساب المالك الموثق (Owner — Mohamed Rabea)"
-                    : "Verified Owner — Mohamed Rabea"}
-                </span>
+                <ShieldCheck size={15} aria-hidden="true" />
+                <span>{isAr ? "مالك المنصة المعتمد" : "Verified Platform Owner"}</span>
               </div>
             ) : null}
             <p>
@@ -992,19 +982,12 @@ export function AuthModal({
                       required
                       value={email}
                       onChange={(event) => {
-                        const next = event.currentTarget.value;
-                        setEmail(next);
-                        setOwnerRecognized(isOwnerEmail(next));
+                        setEmail(event.currentTarget.value);
                       }}
                       placeholder="name@example.com"
                       disabled={busy}
                       dir="ltr"
                     />
-                    {ownerRecognized ? (
-                      <span className="safi-auth-owner-hint" role="status">
-                        👑 {isAr ? "حساب المالك" : "Owner"}
-                      </span>
-                    ) : null}
                   </span>
                 </label>
 
@@ -1183,9 +1166,6 @@ export function AuthModal({
               {isAr
                 ? "بالمتابعة أنت توافق على سياسة الخصوصية. بيانات ملفاتك لا تترك جهازك."
                 : "By continuing you accept the privacy policy. Your file data never leaves your device."}
-            </p>
-            <p className="safi-auth-owner-email" dir="ltr">
-              {OWNER_EMAIL}
             </p>
           </>
         )}

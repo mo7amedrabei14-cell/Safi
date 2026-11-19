@@ -6,15 +6,15 @@ import { OwnerDashboard } from "./OwnerDashboard";
 describe("Owner dashboard locale", () => {
   it("renders English by default without Arabic interface copy", () => {
     const html = renderToString(createElement(OwnerDashboard, null));
-    expect(html).toContain("Owner Console v1");
-    expect(html).toContain("Security / operational event");
-    expect(html).toContain("Desktop release signature verification");
+    expect(html).toContain("Platform Owner Access Required");
+    expect(html).toContain("Google Authenticator");
+    expect(html).toContain("SF-AUTH-013");
     expect(html).not.toMatch(/[\u0600-\u06FF]/);
   });
 
   it("keeps Arabic copy when Arabic is explicitly selected", () => {
     const html = renderToString(createElement(OwnerDashboard, { lang: "ar" }));
-    expect(html).toContain("لوحة تحكم المالك");
-    expect(html).toContain("الحدث الأمني / التشغيلي");
+    expect(html).toContain("الوصول محصور بمالك المنصة المعتمد");
+    expect(html).toContain("Google Authenticator");
   });
 });

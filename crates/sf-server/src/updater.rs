@@ -1,8 +1,19 @@
-//! Update Server & Isolated Signing Service (Sections 9.8 and 8.4).
+//! Real Ed25519 Release Manifest Signing & Offline Desktop License Issuance (Phase 15).
+//!
+//! Security invariants:
+//! - Uses audited `ed25519-dalek` SigningKey/VerifyingKey exclusively.
+//! - Private signing keys exist ONLY server-side via `SAFI_UPDATE_SIGNING_PRIVATE_KEY` and
+//!   `SAFI_LICENSE_SIGNING_PRIVATE_KEY`; public verifying keys are exported safely for Desktop.
+//! - Zero hardcoded fake signatures (`"ed25519_verified_signature_manifest"` removed).
 
+use std::fmt;
+
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
+use crate::error::AuthError;
+
+/// Release manifest published by the update service and verified by `sf-desktop::updater`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseManifestRecord {
     pub version: u64,
@@ -15,93 +26,125 @@ pub struct ReleaseManifestRecord {
     pub release_notes: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SigningRequest {
-    pub version: u64,
-    pub binary_sha256: String,
-    pub owner_token: String,
+impl ReleaseManifestRecord {
+    /// Canonical byte representation matching `sf-desktop::updater::ReleaseManifest::canonical_signing_payload`.
+    #[must_use]
+    pub fn canonical_signing_payload(&self) -> Vec<u8> {
+        format!(
+            "safidata-update-v1|{}|{}|{}|{}",
+            self.version, self.min_required_version, self.delta_checksum, self.is_mandatory
+        )
+        .into_bytes()
+    }
 }
 
+/// Offline Desktop license payload matching `sf-desktop::license::LicensePayload`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SigningResponse {
-    pub version: u64,
+pub struct IssuedLicensePayload {
+    pub license_id: String,
+    pub user_id: String,
+    pub tier: String,
+    pub issued_at_secs: u64,
+    pub expires_at_secs: u64,
+    pub device_fingerprint: String,
+}
+
+/// Ed25519-signed offline license bundle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedLicenseBundle {
+    pub payload: IssuedLicensePayload,
     pub signature_hex: String,
-    pub signed_at_epoch: i64,
+    pub verifying_key_hex: String,
 }
 
-pub struct UpdateServerRegistry {
-    pub releases: HashMap<(String, String), ReleaseManifestRecord>, // (channel, platform) -> Manifest
+/// Server-side Ed25519 signer for both Desktop update manifests and offline licenses.
+#[derive(Clone)]
+pub struct ReleaseAndLicenseSigner {
+    update_signing_key: Option<SigningKey>,
+    license_signing_key: Option<SigningKey>,
 }
 
-impl UpdateServerRegistry {
-    pub fn new() -> Self {
+impl fmt::Debug for ReleaseAndLicenseSigner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReleaseAndLicenseSigner")
+            .field("update_key_configured", &self.update_signing_key.is_some())
+            .field(
+                "license_key_configured",
+                &self.license_signing_key.is_some(),
+            )
+            .finish()
+    }
+}
+
+impl ReleaseAndLicenseSigner {
+    #[must_use]
+    pub fn new(update_seed: Option<[u8; 32]>, license_seed: Option<[u8; 32]>) -> Self {
         Self {
-            releases: HashMap::new(),
+            update_signing_key: update_seed.map(|s| SigningKey::from_bytes(&s)),
+            license_signing_key: license_seed.map(|s| SigningKey::from_bytes(&s)),
         }
     }
 
-    pub fn publish_release(&mut self, record: ReleaseManifestRecord) {
-        self.releases
-            .insert((record.channel.clone(), record.platform.clone()), record);
+    #[must_use]
+    pub fn update_verifying_key_hex(&self) -> Option<String> {
+        self.update_signing_key
+            .as_ref()
+            .map(|k| hex::encode(VerifyingKey::from(k).to_bytes()))
     }
 
-    pub fn get_latest(&self, channel: &str, platform: &str) -> Option<&ReleaseManifestRecord> {
-        self.releases
-            .get(&(channel.to_string(), platform.to_string()))
-    }
-}
-
-pub struct IsolatedSigner {
-    pub authorized_owner_token: String,
-    pub audit_log: Vec<String>,
-}
-
-impl IsolatedSigner {
-    pub fn new(authorized_owner_token: &str) -> Self {
-        Self {
-            authorized_owner_token: authorized_owner_token.to_string(),
-            audit_log: Vec::new(),
-        }
+    #[must_use]
+    pub fn license_verifying_key_hex(&self) -> Option<String> {
+        self.license_signing_key
+            .as_ref()
+            .map(|k| hex::encode(VerifyingKey::from(k).to_bytes()))
     }
 
-    /// Isolated signing requires valid owner token (backed by physical YubiKey FIPS in production)
-    pub fn sign_release(&mut self, req: &SigningRequest) -> Result<SigningResponse, &'static str> {
-        if req.owner_token != self.authorized_owner_token {
-            self.audit_log.push(format!(
-                "REJECTED_SIGNING_UNAUTHORIZED_VERSION_{}",
-                req.version
-            ));
-            return Err(
-                "SF-AUTH-004: محاولة توقيع مرفوضة؛ يتطلب مفتاح أمان المالك (Hardware YubiKey FIPS)",
-            );
-        }
-        if req.binary_sha256.len() != 64
-            || !req.binary_sha256.chars().all(|c| c.is_ascii_hexdigit())
-        {
-            self.audit_log
-                .push(format!("REJECTED_SIGNING_INVALID_HASH_{}", req.version));
-            return Err("SF-UPD-006: بصمة SHA-256 للملف التنفيذي غير صالحة");
-        }
+    /// Sign a Desktop update manifest with the server's Ed25519 private key.
+    pub fn sign_manifest(
+        &self,
+        mut manifest: ReleaseManifestRecord,
+    ) -> Result<ReleaseManifestRecord, AuthError> {
+        let key = self
+            .update_signing_key
+            .as_ref()
+            .ok_or(AuthError::BackendUnavailable)?;
+        let sig = key.sign(&manifest.canonical_signing_payload());
+        manifest.signature_hex = hex::encode(sig.to_bytes());
+        Ok(manifest)
+    }
 
-        let sig = format!(
-            "ed25519_sig_verified_{}_{}",
-            req.version,
-            &req.binary_sha256[..12]
-        );
-        self.audit_log
-            .push(format!("SUCCESSFUL_SIGNING_VERSION_{}", req.version));
+    /// Verify a signed manifest against the corresponding Ed25519 verifying key.
+    pub fn verify_manifest(&self, manifest: &ReleaseManifestRecord) -> Result<(), AuthError> {
+        let key = self
+            .update_signing_key
+            .as_ref()
+            .ok_or(AuthError::BackendUnavailable)?;
+        let verifying_key = VerifyingKey::from(key);
+        let sig_bytes =
+            hex::decode(&manifest.signature_hex).map_err(|_| AuthError::InvalidCredentials)?;
+        let signature =
+            Signature::from_slice(&sig_bytes).map_err(|_| AuthError::InvalidCredentials)?;
+        verifying_key
+            .verify(&manifest.canonical_signing_payload(), &signature)
+            .map_err(|_| AuthError::InvalidCredentials)
+    }
 
-        Ok(SigningResponse {
-            version: req.version,
-            signature_hex: sig,
-            signed_at_epoch: 1778371200,
+    /// Sign an offline Desktop license payload with the server's Ed25519 license private key.
+    pub fn sign_license(
+        &self,
+        payload: IssuedLicensePayload,
+    ) -> Result<SignedLicenseBundle, AuthError> {
+        let key = self
+            .license_signing_key
+            .as_ref()
+            .ok_or(AuthError::BackendUnavailable)?;
+        let payload_bytes = serde_json::to_vec(&payload).map_err(|_| AuthError::InvalidRequest)?;
+        let sig = key.sign(&payload_bytes);
+        Ok(SignedLicenseBundle {
+            payload,
+            signature_hex: hex::encode(sig.to_bytes()),
+            verifying_key_hex: hex::encode(VerifyingKey::from(key).to_bytes()),
         })
-    }
-}
-
-impl Default for UpdateServerRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -110,52 +153,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_update_server_registry_and_manifest() {
-        let mut registry = UpdateServerRegistry::new();
-        let record = ReleaseManifestRecord {
+    fn real_ed25519_manifest_and_license_signing_rejects_tampering() {
+        let signer = ReleaseAndLicenseSigner::new(Some([0x31u8; 32]), Some([0x32u8; 32]));
+        let unsigned = ReleaseManifestRecord {
             version: 105,
-            channel: "stable".to_string(),
-            platform: "windows-x86_64".to_string(),
+            channel: "stable".to_owned(),
+            platform: "windows-x86_64".to_owned(),
             min_required_version: 100,
-            delta_checksum: "abcd1234sha256".to_string(),
-            signature_hex: "sig_abc".to_string(),
+            delta_checksum: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_owned(),
+            signature_hex: String::new(),
             is_mandatory: false,
-            release_notes: "تحسينات الأداء".to_string(),
+            release_notes: "SafiData Desktop 1.0 release".to_owned(),
         };
+        let signed = signer.sign_manifest(unsigned).expect("sign manifest");
+        assert_eq!(signed.signature_hex.len(), 128); // 64 bytes hex
+        assert!(signer.verify_manifest(&signed).is_ok());
 
-        registry.publish_release(record);
-        let fetched = registry.get_latest("stable", "windows-x86_64").unwrap();
-        assert_eq!(fetched.version, 105);
-        assert_eq!(fetched.min_required_version, 100);
+        let mut tampered = signed;
+        tampered.version = 999;
+        assert!(signer.verify_manifest(&tampered).is_err());
+
+        let lic = signer
+            .sign_license(IssuedLicensePayload {
+                license_id: "lic_001".to_owned(),
+                user_id: "usr_001".to_owned(),
+                tier: "Pro".to_owned(),
+                issued_at_secs: 1_795_000_000,
+                expires_at_secs: 1_797_592_000,
+                device_fingerprint: "dev_fp_01".to_owned(),
+            })
+            .expect("sign license");
+        assert_eq!(lic.signature_hex.len(), 128);
+        assert_eq!(lic.verifying_key_hex.len(), 64);
     }
 
     #[test]
-    fn test_isolated_signer_requires_owner_token() {
-        let mut signer = IsolatedSigner::new("owner_yubikey_secret_token_fips");
-        let req = SigningRequest {
+    fn unconfigured_signing_key_fails_closed() {
+        let signer = ReleaseAndLicenseSigner::new(None, None);
+        let unsigned = ReleaseManifestRecord {
             version: 105,
-            binary_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-                .to_string(),
-            owner_token: "wrong_token".to_string(),
+            channel: "stable".to_owned(),
+            platform: "windows-x86_64".to_owned(),
+            min_required_version: 100,
+            delta_checksum: "0".repeat(64),
+            signature_hex: String::new(),
+            is_mandatory: false,
+            release_notes: String::new(),
         };
-
-        let res = signer.sign_release(&req);
-        assert!(res.is_err());
-    }
-
-    #[test]
-    fn test_isolated_signer_success_flow() {
-        let mut signer = IsolatedSigner::new("owner_yubikey_secret_token_fips");
-        let req = SigningRequest {
-            version: 105,
-            binary_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-                .to_string(),
-            owner_token: "owner_yubikey_secret_token_fips".to_string(),
-        };
-
-        let res = signer.sign_release(&req).unwrap();
-        assert_eq!(res.version, 105);
-        assert!(res.signature_hex.starts_with("ed25519_sig_verified_"));
-        assert_eq!(signer.audit_log.len(), 1);
+        assert_eq!(
+            signer.sign_manifest(unsigned).unwrap_err(),
+            AuthError::BackendUnavailable
+        );
     }
 }

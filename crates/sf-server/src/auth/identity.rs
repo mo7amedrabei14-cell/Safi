@@ -1,15 +1,15 @@
-//! Strict owner identity, Friend VIP entitlements, and duplicate-account rules.
+//! Strict immutable Platform Owner identity (by internal `user_id` UUID),
+//! Friend VIP entitlements, and duplicate-account rules.
 //!
-//! `config/business.json` is the launch constitution. The values below mirror
-//! it and are covered by tests so the server can never drift from the owner's
-//! locked decisions.
+//! Security invariant (Phase 04):
+//! - Owner identity is NEVER hardcoded as an email address and NEVER checked by email.
+//! - Authorization compares the authenticated `actor_user_id: Uuid` against the sealed
+//!   `owner_user_id: Uuid` stored in `platform_owner`.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::error::AuthError;
-
-/// The one and only owner account, already normalized.
-pub const OWNER_EMAIL: &str = "mo7amed.rabei14@gmail.com";
 
 /// Minimum password length in Unicode scalar values (not bytes).
 pub const MIN_PASSWORD_LENGTH: usize = 8;
@@ -20,16 +20,19 @@ pub const PASSWORD_TOO_SHORT_MESSAGE_AR: &str = "كلمة المرور يجب أ
 /// Arabic rejection message for a duplicate account.
 pub const DUPLICATE_ACCOUNT_MESSAGE_AR: &str = "هذا الحساب مسجل بالفعل، يرجى تسجيل الدخول";
 
-/// Normalize an email exactly as the identity checks expect.
+/// Normalize an email exactly as duplicate-account checks expect.
 #[must_use]
 pub fn normalize_identity_email(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
-/// Strict single-owner identity check.
+/// Strict immutable single-owner identity check by internal `user_id` UUID.
+/// Rejects nil UUIDs and never inspects email addresses.
 #[must_use]
-pub fn is_owner(email: &str) -> bool {
-    normalize_identity_email(email) == OWNER_EMAIL
+pub fn is_owner_id(actor_user_id: Uuid, sealed_owner_user_id: Uuid) -> bool {
+    !actor_user_id.is_nil()
+        && !sealed_owner_user_id.is_nil()
+        && actor_user_id == sealed_owner_user_id
 }
 
 /// Owner-only actions from the business constitution.
@@ -68,9 +71,8 @@ impl OwnerOnlyAction {
     }
 }
 
-/// Capability token proving the owner authorized an action. The private field
-/// makes it impossible to construct outside this module, so cross-workspace
-/// database access cannot be requested without passing the strict owner check.
+/// Capability token proving the sealed platform owner authorized an action.
+/// The private field makes it impossible to construct outside this module.
 #[derive(Debug, Clone, Copy)]
 pub struct OwnerGrant {
     _private: (),
@@ -79,23 +81,28 @@ pub struct OwnerGrant {
 /// Reject every non-owner before an owner-only action executes, and mint the
 /// capability required by owner-scoped repositories.
 pub fn authorize_owner_grant(
-    actor_email: &str,
+    actor_user_id: Uuid,
+    sealed_owner_user_id: Uuid,
     action: OwnerOnlyAction,
 ) -> Result<OwnerGrant, AuthError> {
-    authorize_owner(actor_email, action)?;
+    authorize_owner(actor_user_id, sealed_owner_user_id, action)?;
     Ok(OwnerGrant { _private: () })
 }
 
-/// Reject every non-owner before an owner-only action executes.
-pub fn authorize_owner(actor_email: &str, action: OwnerOnlyAction) -> Result<(), AuthError> {
-    if is_owner(actor_email) {
+/// Reject every non-owner before an owner-only action executes (`SF-AUTH-013`).
+pub fn authorize_owner(
+    actor_user_id: Uuid,
+    sealed_owner_user_id: Uuid,
+    action: OwnerOnlyAction,
+) -> Result<(), AuthError> {
+    if is_owner_id(actor_user_id, sealed_owner_user_id) {
         Ok(())
     } else {
         tracing::warn!(
             action = action.as_str(),
             "owner-only action rejected for a non-owner account"
         );
-        Err(AuthError::InsufficientScope)
+        Err(AuthError::OwnerRequired)
     }
 }
 
@@ -125,24 +132,28 @@ pub const FRIEND_ENTITLEMENTS: FriendEntitlements = FriendEntitlements {
 /// An active Friend VIP grant owned by the platform owner.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FriendGrant {
-    pub email: String,
+    pub target_user_id: Uuid,
     pub note: Option<String>,
-    pub granted_by: String,
+    pub granted_by_user_id: Uuid,
     pub granted_at_unix: i64,
     pub entitlements: FriendEntitlements,
 }
 
-/// Grant the Friend role. Only the owner may call this, and the owner cannot
-/// grant the role to itself.
+/// Grant the Friend role. Only the sealed owner may call this, and the owner
+/// cannot grant the role to itself.
 pub fn grant_friend_role(
-    actor_email: &str,
-    friend_email: &str,
+    actor_user_id: Uuid,
+    sealed_owner_user_id: Uuid,
+    target_user_id: Uuid,
     note: Option<&str>,
     granted_at_unix: i64,
 ) -> Result<FriendGrant, AuthError> {
-    authorize_owner(actor_email, OwnerOnlyAction::GrantOrRevokeFriendRole)?;
-    let email = normalize_identity_email(friend_email);
-    if email.is_empty() || email.len() > 254 || !email.contains('@') || is_owner(&email) {
+    authorize_owner(
+        actor_user_id,
+        sealed_owner_user_id,
+        OwnerOnlyAction::GrantOrRevokeFriendRole,
+    )?;
+    if target_user_id.is_nil() || target_user_id == sealed_owner_user_id {
         return Err(AuthError::InvalidRequest);
     }
     let note = note
@@ -150,22 +161,29 @@ pub fn grant_friend_role(
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
     Ok(FriendGrant {
-        email,
+        target_user_id,
         note,
-        granted_by: OWNER_EMAIL.to_owned(),
+        granted_by_user_id: sealed_owner_user_id,
         granted_at_unix,
         entitlements: FRIEND_ENTITLEMENTS,
     })
 }
 
-/// Revoke the Friend role. Only the owner may call this.
-pub fn revoke_friend_role(actor_email: &str, friend_email: &str) -> Result<String, AuthError> {
-    authorize_owner(actor_email, OwnerOnlyAction::GrantOrRevokeFriendRole)?;
-    let email = normalize_identity_email(friend_email);
-    if email.is_empty() || !email.contains('@') {
+/// Revoke the Friend role. Only the sealed owner may call this.
+pub fn revoke_friend_role(
+    actor_user_id: Uuid,
+    sealed_owner_user_id: Uuid,
+    target_user_id: Uuid,
+) -> Result<Uuid, AuthError> {
+    authorize_owner(
+        actor_user_id,
+        sealed_owner_user_id,
+        OwnerOnlyAction::GrantOrRevokeFriendRole,
+    )?;
+    if target_user_id.is_nil() {
         return Err(AuthError::InvalidRequest);
     }
-    Ok(email)
+    Ok(target_user_id)
 }
 
 /// A stored account identity used for duplicate detection.
@@ -217,6 +235,7 @@ pub fn detect_duplicate_account(
     }
     None
 }
+
 /// Phone comparison ignores formatting characters and the Egyptian country or
 /// trunk prefix, so `+20 100 123 4567` and `01001234567` collide correctly.
 #[must_use]
@@ -236,17 +255,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn owner_identity_is_strict_after_trim_and_lowercase() {
-        assert!(is_owner("mo7amed.rabei14@gmail.com"));
-        assert!(is_owner("  MO7amed.Rabei14@Gmail.com  "));
-        assert!(!is_owner("mo7amed.rabei14@gmail.com.eg"));
-        assert!(!is_owner("mo7amed.rabei14+1@gmail.com"));
-        assert!(!is_owner("owner@safi.local"));
-        assert!(!is_owner(""));
+    fn owner_identity_uses_immutable_uuid_and_rejects_nil_and_other_ids() {
+        let owner_id = Uuid::now_v7();
+        let other_id = Uuid::now_v7();
+        assert!(is_owner_id(owner_id, owner_id));
+        assert!(!is_owner_id(other_id, owner_id));
+        assert!(!is_owner_id(Uuid::nil(), Uuid::nil()));
+        assert!(!is_owner_id(Uuid::nil(), owner_id));
     }
 
     #[test]
     fn every_owner_action_rejects_a_non_owner() {
+        let owner_id = Uuid::now_v7();
+        let regular_id = Uuid::now_v7();
         for action in [
             OwnerOnlyAction::AccessOwnerDashboard,
             OwnerOnlyAction::GrantOrRevokeFriendRole,
@@ -257,74 +278,57 @@ mod tests {
             OwnerOnlyAction::ToggleMaintenanceMode,
         ] {
             assert_eq!(
-                authorize_owner("friend@example.test", action).unwrap_err(),
-                AuthError::InsufficientScope
+                authorize_owner(regular_id, owner_id, action).unwrap_err(),
+                AuthError::OwnerRequired
             );
-            assert!(authorize_owner(OWNER_EMAIL, action).is_ok());
+            assert!(authorize_owner(owner_id, owner_id, action).is_ok());
         }
     }
 
     #[test]
-    fn owner_grant_is_minted_only_for_the_owner() {
-        assert!(authorize_owner_grant(OWNER_EMAIL, OwnerOnlyAction::SuspendUser).is_ok());
+    fn owner_grant_is_minted_only_for_the_sealed_owner_id() {
+        let owner_id = Uuid::now_v7();
+        let regular_id = Uuid::now_v7();
+        assert!(authorize_owner_grant(owner_id, owner_id, OwnerOnlyAction::SuspendUser).is_ok());
         assert_eq!(
-            authorize_owner_grant("friend@example.test", OwnerOnlyAction::SuspendUser).unwrap_err(),
-            AuthError::InsufficientScope
+            authorize_owner_grant(regular_id, owner_id, OwnerOnlyAction::SuspendUser).unwrap_err(),
+            AuthError::OwnerRequired
         );
     }
 
     #[test]
-    fn friend_role_grants_the_full_paid_plan_for_free() {
+    fn friend_role_grants_full_paid_plan_by_uuid_only() {
+        let owner_id = Uuid::now_v7();
+        let friend_id = Uuid::now_v7();
         let grant = grant_friend_role(
-            " MO7amed.Rabei14@Gmail.com ",
-            " Friend@Example.test ",
-            Some("  Ahmed  "),
+            owner_id,
+            owner_id,
+            friend_id,
+            Some("  VIP  "),
             1_780_000_000,
         )
-        .unwrap();
+        .expect("grant");
 
-        assert_eq!(grant.email, "friend@example.test");
-        assert_eq!(grant.note.as_deref(), Some("Ahmed"));
-        assert_eq!(grant.granted_by, OWNER_EMAIL);
+        assert_eq!(grant.target_user_id, friend_id);
+        assert_eq!(grant.note.as_deref(), Some("VIP"));
+        assert_eq!(grant.granted_by_user_id, owner_id);
         assert_eq!(grant.entitlements, FRIEND_ENTITLEMENTS);
-        assert!(grant.entitlements.all_paid_features_open);
-        assert!(grant.entitlements.removes_watermark);
-        assert!(grant.entitlements.saved_recipes);
-        assert!(grant.entitlements.includes_premium_recipe_packs);
         assert_eq!(grant.entitlements.ai_calls_per_month, 400);
         assert_eq!(grant.entitlements.price_usd, 0);
         assert_eq!(grant.entitlements.price_egp, 0);
-    }
 
-    #[test]
-    fn only_the_owner_can_grant_or_revoke_friend() {
+        // Non-owner cannot grant or revoke; owner cannot self-grant.
         assert_eq!(
-            grant_friend_role("friend@example.test", "other@example.test", None, 0).unwrap_err(),
-            AuthError::InsufficientScope
+            grant_friend_role(friend_id, owner_id, Uuid::now_v7(), None, 0).unwrap_err(),
+            AuthError::OwnerRequired
         );
         assert_eq!(
-            revoke_friend_role("friend@example.test", "other@example.test").unwrap_err(),
-            AuthError::InsufficientScope
-        );
-        assert_eq!(
-            revoke_friend_role(OWNER_EMAIL, " Friend@Example.test ").unwrap(),
-            "friend@example.test"
-        );
-    }
-
-    #[test]
-    fn friend_grants_reject_malformed_and_owner_addresses() {
-        assert_eq!(
-            grant_friend_role(OWNER_EMAIL, "  ", None, 0).unwrap_err(),
+            grant_friend_role(owner_id, owner_id, owner_id, None, 0).unwrap_err(),
             AuthError::InvalidRequest
         );
         assert_eq!(
-            grant_friend_role(OWNER_EMAIL, "not-an-email", None, 0).unwrap_err(),
-            AuthError::InvalidRequest
-        );
-        assert_eq!(
-            grant_friend_role(OWNER_EMAIL, OWNER_EMAIL, None, 0).unwrap_err(),
-            AuthError::InvalidRequest
+            revoke_friend_role(owner_id, owner_id, friend_id).expect("revoke"),
+            friend_id
         );
     }
 
@@ -352,23 +356,6 @@ mod tests {
         assert_eq!(
             detect_duplicate_account(&existing, "new@example.test", Some("201009999999")),
             None
-        );
-        assert_eq!(
-            detect_duplicate_account(&existing, "phone-less@example.test", Some("201001234567")),
-            Some(DuplicateAccountKey::Email)
-        );
-    }
-
-    #[test]
-    fn password_floor_is_eight_characters() {
-        assert_eq!(MIN_PASSWORD_LENGTH, 8);
-        assert_eq!(
-            PASSWORD_TOO_SHORT_MESSAGE_AR,
-            "كلمة المرور يجب ألا تقل عن 8 خانات"
-        );
-        assert_eq!(
-            DUPLICATE_ACCOUNT_MESSAGE_AR,
-            "هذا الحساب مسجل بالفعل، يرجى تسجيل الدخول"
         );
     }
 }

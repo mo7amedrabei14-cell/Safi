@@ -175,11 +175,11 @@ async fn main() {
     let repo = Arc::new(HarnessAccountRepo::default());
     let mailer = Arc::new(HarnessMailer::default());
     let (auth_service, _, _, _) = in_memory_service();
-    let auth_arc = Arc::new(auth_service);
+    let base_state = AppState::new(auth_service);
     let account_auth = AccountAuthService::new(
         repo,
         mailer.clone(),
-        auth_arc.clone(),
+        base_state.auth.clone(),
         "http://127.0.0.1:4175",
     );
 
@@ -200,12 +200,7 @@ async fn main() {
         std::process::exit(3);
     }
 
-    let state = AppState {
-        auth: auth_arc,
-        account_auth: Some(Arc::new(account_auth)),
-        zero_trust: Default::default(),
-        log_center: Arc::new(RwLock::new(sf_server::log_center::AuditLogCenter::new())),
-    };
+    let state = base_state.with_account_auth(account_auth);
     let router = app(state);
     let Ok(listener) = tokio::net::TcpListener::bind(&bind_addr).await else {
         std::process::exit(4);

@@ -4633,10 +4633,12 @@ dependencies = [
 name = "sf-desktop"
 version = "0.1.0"
 dependencies = [
+ "argon2",
  "base64 0.22.1",
  "ed25519-dalek",
  "hex",
  "rand 0.8.8",
+ "ring",
  "serde",
  "serde_json",
  "sf-core",
@@ -4689,18 +4691,27 @@ dependencies = [
  "argon2",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "blake3",
+ "ed25519-dalek",
  "hex",
+ "hmac",
  "lettre",
  "rand 0.8.8",
  "redis",
+ "ring",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2",
  "sqlx",
  "subtle",
+ "time",
  "tokio",
  "tracing",
+ "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

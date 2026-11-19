@@ -1,9 +1,9 @@
-//! Customer account and subscription administration (Phases 0.1 and 0.3).
+//! Customer account and subscription administration (Phases 0.1, 0.3, and 05).
 //!
 //! Every read or write across workspaces requires an [`OwnerGrant`], which only
-//! `authorize_owner_grant` can mint for `mo7amed.rabei14@gmail.com`. Subscription
-//! lifecycle operations update the subscription, append its history event, and
-//! sync the legacy workspace label inside one transaction.
+//! `authorize_owner_grant` can mint for the sealed immutable `owner_user_id`.
+//! Subscription lifecycle operations update the subscription, append its history
+//! event, and sync the legacy workspace label inside one transaction.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -264,12 +264,14 @@ pub trait CustomerAccountRepository: Send + Sync {
 /// Owner-gated facade over the customer account repository.
 pub struct CustomerAccountService {
     repository: Arc<dyn CustomerAccountRepository>,
+    sealed_owner_user_id: Uuid,
 }
 
 impl std::fmt::Debug for CustomerAccountService {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("CustomerAccountService")
+            .field("sealed_owner_user_id", &self.sealed_owner_user_id)
             .finish_non_exhaustive()
     }
 }
@@ -307,47 +309,70 @@ fn billing_months(billing_interval: &str) -> Option<i64> {
 }
 
 impl CustomerAccountService {
-    /// Wrap a repository.
+    /// Wrap a repository bound to the sealed immutable platform owner `user_id`.
     #[must_use]
-    pub fn new(repository: Arc<dyn CustomerAccountRepository>) -> Self {
-        Self { repository }
+    pub fn new(repository: Arc<dyn CustomerAccountRepository>, sealed_owner_user_id: Uuid) -> Self {
+        Self {
+            repository,
+            sealed_owner_user_id,
+        }
     }
 
     /// Owner-only: list all customer accounts.
     pub async fn list_accounts(
         &self,
-        actor_email: &str,
+        actor_user_id: Uuid,
     ) -> Result<Vec<CustomerAccount>, AuthError> {
-        let grant = authorize_owner_grant(actor_email, OwnerOnlyAction::AccessOwnerDashboard)?;
+        let grant = authorize_owner_grant(
+            actor_user_id,
+            self.sealed_owner_user_id,
+            OwnerOnlyAction::AccessOwnerDashboard,
+        )?;
         self.repository.list_accounts(&grant).await
     }
 
     /// Owner-only: suspend one account.
     pub async fn suspend_account(
         &self,
-        actor_email: &str,
+        actor_user_id: Uuid,
         user_id: Uuid,
         at: i64,
     ) -> Result<(), AuthError> {
-        let grant = authorize_owner_grant(actor_email, OwnerOnlyAction::SuspendUser)?;
+        let grant = authorize_owner_grant(
+            actor_user_id,
+            self.sealed_owner_user_id,
+            OwnerOnlyAction::SuspendUser,
+        )?;
         self.repository.suspend_account(&grant, user_id, at).await
     }
 
     /// Owner-only: restore one suspended account.
-    pub async fn restore_account(&self, actor_email: &str, user_id: Uuid) -> Result<(), AuthError> {
-        let grant = authorize_owner_grant(actor_email, OwnerOnlyAction::SuspendUser)?;
+    pub async fn restore_account(
+        &self,
+        actor_user_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), AuthError> {
+        let grant = authorize_owner_grant(
+            actor_user_id,
+            self.sealed_owner_user_id,
+            OwnerOnlyAction::SuspendUser,
+        )?;
         self.repository.restore_account(&grant, user_id).await
     }
 
     /// Owner-only: append a subscription lifecycle event.
     pub async fn record_subscription_event(
         &self,
-        actor_email: &str,
+        actor_user_id: Uuid,
         draft: &SubscriptionEventDraft,
         at: i64,
     ) -> Result<Uuid, AuthError> {
         draft.validate()?;
-        let grant = authorize_owner_grant(actor_email, OwnerOnlyAction::AccessOwnerDashboard)?;
+        let grant = authorize_owner_grant(
+            actor_user_id,
+            self.sealed_owner_user_id,
+            OwnerOnlyAction::AccessOwnerDashboard,
+        )?;
         self.repository
             .append_subscription_event(&grant, draft, at)
             .await
@@ -356,10 +381,14 @@ impl CustomerAccountService {
     /// Owner-only: read the workspace's current subscription.
     pub async fn current_subscription(
         &self,
-        actor_email: &str,
+        actor_user_id: Uuid,
         workspace_id: Uuid,
     ) -> Result<Option<Subscription>, AuthError> {
-        let grant = authorize_owner_grant(actor_email, OwnerOnlyAction::AccessOwnerDashboard)?;
+        let grant = authorize_owner_grant(
+            actor_user_id,
+            self.sealed_owner_user_id,
+            OwnerOnlyAction::AccessOwnerDashboard,
+        )?;
         validate_workspace_id(workspace_id)?;
         self.repository
             .current_subscription(&grant, workspace_id)
@@ -369,12 +398,16 @@ impl CustomerAccountService {
     /// Owner-only: move a workspace to another active plan.
     pub async fn change_plan(
         &self,
-        actor_email: &str,
+        actor_user_id: Uuid,
         workspace_id: Uuid,
         plan_code: &str,
         at: i64,
     ) -> Result<Subscription, AuthError> {
-        let grant = authorize_owner_grant(actor_email, OwnerOnlyAction::AccessOwnerDashboard)?;
+        let grant = authorize_owner_grant(
+            actor_user_id,
+            self.sealed_owner_user_id,
+            OwnerOnlyAction::AccessOwnerDashboard,
+        )?;
         validate_workspace_id(workspace_id)?;
         validate_operation_time(at)?;
 
@@ -431,19 +464,19 @@ impl CustomerAccountService {
     }
 
     /// Owner-only: extend a paid period by one billing interval.
-    ///
-    /// The extension starts at `max(now, current_period_end)`, so renewing early
-    /// never shortens a paid period. A scheduled cancellation is cleared because
-    /// a successful renewal means the customer is continuing.
     pub async fn renew_subscription(
         &self,
-        actor_email: &str,
+        actor_user_id: Uuid,
         workspace_id: Uuid,
         at: i64,
         amount_minor: Option<i32>,
         currency: Option<&str>,
     ) -> Result<Subscription, AuthError> {
-        let grant = authorize_owner_grant(actor_email, OwnerOnlyAction::AccessOwnerDashboard)?;
+        let grant = authorize_owner_grant(
+            actor_user_id,
+            self.sealed_owner_user_id,
+            OwnerOnlyAction::AccessOwnerDashboard,
+        )?;
         validate_workspace_id(workspace_id)?;
         validate_operation_time(at)?;
         validate_payment(amount_minor, currency)?;
@@ -494,18 +527,18 @@ impl CustomerAccountService {
     }
 
     /// Owner-only: cancel now or at the end of the paid period.
-    ///
-    /// A scheduled cancellation keeps the subscription active until the period
-    /// ends and is idempotent. An immediate cancellation moves it to `canceled`,
-    /// which also frees the workspace's one-current-subscription slot.
     pub async fn cancel_subscription(
         &self,
-        actor_email: &str,
+        actor_user_id: Uuid,
         workspace_id: Uuid,
         at: i64,
         at_period_end: bool,
     ) -> Result<Subscription, AuthError> {
-        let grant = authorize_owner_grant(actor_email, OwnerOnlyAction::CancelSubscription)?;
+        let grant = authorize_owner_grant(
+            actor_user_id,
+            self.sealed_owner_user_id,
+            OwnerOnlyAction::CancelSubscription,
+        )?;
         validate_workspace_id(workspace_id)?;
         validate_operation_time(at)?;
 
@@ -1158,7 +1191,14 @@ fn unix_timestamp_utc(year: i64, month: u32, day: u32) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::identity::OWNER_EMAIL;
+
+    fn test_owner_id() -> Uuid {
+        Uuid::from_u128(0x0195_0000_0000_7000_8000_0000_0000_0001)
+    }
+
+    fn test_customer_id() -> Uuid {
+        Uuid::from_u128(0x0195_0000_0000_7000_8000_0000_0000_0002)
+    }
 
     fn account(user_id: Uuid, workspace_id: Uuid, email: &str) -> CustomerAccount {
         CustomerAccount {
@@ -1229,7 +1269,7 @@ mod tests {
                 period_end,
             ))
             .await;
-        let service = CustomerAccountService::new(repository.clone());
+        let service = CustomerAccountService::new(repository.clone(), test_owner_id());
         (repository, service, workspace_id)
     }
 
@@ -1297,7 +1337,7 @@ mod tests {
                 "customer@example.test",
             )])
             .await;
-        let service = CustomerAccountService::new(repository.clone());
+        let service = CustomerAccountService::new(repository.clone(), test_owner_id());
         let draft = SubscriptionEventDraft {
             workspace_id,
             subscription_id: None,
@@ -1309,48 +1349,48 @@ mod tests {
         };
 
         assert_eq!(
-            service
-                .list_accounts("customer@example.test")
-                .await
-                .unwrap_err(),
-            AuthError::InsufficientScope
+            service.list_accounts(test_customer_id()).await.unwrap_err(),
+            AuthError::OwnerRequired
         );
         assert_eq!(
             service
-                .suspend_account("customer@example.test", user_id, 1)
+                .suspend_account(test_customer_id(), user_id, 1)
                 .await
                 .unwrap_err(),
-            AuthError::InsufficientScope
+            AuthError::OwnerRequired
         );
         assert_eq!(
             service
-                .record_subscription_event("customer@example.test", &draft, 1)
+                .record_subscription_event(test_customer_id(), &draft, 1)
                 .await
                 .unwrap_err(),
-            AuthError::InsufficientScope
+            AuthError::OwnerRequired
         );
 
-        let accounts = service.list_accounts(OWNER_EMAIL).await.unwrap();
+        let accounts = service.list_accounts(test_owner_id()).await.unwrap();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].workspace_id, workspace_id);
         assert_eq!(accounts[0].status, AccountStatus::Active);
 
         service
-            .suspend_account(OWNER_EMAIL, user_id, 2)
+            .suspend_account(test_owner_id(), user_id, 2)
             .await
             .unwrap();
         assert_eq!(
-            service.list_accounts(OWNER_EMAIL).await.unwrap()[0].status,
+            service.list_accounts(test_owner_id()).await.unwrap()[0].status,
             AccountStatus::Suspended
         );
-        service.restore_account(OWNER_EMAIL, user_id).await.unwrap();
+        service
+            .restore_account(test_owner_id(), user_id)
+            .await
+            .unwrap();
         assert_eq!(
-            service.list_accounts(OWNER_EMAIL).await.unwrap()[0].status,
+            service.list_accounts(test_owner_id()).await.unwrap()[0].status,
             AccountStatus::Active
         );
 
         let event_id = service
-            .record_subscription_event(OWNER_EMAIL, &draft, 3)
+            .record_subscription_event(test_owner_id(), &draft, 3)
             .await
             .unwrap();
         assert_ne!(event_id, Uuid::nil());
@@ -1360,7 +1400,7 @@ mod tests {
     #[tokio::test]
     async fn subscription_events_validate_currency_and_amount() {
         let repository = Arc::new(InMemoryCustomerAccountRepository::default());
-        let service = CustomerAccountService::new(repository);
+        let service = CustomerAccountService::new(repository, test_owner_id());
         let workspace_id = Uuid::now_v7();
 
         let mut draft = SubscriptionEventDraft {
@@ -1373,14 +1413,14 @@ mod tests {
             currency: Some("USD".to_owned()),
         };
         assert!(service
-            .record_subscription_event(OWNER_EMAIL, &draft, 1)
+            .record_subscription_event(test_owner_id(), &draft, 1)
             .await
             .is_ok());
 
         draft.currency = Some("usd".to_owned());
         assert_eq!(
             service
-                .record_subscription_event(OWNER_EMAIL, &draft, 2)
+                .record_subscription_event(test_owner_id(), &draft, 2)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
@@ -1390,7 +1430,7 @@ mod tests {
         draft.amount_minor = Some(-1);
         assert_eq!(
             service
-                .record_subscription_event(OWNER_EMAIL, &draft, 3)
+                .record_subscription_event(test_owner_id(), &draft, 3)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
@@ -1406,36 +1446,31 @@ mod tests {
 
         assert_eq!(
             service
-                .current_subscription("customer@example.test", workspace_id)
+                .current_subscription(test_customer_id(), workspace_id)
                 .await
                 .unwrap_err(),
-            AuthError::InsufficientScope
+            AuthError::OwnerRequired
         );
         assert_eq!(
             service
-                .change_plan(
-                    "customer@example.test",
-                    workspace_id,
-                    "individual_annual",
-                    start
-                )
+                .change_plan(test_customer_id(), workspace_id, "individual_annual", start)
                 .await
                 .unwrap_err(),
-            AuthError::InsufficientScope
+            AuthError::OwnerRequired
         );
         assert_eq!(
             service
-                .renew_subscription("customer@example.test", workspace_id, start, None, None)
+                .renew_subscription(test_customer_id(), workspace_id, start, None, None)
                 .await
                 .unwrap_err(),
-            AuthError::InsufficientScope
+            AuthError::OwnerRequired
         );
         assert_eq!(
             service
-                .cancel_subscription("customer@example.test", workspace_id, start, true)
+                .cancel_subscription(test_customer_id(), workspace_id, start, true)
                 .await
                 .unwrap_err(),
-            AuthError::InsufficientScope
+            AuthError::OwnerRequired
         );
     }
 
@@ -1446,32 +1481,35 @@ mod tests {
         let (repository, service, workspace_id) =
             seeded("free", unix_timestamp_utc(2026, 1, 1), None).await;
 
-        // A draft plan cannot be sold before billing is activated.
         assert_eq!(
             service
-                .change_plan(OWNER_EMAIL, workspace_id, "pro_monthly", change_at)
-                .await
-                .unwrap_err(),
-            AuthError::InvalidRequest
-        );
-        // Unknown and unchanged plans are rejected.
-        assert_eq!(
-            service
-                .change_plan(OWNER_EMAIL, workspace_id, "does_not_exist", change_at)
+                .change_plan(test_owner_id(), workspace_id, "pro_monthly", change_at)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
         );
         assert_eq!(
             service
-                .change_plan(OWNER_EMAIL, workspace_id, "free", change_at)
+                .change_plan(test_owner_id(), workspace_id, "does_not_exist", change_at)
+                .await
+                .unwrap_err(),
+            AuthError::InvalidRequest
+        );
+        assert_eq!(
+            service
+                .change_plan(test_owner_id(), workspace_id, "free", change_at)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
         );
 
         let changed = service
-            .change_plan(OWNER_EMAIL, workspace_id, " Individual_Monthly ", change_at)
+            .change_plan(
+                test_owner_id(),
+                workspace_id,
+                " Individual_Monthly ",
+                change_at,
+            )
             .await
             .expect("owner changes to an active plan");
         assert_eq!(changed.plan_code, "individual_monthly");
@@ -1490,10 +1528,9 @@ mod tests {
         assert_eq!(events[0].to_status.as_deref(), Some("active"));
         assert_eq!(events[0].subscription_id, Some(changed.id));
 
-        // Annual plans extend to the same day next year.
         let annual = service
             .change_plan(
-                OWNER_EMAIL,
+                test_owner_id(),
                 workspace_id,
                 "individual_annual",
                 unix_timestamp_utc(2026, 3, 15),
@@ -1516,7 +1553,7 @@ mod tests {
 
         service
             .cancel_subscription(
-                OWNER_EMAIL,
+                test_owner_id(),
                 workspace_id,
                 unix_timestamp_utc(2026, 1, 20),
                 true,
@@ -1526,7 +1563,7 @@ mod tests {
 
         let renewed = service
             .renew_subscription(
-                OWNER_EMAIL,
+                test_owner_id(),
                 workspace_id,
                 unix_timestamp_utc(2026, 1, 20),
                 Some(2000),
@@ -1552,10 +1589,9 @@ mod tests {
         assert_eq!(renewal.amount_minor, Some(2000));
         assert_eq!(renewal.currency.as_deref(), Some("USD"));
 
-        // Renewing after expiry restarts from the operation time.
         let late = service
             .renew_subscription(
-                OWNER_EMAIL,
+                test_owner_id(),
                 workspace_id,
                 unix_timestamp_utc(2026, 4, 10),
                 None,
@@ -1568,17 +1604,16 @@ mod tests {
             Some(unix_timestamp_utc(2026, 5, 10))
         );
 
-        // Payment details must be complete and valid.
         assert_eq!(
             service
-                .renew_subscription(OWNER_EMAIL, workspace_id, start, Some(2000), None)
+                .renew_subscription(test_owner_id(), workspace_id, start, Some(2000), None)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
         );
         assert_eq!(
             service
-                .renew_subscription(OWNER_EMAIL, workspace_id, start, None, Some("usd"))
+                .renew_subscription(test_owner_id(), workspace_id, start, None, Some("usd"))
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
@@ -1594,7 +1629,7 @@ mod tests {
         let cancel_at = unix_timestamp_utc(2026, 1, 20);
 
         let scheduled = service
-            .cancel_subscription(OWNER_EMAIL, workspace_id, cancel_at, true)
+            .cancel_subscription(test_owner_id(), workspace_id, cancel_at, true)
             .await
             .unwrap();
         assert_eq!(scheduled.status, "active");
@@ -1602,9 +1637,8 @@ mod tests {
         assert_eq!(scheduled.canceled_at, None);
         assert_eq!(scheduled.current_period_end, Some(end));
 
-        // Repeating the same request is idempotent and writes no second event.
         let repeated = service
-            .cancel_subscription(OWNER_EMAIL, workspace_id, cancel_at, true)
+            .cancel_subscription(test_owner_id(), workspace_id, cancel_at, true)
             .await
             .unwrap();
         assert_eq!(repeated, scheduled);
@@ -1616,7 +1650,7 @@ mod tests {
 
         let immediate = service
             .cancel_subscription(
-                OWNER_EMAIL,
+                test_owner_id(),
                 workspace_id,
                 unix_timestamp_utc(2026, 1, 25),
                 false,
@@ -1628,14 +1662,14 @@ mod tests {
         assert!(!immediate.cancel_at_period_end);
         assert_eq!(
             service
-                .current_subscription(OWNER_EMAIL, workspace_id)
+                .current_subscription(test_owner_id(), workspace_id)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             service
-                .renew_subscription(OWNER_EMAIL, workspace_id, cancel_at, None, None)
+                .renew_subscription(test_owner_id(), workspace_id, cancel_at, None, None)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
@@ -1655,21 +1689,21 @@ mod tests {
 
         assert_eq!(
             service
-                .renew_subscription(OWNER_EMAIL, workspace_id, at, None, None)
+                .renew_subscription(test_owner_id(), workspace_id, at, None, None)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
         );
         assert_eq!(
             service
-                .cancel_subscription(OWNER_EMAIL, workspace_id, at, true)
+                .cancel_subscription(test_owner_id(), workspace_id, at, true)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
         );
         assert_eq!(
             service
-                .cancel_subscription(OWNER_EMAIL, workspace_id, at, false)
+                .cancel_subscription(test_owner_id(), workspace_id, at, false)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
@@ -1684,21 +1718,21 @@ mod tests {
 
         assert_eq!(
             service
-                .current_subscription(OWNER_EMAIL, Uuid::nil())
+                .current_subscription(test_owner_id(), Uuid::nil())
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
         );
         assert_eq!(
             service
-                .cancel_subscription(OWNER_EMAIL, workspace_id, 0, true)
+                .cancel_subscription(test_owner_id(), workspace_id, 0, true)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest
         );
         assert_eq!(
             service
-                .change_plan(OWNER_EMAIL, workspace_id, "   ", 1_780_000_000)
+                .change_plan(test_owner_id(), workspace_id, "   ", 1_780_000_000)
                 .await
                 .unwrap_err(),
             AuthError::InvalidRequest

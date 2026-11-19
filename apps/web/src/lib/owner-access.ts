@@ -1,18 +1,18 @@
 /**
- * Owner-only access rules for the executive console.
+ * Owner-only UI guard helpers for the executive control plane.
  *
- * The Friend VIP role can only be granted or revoked by the single strict owner
- * from `config/business.json`. No purchase path, self-service toggle, or
- * non-owner account can produce a Friend grant.
+ * Security invariant: authorization is enforced strictly on the backend using
+ * the sealed immutable `owner_user_id` + RFC 6238 TOTP elevated/step-up session.
+ * The client NEVER embeds or checks a hardcoded owner email address.
  */
-import { FRIEND_ROLE, OWNER_EMAIL } from "./business-config";
-import { isOwnerEmail, isValidEmail, normalizeEmail } from "./auth-rules";
+import { FRIEND_ROLE } from "./business-config";
+import { isValidEmail, normalizeEmail } from "./auth-rules";
 
 export interface FriendMember {
   readonly email: string;
   readonly note: string;
   readonly grantedAt: string;
-  readonly grantedBy: string;
+  readonly grantedByUserId: string;
   readonly aiCallsUsed: number;
   readonly aiCallsLimit: number;
   readonly entitlesPaidPlan: boolean;
@@ -20,23 +20,29 @@ export interface FriendMember {
 
 export type FriendGrantResult =
   | { readonly ok: true; readonly member: FriendMember }
-  | { readonly ok: false; readonly reason: "not_owner" | "invalid_email" | "owner_address" };
+  | { readonly ok: false; readonly reason: "not_owner" | "invalid_email" | "self_grant" };
 
 export type FriendRevokeResult =
   | { readonly ok: true; readonly email: string }
   | { readonly ok: false; readonly reason: "not_owner" | "invalid_email" };
 
-export function canManageFriends(actorEmail: string): boolean {
-  return isOwnerEmail(actorEmail);
+export interface OwnerActorContext {
+  readonly isOwner: boolean;
+  readonly userId: string;
+  readonly email?: string | null;
 }
 
-export function grantFriendRole(
-  actorEmail: string,
+export function canManageFriends(actor: OwnerActorContext): boolean {
+  return actor.isOwner && actor.userId.trim().length > 0;
+}
+
+export function validateFriendGrantRequest(
+  actor: OwnerActorContext,
   friendEmail: string,
   note: string,
   grantedAtIso: string
 ): FriendGrantResult {
-  if (!canManageFriends(actorEmail)) {
+  if (!canManageFriends(actor)) {
     return { ok: false, reason: "not_owner" };
   }
 
@@ -44,8 +50,8 @@ export function grantFriendRole(
   if (!isValidEmail(email)) {
     return { ok: false, reason: "invalid_email" };
   }
-  if (email === OWNER_EMAIL) {
-    return { ok: false, reason: "owner_address" };
+  if (actor.email && normalizeEmail(actor.email) === email) {
+    return { ok: false, reason: "self_grant" };
   }
 
   return {
@@ -54,7 +60,7 @@ export function grantFriendRole(
       email,
       note: note.trim(),
       grantedAt: grantedAtIso,
-      grantedBy: OWNER_EMAIL,
+      grantedByUserId: actor.userId,
       aiCallsUsed: 0,
       aiCallsLimit: FRIEND_ROLE.ai_calls_per_month,
       entitlesPaidPlan: FRIEND_ROLE.all_paid_features_open
@@ -62,8 +68,11 @@ export function grantFriendRole(
   };
 }
 
-export function revokeFriendRole(actorEmail: string, friendEmail: string): FriendRevokeResult {
-  if (!canManageFriends(actorEmail)) {
+export function validateFriendRevokeRequest(
+  actor: OwnerActorContext,
+  friendEmail: string
+): FriendRevokeResult {
+  if (!canManageFriends(actor)) {
     return { ok: false, reason: "not_owner" };
   }
 

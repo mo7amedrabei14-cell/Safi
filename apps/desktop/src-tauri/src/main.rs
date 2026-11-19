@@ -1292,15 +1292,9 @@ mod tests {
             let api_keys = Arc::new(rt.block_on(InMemoryApiKeyRepository::new(vec![])));
             let sessions_repo = Arc::new(InMemorySessionRepository::new());
             let cache = Arc::new(InMemoryAuthCache::new());
-            let auth = Arc::new(AuthService::new(api_keys, sessions_repo.clone(), cache));
-            let router = app(AppState {
-                auth: auth.clone(),
-                account_auth: None,
-                zero_trust: sf_server::zero_trust::ZeroTrustGuardState::default(),
-                log_center: Arc::new(tokio::sync::RwLock::new(
-                    sf_server::log_center::AuditLogCenter::new(),
-                )),
-            });
+            let state = AppState::new(AuthService::new(api_keys, sessions_repo.clone(), cache));
+            let auth = state.auth.clone();
+            let router = app(state);
 
             let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral bind must succeed");
             let addr = listener.local_addr().expect("local addr must exist");

@@ -50,14 +50,22 @@ export interface SafiDockTab {
   readonly icon: LucideIcon;
 }
 
-export const DOCK_TABS: readonly SafiDockTab[] = [
+export const SHOWCASE_TABS: readonly SafiDockTab[] = [
   { id: "home", label: "الرئيسية", labelEn: "Website", icon: Home },
   { id: "cleaning", label: "التنظيف وPII", labelEn: "Cleaning App", icon: Sparkles },
   { id: "recipes", label: "الوصفات", labelEn: "Recipes App", icon: ListChecks },
   { id: "charts", label: "الرسوم البيانية", labelEn: "Charts App", icon: BarChart3 },
-  { id: "library", label: "المكتبة", labelEn: "Library App", icon: Library },
-  { id: "owner", label: "لوحة المالك", labelEn: "Owner App", icon: ShieldCheck }
+  { id: "library", label: "المكتبة", labelEn: "Library App", icon: Library }
 ];
+
+export const OWNER_TAB: SafiDockTab = {
+  id: "owner",
+  label: "لوحة المالك",
+  labelEn: "Owner App",
+  icon: ShieldCheck
+};
+
+export const DOCK_TABS: readonly SafiDockTab[] = [...SHOWCASE_TABS, OWNER_TAB];
 
 /**
  * The Studio tab exists only inside the packaged desktop app; the public site never shows it.
@@ -300,12 +308,8 @@ export function FloatingGlassDock({
 
         {ownerAccount ? (
           <div className="safi-owner-badge" role="status">
-            <span aria-hidden="true">👑</span>
-            <span>
-              {lang === "ar"
-                ? "حساب المالك الموثق (Owner — Mohamed Rabea)"
-                : "Verified Owner — Mohamed Rabea"}
-            </span>
+            <ShieldCheck size={14} aria-hidden="true" />
+            <span>{lang === "ar" ? "مالك المنصة المعتمد" : "Verified Platform Owner"}</span>
           </div>
         ) : null}
 

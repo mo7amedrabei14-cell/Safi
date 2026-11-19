@@ -12,6 +12,16 @@ export type SafiErrorCode =
   | "SF-AUTH-006"
   | "SF-AUTH-007"
   | "SF-AUTH-008"
+  | "SF-AUTH-009"
+  | "SF-AUTH-010"
+  | "SF-AUTH-011"
+  | "SF-AUTH-012"
+  | "SF-AUTH-013"
+  | "SF-AUTH-014"
+  | "SF-AUTH-015"
+  | "SF-AUTH-016"
+  | "SF-AUTH-017"
+  | "SF-AUTH-018"
   | "SF-CAL-001"
   | "SF-CAL-002"
   | "SF-CAL-003"
@@ -42,11 +52,25 @@ export type SafiErrorCode =
   | "SF-LIC-002"
   | "SF-LIC-003"
   | "SF-LIC-004"
+  | "SF-LIC-005"
+  | "SF-LIC-006"
+  | "SF-LIC-007"
+  | "SF-LIC-008"
+  | "SF-PAY-001"
+  | "SF-PAY-002"
+  | "SF-PAY-003"
+  | "SF-PAY-004"
   | "SF-PRF-001"
   | "SF-PRF-002"
   | "SF-RCP-001"
   | "SF-RCP-002"
   | "SF-RCP-003"
+  | "SF-SYN-001"
+  | "SF-SYN-002"
+  | "SF-SYN-003"
+  | "SF-SYN-004"
+  | "SF-SYN-005"
+  | "SF-SYN-006"
   | "SF-SYS-001"
   | "SF-SYS-002"
   | "SF-SYS-003"
@@ -72,6 +96,7 @@ export type SafiErrorCode =
   | "SF-SYS-026"
   | "SF-SYS-030"
   | "SF-SYS-031"
+  | "SF-SYS-032"
   | "SF-UNK-001"
   | "SF-UPD-001"
   | "SF-UPD-002"
@@ -103,6 +128,26 @@ export type SafiErrorTranslationKey =
   | "error.SF-AUTH-007.action"
   | "error.SF-AUTH-008.title"
   | "error.SF-AUTH-008.action"
+  | "error.SF-AUTH-009.title"
+  | "error.SF-AUTH-009.action"
+  | "error.SF-AUTH-010.title"
+  | "error.SF-AUTH-010.action"
+  | "error.SF-AUTH-011.title"
+  | "error.SF-AUTH-011.action"
+  | "error.SF-AUTH-012.title"
+  | "error.SF-AUTH-012.action"
+  | "error.SF-AUTH-013.title"
+  | "error.SF-AUTH-013.action"
+  | "error.SF-AUTH-014.title"
+  | "error.SF-AUTH-014.action"
+  | "error.SF-AUTH-015.title"
+  | "error.SF-AUTH-015.action"
+  | "error.SF-AUTH-016.title"
+  | "error.SF-AUTH-016.action"
+  | "error.SF-AUTH-017.title"
+  | "error.SF-AUTH-017.action"
+  | "error.SF-AUTH-018.title"
+  | "error.SF-AUTH-018.action"
   | "error.SF-CAL-001.title"
   | "error.SF-CAL-001.action"
   | "error.SF-CAL-002.title"
@@ -163,6 +208,22 @@ export type SafiErrorTranslationKey =
   | "error.SF-LIC-003.action"
   | "error.SF-LIC-004.title"
   | "error.SF-LIC-004.action"
+  | "error.SF-LIC-005.title"
+  | "error.SF-LIC-005.action"
+  | "error.SF-LIC-006.title"
+  | "error.SF-LIC-006.action"
+  | "error.SF-LIC-007.title"
+  | "error.SF-LIC-007.action"
+  | "error.SF-LIC-008.title"
+  | "error.SF-LIC-008.action"
+  | "error.SF-PAY-001.title"
+  | "error.SF-PAY-001.action"
+  | "error.SF-PAY-002.title"
+  | "error.SF-PAY-002.action"
+  | "error.SF-PAY-003.title"
+  | "error.SF-PAY-003.action"
+  | "error.SF-PAY-004.title"
+  | "error.SF-PAY-004.action"
   | "error.SF-PRF-001.title"
   | "error.SF-PRF-001.action"
   | "error.SF-PRF-002.title"
@@ -173,6 +234,18 @@ export type SafiErrorTranslationKey =
   | "error.SF-RCP-002.action"
   | "error.SF-RCP-003.title"
   | "error.SF-RCP-003.action"
+  | "error.SF-SYN-001.title"
+  | "error.SF-SYN-001.action"
+  | "error.SF-SYN-002.title"
+  | "error.SF-SYN-002.action"
+  | "error.SF-SYN-003.title"
+  | "error.SF-SYN-003.action"
+  | "error.SF-SYN-004.title"
+  | "error.SF-SYN-004.action"
+  | "error.SF-SYN-005.title"
+  | "error.SF-SYN-005.action"
+  | "error.SF-SYN-006.title"
+  | "error.SF-SYN-006.action"
   | "error.SF-SYS-001.title"
   | "error.SF-SYS-001.action"
   | "error.SF-SYS-002.title"
@@ -223,6 +296,8 @@ export type SafiErrorTranslationKey =
   | "error.SF-SYS-030.action"
   | "error.SF-SYS-031.title"
   | "error.SF-SYS-031.action"
+  | "error.SF-SYS-032.title"
+  | "error.SF-SYS-032.action"
   | "error.SF-UNK-001.title"
   | "error.SF-UNK-001.action"
   | "error.SF-UPD-001.title"
@@ -263,6 +338,16 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-AUTH-006",
   "SF-AUTH-007",
   "SF-AUTH-008",
+  "SF-AUTH-009",
+  "SF-AUTH-010",
+  "SF-AUTH-011",
+  "SF-AUTH-012",
+  "SF-AUTH-013",
+  "SF-AUTH-014",
+  "SF-AUTH-015",
+  "SF-AUTH-016",
+  "SF-AUTH-017",
+  "SF-AUTH-018",
   "SF-CAL-001",
   "SF-CAL-002",
   "SF-CAL-003",
@@ -293,11 +378,25 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-LIC-002",
   "SF-LIC-003",
   "SF-LIC-004",
+  "SF-LIC-005",
+  "SF-LIC-006",
+  "SF-LIC-007",
+  "SF-LIC-008",
+  "SF-PAY-001",
+  "SF-PAY-002",
+  "SF-PAY-003",
+  "SF-PAY-004",
   "SF-PRF-001",
   "SF-PRF-002",
   "SF-RCP-001",
   "SF-RCP-002",
   "SF-RCP-003",
+  "SF-SYN-001",
+  "SF-SYN-002",
+  "SF-SYN-003",
+  "SF-SYN-004",
+  "SF-SYN-005",
+  "SF-SYN-006",
   "SF-SYS-001",
   "SF-SYS-002",
   "SF-SYS-003",
@@ -323,6 +422,7 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-SYS-026",
   "SF-SYS-030",
   "SF-SYS-031",
+  "SF-SYS-032",
   "SF-UNK-001",
   "SF-UPD-001",
   "SF-UPD-002",
@@ -338,9 +438,9 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
   "SF-AIX-001": {
     code: "SF-AIX-001",
     severity: "warn",
-    titleAr: "????? ?????? ????????? ??? ???? ?????? ?? ??? ??? ???????",
+    titleAr: "مزود الذكاء الاصطناعي غير مهيأ أو غير متاح دون اتصال",
     actionAr:
-      "???? ???? ???? ??????? ?????? ?? ??????? ?? ?????????? ?? ???? ????? DSL ???????? ??????? ??? ????? ???????? ????????.",
+      "هيئ مزودًا محليًا أو معتمدًا في الإعدادات، أو أرسل أوامر DSL المهيكلة مباشرة دون الاعتماد على مزود خارجي.",
     titleEn: "Natural-language AI provider is not configured or is blocked offline",
     actionEn:
       "Configure a local/approved OpenAI-compatible provider or submit validated structured DSL JSON directly.",
@@ -350,8 +450,8 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
   "SF-AIX-002": {
     code: "SF-AIX-002",
     severity: "error",
-    titleAr: "?? ??? ??????? ?????? ????????? ???? ???????? ????? ??????? ????????",
-    actionAr: "???? ??? DSL ??????? ????? ??????? ?? ?????? ???????? ?? ??? ????????.",
+    titleAr: "تم رفض استجابة الذكاء الاصطناعي بواسطة مدقق أوامر Rust",
+    actionAr: "راجع أمر DSL المقترح وصحّح الحقول أو العمليات غير الصالحة ثم أعد المحاولة.",
     titleEn: "AI response rejected by the Rust DSL schema validator",
     actionEn:
       "Inspect the proposed structured DSL command, fix any invalid fields or operations, and retry.",
@@ -432,6 +532,96 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Sign in to the existing account instead of creating a duplicate.",
     ownerNote:
       "Normalized email or verified phone already exists; never log the submitted identity values."
+  },
+  "SF-AUTH-009": {
+    code: "SF-AUTH-009",
+    severity: "error",
+    titleAr: "الحساب موقوف مؤقتًا",
+    actionAr: "تواصل مع الدعم لمراجعة حالة حسابك.",
+    titleEn: "Account is suspended",
+    actionEn: "Contact support to review your account status.",
+    ownerNote: "Account disabled or suspended by platform owner."
+  },
+  "SF-AUTH-010": {
+    code: "SF-AUTH-010",
+    severity: "error",
+    titleAr: "تجاوزت الحد المسموح للمحاولات",
+    actionAr: "انتظر قليلًا ثم أعد المحاولة.",
+    titleEn: "Too many authentication attempts",
+    actionEn: "Wait a moment and try again.",
+    ownerNote: "Rate limit or lockout threshold exceeded on authentication endpoint."
+  },
+  "SF-AUTH-011": {
+    code: "SF-AUTH-011",
+    severity: "error",
+    titleAr: "رمز التحقق عبر الهاتف غير صالح أو منتهي الصلاحية",
+    actionAr: "اطلب رمزًا جديدًا ثم أدخله قبل انتهاء صلاحيته.",
+    titleEn: "Phone verification code is invalid or expired",
+    actionEn: "Request a new code and enter it before it expires.",
+    ownerNote: "Phone OTP verification failed or exceeded attempt cap."
+  },
+  "SF-AUTH-012": {
+    code: "SF-AUTH-012",
+    severity: "error",
+    titleAr: "تسجيل الدخول الخارجي غير مهيأ أو الحالة غير صالحة",
+    actionAr: "استخدم تسجيل الدخول بالبريد وكلمة المرور أو تواصل مع الدعم.",
+    titleEn: "OAuth sign-in is not configured or state is invalid",
+    actionEn: "Use email and password sign-in or contact support.",
+    ownerNote: "OAuth provider credentials are not configured or state/PKCE verification failed."
+  },
+  "SF-AUTH-013": {
+    code: "SF-AUTH-013",
+    severity: "error",
+    titleAr: "الوصول محصور بمالك المنصة",
+    actionAr: "هذا الإجراء متاح لحساب مالك المنصة المعتمد فقط.",
+    titleEn: "Owner privileges required",
+    actionEn: "This action is restricted to the designated platform owner account.",
+    ownerNote: "Caller user_id does not match the sealed platform_owner record."
+  },
+  "SF-AUTH-014": {
+    code: "SF-AUTH-014",
+    severity: "error",
+    titleAr: "التحقق الثنائي لمالك المنصة مطلوب أو الرمز غير صحيح",
+    actionAr: "أدخل الرمز المكوّن من 6 أرقام من تطبيق Google Authenticator ثم أعد المحاولة.",
+    titleEn: "Owner TOTP verification is required or invalid",
+    actionEn: "Enter the current 6-digit code from Google Authenticator and retry.",
+    ownerNote: "RFC 6238 TOTP verification failed, code was replayed, or elevated session expired."
+  },
+  "SF-AUTH-015": {
+    code: "SF-AUTH-015",
+    severity: "error",
+    titleAr: "تم قفل التحقق الثنائي مؤقتًا بعد محاولات فاشلة",
+    actionAr: "انتظر انتهاء مهلة القفل ثم استخدم رمزًا جديدًا أو رمز استرداد.",
+    titleEn: "Owner MFA is temporarily locked",
+    actionEn: "Wait until the lockout expires, then use a fresh code or recovery code.",
+    ownerNote: "Failed TOTP/recovery attempts exceeded lockout threshold."
+  },
+  "SF-AUTH-016": {
+    code: "SF-AUTH-016",
+    severity: "error",
+    titleAr: "يلزم إعادة التحقق الثنائي لتنفيذ هذا الإجراء الحساس",
+    actionAr: "أعد إدخال رمز Google Authenticator الحالي لتأكيد العملية.",
+    titleEn: "Step-up TOTP verification required",
+    actionEn: "Re-enter your current Google Authenticator code to authorize this sensitive action.",
+    ownerNote: "High-risk owner action called without a fresh step-up TOTP verification."
+  },
+  "SF-AUTH-017": {
+    code: "SF-AUTH-017",
+    severity: "error",
+    titleAr: "تعذّر تهيئة مالك المنصة لأنها مغلقة أو غير صالحة",
+    actionAr: "تحقق من حالة التهيئة في قاعدة البيانات؛ لا يُسمح بالتهيئة إلا مرة واحدة.",
+    titleEn: "Owner bootstrap is already sealed or invalid",
+    actionEn: "Check the platform_owner table; bootstrap is one-time and sealed.",
+    ownerNote: "Repeated or unauthorized owner bootstrap attempt blocked."
+  },
+  "SF-AUTH-018": {
+    code: "SF-AUTH-018",
+    severity: "error",
+    titleAr: "مفتاح تشفير التحقق الثنائي غير مهيأ على الخادم",
+    actionAr: "هيئ المتغير SAFI_TOTP_ENCRYPTION_KEY في بيئة الخادم.",
+    titleEn: "Owner TOTP encryption key is not configured",
+    actionEn: "Configure SAFI_TOTP_ENCRYPTION_KEY in the server environment.",
+    ownerNote: "Missing or malformed 32-byte key for encrypting owner TOTP secrets at rest."
   },
   "SF-CAL-001": {
     code: "SF-CAL-001",
@@ -709,6 +899,78 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Use the license on its registered device or request a license transfer.",
     ownerNote: "The device fingerprint in the signed license does not match the current device."
   },
+  "SF-LIC-005": {
+    code: "SF-LIC-005",
+    severity: "error",
+    titleAr: "استنفدت حد العمليات الشهري لخطتك",
+    actionAr: "قم بالترقية أو اشترِ حزمة رصيد إضافية للمتابعة.",
+    titleEn: "Monthly operation limit reached",
+    actionEn: "Upgrade your plan or purchase a credit pack to continue.",
+    ownerNote: "Free plan 5 operations/month quota exhausted with zero credits."
+  },
+  "SF-LIC-006": {
+    code: "SF-LIC-006",
+    severity: "error",
+    titleAr: "يتجاوز الملف حد الصفوف أو الأعمدة المسموح لخطتك",
+    actionAr: "قم بالترقية أو استخدم الدفع لكل ملف لمعالجة ملفات أكبر.",
+    titleEn: "File exceeds plan row or column limits",
+    actionEn: "Upgrade your plan or use Pay-Per-File to process larger datasets.",
+    ownerNote: "Dataset row/column count exceeds active plan limit."
+  },
+  "SF-LIC-007": {
+    code: "SF-LIC-007",
+    severity: "error",
+    titleAr: "استنفدت حصة استخدام الذكاء الاصطناعي",
+    actionAr: "انتظر تجديد الحصة الشهرية أو قم بالترقية للاستمرار في استخدام المساعد.",
+    titleEn: "AI call quota reached",
+    actionEn: "Wait for the monthly reset or upgrade to continue using AI assistance.",
+    ownerNote: "AI call budget exhausted or unavailable on Free plan."
+  },
+  "SF-LIC-008": {
+    code: "SF-LIC-008",
+    severity: "error",
+    titleAr: "هذه الميزة متاحة للخطط المدفوعة فقط",
+    actionAr: "اشترك في خطة فردية أو مؤسسية لتفعيل هذه الميزة.",
+    titleEn: "This feature requires an active paid plan",
+    actionEn: "Subscribe to an Individual or Organization plan to unlock this feature.",
+    ownerNote: "Entitlement check denied paid-only capability."
+  },
+  "SF-PAY-001": {
+    code: "SF-PAY-001",
+    severity: "error",
+    titleAr: "بوابة الدفع غير مهيأة بعد",
+    actionAr: "أكمل إعداد بيانات مزود الدفع في بيئة الخادم قبل التفعيل.",
+    titleEn: "Billing provider is not configured",
+    actionEn: "Complete payment provider configuration in the server environment first.",
+    ownerNote: "Paddle or Paymob environment credentials are NOT_CONFIGURED."
+  },
+  "SF-PAY-002": {
+    code: "SF-PAY-002",
+    severity: "error",
+    titleAr: "توقيع إشعار الدفع غير صالح",
+    actionAr: "تحقق من سر التوقيع الخاص بمزود الدفع؛ تم رفض الطلب.",
+    titleEn: "Invalid payment webhook signature",
+    actionEn: "Verify the payment provider webhook secret; request rejected.",
+    ownerNote: "HMAC-SHA256 (Paddle) or HMAC-SHA512 (Paymob) signature verification failed."
+  },
+  "SF-PAY-003": {
+    code: "SF-PAY-003",
+    severity: "error",
+    titleAr: "توقيت إشعار الدفع خارج النافذة المسموحة",
+    actionAr: "أعد إرسال الحدث من لوحة مزود الدفع وتحقق من مزامنة ساعة الخادم.",
+    titleEn: "Payment webhook timestamp outside replay window",
+    actionEn: "Redeliver the event from the payment provider and verify server clock sync.",
+    ownerNote: "Webhook timestamp exceeded anti-replay tolerance window."
+  },
+  "SF-PAY-004": {
+    code: "SF-PAY-004",
+    severity: "error",
+    titleAr: "تعذّر تنفيذ عملية الفوترة المطلوبة",
+    actionAr: "راجع حالة الاشتراك أو نافذة الاسترداد ثم أعد المحاولة.",
+    titleEn: "Billing operation could not be completed",
+    actionEn: "Review subscription status or refund policy window and retry.",
+    ownerNote: "Invalid subscription state transition or refund window policy violation."
+  },
   "SF-PRF-001": {
     code: "SF-PRF-001",
     severity: "info",
@@ -754,6 +1016,60 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn:
       "Review the suggested column mapping for added or missing columns before applying the recipe.",
     ownerNote: "Recipe column matcher detected schema drift between recipe source and new file."
+  },
+  "SF-SYN-001": {
+    code: "SF-SYN-001",
+    severity: "error",
+    titleAr: "حزمة المزامنة المشفرة غير صالحة أو تعرضت للتعديل",
+    actionAr: "أعد المزامنة من الجهاز الأصلي وتحقق من مفتاح الخزنة.",
+    titleEn: "Encrypted sync envelope is invalid or tampered",
+    actionEn: "Resync from the originating device and verify your vault key.",
+    ownerNote: "Client-side encrypted sync payload failed structural or integrity validation."
+  },
+  "SF-SYN-002": {
+    code: "SF-SYN-002",
+    severity: "warn",
+    titleAr: "تعارض في إصدار المزامنة",
+    actionAr: "حدّث النسخة المحلية أولًا ثم أعد حفظ التعديلات.",
+    titleEn: "Sync version conflict",
+    actionEn: "Pull the latest encrypted revision before pushing local updates.",
+    ownerNote: "Optimistic concurrency version mismatch during encrypted sync."
+  },
+  "SF-SYN-003": {
+    code: "SF-SYN-003",
+    severity: "error",
+    titleAr: "رابط المشاركة المشفر منتهي الصلاحية أو ملغى",
+    actionAr: "اطلب من صاحب الملف إنشاء رابط مشاركة جديد.",
+    titleEn: "Encrypted share link is expired or revoked",
+    actionEn: "Ask the file owner to create a new share link.",
+    ownerNote: "Share link token revoked or past expires_at."
+  },
+  "SF-SYN-004": {
+    code: "SF-SYN-004",
+    severity: "error",
+    titleAr: "الحد الأدنى للمؤسسات هو 3 مقاعد",
+    actionAr: "اختر 3 مقاعد على الأقل لإنشاء أو تعديل خطة المؤسسة.",
+    titleEn: "Organization plans require at least 3 seats",
+    actionEn: "Select at least 3 seats to create or update an organization plan.",
+    ownerNote: "Organization seat count below approved minimum of 3."
+  },
+  "SF-SYN-005": {
+    code: "SF-SYN-005",
+    severity: "error",
+    titleAr: "ليست لديك صلاحية لإدارة هذه المؤسسة",
+    actionAr: "اطلب من مالك المؤسسة أو مديرها تنفيذ هذا الإجراء.",
+    titleEn: "Organization permission denied",
+    actionEn: "Ask an organization owner or admin to perform this action.",
+    ownerNote: "Caller lacks required organization role."
+  },
+  "SF-SYN-006": {
+    code: "SF-SYN-006",
+    severity: "error",
+    titleAr: "الدخول الموحد (SSO/SCIM) غير مهيأ بعد",
+    actionAr: "أكمل إعداد موفر الهوية المؤسسي في الإعدادات اليدوية أولًا.",
+    titleEn: "Enterprise SSO/SCIM is not configured",
+    actionEn: "Complete enterprise identity provider configuration first.",
+    ownerNote: "SSO/SCIM adapter invoked while external IdP configuration is NOT_CONFIGURED."
   },
   "SF-SYS-001": {
     code: "SF-SYS-001",
@@ -986,6 +1302,16 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     ownerNote:
       "The installed desktop build has no valid HTTPS API origin; it must fail closed instead of calling a local address."
   },
+  "SF-SYS-032": {
+    code: "SF-SYS-032",
+    severity: "fatal",
+    titleAr: "إعدادات الخادم غير مكتملة لوضع الإنتاج",
+    actionAr: "أكمل المتغيرات الإلزامية في دليل الإعداد اليدوي ثم أعد تشغيل الخادم.",
+    titleEn: "Server configuration is incomplete for production mode",
+    actionEn: "Configure all required environment variables from the Manual Setup Map and restart.",
+    ownerNote:
+      "Production fail-closed startup check detected missing or invalid required security config."
+  },
   "SF-UNK-001": {
     code: "SF-UNK-001",
     severity: "fatal",
@@ -1071,12 +1397,12 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
 } as const;
 
 export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
-  "error.SF-AIX-001.title": "????? ?????? ????????? ??? ???? ?????? ?? ??? ??? ???????",
+  "error.SF-AIX-001.title": "مزود الذكاء الاصطناعي غير مهيأ أو غير متاح دون اتصال",
   "error.SF-AIX-001.action":
-    "???? ???? ???? ??????? ?????? ?? ??????? ?? ?????????? ?? ???? ????? DSL ???????? ??????? ??? ????? ???????? ????????.",
-  "error.SF-AIX-002.title": "?? ??? ??????? ?????? ????????? ???? ???????? ????? ??????? ????????",
+    "هيئ مزودًا محليًا أو معتمدًا في الإعدادات، أو أرسل أوامر DSL المهيكلة مباشرة دون الاعتماد على مزود خارجي.",
+  "error.SF-AIX-002.title": "تم رفض استجابة الذكاء الاصطناعي بواسطة مدقق أوامر Rust",
   "error.SF-AIX-002.action":
-    "???? ??? DSL ??????? ????? ??????? ?? ?????? ???????? ?? ??? ????????.",
+    "راجع أمر DSL المقترح وصحّح الحقول أو العمليات غير الصالحة ثم أعد المحاولة.",
   "error.SF-AUTH-001.title": "فشل التحقق من الهوية",
   "error.SF-AUTH-001.action": "أعد تسجيل الدخول أو تحقق من بيانات الاعتماد ثم أعد المحاولة.",
   "error.SF-AUTH-002.title": "انتهت صلاحية الدخول",
@@ -1094,6 +1420,28 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
     "اطلب رابط تحقق جديدًا من صفحة تسجيل الدخول ثم افتح أحدث رسالة وصلتك.",
   "error.SF-AUTH-008.title": "هذا الحساب مسجل بالفعل",
   "error.SF-AUTH-008.action": "سجّل الدخول إلى الحساب الحالي بدلًا من إنشاء حساب مكرر.",
+  "error.SF-AUTH-009.title": "الحساب موقوف مؤقتًا",
+  "error.SF-AUTH-009.action": "تواصل مع الدعم لمراجعة حالة حسابك.",
+  "error.SF-AUTH-010.title": "تجاوزت الحد المسموح للمحاولات",
+  "error.SF-AUTH-010.action": "انتظر قليلًا ثم أعد المحاولة.",
+  "error.SF-AUTH-011.title": "رمز التحقق عبر الهاتف غير صالح أو منتهي الصلاحية",
+  "error.SF-AUTH-011.action": "اطلب رمزًا جديدًا ثم أدخله قبل انتهاء صلاحيته.",
+  "error.SF-AUTH-012.title": "تسجيل الدخول الخارجي غير مهيأ أو الحالة غير صالحة",
+  "error.SF-AUTH-012.action": "استخدم تسجيل الدخول بالبريد وكلمة المرور أو تواصل مع الدعم.",
+  "error.SF-AUTH-013.title": "الوصول محصور بمالك المنصة",
+  "error.SF-AUTH-013.action": "هذا الإجراء متاح لحساب مالك المنصة المعتمد فقط.",
+  "error.SF-AUTH-014.title": "التحقق الثنائي لمالك المنصة مطلوب أو الرمز غير صحيح",
+  "error.SF-AUTH-014.action":
+    "أدخل الرمز المكوّن من 6 أرقام من تطبيق Google Authenticator ثم أعد المحاولة.",
+  "error.SF-AUTH-015.title": "تم قفل التحقق الثنائي مؤقتًا بعد محاولات فاشلة",
+  "error.SF-AUTH-015.action": "انتظر انتهاء مهلة القفل ثم استخدم رمزًا جديدًا أو رمز استرداد.",
+  "error.SF-AUTH-016.title": "يلزم إعادة التحقق الثنائي لتنفيذ هذا الإجراء الحساس",
+  "error.SF-AUTH-016.action": "أعد إدخال رمز Google Authenticator الحالي لتأكيد العملية.",
+  "error.SF-AUTH-017.title": "تعذّر تهيئة مالك المنصة لأنها مغلقة أو غير صالحة",
+  "error.SF-AUTH-017.action":
+    "تحقق من حالة التهيئة في قاعدة البيانات؛ لا يُسمح بالتهيئة إلا مرة واحدة.",
+  "error.SF-AUTH-018.title": "مفتاح تشفير التحقق الثنائي غير مهيأ على الخادم",
+  "error.SF-AUTH-018.action": "هيئ المتغير SAFI_TOTP_ENCRYPTION_KEY في بيئة الخادم.",
   "error.SF-CAL-001.title": "العمود المطلوب غير موجود في البيانات",
   "error.SF-CAL-001.action": "اختر عمودًا موجودًا أو أعد تسمية المرجع داخل المعادلة.",
   "error.SF-CAL-002.title": "صيغة المعادلة غير صحيحة",
@@ -1158,6 +1506,23 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-LIC-003.action": "تحقق من مصدر الترخيص واطلب إصدارًا صحيحًا.",
   "error.SF-LIC-004.title": "الترخيص مرتبط بجهاز آخر",
   "error.SF-LIC-004.action": "استخدم الترخيص على الجهاز المسجل أو اطلب نقل الترخيص.",
+  "error.SF-LIC-005.title": "استنفدت حد العمليات الشهري لخطتك",
+  "error.SF-LIC-005.action": "قم بالترقية أو اشترِ حزمة رصيد إضافية للمتابعة.",
+  "error.SF-LIC-006.title": "يتجاوز الملف حد الصفوف أو الأعمدة المسموح لخطتك",
+  "error.SF-LIC-006.action": "قم بالترقية أو استخدم الدفع لكل ملف لمعالجة ملفات أكبر.",
+  "error.SF-LIC-007.title": "استنفدت حصة استخدام الذكاء الاصطناعي",
+  "error.SF-LIC-007.action":
+    "انتظر تجديد الحصة الشهرية أو قم بالترقية للاستمرار في استخدام المساعد.",
+  "error.SF-LIC-008.title": "هذه الميزة متاحة للخطط المدفوعة فقط",
+  "error.SF-LIC-008.action": "اشترك في خطة فردية أو مؤسسية لتفعيل هذه الميزة.",
+  "error.SF-PAY-001.title": "بوابة الدفع غير مهيأة بعد",
+  "error.SF-PAY-001.action": "أكمل إعداد بيانات مزود الدفع في بيئة الخادم قبل التفعيل.",
+  "error.SF-PAY-002.title": "توقيع إشعار الدفع غير صالح",
+  "error.SF-PAY-002.action": "تحقق من سر التوقيع الخاص بمزود الدفع؛ تم رفض الطلب.",
+  "error.SF-PAY-003.title": "توقيت إشعار الدفع خارج النافذة المسموحة",
+  "error.SF-PAY-003.action": "أعد إرسال الحدث من لوحة مزود الدفع وتحقق من مزامنة ساعة الخادم.",
+  "error.SF-PAY-004.title": "تعذّر تنفيذ عملية الفوترة المطلوبة",
+  "error.SF-PAY-004.action": "راجع حالة الاشتراك أو نافذة الاسترداد ثم أعد المحاولة.",
   "error.SF-PRF-001.title": "لسنا متأكدين من نوع هذا العمود",
   "error.SF-PRF-001.action": "راجع الاقتراح أو اشرح لنا معنى العمود.",
   "error.SF-PRF-002.title": "قيمة درجة الثقة غير صالحة",
@@ -1168,6 +1533,18 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-RCP-002.action": "تأكد من صحة عبارة السر وأعد المحاولة.",
   "error.SF-RCP-003.title": "تغيّر شكل الملف أو الأعمدة",
   "error.SF-RCP-003.action": "راجع المطابقة المقترحة للأعمدة الجديدة أو الناقصة قبل تطبيق الوصفة.",
+  "error.SF-SYN-001.title": "حزمة المزامنة المشفرة غير صالحة أو تعرضت للتعديل",
+  "error.SF-SYN-001.action": "أعد المزامنة من الجهاز الأصلي وتحقق من مفتاح الخزنة.",
+  "error.SF-SYN-002.title": "تعارض في إصدار المزامنة",
+  "error.SF-SYN-002.action": "حدّث النسخة المحلية أولًا ثم أعد حفظ التعديلات.",
+  "error.SF-SYN-003.title": "رابط المشاركة المشفر منتهي الصلاحية أو ملغى",
+  "error.SF-SYN-003.action": "اطلب من صاحب الملف إنشاء رابط مشاركة جديد.",
+  "error.SF-SYN-004.title": "الحد الأدنى للمؤسسات هو 3 مقاعد",
+  "error.SF-SYN-004.action": "اختر 3 مقاعد على الأقل لإنشاء أو تعديل خطة المؤسسة.",
+  "error.SF-SYN-005.title": "ليست لديك صلاحية لإدارة هذه المؤسسة",
+  "error.SF-SYN-005.action": "اطلب من مالك المؤسسة أو مديرها تنفيذ هذا الإجراء.",
+  "error.SF-SYN-006.title": "الدخول الموحد (SSO/SCIM) غير مهيأ بعد",
+  "error.SF-SYN-006.action": "أكمل إعداد موفر الهوية المؤسسي في الإعدادات اليدوية أولًا.",
   "error.SF-SYS-001.title": "خلل في بنية الجدول الداخلي",
   "error.SF-SYS-001.action": "أعد استيراد الملف أو تواصل مع الدعم مع رمز التشخيص.",
   "error.SF-SYS-002.title": "رابط عميق غير صالح",
@@ -1220,6 +1597,8 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-SYS-031.title": "عنوان خدمة الحساب غير مهيأ",
   "error.SF-SYS-031.action":
     "أعد تثبيت التطبيق بحزمة تتضمن SAFI_API_BASE_URL صالحًا، أو تواصل مع الدعم.",
+  "error.SF-SYS-032.title": "إعدادات الخادم غير مكتملة لوضع الإنتاج",
+  "error.SF-SYS-032.action": "أكمل المتغيرات الإلزامية في دليل الإعداد اليدوي ثم أعد تشغيل الخادم.",
   "error.SF-UNK-001.title": "حدث خطأ غير متوقع",
   "error.SF-UNK-001.action": "أعد تشغيل التطبيق. إن تكرر الخطأ فأرسل رمز التشخيص للدعم.",
   "error.SF-UPD-001.title": "محاولة تثبيت إصدار أقدم مرفوضة",
@@ -1265,6 +1644,28 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
     "Request a new verification link from sign-in, then open the latest email.",
   "error.SF-AUTH-008.title": "Account already registered",
   "error.SF-AUTH-008.action": "Sign in to the existing account instead of creating a duplicate.",
+  "error.SF-AUTH-009.title": "Account is suspended",
+  "error.SF-AUTH-009.action": "Contact support to review your account status.",
+  "error.SF-AUTH-010.title": "Too many authentication attempts",
+  "error.SF-AUTH-010.action": "Wait a moment and try again.",
+  "error.SF-AUTH-011.title": "Phone verification code is invalid or expired",
+  "error.SF-AUTH-011.action": "Request a new code and enter it before it expires.",
+  "error.SF-AUTH-012.title": "OAuth sign-in is not configured or state is invalid",
+  "error.SF-AUTH-012.action": "Use email and password sign-in or contact support.",
+  "error.SF-AUTH-013.title": "Owner privileges required",
+  "error.SF-AUTH-013.action": "This action is restricted to the designated platform owner account.",
+  "error.SF-AUTH-014.title": "Owner TOTP verification is required or invalid",
+  "error.SF-AUTH-014.action": "Enter the current 6-digit code from Google Authenticator and retry.",
+  "error.SF-AUTH-015.title": "Owner MFA is temporarily locked",
+  "error.SF-AUTH-015.action":
+    "Wait until the lockout expires, then use a fresh code or recovery code.",
+  "error.SF-AUTH-016.title": "Step-up TOTP verification required",
+  "error.SF-AUTH-016.action":
+    "Re-enter your current Google Authenticator code to authorize this sensitive action.",
+  "error.SF-AUTH-017.title": "Owner bootstrap is already sealed or invalid",
+  "error.SF-AUTH-017.action": "Check the platform_owner table; bootstrap is one-time and sealed.",
+  "error.SF-AUTH-018.title": "Owner TOTP encryption key is not configured",
+  "error.SF-AUTH-018.action": "Configure SAFI_TOTP_ENCRYPTION_KEY in the server environment.",
   "error.SF-CAL-001.title": "The referenced column does not exist in the data",
   "error.SF-CAL-001.action": "Pick an existing column or fix the reference inside the formula.",
   "error.SF-CAL-002.title": "The formula syntax is invalid",
@@ -1335,6 +1736,26 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-LIC-004.title": "License is bound to another device",
   "error.SF-LIC-004.action":
     "Use the license on its registered device or request a license transfer.",
+  "error.SF-LIC-005.title": "Monthly operation limit reached",
+  "error.SF-LIC-005.action": "Upgrade your plan or purchase a credit pack to continue.",
+  "error.SF-LIC-006.title": "File exceeds plan row or column limits",
+  "error.SF-LIC-006.action": "Upgrade your plan or use Pay-Per-File to process larger datasets.",
+  "error.SF-LIC-007.title": "AI call quota reached",
+  "error.SF-LIC-007.action":
+    "Wait for the monthly reset or upgrade to continue using AI assistance.",
+  "error.SF-LIC-008.title": "This feature requires an active paid plan",
+  "error.SF-LIC-008.action":
+    "Subscribe to an Individual or Organization plan to unlock this feature.",
+  "error.SF-PAY-001.title": "Billing provider is not configured",
+  "error.SF-PAY-001.action":
+    "Complete payment provider configuration in the server environment first.",
+  "error.SF-PAY-002.title": "Invalid payment webhook signature",
+  "error.SF-PAY-002.action": "Verify the payment provider webhook secret; request rejected.",
+  "error.SF-PAY-003.title": "Payment webhook timestamp outside replay window",
+  "error.SF-PAY-003.action":
+    "Redeliver the event from the payment provider and verify server clock sync.",
+  "error.SF-PAY-004.title": "Billing operation could not be completed",
+  "error.SF-PAY-004.action": "Review subscription status or refund policy window and retry.",
   "error.SF-PRF-001.title": "We are not sure about this column's type",
   "error.SF-PRF-001.action": "Review the suggestion or tell us what this column represents.",
   "error.SF-PRF-002.title": "Invalid confidence score value",
@@ -1347,6 +1768,18 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-RCP-003.title": "File schema or column structure changed",
   "error.SF-RCP-003.action":
     "Review the suggested column mapping for added or missing columns before applying the recipe.",
+  "error.SF-SYN-001.title": "Encrypted sync envelope is invalid or tampered",
+  "error.SF-SYN-001.action": "Resync from the originating device and verify your vault key.",
+  "error.SF-SYN-002.title": "Sync version conflict",
+  "error.SF-SYN-002.action": "Pull the latest encrypted revision before pushing local updates.",
+  "error.SF-SYN-003.title": "Encrypted share link is expired or revoked",
+  "error.SF-SYN-003.action": "Ask the file owner to create a new share link.",
+  "error.SF-SYN-004.title": "Organization plans require at least 3 seats",
+  "error.SF-SYN-004.action": "Select at least 3 seats to create or update an organization plan.",
+  "error.SF-SYN-005.title": "Organization permission denied",
+  "error.SF-SYN-005.action": "Ask an organization owner or admin to perform this action.",
+  "error.SF-SYN-006.title": "Enterprise SSO/SCIM is not configured",
+  "error.SF-SYN-006.action": "Complete enterprise identity provider configuration first.",
   "error.SF-SYS-001.title": "Internal table structure mismatch",
   "error.SF-SYS-001.action": "Re-import the file or contact support with the diagnostic code.",
   "error.SF-SYS-002.title": "Invalid deep link",
@@ -1401,6 +1834,9 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-SYS-031.title": "Account service address is not configured",
   "error.SF-SYS-031.action":
     "Reinstall a build that includes a valid SAFI_API_BASE_URL, or contact support.",
+  "error.SF-SYS-032.title": "Server configuration is incomplete for production mode",
+  "error.SF-SYS-032.action":
+    "Configure all required environment variables from the Manual Setup Map and restart.",
   "error.SF-UNK-001.title": "An unexpected error occurred",
   "error.SF-UNK-001.action":
     "Restart the app. If the error repeats, send the diagnostic code to support.",

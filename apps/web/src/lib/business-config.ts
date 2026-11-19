@@ -1,6 +1,7 @@
 /**
  * Typed bridge to `config/business.json`, the single source of truth for
- * business, auth, roles, and billing decisions. Never hard-code these values.
+ * business, auth, roles, and billing decisions. Never hard-code prices, limits,
+ * or personal owner emails in frontend code.
  */
 import rawBusinessConfig from "../../../../config/business.json";
 
@@ -9,7 +10,7 @@ export type AuthProvider = "google" | "apple" | "github";
 export interface FriendRoleConfig {
   readonly label_ar: string;
   readonly label_en: string;
-  readonly "granted_ exclusively_by": string;
+  readonly granted_exclusively_by: string;
   readonly price: { readonly USD: number; readonly EGP: number };
   readonly all_paid_features_open: boolean;
   readonly removes_watermark: boolean;
@@ -21,7 +22,11 @@ export interface FriendRoleConfig {
 
 export interface BusinessConfig {
   readonly brand: { readonly name_en: string; readonly name_ar: string };
-  readonly owner: { readonly email: string; readonly strict_single_owner_lock: boolean };
+  readonly owner: {
+    readonly identity_mode: string;
+    readonly mfa_policy: string;
+    readonly strict_single_owner_lock: boolean;
+  };
   readonly support: { readonly email: string; readonly show_publicly: boolean };
   readonly auth: {
     readonly min_password_length: number;
@@ -32,7 +37,7 @@ export interface BusinessConfig {
     readonly motion_animations_enabled: boolean;
   };
   readonly roles: {
-    readonly owner: { readonly email_match: string };
+    readonly owner: { readonly identity_resolution: string };
     readonly friend: FriendRoleConfig;
   };
   readonly trial: { readonly days: number; readonly ai_calls_cap: number };
@@ -47,12 +52,19 @@ export interface BusinessConfig {
     readonly quarters: readonly string[];
   };
   readonly refunds: { readonly window_days: number };
+  readonly languages: {
+    readonly launch: readonly string[];
+    readonly default: string;
+    readonly rtl: readonly string[];
+  };
 }
 
 export const BUSINESS_CONFIG = rawBusinessConfig as unknown as BusinessConfig;
 
-export const OWNER_EMAIL = BUSINESS_CONFIG.owner.email;
+export const SUPPORT_EMAIL = BUSINESS_CONFIG.support.email;
 export const MIN_PASSWORD_LENGTH = BUSINESS_CONFIG.auth.min_password_length;
 export const OAUTH_PROVIDERS = BUSINESS_CONFIG.auth.oauth_providers;
 export const FRIEND_ROLE = BUSINESS_CONFIG.roles.friend;
 export const TRIAL_DAYS = BUSINESS_CONFIG.trial.days;
+export const LAUNCH_LANGUAGES = BUSINESS_CONFIG.languages.launch;
+export const DEFAULT_LANGUAGE = BUSINESS_CONFIG.languages.default;

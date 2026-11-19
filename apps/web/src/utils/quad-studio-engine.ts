@@ -857,6 +857,89 @@ export function applyDashboardEdit(
 }
 
 /**
+ * Deterministic regional/category coordinate scatter projection aligned byte-for-byte with
+ * Rust `geo_region_coords` (`crates/sf-recipe/src/datagraph.rs`) so Desktop Dashboard,
+ * offline `.safi.html` capsule, and exported presentations/SVGs share identical coordinates.
+ * Recognized Egyptian regions map to relative `(xPct, yPct)` scatter positions; unmapped
+ * categories distribute deterministically without implying GIS boundary geometry.
+ */
+export function computeRegionalCoordinatePct(
+  label: string,
+  fallbackIndex: number
+): { readonly xPct: number; readonly yPct: number } {
+  const lower = label.trim().toLowerCase();
+  if (lower.includes("alex") || label.includes("الإسكندرية") || label.includes("اسكندرية")) {
+    return { xPct: 30, yPct: 22 };
+  }
+  if (lower.includes("port said") || label.includes("بورسعيد") || lower.includes("دمياط")) {
+    return { xPct: 60, yPct: 20 };
+  }
+  if (
+    lower.includes("delta") ||
+    lower.includes("dakahl") ||
+    lower.includes("gharbia") ||
+    lower.includes("tanta") ||
+    label.includes("الدلتا") ||
+    label.includes("المنصورة") ||
+    label.includes("طنطا")
+  ) {
+    return { xPct: 48, yPct: 28 };
+  }
+  if (
+    lower.includes("sharq") ||
+    lower.includes("ismail") ||
+    lower.includes("suez") ||
+    label.includes("الشرقية") ||
+    label.includes("الإسماعيلية") ||
+    label.includes("السويس")
+  ) {
+    return { xPct: 64, yPct: 34 };
+  }
+  if (lower.includes("cairo") || label.includes("القاهرة")) {
+    return { xPct: 52, yPct: 42 };
+  }
+  if (lower.includes("giza") || label.includes("الجيزة") || label.includes("الفيوم")) {
+    return { xPct: 44, yPct: 46 };
+  }
+  if (
+    lower.includes("minya") ||
+    lower.includes("asyut") ||
+    lower.includes("upper") ||
+    label.includes("المنيا") ||
+    label.includes("أسيوط") ||
+    label.includes("الصعيد")
+  ) {
+    return { xPct: 46, yPct: 66 };
+  }
+  if (
+    lower.includes("luxor") ||
+    lower.includes("aswan") ||
+    label.includes("الأقصر") ||
+    label.includes("أسوان")
+  ) {
+    return { xPct: 56, yPct: 82 };
+  }
+  if (
+    lower.includes("red sea") ||
+    lower.includes("sinai") ||
+    label.includes("البحر الأحمر") ||
+    label.includes("سيناء")
+  ) {
+    return { xPct: 76, yPct: 54 };
+  }
+
+  let hash = Math.imul(fallbackIndex >>> 0, 37) >>> 0;
+  const bytes = new TextEncoder().encode(label);
+  for (const b of bytes) {
+    hash = (Math.imul(hash, 31) + b) >>> 0;
+  }
+  return {
+    xPct: 18 + (hash % 64),
+    yPct: 20 + (Math.floor(hash / 64) % 60)
+  };
+}
+
+/**
  * Renders any of the 21 supported `DashboardChartType` visuals as a clean, genuinely distinct SVG visual.
  */
 export function renderChartSvg(
@@ -1159,18 +1242,22 @@ export function renderChartSvg(
     }
 
     case "Geographic": {
+      const plotX = 28;
+      const plotY = 42;
+      const plotW = 364;
+      const plotH = 142;
       const pins = safePoints
         .slice(0, 8)
         .map((p, i) => {
-          const cx =
-            64 + Math.round(((i + 0.5) / Math.max(1, Math.min(8, safePoints.length))) * 290);
-          const cy = 62 + Math.round((Math.abs(p.value) / maxVal) * 0.7 * 90);
+          const { xPct, yPct } = computeRegionalCoordinatePct(p.label, i);
+          const cx = Math.round(plotX + (xPct / 100) * plotW);
+          const cy = Math.round(plotY + (yPct / 100) * plotH);
           const r = Math.max(6, Math.min(18, Math.round((Math.abs(p.value) / maxVal) * 16)));
           const color = palette[i % palette.length] ?? primaryColor;
-          return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" fill-opacity="0.78" stroke="#ffffff" stroke-width="1.5"/><text x="${cx}" y="${cy + r + 11}" text-anchor="middle" font-size="9.5" fill="#0f172a">${esc(p.label.slice(0, 10))}</text>`;
+          return `<circle data-geo-marker="${i}" data-geo-x-pct="${xPct}" data-geo-y-pct="${yPct}" cx="${cx}" cy="${cy}" r="${r}" fill="${color}" fill-opacity="0.78" stroke="#ffffff" stroke-width="1.5"/><text x="${cx}" y="${cy + r + 11}" text-anchor="middle" font-size="9.5" fill="#0f172a">${esc(p.label.slice(0, 10))}</text>`;
         })
         .join("");
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Geographic" data-visual-kind="geographic" data-geo-projection="category-coordinate-scatter">${header}<rect x="28" y="42" width="364" height="142" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/><line x1="150" y1="42" x2="150" y2="184" stroke="#e2e8f0" stroke-dasharray="3,3"/><line x1="272" y1="42" x2="272" y2="184" stroke="#e2e8f0" stroke-dasharray="3,3"/><line x1="28" y1="113" x2="392" y2="113" stroke="#e2e8f0" stroke-dasharray="3,3"/>${pins}<text x="210" y="198" text-anchor="middle" font-size="9" fill="#64748b">Category coordinate projection (no GIS boundary implied)</text></svg>`;
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210" data-chart-type="Geographic" data-visual-kind="geographic" data-geo-projection="regional-coordinate-scatter">${header}<rect data-geo-backdrop="1" x="${plotX}" y="${plotY}" width="${plotW}" height="${plotH}" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/><line x1="${Math.round(plotX + plotW * 0.35)}" y1="${plotY}" x2="${Math.round(plotX + plotW * 0.35)}" y2="${plotY + plotH}" stroke="#e2e8f0" stroke-dasharray="3,3"/><line x1="${Math.round(plotX + plotW * 0.65)}" y1="${plotY}" x2="${Math.round(plotX + plotW * 0.65)}" y2="${plotY + plotH}" stroke="#e2e8f0" stroke-dasharray="3,3"/><line x1="${plotX}" y1="${Math.round(plotY + plotH * 0.35)}" x2="${plotX + plotW}" y2="${Math.round(plotY + plotH * 0.35)}" stroke="#e2e8f0" stroke-dasharray="3,3"/><line x1="${plotX}" y1="${Math.round(plotY + plotH * 0.65)}" x2="${plotX + plotW}" y2="${Math.round(plotY + plotH * 0.65)}" stroke="#e2e8f0" stroke-dasharray="3,3"/>${pins}<text x="210" y="198" text-anchor="middle" font-size="9" fill="#64748b">Regional coordinate scatter (no GIS boundaries implied)</text></svg>`;
     }
 
     case "Column":

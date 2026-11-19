@@ -384,6 +384,193 @@ def build_csv_and_adversarial_fixtures() -> None:
         zout.writestr("xl/worksheets/sheet1.xml", payload)
 
 
+def _biff12_record(rec_id: int, payload: bytes = b"") -> bytes:
+    """Encodes a single BIFF12 (MS-XLSB) record with 1-2 byte ID and 1-4 byte varint length."""
+    if rec_id < 0x80:
+        header = bytes([rec_id])
+    else:
+        header = bytes([(rec_id & 0x7F) | 0x80, (rec_id >> 7) & 0x7F])
+
+    length = len(payload)
+    len_bytes = bytearray()
+    while True:
+        chunk = length & 0x7F
+        length >>= 7
+        if length:
+            len_bytes.append(chunk | 0x80)
+        else:
+            len_bytes.append(chunk)
+            break
+    return header + bytes(len_bytes) + payload
+
+
+def _xl_wide_str(text: str) -> bytes:
+    encoded = text.encode("utf-16le")
+    return struct.pack("<I", len(text)) + encoded
+
+
+def _biff12_workbook_bin(sheet_name: str = "Sheet1") -> bytes:
+    bundle_sh = (
+        struct.pack("<II", 0, 1)  # hsState=Visible (0), iTabID=1
+        + _xl_wide_str("rId1")
+        + _xl_wide_str(sheet_name)
+    )
+    return b"".join(
+        [
+            _biff12_record(0x0083),  # BrtBeginBook
+            _biff12_record(0x008F),  # BrtBeginBundleShs
+            _biff12_record(0x009C, bundle_sh),  # BrtBundleSh
+            _biff12_record(0x0090),  # BrtEndBundleShs
+            _biff12_record(0x0084),  # BrtEndBook
+        ]
+    )
+
+
+def _write_minimal_xlsb(out_path: Path, wb_bin: bytes, sheet_bin: bytes) -> Path:
+    rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.bin"/>'
+        "</Relationships>"
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/>'
+        "</Types>"
+    )
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zout:
+        zout.writestr("[Content_Types].xml", content_types.encode("utf-8"))
+        zout.writestr("xl/workbook.bin", wb_bin)
+        zout.writestr("xl/_rels/workbook.bin.rels", rels_xml.encode("utf-8"))
+        zout.writestr("xl/worksheets/sheet1.bin", sheet_bin)
+    return out_path
+
+
+def _biff12_cell_st(col: int, text: str) -> bytes:
+    return _biff12_record(0x0006, struct.pack("<II", col, 0) + _xl_wide_str(text))
+
+
+def _biff12_cell_rk_int(col: int, value: int) -> bytes:
+    rk = ((value & 0x3FFFFFFF) << 2) | 0x02
+    return _biff12_record(0x0002, struct.pack("<III", col, 0, rk))
+
+
+def _biff12_fmla_num(col: int, cached: float, rgce: bytes) -> bytes:
+    payload = struct.pack("<IIdHI", col, 0, cached, 0, len(rgce)) + rgce
+    return _biff12_record(0x0009, payload)
+
+
+def _biff12_fmla_string(col: int, cached: str, rgce: bytes) -> bytes:
+    payload = (
+        struct.pack("<II", col, 0)
+        + _xl_wide_str(cached)
+        + struct.pack("<HI", 0, len(rgce))
+        + rgce
+    )
+    return _biff12_record(0x0008, payload)
+
+
+def build_adversarial_xlsb_fixtures() -> list[Path]:
+    """Generates adversarial & integrity XLSB binary fixtures for P0/P1 security regression tests."""
+    ensure_out_dir()
+    wb_bin = _biff12_workbook_bin("AuditSheet")
+    created: list[Path] = []
+
+    # 1. P0: Sparse opposite-corner value allocation bomb (A1 + XFD1048576)
+    sparse_val_sheet = b"".join(
+        [
+            _biff12_record(0x0081),  # BrtBeginSheet
+            _biff12_record(0x0091),  # BrtBeginSheetData
+            _biff12_record(0x0000, struct.pack("<I", 0)),  # Row 0 (A1)
+            _biff12_cell_rk_int(0, 10),
+            _biff12_record(0x0000, struct.pack("<I", 1_048_575)),  # Row 1048575 (XFD1048576)
+            _biff12_cell_rk_int(16_383, 20),
+            _biff12_record(0x0092),  # BrtEndSheetData
+            _biff12_record(0x0082),  # BrtEndSheet
+        ]
+    )
+    created.append(
+        _write_minimal_xlsb(
+            OUT_DIR / "adversarial_sparse_corners.xlsb", wb_bin, sparse_val_sheet
+        )
+    )
+
+    # 2. P0: Sparse opposite-corner formula allocation bomb (A1 + XFD1048576 formula cells)
+    ptg_int_1 = struct.pack("<BH", 0x1E, 1)
+    ptg_int_2 = struct.pack("<BH", 0x1E, 2)
+    sparse_fmla_sheet = b"".join(
+        [
+            _biff12_record(0x0081),
+            _biff12_record(0x0091),
+            _biff12_record(0x0000, struct.pack("<I", 0)),
+            _biff12_fmla_num(0, 1.0, ptg_int_1),
+            _biff12_record(0x0000, struct.pack("<I", 1_048_575)),
+            _biff12_fmla_string(16_383, "", ptg_int_2),
+            _biff12_record(0x0092),
+            _biff12_record(0x0082),
+        ]
+    )
+    created.append(
+        _write_minimal_xlsb(
+            OUT_DIR / "adversarial_sparse_formula_corners.xlsb",
+            wb_bin,
+            sparse_fmla_sheet,
+        )
+    )
+
+    # 3. P1: Truncated BIFF12 worksheet stream mid-record after valid initial rows
+    truncated_sheet = b"".join(
+        [
+            _biff12_record(0x0081),
+            _biff12_record(0x0091),
+            _biff12_record(0x0000, struct.pack("<I", 0)),
+            _biff12_cell_st(0, "Item"),
+            _biff12_cell_st(1, "Amount"),
+            _biff12_record(0x0000, struct.pack("<I", 1)),
+            _biff12_cell_st(0, "Widget"),
+            # Truncated BrtCellReal (rec_id=0x0005, declares 16 bytes, only 4 bytes follow)
+            b"\x05\x10\x01\x00\x00\x00",
+        ]
+    )
+    created.append(
+        _write_minimal_xlsb(
+            OUT_DIR / "malformed_truncated_sheet.xlsb", wb_bin, truncated_sheet
+        )
+    )
+
+    # 4. P1: Valid XLSB containing an unsupported BIFF12 formula token (0x7F) with cached result 250.0
+    unsupported_rgce = b"\x7f\x01\x02"
+    unsupported_fmla_sheet = b"".join(
+        [
+            _biff12_record(0x0081),
+            _biff12_record(0x0091),
+            _biff12_record(0x0000, struct.pack("<I", 0)),
+            _biff12_cell_st(0, "Item"),
+            _biff12_cell_st(1, "Amount"),
+            _biff12_cell_st(2, "Computed"),
+            _biff12_record(0x0000, struct.pack("<I", 1)),
+            _biff12_cell_st(0, "Widget"),
+            _biff12_cell_rk_int(1, 100),
+            _biff12_fmla_num(2, 250.0, unsupported_rgce),
+            _biff12_record(0x0092),
+            _biff12_record(0x0082),
+        ]
+    )
+    created.append(
+        _write_minimal_xlsb(
+            OUT_DIR / "xlsb_unsupported_formula_cached.xlsb",
+            wb_bin,
+            unsupported_fmla_sheet,
+        )
+    )
+
+    return created
+
+
 def main() -> None:
     ensure_out_dir()
     created = [
@@ -393,6 +580,7 @@ def main() -> None:
         build_biff8_xls(),
     ]
     build_csv_and_adversarial_fixtures()
+    created.extend(build_adversarial_xlsb_fixtures())
     for p in sorted(OUT_DIR.iterdir()):
         print(f"Generated fixture: {p.name} ({p.stat().st_size} bytes)")
     assert created

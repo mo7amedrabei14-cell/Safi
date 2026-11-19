@@ -1413,7 +1413,11 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
     }
 
     let (mut ooxml_meta, defined_names, raw_sheets) = if format == WorkbookFormat::Xlsb {
-        let parsed = crate::xlsb_reader::parse_xlsb_package(&raw_bytes, raw_bytes.len() as u64)?;
+        let parsed = crate::xlsb_reader::parse_xlsb_package(
+            &raw_bytes,
+            raw_bytes.len() as u64,
+            limits.max_rows,
+        )?;
         let sheets = parsed
             .sheets
             .into_iter()
@@ -1560,7 +1564,7 @@ pub fn ingest_workbook_universal<R: Read + Seek>(
         .count();
     if unsupported_formula_count > 0 {
         ooxml_meta.warnings.push(format!(
-            "{unsupported_formula_count} formula cell(s) use Excel functions outside local recalculation and had no cached result."
+            "{unsupported_formula_count} formula cell(s) use Excel functions or undecoded binary formula tokens outside local recalculation (any cached results are preserved unverified)."
         ));
     }
 
@@ -1790,8 +1794,54 @@ fn build_worksheet_intelligence(
     };
 
     let (end_r, end_c) = range.end().unwrap_or((start_r, start_c));
-    let total_r = (end_r + 1) as usize;
-    let total_c = (end_c + 1) as usize;
+    let total_r_u64 = u64::from(end_r).checked_add(1).ok_or_else(|| {
+        SafiError::new(
+            ErrorCode::SF_IMP_005,
+            ErrorSeverity::Error,
+            "WorksheetDenseExtentOverflow",
+            "import.zip_bomb_detected",
+        )
+    })?;
+    let total_c_u64 = u64::from(end_c).checked_add(1).ok_or_else(|| {
+        SafiError::new(
+            ErrorCode::SF_IMP_005,
+            ErrorSeverity::Error,
+            "WorksheetDenseExtentOverflow",
+            "import.zip_bomb_detected",
+        )
+    })?;
+    let dense_area = total_r_u64.checked_mul(total_c_u64).ok_or_else(|| {
+        SafiError::new(
+            ErrorCode::SF_IMP_005,
+            ErrorSeverity::Error,
+            "WorksheetDenseExtentOverflow",
+            "import.zip_bomb_detected",
+        )
+    })?;
+    if dense_area > crate::xlsb_reader::MAX_DENSE_GRID_CELLS {
+        return Err(SafiError::new(
+            ErrorCode::SF_IMP_005,
+            ErrorSeverity::Error,
+            "WorksheetDenseExtentLimitExceeded",
+            "import.zip_bomb_detected",
+        ));
+    }
+    let total_r = usize::try_from(total_r_u64).map_err(|_| {
+        SafiError::new(
+            ErrorCode::SF_IMP_005,
+            ErrorSeverity::Error,
+            "WorksheetDenseExtentOverflow",
+            "import.zip_bomb_detected",
+        )
+    })?;
+    let total_c = usize::try_from(total_c_u64).map_err(|_| {
+        SafiError::new(
+            ErrorCode::SF_IMP_005,
+            ErrorSeverity::Error,
+            "WorksheetDenseExtentOverflow",
+            "import.zip_bomb_detected",
+        )
+    })?;
 
     let mut grid = vec![vec![String::new(); total_c]; total_r];
     let mut numeric_lookup: BTreeMap<(u32, u32), f64> = BTreeMap::new();
@@ -2236,6 +2286,9 @@ fn classify_formula_status(
     recalculated: Option<&str>,
     data_type: IngestedCellDataType,
 ) -> FormulaVerificationStatus {
+    if formula == crate::xlsb_reader::UNDECODED_BIFF12_FORMULA_MARKER {
+        return FormulaVerificationStatus::UnsupportedFormula;
+    }
     let upper = formula.to_ascii_uppercase();
     if upper.contains('[') && upper.contains(']') {
         return FormulaVerificationStatus::ExternalWorkbookReference;

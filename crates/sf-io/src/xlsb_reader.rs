@@ -1,8 +1,14 @@
 //! Panic-free native MS-XLSB (`BIFF12`) binary workbook parser (`crates/sf-io`).
 //!
 //! Reads ZIP-packaged BIFF12 parts (`xl/workbook.bin`, `xl/sharedStrings.bin`, `xl/styles.bin`,
-//! `xl/worksheets/*.bin`, `xl/comments*.bin`, and relationship XMLs) with full bounds checking,
-//! decompression-budget enforcement (`SF-IMP-005`), and zero `.unwrap()` calls.
+//! `xl/worksheets/*.bin`, `xl/comments*.bin`, and relationship XMLs) with:
+//! - Strict BIFF12 stream framing (clean EOF vs truncated/malformed stream errors `SF-IMP-002`)
+//! - Excel worksheet coordinate bounds (`0..=1_048_575` rows, `0..=16_383` columns)
+//! - Independent checked dense-materialization extent budgets (`SF-IMP-005`) for values & formulas
+//!   BEFORE calling `calamine::Range::from_sparse`
+//! - Explicit preservation of undecoded BIFF12 formulas (`UnsupportedFormula`) so cached formula
+//!   results are never silently downgraded to `LiteralValue`
+//! - Zero `.unwrap()` / `.expect()` calls.
 
 use std::io::Cursor;
 
@@ -15,6 +21,28 @@ use crate::workbook_intelligence::{
     OoxmlMetadata, SheetRange, SheetVisibility, WorkbookDateSystem, check_zip_budget_and_scan,
     coords_to_a1, parse_rels_xml_map, read_zip_part_budgeted, seed_builtin_number_formats,
 };
+
+/// Maximum legal 0-based Excel/XLSB worksheet row index (`1,048,576` rows: `0..=1_048_575`).
+pub(crate) const MAX_XLSB_ROW: u32 = 1_048_575;
+
+/// Maximum legal 0-based Excel/XLSB worksheet column index (`16,384` columns: `0..=16_383`, `A..=XFD`).
+pub(crate) const MAX_XLSB_COL: u32 = 16_383;
+
+/// Maximum dense cell area permitted before `Range::from_sparse` or dense grid materialization.
+///
+/// Caps worst-case dense allocation to ~2 million slots (protecting Desktop/WASM memory budgets
+/// against small XLSB files with two distant corner cells such as `A1` and `XFD1048576`).
+pub(crate) const MAX_DENSE_GRID_CELLS: u64 = 2_000_000;
+
+/// Maximum cells expanded by a single worksheet `BrtMergeCell` record.
+const MAX_MERGE_CELLS: u64 = 100_000;
+
+/// Explicit formula marker emitted when a BIFF12 formula record (`0x0008..=0x000B`) contains
+/// expression tokens outside the local BIFF12 formula decoder.
+///
+/// Contains no `[` or `]` characters so it is classified explicitly as `UnsupportedFormula`
+/// rather than `ExternalWorkbookReference` or `LiteralValue`.
+pub(crate) const UNDECODED_BIFF12_FORMULA_MARKER: &str = "=(unsupported BIFF12 formula)";
 
 #[derive(Debug)]
 pub(crate) struct XlsbSheetParsed {
@@ -36,6 +64,100 @@ enum SupBookKind {
     External(String),
 }
 
+fn corrupted_xlsb(kind: &'static str) -> SafiError {
+    SafiError::new(
+        ErrorCode::SF_IMP_002,
+        ErrorSeverity::Error,
+        kind,
+        "import.excel_corrupted",
+    )
+}
+
+fn extent_limit_exceeded(kind: &'static str) -> SafiError {
+    SafiError::new(
+        ErrorCode::SF_IMP_005,
+        ErrorSeverity::Error,
+        kind,
+        "import.zip_bomb_detected",
+    )
+}
+
+/// Validates Excel coordinate bounds and checks that dense materialization of either
+/// `[min..=max]` (`calamine::Range::from_sparse`) or `[0..=max]` (`build_worksheet_intelligence`)
+/// stays strictly within `MAX_DENSE_GRID_CELLS` and `max_rows_limit`.
+#[derive(Debug, Default)]
+struct ExtentTracker {
+    count: u64,
+    min_row: u32,
+    max_row: u32,
+    min_col: u32,
+    max_col: u32,
+}
+
+impl ExtentTracker {
+    fn observe(&mut self, row: u32, col: u32, max_rows_limit: u64) -> Result<(), SafiError> {
+        if row > MAX_XLSB_ROW || col > MAX_XLSB_COL {
+            return Err(corrupted_xlsb("XlsbCoordinateOutOfBounds"));
+        }
+        if self.count == 0 {
+            self.min_row = row;
+            self.max_row = row;
+            self.min_col = col;
+            self.max_col = col;
+        } else {
+            self.min_row = self.min_row.min(row);
+            self.max_row = self.max_row.max(row);
+            self.min_col = self.min_col.min(col);
+            self.max_col = self.max_col.max(col);
+        }
+        self.count = self.count.saturating_add(1);
+        self.validate(max_rows_limit)
+    }
+
+    fn validate(&self, max_rows_limit: u64) -> Result<(), SafiError> {
+        if self.count == 0 {
+            return Ok(());
+        }
+        if self.max_row > MAX_XLSB_ROW || self.max_col > MAX_XLSB_COL {
+            return Err(corrupted_xlsb("XlsbCoordinateOutOfBounds"));
+        }
+
+        // 1. Check bounding-box span materialized by `calamine::Range::from_sparse`.
+        let span_rows = u64::from(self.max_row - self.min_row)
+            .checked_add(1)
+            .ok_or_else(|| extent_limit_exceeded("XlsbExtentArithmeticOverflow"))?;
+        let span_cols = u64::from(self.max_col - self.min_col)
+            .checked_add(1)
+            .ok_or_else(|| extent_limit_exceeded("XlsbExtentArithmeticOverflow"))?;
+        let span_cells = span_rows
+            .checked_mul(span_cols)
+            .ok_or_else(|| extent_limit_exceeded("XlsbExtentArithmeticOverflow"))?;
+
+        if span_cells > MAX_DENSE_GRID_CELLS {
+            return Err(extent_limit_exceeded("XlsbSparseExtentLimitExceeded"));
+        }
+
+        // 2. Check full dense grid `(0..=max_row) x (0..=max_col)` materialized by worksheet grid.
+        let total_rows = u64::from(self.max_row)
+            .checked_add(1)
+            .ok_or_else(|| extent_limit_exceeded("XlsbExtentArithmeticOverflow"))?;
+        let total_cols = u64::from(self.max_col)
+            .checked_add(1)
+            .ok_or_else(|| extent_limit_exceeded("XlsbExtentArithmeticOverflow"))?;
+        let dense_cells = total_rows
+            .checked_mul(total_cols)
+            .ok_or_else(|| extent_limit_exceeded("XlsbExtentArithmeticOverflow"))?;
+
+        if dense_cells > MAX_DENSE_GRID_CELLS {
+            return Err(extent_limit_exceeded("XlsbDenseGridExtentLimitExceeded"));
+        }
+        if max_rows_limit > 0 && span_rows > max_rows_limit.saturating_add(64) {
+            return Err(extent_limit_exceeded("XlsbRowExtentLimitExceeded"));
+        }
+        Ok(())
+    }
+}
+
 struct Biff12Iter<'a> {
     data: &'a [u8],
     pos: usize,
@@ -46,51 +168,81 @@ impl<'a> Biff12Iter<'a> {
         Self { data, pos: 0 }
     }
 
-    fn next_record(&mut self) -> Option<(u16, &'a [u8])> {
-        let b0 = *self.data.get(self.pos)?;
+    /// Reads the next BIFF12 record, distinguishing clean EOF (`Ok(None)`) from
+    /// truncated/malformed record headers, invalid varint lengths, or truncated payloads (`Err`).
+    fn next_record(&mut self) -> Result<Option<(u16, &'a [u8])>, SafiError> {
+        if self.pos == self.data.len() {
+            return Ok(None);
+        }
+
+        let b0 = *self
+            .data
+            .get(self.pos)
+            .ok_or_else(|| corrupted_xlsb("TruncatedBiff12RecordId"))?;
         self.pos += 1;
+
         let rec_id = if (b0 & 0x80) != 0 {
-            let b1 = *self.data.get(self.pos)?;
+            let b1 = *self
+                .data
+                .get(self.pos)
+                .ok_or_else(|| corrupted_xlsb("TruncatedBiff12RecordId"))?;
             self.pos += 1;
+            if (b1 & 0x80) != 0 {
+                return Err(corrupted_xlsb("InvalidBiff12RecordIdEncoding"));
+            }
             u16::from(b0 & 0x7F) | (u16::from(b1 & 0x7F) << 7)
         } else {
             u16::from(b0)
         };
 
         let mut len: usize = 0;
+        let mut terminated = false;
         for shift in 0..4usize {
-            let lb = *self.data.get(self.pos)?;
+            let lb = *self
+                .data
+                .get(self.pos)
+                .ok_or_else(|| corrupted_xlsb("TruncatedBiff12RecordLength"))?;
             self.pos += 1;
             len |= usize::from(lb & 0x7F) << (7 * shift);
             if (lb & 0x80) == 0 {
+                terminated = true;
                 break;
             }
         }
+        if !terminated {
+            return Err(corrupted_xlsb("InvalidBiff12RecordLengthEncoding"));
+        }
 
-        let end = self.pos.checked_add(len)?;
-        let payload = self.data.get(self.pos..end)?;
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| corrupted_xlsb("Biff12RecordLengthOverflow"))?;
+        let payload = self
+            .data
+            .get(self.pos..end)
+            .ok_or_else(|| corrupted_xlsb("TruncatedBiff12RecordPayload"))?;
         self.pos = end;
-        Some((rec_id, payload))
+        Ok(Some((rec_id, payload)))
     }
 }
 
 fn read_u16_le(slice: &[u8], offset: usize) -> Option<u16> {
-    let bytes = slice.get(offset..offset + 2)?;
+    let bytes = slice.get(offset..offset.checked_add(2)?)?;
     Some(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
 fn read_u32_le(slice: &[u8], offset: usize) -> Option<u32> {
-    let bytes = slice.get(offset..offset + 4)?;
+    let bytes = slice.get(offset..offset.checked_add(4)?)?;
     Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 fn read_i32_le(slice: &[u8], offset: usize) -> Option<i32> {
-    let bytes = slice.get(offset..offset + 4)?;
+    let bytes = slice.get(offset..offset.checked_add(4)?)?;
     Some(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 fn read_f64_le(slice: &[u8], offset: usize) -> Option<f64> {
-    let bytes = slice.get(offset..offset + 8)?;
+    let bytes = slice.get(offset..offset.checked_add(8)?)?;
     Some(f64::from_le_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]))
@@ -102,12 +254,12 @@ fn decode_utf16le(bytes: &[u8]) -> String {
 }
 
 fn read_xl_wide_string(slice: &[u8], offset: usize) -> Option<(String, usize)> {
-    let cch = read_u32_le(slice, offset)? as usize;
+    let cch = usize::try_from(read_u32_le(slice, offset)?).ok()?;
     let byte_len = cch.checked_mul(2)?;
     let start = offset.checked_add(4)?;
     let end = start.checked_add(byte_len)?;
     let raw = slice.get(start..end)?;
-    Some((decode_utf16le(raw), 4 + byte_len))
+    Some((decode_utf16le(raw), 4usize.checked_add(byte_len)?))
 }
 
 fn read_xl_nullable_wide_string(slice: &[u8], offset: usize) -> Option<(Option<String>, usize)> {
@@ -121,9 +273,9 @@ fn read_xl_nullable_wide_string(slice: &[u8], offset: usize) -> Option<(Option<S
 
 fn read_rfx_range(slice: &[u8], offset: usize) -> Option<SheetRange> {
     let r1 = read_u32_le(slice, offset)?;
-    let r2 = read_u32_le(slice, offset + 4)?;
-    let c1 = read_u32_le(slice, offset + 8)?;
-    let c2 = read_u32_le(slice, offset + 12)?;
+    let r2 = read_u32_le(slice, offset.checked_add(4)?)?;
+    let c1 = read_u32_le(slice, offset.checked_add(8)?)?;
+    let c2 = read_u32_le(slice, offset.checked_add(12)?)?;
     Some(SheetRange {
         start_row: r1.min(r2),
         end_row: r1.max(r2),
@@ -340,7 +492,7 @@ fn decode_biff12_formula(
             0x17 => {
                 let cch = usize::from(read_u16_le(rgce, pos)?);
                 let byte_len = cch.checked_mul(2)?;
-                let start = pos + 2;
+                let start = pos.checked_add(2)?;
                 let end = start.checked_add(byte_len)?;
                 let text = decode_utf16le(rgce.get(start..end)?);
                 pos = end;
@@ -354,7 +506,7 @@ fn decode_biff12_formula(
                     0x1D => 4,
                     _ => return None,
                 };
-                if pos + skip > rgce.len() {
+                if pos.checked_add(skip)? > rgce.len() {
                     return None;
                 }
                 pos += skip;
@@ -369,7 +521,7 @@ fn decode_biff12_formula(
                         return None;
                     }
                 } else {
-                    if pos + 2 > rgce.len() {
+                    if pos.checked_add(2)? > rgce.len() {
                         return None;
                     }
                     pos += 2;
@@ -404,7 +556,7 @@ fn decode_biff12_formula(
                 }
             }
             0x20 | 0x40 | 0x60 => {
-                if pos + 14 > rgce.len() {
+                if pos.checked_add(14)? > rgce.len() {
                     return None;
                 }
                 pos += 14;
@@ -464,14 +616,14 @@ fn decode_biff12_formula(
                 stack.push(format!("{a}:{b}"));
             }
             0x2A | 0x4A | 0x6A => {
-                if pos + 6 > rgce.len() {
+                if pos.checked_add(6)? > rgce.len() {
                     return None;
                 }
                 pos += 6;
                 stack.push("#REF!".to_string());
             }
             0x2B | 0x4B | 0x6B => {
-                if pos + 12 > rgce.len() {
+                if pos.checked_add(12)? > rgce.len() {
                     return None;
                 }
                 pos += 12;
@@ -540,61 +692,84 @@ fn decode_biff12_formula(
     stack.pop().map(|expr| format!("={expr}"))
 }
 
-fn parse_styles_bin(bytes: &[u8], meta: &mut OoxmlMetadata) {
+fn parse_styles_bin(bytes: &[u8], meta: &mut OoxmlMetadata) -> Result<(), SafiError> {
     seed_builtin_number_formats(meta);
     let mut iter = Biff12Iter::new(bytes);
     let mut in_cell_xfs = false;
-    while let Some((rec_id, payload)) = iter.next_record() {
+    let mut saw_begin = false;
+    let mut saw_end = false;
+    while let Some((rec_id, payload)) = iter.next_record()? {
         match rec_id {
+            0x0116 => saw_begin = true,
+            0x0117 => saw_end = true,
             0x002C => {
-                if let Some(ifmt) = read_u16_le(payload, 0)
-                    && let Some((code, _)) = read_xl_wide_string(payload, 2)
-                {
-                    meta.number_formats.insert(u32::from(ifmt), code);
-                }
+                let ifmt =
+                    read_u16_le(payload, 0).ok_or_else(|| corrupted_xlsb("TruncatedBrtFmt"))?;
+                let (code, _) = read_xl_wide_string(payload, 2)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmtCode"))?;
+                meta.number_formats.insert(u32::from(ifmt), code);
             }
             0x0269 => in_cell_xfs = true,
             0x026A => in_cell_xfs = false,
             0x002F if in_cell_xfs => {
-                let ifmt = read_u16_le(payload, 2).unwrap_or(0);
+                let ifmt =
+                    read_u16_le(payload, 2).ok_or_else(|| corrupted_xlsb("TruncatedBrtXF"))?;
                 meta.cell_style_numfmt.push(u32::from(ifmt));
             }
             _ => {}
         }
     }
+    if saw_begin && !saw_end {
+        return Err(corrupted_xlsb("TruncatedStylesStream"));
+    }
+    Ok(())
 }
 
-fn parse_shared_strings_bin(bytes: &[u8]) -> Vec<String> {
+fn parse_shared_strings_bin(bytes: &[u8]) -> Result<Vec<String>, SafiError> {
     let mut strings = Vec::new();
     let mut iter = Biff12Iter::new(bytes);
-    while let Some((rec_id, payload)) = iter.next_record() {
-        if rec_id == 0x0013
-            && payload.len() >= 5
-            && let Some((text, _)) = read_xl_wide_string(payload, 1)
-        {
-            strings.push(text);
+    let mut saw_begin = false;
+    let mut saw_end = false;
+    while let Some((rec_id, payload)) = iter.next_record()? {
+        match rec_id {
+            0x009F => saw_begin = true,
+            0x00A0 => saw_end = true,
+            0x0013 => {
+                let (text, _) = read_xl_wide_string(payload, 1)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtSSTItem"))?;
+                strings.push(text);
+            }
+            _ => {}
         }
     }
-    strings
+    if saw_begin && !saw_end {
+        return Err(corrupted_xlsb("TruncatedSharedStringsStream"));
+    }
+    Ok(strings)
 }
 
-fn parse_comments_bin(bytes: &[u8], sheet_name: &str, meta: &mut OoxmlMetadata) {
+fn parse_comments_bin(
+    bytes: &[u8],
+    sheet_name: &str,
+    meta: &mut OoxmlMetadata,
+) -> Result<(), SafiError> {
     let mut iter = Biff12Iter::new(bytes);
     let mut active_ref: Option<String> = None;
-    while let Some((rec_id, payload)) = iter.next_record() {
+    let mut saw_begin = false;
+    let mut saw_end = false;
+    while let Some((rec_id, payload)) = iter.next_record()? {
         match rec_id {
+            0x0274 => saw_begin = true,
+            0x0275 => saw_end = true,
             0x027B => {
-                // BrtBeginComment: authorId(4) + rfx(16)
-                if let Some(range) = read_rfx_range(payload, 4) {
-                    active_ref = Some(coords_to_a1(range.start_row, range.start_col));
-                }
+                let range = read_rfx_range(payload, 4)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtBeginComment"))?;
+                active_ref = Some(coords_to_a1(range.start_row, range.start_col));
             }
             0x027D => {
-                // BrtCommentText: richStr flags(1) + XLWideString
-                if let Some(cell_ref) = active_ref.as_ref()
-                    && payload.len() >= 5
-                    && let Some((text, _)) = read_xl_wide_string(payload, 1)
-                {
+                if let Some(cell_ref) = active_ref.as_ref() {
+                    let (text, _) = read_xl_wide_string(payload, 1)
+                        .ok_or_else(|| corrupted_xlsb("TruncatedBrtCommentText"))?;
                     let trimmed = text.trim().to_string();
                     if !trimmed.is_empty() {
                         meta.sheet_comments
@@ -612,21 +787,20 @@ fn parse_comments_bin(bytes: &[u8], sheet_name: &str, meta: &mut OoxmlMetadata) 
             _ => {}
         }
     }
+    if saw_begin && !saw_end {
+        return Err(corrupted_xlsb("TruncatedCommentsStream"));
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_xlsb_package(
     bytes: &[u8],
     file_bytes: u64,
+    max_rows_limit: u64,
 ) -> Result<XlsbWorkbookParsed, SafiError> {
     let mut cursor = Cursor::new(bytes);
-    let mut archive = ZipArchive::new(&mut cursor).map_err(|_| {
-        SafiError::new(
-            ErrorCode::SF_IMP_002,
-            ErrorSeverity::Error,
-            "CorruptedExcelArchive",
-            "import.excel_corrupted",
-        )
-    })?;
+    let mut archive =
+        ZipArchive::new(&mut cursor).map_err(|_| corrupted_xlsb("CorruptedExcelArchive"))?;
 
     let (budget, mut total_uncompressed, mut meta, _file_names) =
         check_zip_budget_and_scan(&mut archive, file_bytes)?;
@@ -637,7 +811,7 @@ pub(crate) fn parse_xlsb_package(
         budget,
         &mut total_uncompressed,
     )? {
-        parse_styles_bin(&styles_bytes, &mut meta);
+        parse_styles_bin(&styles_bytes, &mut meta)?;
     }
 
     let shared_strings = if let Some(sst_bytes) = read_zip_part_budgeted(
@@ -646,7 +820,7 @@ pub(crate) fn parse_xlsb_package(
         budget,
         &mut total_uncompressed,
     )? {
-        parse_shared_strings_bin(&sst_bytes)
+        parse_shared_strings_bin(&sst_bytes)?
     } else {
         Vec::new()
     };
@@ -666,14 +840,11 @@ pub(crate) fn parse_xlsb_package(
         budget,
         &mut total_uncompressed,
     )?
-    .ok_or_else(|| {
-        SafiError::new(
-            ErrorCode::SF_IMP_002,
-            ErrorSeverity::Error,
-            "MissingXlsbWorkbookStream",
-            "import.excel_corrupted",
-        )
-    })?;
+    .ok_or_else(|| corrupted_xlsb("MissingXlsbWorkbookStream"))?;
+
+    if wb_bytes.is_empty() {
+        return Err(corrupted_xlsb("EmptyXlsbWorkbookStream"));
+    }
 
     struct RawSheetMeta {
         name: String,
@@ -687,40 +858,48 @@ pub(crate) fn parse_xlsb_package(
     let mut pending_names: Vec<(String, bool, Vec<u8>)> = Vec::new();
 
     let mut wb_iter = Biff12Iter::new(&wb_bytes);
-    while let Some((rec_id, payload)) = wb_iter.next_record() {
+    let mut saw_begin_book = false;
+    let mut saw_end_book = false;
+    while let Some((rec_id, payload)) = wb_iter.next_record()? {
         match rec_id {
+            0x0083 => saw_begin_book = true,
+            0x0084 => saw_end_book = true,
             0x0099 => {
                 if payload.first().is_some_and(|b| (b & 0x01) != 0) {
                     meta.date_system = Some(WorkbookDateSystem::Macintosh1904);
                 }
             }
             0x009C => {
-                if let Some(hs_state) = read_u32_le(payload, 0)
-                    && let Some((maybe_rel, rel_bytes)) = read_xl_nullable_wide_string(payload, 8)
-                    && let Some((name, _)) = read_xl_wide_string(payload, 8 + rel_bytes)
+                let hs_state = read_u32_le(payload, 0)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtBundleSh"))?;
+                let (maybe_rel, rel_bytes) = read_xl_nullable_wide_string(payload, 8)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtBundleShRel"))?;
+                let name_offset = 8usize
+                    .checked_add(rel_bytes)
+                    .ok_or_else(|| corrupted_xlsb("BrtBundleShOffsetOverflow"))?;
+                let (name, _) = read_xl_wide_string(payload, name_offset)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtBundleShName"))?;
+                let vis = match hs_state {
+                    1 => SheetVisibility::Hidden,
+                    2 => SheetVisibility::VeryHidden,
+                    _ => SheetVisibility::Visible,
+                };
+                meta.sheet_visibility.insert(name.clone(), vis);
+                if let Some(rid) = maybe_rel
+                    && let Some(target) = wb_rels.get(&rid)
                 {
-                    let vis = match hs_state {
-                        1 => SheetVisibility::Hidden,
-                        2 => SheetVisibility::VeryHidden,
-                        _ => SheetVisibility::Visible,
-                    };
-                    meta.sheet_visibility.insert(name.clone(), vis);
-                    if let Some(rid) = maybe_rel
-                        && let Some(target) = wb_rels.get(&rid)
-                    {
-                        let zip_path = normalize_zip_rel_path("xl", target);
-                        let is_worksheet = zip_path.starts_with("xl/worksheets/");
-                        if !is_worksheet {
-                            meta.warnings.push(format!(
-                                "Sheet '{name}' is not a standard worksheet; tabular extraction applies only to worksheet cells."
-                            ));
-                        }
-                        sheet_metas.push(RawSheetMeta {
-                            name,
-                            zip_path,
-                            is_worksheet,
-                        });
+                    let zip_path = normalize_zip_rel_path("xl", target);
+                    let is_worksheet = zip_path.starts_with("xl/worksheets/");
+                    if !is_worksheet {
+                        meta.warnings.push(format!(
+                            "Sheet '{name}' is not a standard worksheet; tabular extraction applies only to worksheet cells."
+                        ));
                     }
+                    sheet_metas.push(RawSheetMeta {
+                        name,
+                        zip_path,
+                        is_worksheet,
+                    });
                 }
             }
             0x0165 => sup_books.push(SupBookKind::SelfWorkbook),
@@ -731,38 +910,50 @@ pub(crate) fn parse_xlsb_package(
                 sup_books.push(SupBookKind::External(rel_label));
             }
             0x016A => {
-                if let Some(cxti) = read_u32_le(payload, 0) {
-                    let count = usize::try_from(cxti).unwrap_or(0).min(payload.len() / 12);
-                    for i in 0..count {
-                        let base = 4 + i * 12;
-                        if let (Some(sup), Some(first), Some(last)) = (
-                            read_i32_le(payload, base),
-                            read_i32_le(payload, base + 4),
-                            read_i32_le(payload, base + 8),
-                        ) {
-                            raw_extern_entries.push((sup, first, last));
-                        }
+                let cxti = read_u32_le(payload, 0)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtExternSheet"))?;
+                let count = usize::try_from(cxti).unwrap_or(0).min(payload.len() / 12);
+                for i in 0..count {
+                    let base = 4 + i * 12;
+                    if let (Some(sup), Some(first), Some(last)) = (
+                        read_i32_le(payload, base),
+                        read_i32_le(payload, base + 4),
+                        read_i32_le(payload, base + 8),
+                    ) {
+                        raw_extern_entries.push((sup, first, last));
                     }
                 }
             }
             0x0027 => {
-                if let Some(flags) = read_u32_le(payload, 0)
-                    && let Some((name, str_len)) = read_xl_wide_string(payload, 9)
-                {
-                    let is_built_in = (flags & 0x0020) != 0 || name.starts_with("_xlnm.");
-                    let rgce_start = 9 + str_len + 4;
-                    let rgce_len = read_u32_le(payload, 9 + str_len)
-                        .and_then(|v| usize::try_from(v).ok())
-                        .unwrap_or(0);
-                    let rgce = payload
-                        .get(rgce_start..rgce_start.saturating_add(rgce_len))
-                        .unwrap_or(&[])
-                        .to_vec();
-                    pending_names.push((name, is_built_in, rgce));
-                }
+                let flags =
+                    read_u32_le(payload, 0).ok_or_else(|| corrupted_xlsb("TruncatedBrtName"))?;
+                let (name, str_len) = read_xl_wide_string(payload, 9)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtNameText"))?;
+                let is_built_in = (flags & 0x0020) != 0 || name.starts_with("_xlnm.");
+                let len_off = 9usize
+                    .checked_add(str_len)
+                    .ok_or_else(|| corrupted_xlsb("BrtNameOffsetOverflow"))?;
+                let rgce_len = read_u32_le(payload, len_off)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtNameFormulaLen"))?;
+                let rgce_start = len_off
+                    .checked_add(4)
+                    .ok_or_else(|| corrupted_xlsb("BrtNameOffsetOverflow"))?;
+                let rgce_end = rgce_start
+                    .checked_add(rgce_len)
+                    .ok_or_else(|| corrupted_xlsb("BrtNameFormulaOverflow"))?;
+                let rgce = payload
+                    .get(rgce_start..rgce_end)
+                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtNameFormula"))?
+                    .to_vec();
+                pending_names.push((name, is_built_in, rgce));
             }
             _ => {}
         }
+    }
+
+    if saw_begin_book && !saw_end_book {
+        return Err(corrupted_xlsb("TruncatedXlsbWorkbookStream"));
     }
 
     let extern_sheets: Vec<String> = raw_extern_entries
@@ -834,42 +1025,52 @@ pub(crate) fn parse_xlsb_package(
                     &mut total_uncompressed,
                 )?
             {
-                parse_comments_bin(&c_bytes, &sheet.name, &mut meta);
+                parse_comments_bin(&c_bytes, &sheet.name, &mut meta)?;
             }
         }
 
-        let Some(ws_bytes) = read_zip_part_budgeted(
+        let ws_bytes = read_zip_part_budgeted(
             &mut archive,
             &sheet.zip_path,
             budget,
             &mut total_uncompressed,
         )?
-        else {
-            parsed_sheets.push(XlsbSheetParsed {
-                name: sheet.name.clone(),
-                range: Range::empty(),
-                formula_range: None,
-            });
-            continue;
-        };
+        .ok_or_else(|| corrupted_xlsb("MissingXlsbWorksheetStream"))?;
+
+        if ws_bytes.is_empty() {
+            return Err(corrupted_xlsb("EmptyXlsbWorksheetStream"));
+        }
 
         let mut value_cells: Vec<Cell<Data>> = Vec::new();
         let mut formula_cells: Vec<Cell<String>> = Vec::new();
+        let mut value_extent = ExtentTracker::default();
+        let mut formula_extent = ExtentTracker::default();
         let mut current_row: u32 = 0;
+        let mut saw_begin_sheet = false;
+        let mut saw_end_sheet = false;
 
         let mut ws_iter = Biff12Iter::new(&ws_bytes);
-        while let Some((rec_id, payload)) = ws_iter.next_record() {
+        while let Some((rec_id, payload)) = ws_iter.next_record()? {
             match rec_id {
+                0x0081 => saw_begin_sheet = true,
+                0x0082 => saw_end_sheet = true,
                 0x0000 => {
-                    if let Some(row) = read_u32_le(payload, 0) {
-                        current_row = row;
+                    let row = read_u32_le(payload, 0)
+                        .ok_or_else(|| corrupted_xlsb("TruncatedBrtRowHdr"))?;
+                    if row > MAX_XLSB_ROW {
+                        return Err(corrupted_xlsb("XlsbRowOutOfBounds"));
                     }
+                    current_row = row;
                 }
                 0x0001..=0x000B => {
-                    let Some(col) = read_u32_le(payload, 0) else {
-                        continue;
-                    };
-                    let style_ref = read_u32_le(payload, 4).unwrap_or(0) & 0x00FF_FFFF;
+                    let col = read_u32_le(payload, 0)
+                        .ok_or_else(|| corrupted_xlsb("TruncatedBrtCellCol"))?;
+                    let style_word = read_u32_le(payload, 4)
+                        .ok_or_else(|| corrupted_xlsb("TruncatedBrtCellStyle"))?;
+                    if col > MAX_XLSB_COL {
+                        return Err(corrupted_xlsb("XlsbColOutOfBounds"));
+                    }
+                    let style_ref = style_word & 0x00FF_FFFF;
                     if let Some(fmt_id) = meta.cell_style_numfmt.get(style_ref as usize)
                         && let Some(fmt_code) = meta.number_formats.get(fmt_id)
                     {
@@ -879,101 +1080,159 @@ pub(crate) fn parse_xlsb_package(
                     }
 
                     let mut cell_val: Option<Data> = None;
-                    let mut rgce_slice: Option<&[u8]> = None;
+                    let mut formula_rgce: Option<&[u8]> = None;
 
                     match rec_id {
                         0x0001 => {}
                         0x0002 => {
-                            if let Some(rk) = read_u32_le(payload, 8) {
-                                cell_val = Some(decode_rk_value(rk));
-                            }
+                            let rk = read_u32_le(payload, 8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtCellRk"))?;
+                            cell_val = Some(decode_rk_value(rk));
                         }
                         0x0003 => {
-                            if let Some(&err) = payload.get(8) {
-                                cell_val = Some(Data::Error(decode_xlsb_error(err)));
-                            }
+                            let err = *payload
+                                .get(8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtCellError"))?;
+                            cell_val = Some(Data::Error(decode_xlsb_error(err)));
                         }
                         0x0004 => {
-                            if let Some(&b) = payload.get(8) {
-                                cell_val = Some(Data::Bool(b != 0));
-                            }
+                            let b = *payload
+                                .get(8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtCellBool"))?;
+                            cell_val = Some(Data::Bool(b != 0));
                         }
                         0x0005 => {
-                            if let Some(f) = read_f64_le(payload, 8) {
-                                cell_val = Some(Data::Float(f));
-                            }
+                            let f = read_f64_le(payload, 8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtCellReal"))?;
+                            cell_val = Some(Data::Float(f));
                         }
                         0x0006 => {
-                            if let Some((text, _)) = read_xl_wide_string(payload, 8) {
-                                cell_val = Some(Data::String(text));
-                            }
+                            let (text, _) = read_xl_wide_string(payload, 8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtCellSt"))?;
+                            cell_val = Some(Data::String(text));
                         }
                         0x0007 => {
-                            if let Some(isst) = read_u32_le(payload, 8)
-                                && let Some(text) = shared_strings.get(isst as usize)
-                            {
-                                cell_val = Some(Data::String(text.clone()));
-                            }
+                            let isst = read_u32_le(payload, 8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtCellIsst"))?;
+                            let text = shared_strings
+                                .get(isst as usize)
+                                .ok_or_else(|| corrupted_xlsb("InvalidSharedStringIndex"))?;
+                            cell_val = Some(Data::String(text.clone()));
                         }
                         0x0008 => {
-                            if let Some((text, consumed)) = read_xl_wide_string(payload, 8) {
-                                if !text.is_empty() {
-                                    cell_val = Some(Data::String(text));
-                                }
-                                let f_off = 8 + consumed + 2;
-                                if let Some(cce) = read_u32_le(payload, f_off) {
-                                    let end = f_off + 4 + (cce as usize);
-                                    rgce_slice = payload.get(f_off + 4..end);
-                                }
-                            }
+                            let (text, consumed) = read_xl_wide_string(payload, 8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaString"))?;
+                            cell_val = Some(if text.is_empty() {
+                                Data::Empty
+                            } else {
+                                Data::String(text)
+                            });
+                            let f_off = 8usize
+                                .checked_add(consumed)
+                                .and_then(|v| v.checked_add(2))
+                                .ok_or_else(|| corrupted_xlsb("BrtFmlaStringOffsetOverflow"))?;
+                            let cce = read_u32_le(payload, f_off)
+                                .and_then(|v| usize::try_from(v).ok())
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaStringLen"))?;
+                            let start = f_off
+                                .checked_add(4)
+                                .ok_or_else(|| corrupted_xlsb("BrtFmlaStringOffsetOverflow"))?;
+                            let end = start
+                                .checked_add(cce)
+                                .ok_or_else(|| corrupted_xlsb("BrtFmlaStringOverflow"))?;
+                            formula_rgce = Some(
+                                payload
+                                    .get(start..end)
+                                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaStringRgce"))?,
+                            );
                         }
                         0x0009 => {
-                            if let Some(f) = read_f64_le(payload, 8) {
-                                cell_val = Some(Data::Float(f));
-                            }
-                            if let Some(cce) = read_u32_le(payload, 18) {
-                                let end = 22 + (cce as usize);
-                                rgce_slice = payload.get(22..end);
-                            }
+                            let f = read_f64_le(payload, 8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaNum"))?;
+                            cell_val = Some(Data::Float(f));
+                            let cce = read_u32_le(payload, 18)
+                                .and_then(|v| usize::try_from(v).ok())
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaNumLen"))?;
+                            let end = 22usize
+                                .checked_add(cce)
+                                .ok_or_else(|| corrupted_xlsb("BrtFmlaNumOverflow"))?;
+                            formula_rgce = Some(
+                                payload
+                                    .get(22..end)
+                                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaNumRgce"))?,
+                            );
                         }
                         0x000A => {
-                            if let Some(&b) = payload.get(8) {
-                                cell_val = Some(Data::Bool(b != 0));
-                            }
-                            if let Some(cce) = read_u32_le(payload, 11) {
-                                let end = 15 + (cce as usize);
-                                rgce_slice = payload.get(15..end);
-                            }
+                            let b = *payload
+                                .get(8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaBool"))?;
+                            cell_val = Some(Data::Bool(b != 0));
+                            let cce = read_u32_le(payload, 11)
+                                .and_then(|v| usize::try_from(v).ok())
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaBoolLen"))?;
+                            let end = 15usize
+                                .checked_add(cce)
+                                .ok_or_else(|| corrupted_xlsb("BrtFmlaBoolOverflow"))?;
+                            formula_rgce = Some(
+                                payload
+                                    .get(15..end)
+                                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaBoolRgce"))?,
+                            );
                         }
                         0x000B => {
-                            if let Some(&err) = payload.get(8) {
-                                cell_val = Some(Data::Error(decode_xlsb_error(err)));
-                            }
-                            if let Some(cce) = read_u32_le(payload, 11) {
-                                let end = 15 + (cce as usize);
-                                rgce_slice = payload.get(15..end);
-                            }
+                            let err = *payload
+                                .get(8)
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaError"))?;
+                            cell_val = Some(Data::Error(decode_xlsb_error(err)));
+                            let cce = read_u32_le(payload, 11)
+                                .and_then(|v| usize::try_from(v).ok())
+                                .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaErrorLen"))?;
+                            let end = 15usize
+                                .checked_add(cce)
+                                .ok_or_else(|| corrupted_xlsb("BrtFmlaErrorOverflow"))?;
+                            formula_rgce = Some(
+                                payload
+                                    .get(15..end)
+                                    .ok_or_else(|| corrupted_xlsb("TruncatedBrtFmlaErrorRgce"))?,
+                            );
                         }
                         _ => {}
                     }
 
-                    if let Some(val) = cell_val {
-                        value_cells.push(Cell::new((current_row, col), val));
-                    }
-                    if let Some(rgce) = rgce_slice
-                        && let Some(formula) =
-                            decode_biff12_formula(rgce, &extern_sheets, &defined_names)
-                    {
+                    // Validate formula extent independently BEFORE pushing or materializing values,
+                    // and preserve undecoded formulas explicitly so they never become LiteralValue.
+                    if let Some(rgce) = formula_rgce {
+                        formula_extent.observe(current_row, col, max_rows_limit)?;
+                        let formula = decode_biff12_formula(rgce, &extern_sheets, &defined_names)
+                            .unwrap_or_else(|| UNDECODED_BIFF12_FORMULA_MARKER.to_string());
                         formula_cells.push(Cell::new((current_row, col), formula));
+                    }
+                    if let Some(val) = cell_val {
+                        value_extent.observe(current_row, col, max_rows_limit)?;
+                        value_cells.push(Cell::new((current_row, col), val));
                     }
                 }
                 0x00B0 => {
-                    if let Some(range) = read_rfx_range(payload, 0) {
-                        meta.sheet_merges
-                            .entry(sheet.name.clone())
-                            .or_default()
-                            .push(range);
+                    let range = read_rfx_range(payload, 0)
+                        .ok_or_else(|| corrupted_xlsb("TruncatedBrtMergeCell"))?;
+                    if range.end_row > MAX_XLSB_ROW || range.end_col > MAX_XLSB_COL {
+                        return Err(corrupted_xlsb("XlsbMergeCoordinateOutOfBounds"));
                     }
+                    let merge_cells = u64::from(range.end_row - range.start_row)
+                        .checked_add(1)
+                        .and_then(|r| {
+                            u64::from(range.end_col - range.start_col)
+                                .checked_add(1)
+                                .and_then(|c| r.checked_mul(c))
+                        })
+                        .ok_or_else(|| extent_limit_exceeded("XlsbMergeExtentOverflow"))?;
+                    if merge_cells > MAX_MERGE_CELLS {
+                        return Err(extent_limit_exceeded("XlsbMergeExtentLimitExceeded"));
+                    }
+                    meta.sheet_merges
+                        .entry(sheet.name.clone())
+                        .or_default()
+                        .push(range);
                 }
                 0x0097 => {
                     if let Some(state_byte) = payload.get(28)
@@ -983,10 +1242,10 @@ pub(crate) fn parse_xlsb_package(
                     }
                 }
                 0x00A1 => {
-                    if let Some(range) = read_rfx_range(payload, 0) {
-                        meta.sheet_autofilter
-                            .insert(sheet.name.clone(), range.to_a1_range());
-                    }
+                    let range = read_rfx_range(payload, 0)
+                        .ok_or_else(|| corrupted_xlsb("TruncatedBrtBeginAFilter"))?;
+                    meta.sheet_autofilter
+                        .insert(sheet.name.clone(), range.to_a1_range());
                 }
                 0x0217 => {
                     if read_u32_le(payload, 2).is_some_and(|v| v != 0) {
@@ -994,22 +1253,30 @@ pub(crate) fn parse_xlsb_package(
                     }
                 }
                 0x01EE => {
-                    if let Some(range) = read_rfx_range(payload, 0)
-                        && let Some((maybe_rid, _)) = read_xl_nullable_wide_string(payload, 16)
-                    {
-                        let link_val = maybe_rid
-                            .and_then(|rid| ws_rels.get(&rid).cloned())
-                            .unwrap_or_default();
-                        if !link_val.is_empty() {
-                            let addr = coords_to_a1(range.start_row, range.start_col);
-                            meta.sheet_hyperlinks
-                                .insert((sheet.name.clone(), addr), link_val);
-                        }
+                    let range = read_rfx_range(payload, 0)
+                        .ok_or_else(|| corrupted_xlsb("TruncatedBrtHLink"))?;
+                    let (maybe_rid, _) = read_xl_nullable_wide_string(payload, 16)
+                        .ok_or_else(|| corrupted_xlsb("TruncatedBrtHLinkRel"))?;
+                    let link_val = maybe_rid
+                        .and_then(|rid| ws_rels.get(&rid).cloned())
+                        .unwrap_or_default();
+                    if !link_val.is_empty() {
+                        let addr = coords_to_a1(range.start_row, range.start_col);
+                        meta.sheet_hyperlinks
+                            .insert((sheet.name.clone(), addr), link_val);
                     }
                 }
                 _ => {}
             }
         }
+
+        if saw_begin_sheet && !saw_end_sheet {
+            return Err(corrupted_xlsb("TruncatedXlsbWorksheetStream"));
+        }
+
+        // Independent final extent validation immediately prior to `Range::from_sparse`.
+        value_extent.validate(max_rows_limit)?;
+        formula_extent.validate(max_rows_limit)?;
 
         let range = if value_cells.is_empty() {
             Range::empty()
@@ -1034,4 +1301,76 @@ pub(crate) fn parse_xlsb_package(
         sheets: parsed_sheets,
         defined_names,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn biff12_iter_distinguishes_clean_eof_from_malformed_streams() -> Result<(), SafiError> {
+        // Clean empty stream -> Ok(None)
+        let mut empty = Biff12Iter::new(&[]);
+        assert_eq!(empty.next_record()?, None);
+
+        // Truncated 2-byte record ID (high bit set, missing second byte) -> Err(SF-IMP-002)
+        let mut trunc_id = Biff12Iter::new(&[0x80]);
+        assert_eq!(
+            trunc_id.next_record().err().map(|e| e.code()),
+            Some(ErrorCode::SF_IMP_002)
+        );
+
+        // Invalid 2-byte record ID (second byte also has continuation bit set) -> Err(SF-IMP-002)
+        let mut bad_id = Biff12Iter::new(&[0x81, 0x80, 0x00]);
+        assert_eq!(
+            bad_id.next_record().err().map(|e| e.code()),
+            Some(ErrorCode::SF_IMP_002)
+        );
+
+        // Truncated varint length -> Err(SF-IMP-002)
+        let mut trunc_len = Biff12Iter::new(&[0x01, 0x80]);
+        assert_eq!(
+            trunc_len.next_record().err().map(|e| e.code()),
+            Some(ErrorCode::SF_IMP_002)
+        );
+
+        // Invalid 4-byte non-terminating varint length -> Err(SF-IMP-002)
+        let mut bad_len = Biff12Iter::new(&[0x01, 0x80, 0x80, 0x80, 0x80]);
+        assert_eq!(
+            bad_len.next_record().err().map(|e| e.code()),
+            Some(ErrorCode::SF_IMP_002)
+        );
+
+        // Truncated payload (declares 10 bytes, only 3 present) -> Err(SF-IMP-002)
+        let mut trunc_payload = Biff12Iter::new(&[0x01, 0x0A, 0xAA, 0xBB, 0xCC]);
+        assert_eq!(
+            trunc_payload.next_record().err().map(|e| e.code()),
+            Some(ErrorCode::SF_IMP_002)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn extent_tracker_rejects_opposite_corner_sparse_bomb_without_allocating() {
+        let mut tracker = ExtentTracker::default();
+        assert!(tracker.observe(0, 0, 1_000_000).is_ok());
+        // Opposite Excel corner XFD1048576 -> 1,048,576 * 16,384 = 17,179,869,184 cells
+        let err = tracker.observe(MAX_XLSB_ROW, MAX_XLSB_COL, 1_000_000);
+        assert_eq!(err.err().map(|e| e.code()), Some(ErrorCode::SF_IMP_005));
+
+        // Out-of-bounds coordinate beyond Excel limits -> SF-IMP-002
+        let mut oob = ExtentTracker::default();
+        assert_eq!(
+            oob.observe(MAX_XLSB_ROW + 1, 0, 1_000_000)
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::SF_IMP_002)
+        );
+        assert_eq!(
+            oob.observe(0, MAX_XLSB_COL + 1, 1_000_000)
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::SF_IMP_002)
+        );
+    }
 }

@@ -318,3 +318,239 @@ fn ingests_genuine_excel_xlsb_binary_workbook() -> Result<(), Box<dyn std::error
     assert!(xlsb_statuses.contains(&FormulaVerificationStatus::FormulaError));
     Ok(())
 }
+
+fn build_in_memory_xlsb(
+    wb_bin: &[u8],
+    sheet_bin: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("[Content_Types].xml", opts)?;
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="bin" ContentType="application/vnd.ms-excel.sheet.binary.macroEnabled.main"/></Types>"#,
+        )?;
+        zip.start_file("xl/workbook.bin", opts)?;
+        zip.write_all(wb_bin)?;
+        zip.start_file("xl/_rels/workbook.bin.rels", opts)?;
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.bin"/></Relationships>"#,
+        )?;
+        zip.start_file("xl/worksheets/sheet1.bin", opts)?;
+        zip.write_all(sheet_bin)?;
+        zip.finish()?;
+    }
+    Ok(cursor.into_inner())
+}
+
+fn encode_biff12_record(rec_id: u16, payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    if rec_id < 0x80 {
+        out.push(rec_id as u8);
+    } else {
+        out.push(((rec_id & 0x7F) as u8) | 0x80);
+        out.push(((rec_id >> 7) & 0x7F) as u8);
+    }
+    let mut len = payload.len();
+    loop {
+        let chunk = (len & 0x7F) as u8;
+        len >>= 7;
+        if len > 0 {
+            out.push(chunk | 0x80);
+        } else {
+            out.push(chunk);
+            break;
+        }
+    }
+    out.extend_from_slice(payload);
+    out
+}
+
+fn encode_xl_wide_string(text: &str) -> Vec<u8> {
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let mut out = Vec::with_capacity(4 + units.len() * 2);
+    out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+    for u in units {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
+    out
+}
+
+fn minimal_valid_workbook_bin() -> Vec<u8> {
+    let mut bundle_sh = Vec::new();
+    bundle_sh.extend_from_slice(&0u32.to_le_bytes()); // hsState=Visible
+    bundle_sh.extend_from_slice(&1u32.to_le_bytes()); // iTabID=1
+    bundle_sh.extend_from_slice(&encode_xl_wide_string("rId1"));
+    bundle_sh.extend_from_slice(&encode_xl_wide_string("Sheet1"));
+
+    let mut wb = Vec::new();
+    wb.extend_from_slice(&encode_biff12_record(0x0083, &[])); // BrtBeginBook
+    wb.extend_from_slice(&encode_biff12_record(0x009C, &bundle_sh)); // BrtBundleSh
+    wb.extend_from_slice(&encode_biff12_record(0x0084, &[])); // BrtEndBook
+    wb
+}
+
+#[test]
+fn rejects_xlsb_sparse_corner_value_and_formula_allocation_bombs()
+-> Result<(), Box<dyn std::error::Error>> {
+    // 1. Value-cell opposite corners (A1 + XFD1048576): must return structured SF-IMP-005 without OOM.
+    let val_bytes = fs::read(fixture_path("adversarial_sparse_corners.xlsb"))?;
+    let val_err = ingest_workbook_universal(
+        Cursor::new(val_bytes),
+        PlatformLimits::DESKTOP_CLI,
+        Some("adversarial_sparse_corners.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("sparse opposite-corner XLSB values must fail with SF-IMP-005")?;
+    assert_eq!(val_err.code(), ErrorCode::SF_IMP_005);
+
+    // 2. Formula-cell opposite corners (A1 + XFD1048576): formula extent must be validated independently.
+    let fmla_bytes = fs::read(fixture_path("adversarial_sparse_formula_corners.xlsb"))?;
+    let fmla_err = ingest_workbook_universal(
+        Cursor::new(fmla_bytes),
+        PlatformLimits::DESKTOP_CLI,
+        Some("adversarial_sparse_formula_corners.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("sparse opposite-corner XLSB formulas must fail with SF-IMP-005")?;
+    assert_eq!(fmla_err.code(), ErrorCode::SF_IMP_005);
+
+    // 3. Single cell beyond Excel coordinate limit (row 1_048_576): must fail with SF-IMP-002.
+    let mut oob_sheet = Vec::new();
+    oob_sheet.extend_from_slice(&encode_biff12_record(0x0081, &[]));
+    oob_sheet.extend_from_slice(&encode_biff12_record(0x0000, &1_048_576u32.to_le_bytes()));
+    oob_sheet.extend_from_slice(&encode_biff12_record(0x0082, &[]));
+    let oob_xlsb = build_in_memory_xlsb(&minimal_valid_workbook_bin(), &oob_sheet)?;
+    let oob_err = ingest_workbook_universal(
+        Cursor::new(oob_xlsb),
+        PlatformLimits::DESKTOP_CLI,
+        Some("oob_row.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("out-of-bounds XLSB row must fail with SF-IMP-002")?;
+    assert_eq!(oob_err.code(), ErrorCode::SF_IMP_002);
+
+    // 4. Single valid cell at XFD1048576 (1x1 sparse range, but 17B dense grid origin-to-max):
+    // must fail with SF-IMP-005 before allocating any dense worksheet grid.
+    let mut far_sheet = Vec::new();
+    far_sheet.extend_from_slice(&encode_biff12_record(0x0081, &[]));
+    far_sheet.extend_from_slice(&encode_biff12_record(0x0000, &1_048_575u32.to_le_bytes()));
+    let mut rk_payload = Vec::new();
+    rk_payload.extend_from_slice(&16_383u32.to_le_bytes()); // col XFD
+    rk_payload.extend_from_slice(&0u32.to_le_bytes()); // style
+    rk_payload.extend_from_slice(&((42u32 << 2) | 0x02).to_le_bytes()); // RK int 42
+    far_sheet.extend_from_slice(&encode_biff12_record(0x0002, &rk_payload));
+    far_sheet.extend_from_slice(&encode_biff12_record(0x0082, &[]));
+    let far_xlsb = build_in_memory_xlsb(&minimal_valid_workbook_bin(), &far_sheet)?;
+    let far_err = ingest_workbook_universal(
+        Cursor::new(far_xlsb),
+        PlatformLimits::DESKTOP_CLI,
+        Some("far_single_cell.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("single XLSB cell at XFD1048576 must fail with SF-IMP-005")?;
+    assert_eq!(far_err.code(), ErrorCode::SF_IMP_005);
+
+    Ok(())
+}
+
+#[test]
+fn rejects_malformed_and_truncated_biff12_xlsb_streams() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Truncated worksheet BIFF12 payload after valid initial rows must fail (no silent partial success).
+    let trunc_sheet_bytes = fs::read(fixture_path("malformed_truncated_sheet.xlsb"))?;
+    let trunc_err = ingest_workbook_universal(
+        Cursor::new(trunc_sheet_bytes),
+        PlatformLimits::DESKTOP_CLI,
+        Some("malformed_truncated_sheet.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("truncated XLSB worksheet stream must fail with SF-IMP-002")?;
+    assert_eq!(trunc_err.code(), ErrorCode::SF_IMP_002);
+
+    // 2. Truncated workbook.bin (missing BrtEndBook + invalid 4-byte non-terminating varint length).
+    let mut bad_wb = minimal_valid_workbook_bin();
+    bad_wb.truncate(bad_wb.len() - 3); // strip BrtEndBook
+    bad_wb.extend_from_slice(&[0x01, 0x80, 0x80, 0x80, 0x80]); // invalid non-terminating 4-byte varint
+    let valid_sheet = [
+        encode_biff12_record(0x0081, &[]),
+        encode_biff12_record(0x0082, &[]),
+    ]
+    .concat();
+    let bad_wb_xlsb = build_in_memory_xlsb(&bad_wb, &valid_sheet)?;
+    let wb_err = ingest_workbook_universal(
+        Cursor::new(bad_wb_xlsb),
+        PlatformLimits::DESKTOP_CLI,
+        Some("malformed_varint_workbook.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("malformed BIFF12 varint in workbook.bin must fail with SF-IMP-002")?;
+    assert_eq!(wb_err.code(), ErrorCode::SF_IMP_002);
+
+    // 3. Truncated 2-byte record ID at EOF in worksheet stream.
+    let mut trunc_id_sheet = encode_biff12_record(0x0081, &[]);
+    trunc_id_sheet.push(0x85); // high bit set -> expects 2nd ID byte, hits EOF
+    let trunc_id_xlsb = build_in_memory_xlsb(&minimal_valid_workbook_bin(), &trunc_id_sheet)?;
+    let id_err = ingest_workbook_universal(
+        Cursor::new(trunc_id_xlsb),
+        PlatformLimits::DESKTOP_CLI,
+        Some("truncated_rec_id.xlsb"),
+        None,
+    )
+    .err()
+    .ok_or("truncated 2-byte BIFF12 record ID must fail with SF-IMP-002")?;
+    assert_eq!(id_err.code(), ErrorCode::SF_IMP_002);
+
+    Ok(())
+}
+
+#[test]
+fn preserves_undecoded_xlsb_formula_as_unsupported_with_cached_value_and_warning()
+-> Result<(), Box<dyn std::error::Error>> {
+    let bytes = fs::read(fixture_path("xlsb_unsupported_formula_cached.xlsb"))?;
+    let rep = ingest_workbook_universal(
+        Cursor::new(bytes),
+        PlatformLimits::DESKTOP_CLI,
+        Some("xlsb_unsupported_formula_cached.xlsb"),
+        None,
+    )?;
+
+    assert_eq!(rep.detected_format, WorkbookFormat::Xlsb);
+    assert_eq!(rep.total_formulas_detected, 1);
+    assert_eq!(rep.total_formulas_verified, 0);
+
+    let c2 = rep.worksheets[0]
+        .cell_metadata
+        .iter()
+        .find(|c| c.address == "C2")
+        .ok_or("C2 formula metadata must be preserved even when BIFF12 token is undecoded")?;
+    assert_eq!(c2.formula.as_deref(), Some("=(unsupported BIFF12 formula)"));
+    assert_eq!(c2.cached_value.as_deref(), Some("250"));
+    assert_eq!(c2.recalculated_value, None);
+    assert_eq!(
+        c2.formula_status,
+        FormulaVerificationStatus::UnsupportedFormula
+    );
+    assert_ne!(c2.formula_status, FormulaVerificationStatus::LiteralValue);
+    assert_ne!(
+        c2.formula_status,
+        FormulaVerificationStatus::VerifiedCachedAndRecalculated
+    );
+    assert!(
+        rep.warnings
+            .iter()
+            .any(|w| w.contains("outside local recalculation") && w.contains("undecoded binary")),
+        "expected transparent warning disclosing undecoded BIFF12 formula, got: {:?}",
+        rep.warnings
+    );
+
+    Ok(())
+}

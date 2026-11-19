@@ -167,6 +167,29 @@ impl LocalRecipeLibrary {
         self.official_templates.values().cloned().collect()
     }
 
+    /// Synchronize server-authoritative official templates into the local read-only cache
+    /// without ever mutating any user-owned recipes in `My Recipes`.
+    ///
+    /// # Errors
+    /// Returns `SF-SYS-016` / `SF-SYS-001` if atomic persistence fails.
+    pub fn sync_official_templates(
+        &mut self,
+        incoming: Vec<LocalRecipeRecord>,
+    ) -> Result<usize, String> {
+        for mut rec in incoming {
+            if rec.id.trim().is_empty() || rec.name.trim().is_empty() || rec.recipe.steps.is_empty()
+            {
+                continue;
+            }
+            if rec.origin != RecipeOriginClass::PublishedCommunityTemplate {
+                rec.origin = RecipeOriginClass::OfficialTemplate;
+            }
+            let _ = self.official_templates.insert(rec.id.clone(), rec);
+        }
+        self.persist_atomic()?;
+        Ok(self.official_templates.len())
+    }
+
     /// List all user-owned recipes (`My Recipes` and `Imported Recipes`).
     #[must_use]
     pub fn list_my_recipes(&self) -> Vec<LocalRecipeRecord> {

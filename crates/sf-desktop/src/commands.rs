@@ -20,13 +20,17 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 54] = [
+pub const ALLOWED_COMMANDS: [&str; 68] = [
     "app_info",
     "take_pending_deep_link",
+    "desktop_open_external_auth_url",
     "pick_input_file",
     "pick_output_file",
     "pick_capsule_output_file",
     "pick_deliverable_file",
+    "pick_search_folder",
+    "pick_safitemplate_open_file",
+    "pick_safitemplate_save_file",
     "studio_set_auth_session",
     "studio_clear_auth_session",
     "studio_authorization_status",
@@ -75,6 +79,16 @@ pub const ALLOWED_COMMANDS: [&str; 54] = [
     "studio_instantiate_template",
     "studio_export_capsule",
     "studio_export_deliverable",
+    "desktop_search_index_folders",
+    "desktop_search_query",
+    "desktop_search_stats",
+    "desktop_recipes_list",
+    "desktop_recipes_sync_official",
+    "desktop_recipes_save_as_new",
+    "desktop_recipes_delete",
+    "desktop_recipes_export_safitemplate",
+    "desktop_recipes_import_safitemplate",
+    "desktop_recipes_prepare_community_share",
 ];
 
 /// Access classification separating offline read-only viewing of saved local projects
@@ -95,6 +109,7 @@ pub fn classify_command_access(command: &str) -> CommandAccessClass {
     match command {
         "app_info"
         | "take_pending_deep_link"
+        | "desktop_open_external_auth_url"
         | "studio_authorization_status"
         | "studio_enter_offline_readonly"
         | "studio_revalidate_session"
@@ -103,7 +118,10 @@ pub fn classify_command_access(command: &str) -> CommandAccessClass {
         | "studio_state"
         | "studio_rows_page"
         | "studio_workbook_details"
-        | "studio_list_templates" => CommandAccessClass::ReadOnlyOffline,
+        | "studio_list_templates"
+        | "desktop_search_query"
+        | "desktop_search_stats"
+        | "desktop_recipes_list" => CommandAccessClass::ReadOnlyOffline,
         _ => CommandAccessClass::ProtectedOnline,
     }
 }

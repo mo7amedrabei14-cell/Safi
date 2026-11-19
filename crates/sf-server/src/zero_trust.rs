@@ -12,11 +12,13 @@ use axum::{
 use crate::auth::{unix_now, AuthenticatedSession};
 use crate::error::AuthError;
 use crate::owner_mfa::OwnerMfaService;
+use crate::pg_store::PgControlPlaneStore;
 
 /// Guard configuration for Owner routes.
 #[derive(Debug, Clone)]
 pub struct OwnerAccessGuard {
     pub mfa: OwnerMfaService,
+    pub pg_store: Option<PgControlPlaneStore>,
     pub require_step_up: bool,
 }
 
@@ -25,6 +27,9 @@ pub struct OwnerAccessGuard {
 /// 2. Caller `user_id` matches the sealed immutable `platform_owner` record (`SF-AUTH-013`).
 /// 3. Active, non-expired RFC 6238 TOTP elevated Owner session (`SF-AUTH-014`).
 /// 4. Optional fresh 5-minute step-up TOTP verification for high-risk actions (`SF-AUTH-016`).
+///
+/// Whenever `pg_store` is attached, hydrates Owner MFA state directly from PostgreSQL first so
+/// multi-instance deployments and post-restart servers always enforce authoritative DB state.
 pub async fn require_owner_mfa(
     State(guard): State<OwnerAccessGuard>,
     request: Request,
@@ -34,6 +39,10 @@ pub async fn require_owner_mfa(
         .extensions()
         .get::<AuthenticatedSession>()
         .ok_or(AuthError::InvalidCredentials)?;
+    if let Some(pg) = &guard.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        guard.mfa.import_snapshot(snap).await;
+    }
     let now = unix_now();
     if guard.require_step_up {
         guard

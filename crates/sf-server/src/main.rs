@@ -83,11 +83,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Arc::new(SqlxSessionRepository::new(pool.clone())),
         cache,
     );
-    let mut state = AppState::with_config(auth, config.clone())
-        .with_pg_store(PgControlPlaneStore::new(pool.clone()));
+    let pg_store = PgControlPlaneStore::new(pool.clone());
+    let mut state = AppState::with_config(auth, config.clone()).with_pg_store(pg_store.clone());
 
-    // Load sealed platform_owner (if already bootstrapped) into OwnerMfaService.
-    if let Ok(Some(row)) = sqlx::query("SELECT owner_user_id FROM platform_owner LIMIT 1")
+    // Hydrate sealed Owner MFA state (platform_owner, encrypted TOTP, recovery codes,
+    // elevated sessions) directly from PostgreSQL on startup so restarts never lose MFA state.
+    if let Ok(mfa_snap) = pg_store.load_owner_mfa_snapshot_pg().await {
+        state.owner_mfa.import_snapshot(mfa_snap).await;
+    } else if let Ok(Some(row)) = sqlx::query("SELECT owner_user_id FROM platform_owner LIMIT 1")
         .fetch_optional(&pool)
         .await
     {
@@ -98,6 +101,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await;
         }
     }
+
+    // Seed default official templates into PostgreSQL only if `official_templates` is empty.
+    let default_templates = state.templates_hub.list_all_official_for_owner().await;
+    let _ = pg_store
+        .seed_default_official_templates_if_empty(&default_templates)
+        .await;
 
     let (email_sender, public_base_url) = SmtpVerificationEmailSender::from_env()
         .map_err(|_| io::Error::other("Invalid or missing SMTP account configuration"))?;

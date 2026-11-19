@@ -42,11 +42,29 @@ pub async fn get_latest_update(
         .filter(|p| !p.trim().is_empty() && p.len() <= 64)
         .unwrap_or_else(|| "windows-x86_64".to_owned());
 
-    let (release, unsigned) = state
-        .templates_hub
-        .latest_release(&channel, &platform)
-        .await
-        .ok_or(AuthError::InvalidRequest)?;
+    let (release, unsigned) = if let Some(pg) = &state.pg_store {
+        let rel = pg
+            .latest_active_release_pg(&channel, &platform)
+            .await?
+            .ok_or(AuthError::InvalidRequest)?;
+        let manifest = crate::updater::ReleaseManifestRecord {
+            version: rel.version_code,
+            min_required_version: rel.min_required_version,
+            channel: rel.channel.clone(),
+            platform: rel.platform.clone(),
+            delta_checksum: rel.sha256_hex.clone(),
+            is_mandatory: rel.is_mandatory,
+            release_notes: rel.release_notes.clone(),
+            signature_hex: String::new(),
+        };
+        (rel, manifest)
+    } else {
+        state
+            .templates_hub
+            .latest_release(&channel, &platform)
+            .await
+            .ok_or(AuthError::InvalidRequest)?
+    };
     let manifest = state.signer.sign_manifest(unsigned)?;
     let verifying_key_hex = state
         .signer

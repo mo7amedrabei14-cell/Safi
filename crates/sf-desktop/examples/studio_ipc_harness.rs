@@ -12,7 +12,17 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+use sf_desktop::content::validate_desktop_auth_external_url;
+use sf_desktop::deep_link::{DeepLinkAction, parse as parse_deep_link};
 use sf_desktop::studio::StudioStore;
+
+struct HarnessExtras {
+    search_folder_path: String,
+    safitemplate_path: String,
+    allowed_auth_origin: String,
+    pending_deep_link: Option<DeepLinkAction>,
+    last_opened_auth_url: Option<String>,
+}
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -49,6 +59,7 @@ fn opt_u64_arg(args: &Value, primary: &str, fallback: &str) -> Option<u64> {
 
 fn dispatch(
     store: &mut StudioStore,
+    extras: &mut HarnessExtras,
     storage_dir: &Path,
     csv_path: &str,
     capsule_path: &str,
@@ -57,6 +68,50 @@ fn dispatch(
 ) -> Result<String, String> {
     let ts = now_ms();
     match command {
+        "__harness_queue_deep_link" => {
+            let raw = str_arg(args, "url", "raw");
+            let action = parse_deep_link(raw).map_err(|err| err.code().as_str().to_owned())?;
+            extras.pending_deep_link = Some(action);
+            Ok(r#"{"queued":true}"#.to_owned())
+        }
+        "__harness_take_opened_auth_url" => {
+            let url = extras.last_opened_auth_url.take();
+            serde_json::to_string(&serde_json::json!({ "url": url }))
+                .map_err(|_| "SF-SYS-001".to_owned())
+        }
+        "take_pending_deep_link" => {
+            let next = extras.pending_deep_link.take();
+            serde_json::to_string(&next).map_err(|_| "SF-SYS-001".to_owned())
+        }
+        "desktop_open_external_auth_url" => {
+            let url = str_arg(args, "url", "url");
+            let origin = if !extras.allowed_auth_origin.is_empty() {
+                extras.allowed_auth_origin.as_str()
+            } else if let Some(idx) = url.find("/auth/desktop?") {
+                &url[..idx]
+            } else {
+                ""
+            };
+            validate_desktop_auth_external_url(url, origin)
+                .map_err(|err| err.code().as_str().to_owned())?;
+            extras.last_opened_auth_url = Some(url.to_owned());
+            Ok(r#"{"opened":true}"#.to_owned())
+        }
+        "studio_authorization_status" => store.authorization_status(),
+        "studio_enter_offline_readonly" => store.enter_offline_read_only(),
+        "studio_revalidate_session" => store.revalidate_session(ts),
+        "pick_search_folder" => {
+            store.gate_command("pick_search_folder", 0, Some(ts))?;
+            serde_json::to_string(&extras.search_folder_path).map_err(|_| "SF-SYS-001".to_owned())
+        }
+        "pick_safitemplate_open_file" => {
+            store.gate_command("pick_safitemplate_open_file", 0, Some(ts))?;
+            serde_json::to_string(&extras.safitemplate_path).map_err(|_| "SF-SYS-001".to_owned())
+        }
+        "pick_safitemplate_save_file" => {
+            store.gate_command("pick_safitemplate_save_file", 0, Some(ts))?;
+            serde_json::to_string(&extras.safitemplate_path).map_err(|_| "SF-SYS-001".to_owned())
+        }
         "__harness_register_session" => {
             let token = str_arg(args, "token", "token");
             let session_id = str_arg(args, "sessionId", "session_id");
@@ -335,6 +390,58 @@ fn dispatch(
                 .unwrap_or(false),
             str_arg(args, "payload", "payload"),
         ),
+        "desktop_search_index_folders" => store.desktop_search_index_folders(
+            str_arg(args, "folders", "folders"),
+            opt_str_arg(args, "projectId", "project_id"),
+            ts,
+        ),
+        "desktop_search_query" => store.desktop_search_query(str_arg(args, "query", "query")),
+        "desktop_search_stats" => store.desktop_search_stats(),
+        "desktop_recipes_list" => store.desktop_recipes_list(),
+        "desktop_recipes_sync_official" => {
+            store.desktop_recipes_sync_official(str_arg(args, "templates", "templates"), ts)
+        }
+        "desktop_recipes_save_as_new" => {
+            store.desktop_recipes_save_as_new(str_arg(args, "payload", "payload"), ts)
+        }
+        "desktop_recipes_delete" => store.desktop_recipes_delete(
+            str_arg(args, "recipeId", "recipe_id"),
+            args.get("confirmed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            ts,
+        ),
+        "desktop_recipes_export_safitemplate" => store.desktop_recipes_export_safitemplate(
+            str_arg(args, "recipeId", "recipe_id"),
+            Path::new(str_arg(args, "targetPath", "target_path")),
+            args.get("premiumEntitlementVerified")
+                .or_else(|| args.get("premium_entitlement_verified"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            ts,
+        ),
+        "desktop_recipes_import_safitemplate" => store.desktop_recipes_import_safitemplate(
+            Path::new(str_arg(args, "sourcePath", "source_path")),
+            args.get("premiumEntitlementVerified")
+                .or_else(|| args.get("premium_entitlement_verified"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            opt_str_arg(args, "conflictPolicy", "conflict_policy").unwrap_or("fail_on_duplicate"),
+            ts,
+        ),
+        "desktop_recipes_prepare_community_share" => store.desktop_recipes_prepare_community_share(
+            str_arg(args, "recipeId", "recipe_id"),
+            args.get("consentAccepted")
+                .or_else(|| args.get("consent_accepted"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            str_arg(args, "consentTermsVersion", "consent_terms_version"),
+            args.get("showContributorAttribution")
+                .or_else(|| args.get("show_contributor_attribution"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            ts,
+        ),
         other => store
             .gate_command(other, 0, Some(ts))
             .map(|_| "null".to_owned()),
@@ -348,6 +455,13 @@ fn main() {
     );
     let csv_path = std::env::var("HARNESS_CSV_PATH").unwrap_or_default();
     let capsule_path = std::env::var("HARNESS_CAPSULE_PATH").unwrap_or_default();
+    let mut extras = HarnessExtras {
+        search_folder_path: std::env::var("HARNESS_SEARCH_DIR").unwrap_or_default(),
+        safitemplate_path: std::env::var("HARNESS_SAFITEMPLATE_PATH").unwrap_or_default(),
+        allowed_auth_origin: std::env::var("HARNESS_ALLOWED_AUTH_ORIGIN").unwrap_or_default(),
+        pending_deep_link: None,
+        last_opened_auth_url: None,
+    };
 
     let mut store = StudioStore::with_storage_dir(storage_dir.clone());
 
@@ -379,6 +493,7 @@ fn main() {
 
         let response = match dispatch(
             &mut store,
+            &mut extras,
             &storage_dir,
             &csv_path,
             &capsule_path,

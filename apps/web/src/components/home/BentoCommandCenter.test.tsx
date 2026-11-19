@@ -14,7 +14,7 @@ describe("UI-Phase-4 Bento command centre", () => {
     expect(html).not.toContain("Works 100% Offline");
     expect(html).not.toContain("100% offline");
     expect(html).toContain('data-download-installer-btn="true"');
-    expect(html).toContain("data-installer-sha256=");
+    expect(html).toContain("غير متاح بعد");
     expect(html.startsWith("<div")).toBe(true);
     expect(html).toContain("<h1");
     expect(html).toContain("مرحبًا");

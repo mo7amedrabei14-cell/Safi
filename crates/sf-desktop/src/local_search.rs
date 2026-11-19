@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use flate2::read::ZlibDecoder;
 use quick_xml::Reader as XmlReader;
 use quick_xml::events::Event as XmlEvent;
 use serde::{Deserialize, Serialize};
@@ -687,6 +688,63 @@ impl LocalSearchIndex {
             decrypt_vault_payload(vault_key, &bytes).map_err(|_| "SF-SYS-024".to_owned())?;
         serde_json::from_slice(&decrypted).map_err(|_| "SF-SYS-001".to_owned())
     }
+
+    /// Saves the index atomically into `storage_dir`, encrypted with `vault_key` when configured.
+    ///
+    /// # Errors
+    /// Returns `SF-SYS-023`, `SF-SYS-016`, or `SF-SYS-001`.
+    pub fn save_to_dir(
+        &self,
+        storage_dir: &Path,
+        vault_key: Option<&VaultKey>,
+    ) -> Result<(), String> {
+        fs::create_dir_all(storage_dir).map_err(|_| "SF-SYS-016".to_owned())?;
+        if let Some(key) = vault_key {
+            self.save_encrypted(&storage_dir.join("local_search_index.safi.enc"), key)
+        } else {
+            let json = serde_json::to_vec(self).map_err(|_| "SF-SYS-001".to_owned())?;
+            atomic_write_bytes(&storage_dir.join("local_search_index.json"), &json)
+        }
+    }
+
+    /// Loads an existing persisted index from `storage_dir`, or returns an empty index if none exists.
+    ///
+    /// # Errors
+    /// Returns `SF-SYS-024` or `SF-SYS-001` when persisted data is corrupt or cannot be decrypted.
+    pub fn load_from_dir(storage_dir: &Path, vault_key: Option<&VaultKey>) -> Result<Self, String> {
+        let enc_path = storage_dir.join("local_search_index.safi.enc");
+        let json_path = storage_dir.join("local_search_index.json");
+        if enc_path.exists() {
+            let key = vault_key.ok_or_else(|| "SF-SYS-024".to_owned())?;
+            Self::load_encrypted(&enc_path, key)
+        } else if json_path.exists() {
+            let bytes = fs::read(&json_path).map_err(|_| "SF-SYS-001".to_owned())?;
+            serde_json::from_slice(&bytes).map_err(|_| "SF-SYS-001".to_owned())
+        } else {
+            Ok(Self::new())
+        }
+    }
+
+    /// Returns lightweight aggregate stats about indexed local documents (zero file contents).
+    #[must_use]
+    pub fn stats_snapshot(&self) -> serde_json::Value {
+        let mut folders: BTreeSet<String> = BTreeSet::new();
+        let mut scanned_pdf_notice_count = 0usize;
+        for doc in self.documents.values() {
+            if !doc.folder.is_empty() {
+                let _ = folders.insert(doc.folder.clone());
+            }
+            if !doc.has_extractable_text {
+                scanned_pdf_notice_count = scanned_pdf_notice_count.saturating_add(1);
+            }
+        }
+        serde_json::json!({
+            "totalDocuments": self.documents.len(),
+            "totalTerms": self.postings.len(),
+            "scannedPdfNoticeCount": scanned_pdf_notice_count,
+            "indexedFolders": folders.into_iter().collect::<Vec<_>>(),
+        })
+    }
 }
 
 /// Outcome of indexing one file.
@@ -992,16 +1050,105 @@ fn extract_xml_paragraphs(xml: &str, para_local: &[u8], text_local: &[u8]) -> Ve
     paragraphs
 }
 
-/// Extracts uncompressed PDF literal text strings (`(text) Tj` / `[(text)] TJ`).
+/// Maximum decompressed bytes read from PDF `/FlateDecode` streams (`8 MiB`, zlib-bomb guard).
+const MAX_PDF_DECOMPRESSED_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Extracts PDF text from both uncompressed and `/FlateDecode`-compressed content streams
+/// (supporting literal `(...)` strings and hex/UTF-16BE `<...>` strings).
 ///
-/// Scanned image-only PDFs or PDFs whose text streams require OCR are flagged transparently
-/// via `has_extractable_text = false` and `notice` (OCR is never claimed or faked).
+/// Scanned image-only PDFs that require OCR are flagged transparently via
+/// `has_extractable_text = false` and an explicit notice (OCR is never claimed or faked).
 fn extract_pdf_text(bytes: &[u8]) -> ExtractedDocument {
     let mut chunks = Vec::new();
-    let mut idx = 0usize;
     let mut total_bytes = 0usize;
 
-    while idx < bytes.len() && total_bytes < MAX_EXTRACTED_TEXT_BYTES {
+    // 1. Scan PDF `stream ... endstream` blocks and decompress `/FlateDecode` streams safely.
+    let mut pos = 0usize;
+    let mut total_decompressed = 0u64;
+    while pos < bytes.len() && total_bytes < MAX_EXTRACTED_TEXT_BYTES {
+        let Some(rel_start) = find_subslice(&bytes[pos..], b"stream") else {
+            break;
+        };
+        let stream_kw = pos + rel_start;
+        // Inspect the preceding object dictionary (up to 512 bytes back) for `/FlateDecode`.
+        let dict_start = stream_kw.saturating_sub(512);
+        let dict_slice = &bytes[dict_start..stream_kw];
+        let is_flate = find_subslice(dict_slice, b"/FlateDecode").is_some()
+            || find_subslice(dict_slice, b"/Fl").is_some();
+
+        let mut data_start = stream_kw + b"stream".len();
+        if data_start < bytes.len() && bytes[data_start] == b'\r' {
+            data_start += 1;
+        }
+        if data_start < bytes.len() && bytes[data_start] == b'\n' {
+            data_start += 1;
+        }
+        let Some(rel_end) = find_subslice(&bytes[data_start..], b"endstream") else {
+            break;
+        };
+        let raw_stream = trim_trailing_crlf(&bytes[data_start..data_start + rel_end]);
+        pos = data_start + rel_end + b"endstream".len();
+
+        if is_flate {
+            let budget = MAX_PDF_DECOMPRESSED_BYTES.saturating_sub(total_decompressed);
+            if budget == 0 {
+                break;
+            }
+            let mut decoder = ZlibDecoder::new(raw_stream).take(budget);
+            let mut inflated = Vec::new();
+            if decoder.read_to_end(&mut inflated).is_ok() && !inflated.is_empty() {
+                total_decompressed = total_decompressed.saturating_add(inflated.len() as u64);
+                collect_pdf_text_operators(&inflated, &mut chunks, &mut total_bytes);
+            }
+        } else {
+            collect_pdf_text_operators(raw_stream, &mut chunks, &mut total_bytes);
+        }
+    }
+
+    // 2. Fallback scan for simple inline PDF text objects if no stream block yielded text.
+    if chunks.is_empty() {
+        collect_pdf_text_operators(bytes, &mut chunks, &mut total_bytes);
+    }
+
+    if chunks.is_empty() {
+        return ExtractedDocument {
+            sections: Vec::new(),
+            has_extractable_text: false,
+            notice: Some(
+                "No extractable PDF text found (scanned image-only PDFs require OCR, which is not enabled)."
+                    .to_owned(),
+            ),
+        };
+    }
+
+    ExtractedDocument {
+        sections: vec![IndexedSection {
+            location: "PDF Text Stream".to_owned(),
+            text: chunks.join(" "),
+        }],
+        has_extractable_text: true,
+        notice: None,
+    }
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn trim_trailing_crlf(slice: &[u8]) -> &[u8] {
+    let mut end = slice.len();
+    while end > 0 && matches!(slice[end - 1], b'\r' | b'\n') {
+        end -= 1;
+    }
+    &slice[..end]
+}
+
+fn collect_pdf_text_operators(bytes: &[u8], chunks: &mut Vec<String>, total_bytes: &mut usize) {
+    let mut idx = 0usize;
+    while idx < bytes.len() && *total_bytes < MAX_EXTRACTED_TEXT_BYTES {
         if bytes[idx] == b'(' {
             idx += 1;
             let mut depth = 1u32;
@@ -1030,39 +1177,56 @@ fn extract_pdf_text(bytes: &[u8]) -> ExtractedDocument {
                 }
                 idx += 1;
             }
-            let text = String::from_utf8_lossy(&raw);
-            let cleaned = text.trim();
-            if cleaned.chars().count() >= 2
-                && cleaned
-                    .chars()
-                    .any(|c| c.is_alphanumeric() || ('\u{0600}'..='\u{06FF}').contains(&c))
-            {
-                total_bytes += cleaned.len();
-                chunks.push(cleaned.to_owned());
+            push_pdf_text_chunk(&decode_pdf_bytes(&raw), chunks, total_bytes);
+        } else if bytes[idx] == b'<' && bytes.get(idx + 1).copied() != Some(b'<') {
+            idx += 1;
+            let start = idx;
+            while idx < bytes.len() && bytes[idx] != b'>' {
+                idx += 1;
+            }
+            if idx < bytes.len() {
+                let hex_str: String = bytes[start..idx]
+                    .iter()
+                    .copied()
+                    .filter(|b| !b.is_ascii_whitespace())
+                    .map(char::from)
+                    .collect();
+                idx += 1;
+                if hex_str.len() >= 4
+                    && hex_str.len() % 2 == 0
+                    && hex_str.bytes().all(|b| b.is_ascii_hexdigit())
+                    && let Ok(decoded_bytes) = hex::decode(&hex_str)
+                {
+                    push_pdf_text_chunk(&decode_pdf_bytes(&decoded_bytes), chunks, total_bytes);
+                }
             }
         } else {
             idx += 1;
         }
     }
+}
 
-    if chunks.is_empty() {
-        return ExtractedDocument {
-            sections: Vec::new(),
-            has_extractable_text: false,
-            notice: Some(
-                "No uncompressed extractable PDF text found (scanned/OCR PDFs are not OCR-indexed)."
-                    .to_owned(),
-            ),
-        };
+fn decode_pdf_bytes(raw: &[u8]) -> String {
+    // Handle UTF-16BE BOM (`FE FF`) commonly emitted by Arabic/Unicode PDF generators.
+    if raw.len() >= 4 && raw[0] == 0xFE && raw[1] == 0xFF {
+        let units: Vec<u16> = raw[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
+        return String::from_utf16_lossy(&units);
     }
+    String::from_utf8_lossy(raw).into_owned()
+}
 
-    ExtractedDocument {
-        sections: vec![IndexedSection {
-            location: "PDF Text Stream".to_owned(),
-            text: chunks.join(" "),
-        }],
-        has_extractable_text: true,
-        notice: None,
+fn push_pdf_text_chunk(text: &str, chunks: &mut Vec<String>, total_bytes: &mut usize) {
+    let cleaned = text.trim();
+    if cleaned.chars().count() >= 2
+        && cleaned
+            .chars()
+            .any(|c| c.is_alphanumeric() || ('\u{0600}'..='\u{06FF}').contains(&c))
+    {
+        *total_bytes = total_bytes.saturating_add(cleaned.len());
+        chunks.push(cleaned.to_owned());
     }
 }
 
@@ -1704,6 +1868,76 @@ mod tests {
             elapsed_1000_ms < 30_000,
             "1000-file index took {elapsed_1000_ms}ms"
         );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn extracts_flatedecode_compressed_pdf_text_and_flags_scanned_pdf_honestly() {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+
+        let root = temp_test_dir("pdf-flate");
+
+        // Build a real FlateDecode-compressed PDF stream (ASCII + UTF-16BE Arabic hex string)
+        let stream_plain = b"BT /F1 12 Tf (Quarterly Revenue Cairo FlateDecode2026) Tj <FEFF063506270641064A> Tj ET";
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        crate::test_result(encoder.write_all(stream_plain));
+        let compressed = crate::test_result(encoder.finish());
+
+        let mut pdf_bytes = Vec::new();
+        pdf_bytes.extend_from_slice(b"%PDF-1.4\n1 0 obj << /Filter /FlateDecode /Length ");
+        pdf_bytes.extend_from_slice(compressed.len().to_string().as_bytes());
+        pdf_bytes.extend_from_slice(b" >>\nstream\n");
+        pdf_bytes.extend_from_slice(&compressed);
+        pdf_bytes.extend_from_slice(b"\nendstream\nendobj\n%%EOF\n");
+        let flate_pdf = root.join("compressed_report.pdf");
+        crate::test_result(fs::write(&flate_pdf, &pdf_bytes));
+
+        let scanned_pdf = root.join("scanned_only.pdf");
+        crate::test_result(fs::write(
+            &scanned_pdf,
+            b"%PDF-1.4\n1 0 obj << /Type /XObject /Subtype /Image >> endobj\n%%EOF\n",
+        ));
+
+        let mut index = LocalSearchIndex::new();
+        let summary = crate::test_result(index.index_folders(
+            std::slice::from_ref(&root),
+            None,
+            None,
+            |_| {},
+        ));
+        assert_eq!(summary.added, 2);
+
+        let hits_en = index.search_readonly(&SearchQuery {
+            query: "FlateDecode2026".to_owned(),
+            filters: SearchFilters {
+                file_types: vec![IndexedFileType::Pdf],
+                ..SearchFilters::default()
+            },
+            enable_fuzzy: false,
+            limit: 5,
+        });
+        assert_eq!(hits_en.len(), 1);
+        assert_eq!(hits_en[0].file_name, "compressed_report.pdf");
+
+        let hits_ar = index.search_readonly(&SearchQuery {
+            query: "صافي".to_owned(),
+            filters: SearchFilters {
+                file_types: vec![IndexedFileType::Pdf],
+                ..SearchFilters::default()
+            },
+            enable_fuzzy: false,
+            limit: 5,
+        });
+        assert_eq!(hits_ar.len(), 1);
+        assert_eq!(hits_ar[0].file_name, "compressed_report.pdf");
+
+        let scanned_doc = index
+            .get_document_by_path(&scanned_pdf)
+            .unwrap_or_else(|| panic!("scanned pdf should be catalogued"));
+        assert!(!scanned_doc.has_extractable_text);
+        assert!(scanned_doc.extraction_notice.is_some());
 
         let _ = fs::remove_dir_all(&root);
     }

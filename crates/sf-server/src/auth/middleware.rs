@@ -14,6 +14,7 @@ use super::session::SESSION_TOKEN_PREFIX;
 use super::{unix_now, AuthenticatedSession, Principal, Scope};
 use crate::desktop_auth::DesktopAuthService;
 use crate::error::AuthError;
+use crate::pg_store::PgControlPlaneStore;
 
 /// State for API-key protected routes.
 #[derive(Clone)]
@@ -36,6 +37,7 @@ pub struct SessionGuard {
 pub struct OwnerSessionGuard {
     pub auth: Arc<AuthService>,
     pub desktop_auth: DesktopAuthService,
+    pub pg_store: Option<PgControlPlaneStore>,
     pub required_scope: Scope,
 }
 
@@ -117,10 +119,16 @@ pub async fn require_owner_session(
 ) -> Result<Response, AuthError> {
     let token = bearer_token(&request).ok_or(AuthError::InvalidCredentials)?;
     let session = if token.starts_with("sfw_") {
-        guard
-            .desktop_auth
-            .authenticate_owner_web_session(token, unix_now())
-            .await?
+        if let Some(pg) = &guard.pg_store {
+            let token_hash_bytes = blake3::hash(token.trim().as_bytes());
+            pg.authenticate_owner_web_session_pg(token_hash_bytes.as_bytes(), unix_now())
+                .await?
+        } else {
+            guard
+                .desktop_auth
+                .authenticate_owner_web_session(token, unix_now())
+                .await?
+        }
     } else if token.starts_with(SESSION_TOKEN_PREFIX) {
         guard.auth.authenticate_session(token).await?
     } else {

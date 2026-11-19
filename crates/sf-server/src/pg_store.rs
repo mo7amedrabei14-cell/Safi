@@ -46,6 +46,12 @@ impl PgControlPlaneStore {
         Self { pool }
     }
 
+    /// Expose the underlying SQLx PostgreSQL connection pool for transactional control-plane queries.
+    #[must_use]
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     /// Persist a hash-chained Owner audit log entry to `owner_audit_log`.
     pub async fn insert_audit_entry(&self, entry: &AuditLogEntry) -> Result<(), AuthError> {
         let outcome_str = match entry.outcome {

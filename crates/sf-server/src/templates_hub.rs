@@ -373,7 +373,7 @@ fn has_long_digit_run(input: &str, min_len: usize) -> bool {
     false
 }
 
-fn validate_declarative_steps(steps: &[DeclarativeRecipeStep]) -> Result<(), AuthError> {
+pub fn validate_declarative_steps(steps: &[DeclarativeRecipeStep]) -> Result<(), AuthError> {
     if steps.is_empty() || steps.len() > 64 {
         return Err(AuthError::CommunitySubmissionRejected);
     }

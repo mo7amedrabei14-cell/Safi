@@ -984,3 +984,305 @@ export async function exportDeliverable(
     await call("studio_export_deliverable", { project, target, isBase64, payload })
   );
 }
+
+export interface DesktopDeepLinkAction {
+  readonly action: string;
+  readonly code?: string;
+  readonly state?: string;
+  readonly token?: string;
+  readonly id?: string;
+  readonly tab?: string;
+}
+
+/** Polls any queued `safi://` deep link parsed and validated by the native Tauri shell. */
+export async function takePendingDeepLink(): Promise<DesktopDeepLinkAction | null> {
+  const invoke = bridge()?.invoke;
+  if (invoke === undefined) {
+    return null;
+  }
+  const raw = await invoke("take_pending_deep_link");
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed === "" || trimmed === "null") return null;
+    return JSON.parse(trimmed) as DesktopDeepLinkAction;
+  }
+  return raw as DesktopDeepLinkAction;
+}
+
+/** Launches the OS default browser strictly for a validated SafiData PKCE `/auth/desktop` URL. */
+export async function openDesktopExternalAuthUrl(
+  url: string
+): Promise<{ readonly opened: boolean }> {
+  const raw = await call("desktop_open_external_auth_url", { url });
+  return JSON.parse(raw) as { readonly opened: boolean };
+}
+
+/** Opens the native folder picker for selecting a local folder to index in Local Search. */
+export async function pickSearchFolder(): Promise<string | null> {
+  return pickOptionalPath("pick_search_folder");
+}
+
+/** Opens the native file picker for importing a `.safitemplate` file. */
+export async function pickSafiTemplateOpenFile(): Promise<string | null> {
+  return pickOptionalPath("pick_safitemplate_open_file");
+}
+
+/** Opens the native save dialog for exporting a `.safitemplate` file. */
+export async function pickSafiTemplateSaveFile(defaultName?: string): Promise<string | null> {
+  return pickOptionalPath("pick_safitemplate_save_file", {
+    defaultName: defaultName ?? "recipe.safitemplate"
+  });
+}
+
+async function pickOptionalPath(
+  command: string,
+  args?: Record<string, unknown>
+): Promise<string | null> {
+  const invoke = bridge()?.invoke;
+  if (invoke === undefined) {
+    throw new Error("SF-SYS-010");
+  }
+  const raw = await invoke(command, args);
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  if (typeof raw === "string") {
+    const unwrapped = unwrapStringResult(raw);
+    return unwrapped.trim().length > 0 ? unwrapped : null;
+  }
+  return null;
+}
+
+export interface DesktopSearchStats {
+  readonly totalDocuments: number;
+  readonly totalTerms: number;
+  readonly scannedPdfNoticeCount: number;
+  readonly indexedFolders: readonly string[];
+}
+
+export interface DesktopSearchIndexSummary {
+  readonly added: number;
+  readonly updated: number;
+  readonly unchanged: number;
+  readonly removed: number;
+  readonly skipped: number;
+  readonly cancelled: boolean;
+  readonly totalDocuments: number;
+}
+
+export interface DesktopSearchHit {
+  readonly path: string;
+  readonly fileName: string;
+  readonly fileType: string;
+  readonly projectId: string | null;
+  readonly matchLocation: string;
+  readonly snippet: string;
+  readonly score: number;
+  readonly modifiedMs: number;
+}
+
+export async function indexDesktopSearchFolders(
+  folders: readonly string[],
+  projectId?: string | null
+): Promise<{ readonly summary: DesktopSearchIndexSummary; readonly stats: DesktopSearchStats }> {
+  const raw = await call("desktop_search_index_folders", {
+    folders: JSON.stringify(folders),
+    projectId: projectId ?? null
+  });
+  return JSON.parse(raw) as {
+    readonly summary: DesktopSearchIndexSummary;
+    readonly stats: DesktopSearchStats;
+  };
+}
+
+export async function queryDesktopSearch(query: {
+  readonly query: string;
+  readonly fileType?: string | null;
+  readonly folderPrefix?: string | null;
+  readonly projectId?: string | null;
+  readonly enableFuzzy?: boolean;
+  readonly limit?: number;
+}): Promise<{ readonly hits: readonly DesktopSearchHit[]; readonly stats: DesktopSearchStats }> {
+  const raw = await call("desktop_search_query", {
+    query: JSON.stringify({
+      query: query.query,
+      fileType: query.fileType ?? null,
+      folderPrefix: query.folderPrefix ?? null,
+      projectId: query.projectId ?? null,
+      enableFuzzy: query.enableFuzzy ?? true,
+      limit: query.limit ?? 25
+    })
+  });
+  return JSON.parse(raw) as {
+    readonly hits: readonly DesktopSearchHit[];
+    readonly stats: DesktopSearchStats;
+  };
+}
+
+export async function getDesktopSearchStats(): Promise<DesktopSearchStats> {
+  return JSON.parse(await call("desktop_search_stats")) as DesktopSearchStats;
+}
+
+export interface DesktopLocalRecipeStep {
+  readonly id: string;
+  readonly op: Record<string, unknown>;
+  readonly enabled?: boolean;
+}
+
+export interface DesktopLocalRecipeRecord {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category: string;
+  readonly recipe_type: string;
+  readonly origin:
+    | "official_template"
+    | "my_recipe"
+    | "imported_recipe"
+    | "community_contribution"
+    | "published_community_template";
+  readonly source_template_id: string | null;
+  readonly required_columns: readonly string[];
+  readonly recipe: {
+    readonly schema_version: number;
+    readonly id: string;
+    readonly name: string;
+    readonly steps: readonly DesktopLocalRecipeStep[];
+    readonly content_hash?: string | null;
+  };
+  readonly created_at_ms: number;
+  readonly updated_at_ms: number;
+}
+
+export interface DesktopCommunitySharePayload {
+  readonly name: string;
+  readonly description: string;
+  readonly recipe_type: string;
+  readonly schema_version: number;
+  readonly app_version: string;
+  readonly required_columns: readonly string[];
+  readonly steps: readonly DesktopLocalRecipeStep[];
+  readonly consent_accepted: boolean;
+  readonly consent_terms_version: string;
+  readonly show_contributor_attribution: boolean;
+  readonly pii_warnings: readonly string[];
+}
+
+export async function listDesktopRecipes(): Promise<{
+  readonly officialTemplates: readonly DesktopLocalRecipeRecord[];
+  readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+}> {
+  return JSON.parse(await call("desktop_recipes_list")) as {
+    readonly officialTemplates: readonly DesktopLocalRecipeRecord[];
+    readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+  };
+}
+
+export async function syncDesktopOfficialTemplates(
+  templates: readonly Record<string, unknown>[]
+): Promise<{
+  readonly syncedCount: number;
+  readonly officialTemplates: readonly DesktopLocalRecipeRecord[];
+  readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+}> {
+  return JSON.parse(
+    await call("desktop_recipes_sync_official", { templates: JSON.stringify(templates) })
+  ) as {
+    readonly syncedCount: number;
+    readonly officialTemplates: readonly DesktopLocalRecipeRecord[];
+    readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+  };
+}
+
+export async function saveDesktopRecipeAsNew(payload: {
+  readonly sourceTemplateId?: string | null;
+  readonly name: string;
+  readonly description: string;
+  readonly category?: string;
+  readonly recipeType?: string;
+  readonly requiredColumns?: readonly string[];
+  readonly steps?: readonly DesktopLocalRecipeStep[];
+  readonly conflictPolicy?: "fail_on_duplicate" | "rename" | "skip" | "confirmed_replace";
+}): Promise<{
+  readonly saved: DesktopLocalRecipeRecord | null;
+  readonly officialTemplates: readonly DesktopLocalRecipeRecord[];
+  readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+}> {
+  return JSON.parse(
+    await call("desktop_recipes_save_as_new", { payload: JSON.stringify(payload) })
+  ) as {
+    readonly saved: DesktopLocalRecipeRecord | null;
+    readonly officialTemplates: readonly DesktopLocalRecipeRecord[];
+    readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+  };
+}
+
+export async function deleteDesktopRecipe(
+  recipeId: string,
+  confirmed: boolean
+): Promise<{
+  readonly deleted: string;
+  readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+}> {
+  return JSON.parse(await call("desktop_recipes_delete", { recipeId, confirmed })) as {
+    readonly deleted: string;
+    readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+  };
+}
+
+export async function exportDesktopSafiTemplate(
+  recipeId: string,
+  targetPath: string,
+  premiumEntitlementVerified: boolean
+): Promise<{ readonly path: string; readonly portable: Record<string, unknown> }> {
+  return JSON.parse(
+    await call("desktop_recipes_export_safitemplate", {
+      recipeId,
+      targetPath,
+      premiumEntitlementVerified
+    })
+  ) as { readonly path: string; readonly portable: Record<string, unknown> };
+}
+
+export async function importDesktopSafiTemplate(
+  sourcePath: string,
+  premiumEntitlementVerified: boolean,
+  conflictPolicy:
+    | "fail_on_duplicate"
+    | "rename"
+    | "skip"
+    | "confirmed_replace" = "fail_on_duplicate"
+): Promise<{
+  readonly imported: DesktopLocalRecipeRecord | null;
+  readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+}> {
+  return JSON.parse(
+    await call("desktop_recipes_import_safitemplate", {
+      sourcePath,
+      premiumEntitlementVerified,
+      conflictPolicy
+    })
+  ) as {
+    readonly imported: DesktopLocalRecipeRecord | null;
+    readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+  };
+}
+
+export async function prepareDesktopCommunityShare(
+  recipeId: string,
+  consentAccepted: boolean,
+  consentTermsVersion: string,
+  showContributorAttribution: boolean
+): Promise<DesktopCommunitySharePayload> {
+  return JSON.parse(
+    await call("desktop_recipes_prepare_community_share", {
+      recipeId,
+      consentAccepted,
+      consentTermsVersion,
+      showContributorAttribution
+    })
+  ) as DesktopCommunitySharePayload;
+}

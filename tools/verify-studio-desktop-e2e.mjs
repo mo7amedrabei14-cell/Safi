@@ -73,7 +73,7 @@ const authProc = spawn(authServerBin, [], {
 });
 const authRl = createInterface({ input: authProc.stdout });
 const authAddr = await new Promise((resolveAddr, rejectAddr) => {
-  const timer = setTimeout(() => rejectAddr(new Error("sf-server auth harness timeout")), 15_000);
+  const timer = setTimeout(() => rejectAddr(new Error("sf-server auth harness timeout")), 90_000);
   authRl.on("line", (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;

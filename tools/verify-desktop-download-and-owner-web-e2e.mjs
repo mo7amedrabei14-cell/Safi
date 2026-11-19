@@ -88,27 +88,41 @@ try {
         assert.equal(await page.locator('[data-tab-id="cleaning"]').count(), 0);
       }
 
-      // Real Download Installer verification (actual Chromium download event + real bytes + SHA-256)
+      // Honest unpublished installer verification: when manifest has `available: false` (no real
+      // public HTTPS release URL configured yet), the download CTA must honestly show unavailable
+      // instead of linking to a fake or local untracked dev binary!
       const manifest = JSON.parse(
         readFileSync(resolve("apps/web/public/downloads/release-manifest.json"), "utf8")
       );
-      const expectedSha = manifest.platforms.windows.sha256;
-      const expectedBytes = manifest.platforms.windows.fileSizeBytes;
-
       const downloadBtn = page.locator('[data-download-installer-btn="true"]');
       await downloadBtn.scrollIntoViewIfNeeded();
       await downloadBtn.waitFor({ state: "visible", timeout: 10_000 });
 
-      const [download] = await Promise.all([
-        page.waitForEvent("download", { timeout: 20_000 }),
-        downloadBtn.click()
-      ]);
-      const downloadedPath = await download.path();
-      assert.ok(downloadedPath, "Playwright must save a real downloaded file");
-      const bytes = readFileSync(downloadedPath);
-      assert.equal(bytes.length, expectedBytes, "Downloaded installer byte length must match manifest");
-      const actualSha = createHash("sha256").update(bytes).digest("hex");
-      assert.equal(actualSha, expectedSha, "Downloaded installer SHA-256 must match manifest");
+      if (manifest.platforms.windows.available && manifest.platforms.windows.downloadUrl) {
+        const expectedSha = manifest.platforms.windows.sha256;
+        const expectedBytes = manifest.platforms.windows.fileSizeBytes;
+        const [download] = await Promise.all([
+          page.waitForEvent("download", { timeout: 20_000 }),
+          downloadBtn.click()
+        ]);
+        const downloadedPath = await download.path();
+        assert.ok(downloadedPath, "Playwright must save a real downloaded file");
+        const bytes = readFileSync(downloadedPath);
+        assert.equal(bytes.length, expectedBytes, "Downloaded installer byte length must match manifest");
+        const actualSha = createHash("sha256").update(bytes).digest("hex");
+        assert.equal(actualSha, expectedSha, "Downloaded installer SHA-256 must match manifest");
+      } else {
+        assert.equal(
+          await downloadBtn.isDisabled(),
+          true,
+          "Unpublished Windows installer button must be disabled"
+        );
+        const btnText = await downloadBtn.innerText();
+        assert.ok(
+          btnText.includes("Not Yet Published") || btnText.includes("غير متاح بعد"),
+          `Unpublished installer button must state unavailable honestly, got: ${btnText}`
+        );
+      }
       assert.deepEqual(errors, []);
       await ctx.close();
     }
@@ -223,7 +237,7 @@ try {
     }
 
     console.log(
-      "[verify-desktop-download-and-owner-web-e2e] PASS: Showcase boundary, real SHA-256 installer download (6,240,768 bytes), /owner Web Portal MFA + isolation, and /auth/desktop PKCE flow verified in headless Chromium."
+      "[verify-desktop-download-and-owner-web-e2e] PASS (UI-boundary smoke test; see verify-desktop-full-journey-real-e2e.mjs for unmocked full-stack E2E): Showcase boundary, honest installer availability state, /owner Web Portal UI, and /auth/desktop PKCE UI verified."
     );
   } finally {
     await browser.close();

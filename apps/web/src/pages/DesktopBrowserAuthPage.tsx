@@ -10,7 +10,7 @@ import type { FormEvent, ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { CheckCircle2, KeyRound, ShieldCheck } from "lucide-react";
 import type { SafiLang } from "../components/layout/FloatingGlassDock";
-import { SafiAuthApiError } from "../lib/auth-api";
+import { postSafiAuth, SafiAuthApiError } from "../lib/auth-api";
 import { ownerApi } from "../lib/owner-api";
 
 export interface DesktopBrowserAuthPageProps {
@@ -31,8 +31,13 @@ export function DesktopBrowserAuthPage({ lang = "en" }: DesktopBrowserAuthPagePr
     };
   }, []);
 
+  const [activeFlow, setActiveFlow] = useState<"signin" | "signup">(
+    params.flow === "signup" ? "signup" : "signin"
+  );
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [signupMessage, setSignupMessage] = useState<string | null>(null);
   const [callbackUrl, setCallbackUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +56,22 @@ export function DesktopBrowserAuthPage({ lang = "en" }: DesktopBrowserAuthPagePr
     }
     setBusy(true);
     setError(null);
+    setSignupMessage(null);
     try {
+      if (activeFlow === "signup") {
+        await postSafiAuth("/register", {
+          email: email.trim(),
+          name: name.trim() || email.trim().split("@")[0] || "Safi User",
+          password
+        });
+        setSignupMessage(
+          isAr
+            ? "تم إنشاء الحساب بنجاح. بعد تأكيد بريدك الإلكتروني يمكنك المتابعة بتسجيل الدخول لتفويض تطبيق سطح المكتب."
+            : "Account created. After verifying your email, sign in below to authorize SafiData Desktop."
+        );
+        setActiveFlow("signin");
+        return;
+      }
       const approved = await ownerApi.approveDesktopPkceAuth({
         request_id: params.requestId,
         state: params.state,
@@ -86,7 +106,7 @@ export function DesktopBrowserAuthPage({ lang = "en" }: DesktopBrowserAuthPagePr
       <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
         <KeyRound size={22} aria-hidden="true" />
         <h1 style={{ fontSize: "20px", fontWeight: 800, margin: 0 }}>
-          {params.flow === "signup"
+          {activeFlow === "signup"
             ? isAr
               ? "إنشاء حساب وتوصيل تطبيق صافي لسطح المكتب"
               : "Sign Up & Authorize SafiData Desktop"
@@ -135,6 +155,26 @@ export function DesktopBrowserAuthPage({ lang = "en" }: DesktopBrowserAuthPagePr
             </div>
           ) : null}
 
+          {signupMessage !== null ? (
+            <div role="status" data-desktop-auth-signup-status="true" style={{ fontSize: "13px" }}>
+              {signupMessage}
+            </div>
+          ) : null}
+
+          {activeFlow === "signup" ? (
+            <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
+              <span>{isAr ? "الاسم" : "Full name"}</span>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="safi-input"
+                data-desktop-auth-name="true"
+              />
+            </label>
+          ) : null}
+
           <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
             <span>{isAr ? "البريد الإلكتروني" : "Email"}</span>
             <input
@@ -153,7 +193,7 @@ export function DesktopBrowserAuthPage({ lang = "en" }: DesktopBrowserAuthPagePr
             <input
               type="password"
               required
-              autoComplete="current-password"
+              autoComplete={activeFlow === "signup" ? "new-password" : "current-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="safi-input"
@@ -169,11 +209,29 @@ export function DesktopBrowserAuthPage({ lang = "en" }: DesktopBrowserAuthPagePr
           >
             {busy
               ? isAr
-                ? "جارٍ إصدار رمز التفويض..."
-                : "Issuing one-time code..."
+                ? "جارٍ المعالجة..."
+                : "Processing..."
+              : activeFlow === "signup"
+                ? isAr
+                  ? "إنشاء الحساب والمتابعة"
+                  : "Create Account & Continue"
+                : isAr
+                  ? "تفويض تطبيق سطح المكتب"
+                  : "Authorize Desktop App"}
+          </button>
+
+          <button
+            type="button"
+            className="safi-btn safi-btn-ghost"
+            onClick={() => setActiveFlow((prev) => (prev === "signup" ? "signin" : "signup"))}
+          >
+            {activeFlow === "signup"
+              ? isAr
+                ? "لديك حساب بالفعل؟ سجّل الدخول لتفويض سطح المكتب"
+                : "Already have an account? Sign in to authorize Desktop"
               : isAr
-                ? "تفويض تطبيق سطح المكتب"
-                : "Authorize Desktop App"}
+                ? "جديد في صافي؟ أنشئ حسابًا أولًا"
+                : "New to SafiData? Create an account first"}
           </button>
         </form>
       )}

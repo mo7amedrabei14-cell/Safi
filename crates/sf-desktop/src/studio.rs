@@ -37,6 +37,10 @@ use sf_recipe::studio_dsl::{apply_command, parse_command, render_narrative};
 use sf_recipe::studio_templates::{TEMPLATES, instantiate as instantiate_tpl, template_by_id};
 
 use crate::commands::{CommandAccessClass, classify_command_access, enforce_ipc_command};
+use crate::local_search::{LocalSearchIndex, SearchQuery};
+use crate::recipe_library::{
+    LocalRecipeLibrary, LocalRecipeRecord, NameConflictPolicy, RecipeOriginClass,
+};
 use crate::vault::{VaultKey, decrypt_vault_payload, encrypt_vault_payload};
 
 /// Largest file the desktop app will import (`50 MiB`, matching the drop zone copy).
@@ -698,6 +702,8 @@ pub struct StudioStore {
     authority: Arc<StudioSessionAuthority>,
     verifier: Arc<dyn StudioSessionVerifier>,
     clock_ms: Mutex<Option<u64>>,
+    search_index: Mutex<Option<LocalSearchIndex>>,
+    recipe_library: Mutex<Option<LocalRecipeLibrary>>,
 }
 
 impl Default for StudioStore {
@@ -719,6 +725,8 @@ impl Default for StudioStore {
             authority,
             verifier,
             clock_ms: Mutex::new(None),
+            search_index: Mutex::new(None),
+            recipe_library: Mutex::new(None),
         }
     }
 }
@@ -751,6 +759,8 @@ impl StudioStore {
             authority,
             verifier,
             clock_ms: Mutex::new(None),
+            search_index: Mutex::new(None),
+            recipe_library: Mutex::new(None),
         }
     }
 
@@ -777,6 +787,8 @@ impl StudioStore {
             authority,
             verifier,
             clock_ms: Mutex::new(None),
+            search_index: Mutex::new(None),
+            recipe_library: Mutex::new(None),
         }
     }
 
@@ -2529,6 +2541,518 @@ impl StudioStore {
         Ok(target.display().to_string())
     }
 
+    fn ensure_search_index_loaded(&self) -> Result<(), String> {
+        let mut slot = self
+            .search_index
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        if slot.is_none() {
+            let dir = self.resolve_storage_dir()?;
+            let key = self.vault_key.lock().ok().and_then(|g| g.clone());
+            let loaded = LocalSearchIndex::load_from_dir(&dir, key.as_ref())?;
+            *slot = Some(loaded);
+        }
+        Ok(())
+    }
+
+    fn ensure_recipe_library_loaded(&self) -> Result<(), String> {
+        let mut slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        if slot.is_none() {
+            let dir = self.resolve_storage_dir()?;
+            let key = self.vault_key.lock().ok().and_then(|g| g.clone());
+            let loaded = LocalRecipeLibrary::open(dir, key)?;
+            *slot = Some(loaded);
+        }
+        Ok(())
+    }
+
+    /// Indexes or incrementally updates one or more user-selected local folders into the
+    /// on-device `LocalSearchIndex` (strictly local, zero cloud upload).
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-SYS-001` / `SF-IMP-002`.
+    pub fn desktop_search_index_folders(
+        &self,
+        folders_json: &str,
+        project_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len =
+            crate::ipc_payload_len!(("folders", folders_json), ("projectId", project_id),);
+        self.gate_command("desktop_search_index_folders", payload_len, Some(now_ms))?;
+        let raw_folders: Vec<String> =
+            serde_json::from_str(folders_json).map_err(|_| "SF-SYS-001".to_owned())?;
+        if raw_folders.is_empty() || raw_folders.len() > 32 {
+            return Err("SF-SYS-001".to_owned());
+        }
+        let mut roots = Vec::with_capacity(raw_folders.len());
+        for raw in raw_folders {
+            let path = PathBuf::from(raw.trim());
+            if path.as_os_str().is_empty()
+                || path
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err("SF-IMP-002".to_owned());
+            }
+            roots.push(path);
+        }
+
+        self.ensure_search_index_loaded()?;
+        let dir = self.resolve_storage_dir()?;
+        let key = self.vault_key.lock().ok().and_then(|g| g.clone());
+        let mut slot = self
+            .search_index
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(index) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let summary = index.index_folders(&roots, project_id, None, |_| {})?;
+        index.save_to_dir(&dir, key.as_ref())?;
+        let stats = index.stats_snapshot();
+        serde_json::to_string(&serde_json::json!({
+            "summary": summary,
+            "stats": stats,
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Executes a local BM25 full-text search query (strictly Read-Only; works offline).
+    ///
+    /// # Errors
+    /// Returns `SF-AUTH-001` or `SF-SYS-001`.
+    pub fn desktop_search_query(&self, query_json: &str) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("query", query_json));
+        self.gate_command("desktop_search_query", payload_len, None)?;
+        let query: SearchQuery =
+            serde_json::from_str(query_json).map_err(|_| "SF-SYS-001".to_owned())?;
+        self.ensure_search_index_loaded()?;
+        let slot = self
+            .search_index
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(index) = slot.as_ref() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let hits = index.search_readonly(&query);
+        serde_json::to_string(&serde_json::json!({
+            "hits": hits,
+            "stats": index.stats_snapshot(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Returns aggregate metadata of the local full-text search index (works offline).
+    ///
+    /// # Errors
+    /// Returns `SF-AUTH-001` or `SF-SYS-001`.
+    pub fn desktop_search_stats(&self) -> Result<String, String> {
+        self.gate_command("desktop_search_stats", crate::ipc_payload_len!(), None)?;
+        self.ensure_search_index_loaded()?;
+        let slot = self
+            .search_index
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(index) = slot.as_ref() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        serde_json::to_string(&index.stats_snapshot()).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Lists both cached Official Templates and user-owned local My Recipes (works offline).
+    ///
+    /// # Errors
+    /// Returns `SF-AUTH-001` or `SF-SYS-001`.
+    pub fn desktop_recipes_list(&self) -> Result<String, String> {
+        self.gate_command("desktop_recipes_list", crate::ipc_payload_len!(), None)?;
+        self.ensure_recipe_library_loaded()?;
+        let slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_ref() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        serde_json::to_string(&serde_json::json!({
+            "officialTemplates": lib.list_official_templates(),
+            "myRecipes": lib.list_my_recipes(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Synchronizes Official Templates fetched from `GET /v1/templates/official` into the local cache.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-RCP-001`.
+    pub fn desktop_recipes_sync_official(
+        &self,
+        templates_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("templates", templates_json));
+        self.gate_command("desktop_recipes_sync_official", payload_len, Some(now_ms))?;
+        let raw_list: Vec<serde_json::Value> =
+            serde_json::from_str(templates_json).map_err(|_| "SF-RCP-001".to_owned())?;
+        let mut incoming = Vec::with_capacity(raw_list.len());
+        for item in raw_list {
+            let id = item
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            let name = item
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            let description = item
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let category = item
+                .get("category")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("general")
+                .to_owned();
+            let recipe_type = item
+                .get("recipe_type")
+                .or_else(|| item.get("recipeType"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("cleaning")
+                .to_owned();
+            let required_columns: Vec<String> = item
+                .get("required_columns")
+                .or_else(|| item.get("requiredColumns"))
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            let steps: Vec<sf_recipe::recipe::RecipeStep> = item
+                .get("steps")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            if id.is_empty() || name.is_empty() || steps.is_empty() {
+                continue;
+            }
+            let is_community = item
+                .get("origin")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|o| o == "published_community_template");
+            let mut recipe = sf_recipe::recipe::SafiRecipe {
+                schema_version: 1,
+                id: id.clone(),
+                name: name.clone(),
+                created_with: Some("1.0.0".to_owned()),
+                region: None,
+                column_rules: None,
+                steps,
+                content_hash: None,
+            };
+            recipe.content_hash = recipe.compute_content_hash().ok();
+            incoming.push(LocalRecipeRecord {
+                id,
+                name,
+                description,
+                category,
+                recipe_type,
+                origin: if is_community {
+                    RecipeOriginClass::PublishedCommunityTemplate
+                } else {
+                    RecipeOriginClass::OfficialTemplate
+                },
+                source_template_id: None,
+                required_columns,
+                recipe,
+                created_at_ms: now_ms,
+                updated_at_ms: now_ms,
+            });
+        }
+        self.ensure_recipe_library_loaded()?;
+        let mut slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let count = lib.sync_official_templates(incoming)?;
+        serde_json::to_string(&serde_json::json!({
+            "syncedCount": count,
+            "officialTemplates": lib.list_official_templates(),
+            "myRecipes": lib.list_my_recipes(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Customizes an Official Template (or personal recipe) and saves an independent user-owned
+    /// recipe into `My Recipes` (`Save as New Recipe`) without mutating the original Official Template.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors, `SF-RCP-001`, or `"DUPLICATE_RECIPE_NAME"`.
+    pub fn desktop_recipes_save_as_new(
+        &self,
+        payload_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("payload", payload_json));
+        self.gate_command("desktop_recipes_save_as_new", payload_len, Some(now_ms))?;
+        let body: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|_| "SF-RCP-001".to_owned())?;
+        let source_template_id = body
+            .get("sourceTemplateId")
+            .and_then(serde_json::Value::as_str);
+        let name = body
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let description = body
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let category = body
+            .get("category")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("custom");
+        let recipe_type = body
+            .get("recipeType")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("cleaning");
+        let conflict_policy = parse_conflict_policy(
+            body.get("conflictPolicy")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("fail_on_duplicate"),
+        );
+        let custom_steps: Option<Vec<sf_recipe::recipe::RecipeStep>> = body
+            .get("steps")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let required_columns: Option<Vec<String>> = body
+            .get("requiredColumns")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        self.ensure_recipe_library_loaded()?;
+        let mut slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+
+        let mut working_copy = if let Some(src_id) = source_template_id {
+            if lib.get_official_template(src_id).is_some() {
+                lib.clone_official_for_editing(src_id, now_ms)?
+            } else if let Some(existing) = lib.get_my_recipe(src_id).cloned() {
+                existing
+            } else {
+                return Err("SF-RCP-001".to_owned());
+            }
+        } else {
+            let steps = custom_steps
+                .clone()
+                .ok_or_else(|| "SF-RCP-001".to_owned())?;
+            LocalRecipeRecord {
+                id: String::new(),
+                name: name.trim().to_owned(),
+                description: description.trim().to_owned(),
+                category: category.trim().to_owned(),
+                recipe_type: recipe_type.trim().to_owned(),
+                origin: RecipeOriginClass::MyRecipe,
+                source_template_id: None,
+                required_columns: required_columns.clone().unwrap_or_default(),
+                recipe: sf_recipe::recipe::SafiRecipe {
+                    schema_version: 1,
+                    id: String::new(),
+                    name: name.trim().to_owned(),
+                    created_with: Some("1.0.0".to_owned()),
+                    region: None,
+                    column_rules: None,
+                    steps,
+                    content_hash: None,
+                },
+                created_at_ms: now_ms,
+                updated_at_ms: now_ms,
+            }
+        };
+
+        if let Some(steps) = custom_steps {
+            LocalRecipeLibrary::customize_working_copy_steps(&mut working_copy, steps, now_ms)?;
+        }
+        if let Some(cols) = required_columns {
+            working_copy.required_columns = cols;
+        }
+        working_copy.recipe_type = recipe_type.trim().to_owned();
+
+        let saved = lib.save_as_new_recipe(
+            working_copy,
+            name,
+            description,
+            category,
+            conflict_policy,
+            now_ms,
+        )?;
+        serde_json::to_string(&serde_json::json!({
+            "saved": saved,
+            "officialTemplates": lib.list_official_templates(),
+            "myRecipes": lib.list_my_recipes(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Deletes a user-owned recipe from `My Recipes` when explicitly confirmed (never deletes Official Templates).
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-RCP-001`.
+    pub fn desktop_recipes_delete(
+        &self,
+        recipe_id: &str,
+        confirmed: bool,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len =
+            crate::ipc_payload_len!(("recipeId", recipe_id), ("confirmed", confirmed),);
+        self.gate_command("desktop_recipes_delete", payload_len, Some(now_ms))?;
+        self.ensure_recipe_library_loaded()?;
+        let mut slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        lib.delete_my_recipe(recipe_id, confirmed)?;
+        serde_json::to_string(&serde_json::json!({
+            "deleted": recipe_id,
+            "myRecipes": lib.list_my_recipes(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Exports a user-owned recipe to a portable `.safitemplate` file after server entitlement verification.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors, `SF-RCP-005`, `SF-RCP-006`, or `SF-RCP-001`.
+    pub fn desktop_recipes_export_safitemplate(
+        &self,
+        recipe_id: &str,
+        target_path: &Path,
+        premium_entitlement_verified: bool,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("recipeId", recipe_id),
+            ("targetPath", target_path),
+            ("premiumEntitlementVerified", premium_entitlement_verified),
+        );
+        self.gate_command(
+            "desktop_recipes_export_safitemplate",
+            payload_len,
+            Some(now_ms),
+        )?;
+        self.ensure_recipe_library_loaded()?;
+        let slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_ref() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let exported =
+            lib.export_safitemplate(recipe_id, target_path, premium_entitlement_verified)?;
+        serde_json::to_string(&serde_json::json!({
+            "path": target_path.display().to_string(),
+            "portable": exported,
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Imports a validated `.safitemplate` file into `My Recipes` after server entitlement verification.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors, `SF-RCP-005`, `SF-RCP-006`, `SF-CAL-008`, `SF-RCP-001`, or `"DUPLICATE_RECIPE_NAME"`.
+    pub fn desktop_recipes_import_safitemplate(
+        &self,
+        source_path: &Path,
+        premium_entitlement_verified: bool,
+        conflict_policy: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("sourcePath", source_path),
+            ("premiumEntitlementVerified", premium_entitlement_verified),
+            ("conflictPolicy", conflict_policy),
+        );
+        self.gate_command(
+            "desktop_recipes_import_safitemplate",
+            payload_len,
+            Some(now_ms),
+        )?;
+        self.ensure_recipe_library_loaded()?;
+        let mut slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let imported = lib.import_safitemplate(
+            source_path,
+            premium_entitlement_verified,
+            parse_conflict_policy(conflict_policy),
+            now_ms,
+        )?;
+        serde_json::to_string(&serde_json::json!({
+            "imported": imported,
+            "myRecipes": lib.list_my_recipes(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Prepares a sanitized `Share with SafiData` community contribution preview & payload with
+    /// secret/PII scanning and mandatory consent validation (zero dataset rows).
+    ///
+    /// # Errors
+    /// Returns auth/offline errors, `SF-RCP-006`, or `SF-RCP-001`.
+    pub fn desktop_recipes_prepare_community_share(
+        &self,
+        recipe_id: &str,
+        consent_accepted: bool,
+        consent_terms_version: &str,
+        show_contributor_attribution: bool,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("recipeId", recipe_id),
+            ("consentAccepted", consent_accepted),
+            ("consentTermsVersion", consent_terms_version),
+            ("showContributorAttribution", show_contributor_attribution),
+        );
+        self.gate_command(
+            "desktop_recipes_prepare_community_share",
+            payload_len,
+            Some(now_ms),
+        )?;
+        self.ensure_recipe_library_loaded()?;
+        let slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_ref() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let payload = lib.prepare_community_contribution(
+            recipe_id,
+            consent_accepted,
+            consent_terms_version,
+            show_contributor_attribution,
+        )?;
+        serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
     fn mutate(
         &self,
         project: &str,
@@ -3075,6 +3599,15 @@ fn write_atomic_bytes(target: &Path, contents: &[u8]) -> Result<(), String> {
         return Err(EXPORT_FAILED_CODE.to_owned());
     }
     Ok(())
+}
+
+fn parse_conflict_policy(raw: &str) -> NameConflictPolicy {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "rename" => NameConflictPolicy::Rename,
+        "skip" => NameConflictPolicy::Skip,
+        "confirmed_replace" => NameConflictPolicy::ConfirmedReplace,
+        _ => NameConflictPolicy::FailOnDuplicate,
+    }
 }
 
 #[cfg(test)]

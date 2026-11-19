@@ -192,7 +192,7 @@ export interface OnlineAuthorizationLeaseResponse {
 
 export function postSafiHeartbeat(sessionToken: string): Promise<OnlineAuthorizationLeaseResponse> {
   return sendAuthRequest<OnlineAuthorizationLeaseResponse>(
-    "/v1/auth/heartbeat",
+    "/heartbeat",
     "POST",
     undefined,
     sessionToken

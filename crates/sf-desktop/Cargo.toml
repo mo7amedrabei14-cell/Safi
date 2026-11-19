@@ -25,6 +25,7 @@ sf-core = { path = "../sf-core" }
 sf-io = { path = "../sf-io" }
 sf-recipe = { path = "../sf-recipe" }
 zip = "=2.2.2"
+flate2 = "=1.1.10"
 quick-xml = "=0.31.0"
 
 [dev-dependencies]

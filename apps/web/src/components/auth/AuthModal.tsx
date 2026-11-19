@@ -64,6 +64,11 @@ export interface AuthPortalSession {
 export interface AuthModalProps {
   readonly open: boolean;
   readonly mandatory?: boolean;
+  readonly desktopRuntime?: boolean;
+  readonly pkcePending?: boolean;
+  readonly pkceError?: string | null;
+  readonly onStartDesktopPkce?: (flow: "signin" | "signup") => void | Promise<void>;
+  readonly onCancelDesktopPkce?: () => void;
   readonly lang?: SafiLang;
   readonly theme?: SafiThemeId;
   readonly initialMode?: AuthMode;
@@ -229,6 +234,11 @@ export function buildSanitizedExitGhost(formEl: HTMLElement): HTMLElement {
 export function AuthModal({
   open,
   mandatory = false,
+  desktopRuntime = false,
+  pkcePending = false,
+  pkceError = null,
+  onStartDesktopPkce,
+  onCancelDesktopPkce,
   lang = "en",
   initialMode = "signin",
   onClose,
@@ -882,6 +892,83 @@ export function AuthModal({
           </div>
         ) : (
           <>
+            {desktopRuntime && onStartDesktopPkce !== undefined ? (
+              <div
+                data-desktop-pkce-panel="true"
+                style={{
+                  display: "grid",
+                  gap: "10px",
+                  padding: "12px",
+                  marginBottom: "14px",
+                  borderRadius: "12px",
+                  border: "1px solid var(--border-subtle, rgba(148,163,184,0.28))"
+                }}
+              >
+                <div style={{ fontSize: "12px", fontWeight: 700 }}>
+                  {isAr
+                    ? "تسجيل الدخول الموصى به عبر متصفح النظام (PKCE S256)"
+                    : "Recommended System-Browser Sign-In (PKCE S256)"}
+                </div>
+                {pkceError !== null ? (
+                  <div
+                    role="alert"
+                    data-desktop-pkce-error="true"
+                    style={{ fontSize: "12px", color: "var(--safi-danger, #ef4444)" }}
+                  >
+                    {pkceError}
+                  </div>
+                ) : null}
+                {pkcePending ? (
+                  <div
+                    data-desktop-pkce-waiting="true"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "8px",
+                      fontSize: "12px"
+                    }}
+                  >
+                    <span>
+                      {isAr
+                        ? "بانتظار إكمال المصادقة في المتصفح والعودة عبر safi://auth..."
+                        : "Waiting for browser approval and safi://auth callback..."}
+                    </span>
+                    <button
+                      type="button"
+                      className="safi-btn safi-btn-ghost"
+                      onClick={() => onCancelDesktopPkce?.()}
+                      data-desktop-pkce-cancel="true"
+                    >
+                      {isAr ? "إلغاء" : "Cancel"}
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                    <button
+                      type="button"
+                      className="safi-btn safi-btn-primary"
+                      onClick={() => void onStartDesktopPkce("signin")}
+                      disabled={busy}
+                      data-desktop-pkce-signin="true"
+                    >
+                      <ShieldCheck size={15} aria-hidden="true" />
+                      <span>{isAr ? "تسجيل الدخول عبر المتصفح" : "Sign In in Browser"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="safi-btn safi-btn-ghost"
+                      onClick={() => void onStartDesktopPkce("signup")}
+                      disabled={busy}
+                      data-desktop-pkce-signup="true"
+                    >
+                      <UserPlus size={15} aria-hidden="true" />
+                      <span>{isAr ? "إنشاء حساب عبر المتصفح" : "Sign Up in Browser"}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : null}
             <div
               ref={tablistRef}
               className="safi-auth-tabs"

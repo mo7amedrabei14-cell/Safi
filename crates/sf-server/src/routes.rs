@@ -357,6 +357,7 @@ pub async fn login_account(
     let email_norm = body.login.email.trim().to_ascii_lowercase();
     let device_name_copy = body.login.device_name.clone();
     let installation_id = body.login.installation_id;
+    let platform_copy = body.login.platform;
     let service: &AccountAuthService = state
         .account_auth
         .as_deref()
@@ -382,18 +383,40 @@ pub async fn login_account(
         }
     }
 
-    let (active_device, previous_device_id) = state
-        .device_authority
-        .activate_device_atomically(
-            user_id,
-            workspace_id,
-            &device_name_copy,
-            installation_id,
-            body.device_public_key_hex,
-            issued.session.id,
-            authenticated.token_hash.clone(),
-        )
-        .await?;
+    let platform_str = match platform_copy {
+        crate::auth::device::DevicePlatform::Windows => "windows",
+        crate::auth::device::DevicePlatform::Linux => "linux",
+        crate::auth::device::DevicePlatform::Macos => "macos",
+        crate::auth::device::DevicePlatform::Web => "web",
+    };
+    let (active_device, previous_device_id) = if let Some(pg) = &state.pg_store {
+        let (dev, prev, _ev) = pg
+            .activate_device_atomically_pg(
+                user_id,
+                workspace_id,
+                &device_name_copy,
+                platform_str,
+                installation_id,
+                body.device_public_key_hex.as_deref(),
+                issued.session.id,
+                unix_now(),
+            )
+            .await?;
+        (dev, prev)
+    } else {
+        state
+            .device_authority
+            .activate_device_atomically(
+                user_id,
+                workspace_id,
+                &device_name_copy,
+                installation_id,
+                body.device_public_key_hex,
+                issued.session.id,
+                authenticated.token_hash.clone(),
+            )
+            .await?
+    };
 
     if let Some(prev_id) = previous_device_id {
         state
@@ -526,16 +549,27 @@ pub async fn online_authorize_or_heartbeat(
     };
 
     let now = unix_now();
-    let (device, session_generation) = state
-        .device_authority
-        .verify_active_session_device(
+    let (device, session_generation) = if let Some(pg) = &state.pg_store {
+        pg.verify_active_session_device_pg(
             user_id,
             session.session_id,
             &session.token_hash,
             device_sig_header,
             now,
         )
-        .await?;
+        .await?
+    } else {
+        state
+            .device_authority
+            .verify_active_session_device(
+                user_id,
+                session.session_id,
+                &session.token_hash,
+                device_sig_header,
+                now,
+            )
+            .await?
+    };
 
     let is_owner = state.owner_mfa.is_owner_user(user_id).await;
     let entitlements = state
@@ -798,12 +832,16 @@ pub struct RecoveryCodeRequest {
 pub async fn owner_mfa_status(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
-) -> Json<OwnerMfaStatus> {
+) -> Result<Json<OwnerMfaStatus>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        state.owner_mfa.import_snapshot(snap).await;
+    }
     let status = state
         .owner_mfa
         .status_at(session.principal.user_id, session.session_id, unix_now())
         .await;
-    Json(status)
+    Ok(Json(status))
 }
 
 /// `POST /v1/owner/mfa/enroll` — starts Google Authenticator TOTP enrollment for the sealed Owner only.
@@ -811,6 +849,10 @@ pub async fn owner_mfa_enroll(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
 ) -> Result<Json<TotpEnrollmentBundle>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        state.owner_mfa.import_snapshot(snap).await;
+    }
     let user_id = session.principal.user_id;
     let label = state
         .control_plane
@@ -821,7 +863,11 @@ pub async fn owner_mfa_enroll(
         .map_or_else(|| "PlatformOwner".to_owned(), |a| a.display_name.clone());
     match state.owner_mfa.enroll_totp(user_id, &label).await {
         Ok(bundle) => {
-            state
+            if let Some(pg) = &state.pg_store {
+                let snap = state.owner_mfa.export_snapshot().await;
+                pg.persist_owner_mfa_snapshot_pg(&snap).await?;
+            }
+            let audit = state
                 .log_center
                 .record(
                     Some(user_id),
@@ -833,10 +879,14 @@ pub async fn owner_mfa_enroll(
                     Some(json!({ "enrolled": true })),
                 )
                 .await;
+            if let Some(pg) = &state.pg_store {
+                pg.insert_audit_entry(&audit).await?;
+            }
+            state.persist_durable_state().await;
             Ok(Json(bundle))
         }
         Err(err) => {
-            state
+            let audit = state
                 .log_center
                 .record(
                     Some(user_id),
@@ -848,6 +898,9 @@ pub async fn owner_mfa_enroll(
                     Some(json!({ "error_code": err.code() })),
                 )
                 .await;
+            if let Some(pg) = &state.pg_store {
+                pg.insert_audit_entry(&audit).await?;
+            }
             Err(err)
         }
     }
@@ -859,17 +912,25 @@ pub async fn owner_mfa_confirm(
     Extension(session): Extension<AuthenticatedSession>,
     Json(body): Json<TotpCodeRequest>,
 ) -> Result<Json<ElevatedOwnerSession>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        state.owner_mfa.import_snapshot(snap).await;
+    }
     let user_id = session.principal.user_id;
     let res = state
         .owner_mfa
         .confirm_totp_at(user_id, session.session_id, &body.code, unix_now())
         .await;
+    if let Some(pg) = &state.pg_store {
+        let snap = state.owner_mfa.export_snapshot().await;
+        pg.persist_owner_mfa_snapshot_pg(&snap).await?;
+    }
     let outcome = if res.is_ok() {
         AuditOutcome::Allowed
     } else {
         AuditOutcome::Denied
     };
-    state
+    let audit = state
         .log_center
         .record(
             Some(user_id),
@@ -881,6 +942,10 @@ pub async fn owner_mfa_confirm(
             Some(json!({ "confirmed": res.is_ok() })),
         )
         .await;
+    if let Some(pg) = &state.pg_store {
+        pg.insert_audit_entry(&audit).await?;
+    }
+    state.persist_durable_state().await;
     Ok(Json(res?))
 }
 
@@ -890,17 +955,25 @@ pub async fn owner_mfa_verify(
     Extension(session): Extension<AuthenticatedSession>,
     Json(body): Json<TotpCodeRequest>,
 ) -> Result<Json<ElevatedOwnerSession>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        state.owner_mfa.import_snapshot(snap).await;
+    }
     let user_id = session.principal.user_id;
     let res = state
         .owner_mfa
         .verify_totp_at(user_id, session.session_id, &body.code, unix_now())
         .await;
+    if let Some(pg) = &state.pg_store {
+        let snap = state.owner_mfa.export_snapshot().await;
+        pg.persist_owner_mfa_snapshot_pg(&snap).await?;
+    }
     let outcome = if res.is_ok() {
         AuditOutcome::Allowed
     } else {
         AuditOutcome::Denied
     };
-    state
+    let audit = state
         .log_center
         .record(
             Some(user_id),
@@ -912,6 +985,10 @@ pub async fn owner_mfa_verify(
             None,
         )
         .await;
+    if let Some(pg) = &state.pg_store {
+        pg.insert_audit_entry(&audit).await?;
+    }
+    state.persist_durable_state().await;
     Ok(Json(res?))
 }
 
@@ -921,17 +998,25 @@ pub async fn owner_mfa_recover(
     Extension(session): Extension<AuthenticatedSession>,
     Json(body): Json<RecoveryCodeRequest>,
 ) -> Result<Json<ElevatedOwnerSession>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        state.owner_mfa.import_snapshot(snap).await;
+    }
     let user_id = session.principal.user_id;
     let res = state
         .owner_mfa
         .verify_recovery_code_at(user_id, session.session_id, &body.recovery_code, unix_now())
         .await;
+    if let Some(pg) = &state.pg_store {
+        let snap = state.owner_mfa.export_snapshot().await;
+        pg.persist_owner_mfa_snapshot_pg(&snap).await?;
+    }
     let outcome = if res.is_ok() {
         AuditOutcome::Allowed
     } else {
         AuditOutcome::Denied
     };
-    state
+    let audit = state
         .log_center
         .record(
             Some(user_id),
@@ -943,6 +1028,10 @@ pub async fn owner_mfa_recover(
             None,
         )
         .await;
+    if let Some(pg) = &state.pg_store {
+        pg.insert_audit_entry(&audit).await?;
+    }
+    state.persist_durable_state().await;
     Ok(Json(res?))
 }
 
@@ -1492,13 +1581,20 @@ pub struct OwnerDevicesOverviewResponse {
 /// `GET /v1/owner/devices` — all registered devices & replacement audit events (Section 9.8).
 pub async fn owner_list_devices(
     State(state): State<AppState>,
-) -> Json<OwnerDevicesOverviewResponse> {
+) -> Result<Json<OwnerDevicesOverviewResponse>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let (devices, replacements) = pg.list_devices_and_replacements_pg(None).await?;
+        return Ok(Json(OwnerDevicesOverviewResponse {
+            devices,
+            replacements,
+        }));
+    }
     let devices = state.device_authority.list_all_devices().await;
     let replacements = state.device_authority.list_recent_replacements(100).await;
-    Json(OwnerDevicesOverviewResponse {
+    Ok(Json(OwnerDevicesOverviewResponse {
         devices,
         replacements,
-    })
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1513,14 +1609,21 @@ pub async fn owner_reset_account_devices(
     Path(target_user_id): Path<Uuid>,
     Json(body): Json<ResetDevicesRequest>,
 ) -> Result<Json<DeviceReplacementEvent>, AuthError> {
-    let event = state
-        .device_authority
-        .owner_reset_devices(session.principal.user_id, target_user_id, &body.reason)
-        .await?;
+    let event = if let Some(pg) = &state.pg_store {
+        pg.owner_reset_devices_pg(
+            session.principal.user_id,
+            target_user_id,
+            &body.reason,
+            unix_now(),
+        )
+        .await?
+    } else {
+        state
+            .device_authority
+            .owner_reset_devices(session.principal.user_id, target_user_id, &body.reason)
+            .await?
+    };
     state.auth.revoke_all_user_sessions(target_user_id).await?;
-    if let Some(pg) = &state.pg_store {
-        pg.persist_device_replacement(&event).await?;
-    }
     let audit = state
         .log_center
         .record(
@@ -1869,10 +1972,57 @@ pub async fn desktop_pkce_start(
         .api_base_url
         .as_deref()
         .unwrap_or("https://safidata.app");
-    let resp = state
-        .desktop_auth
-        .start_pkce(body, origin, unix_now())
+    let now = unix_now();
+    if let Some(pg) = &state.pg_store {
+        let state_trimmed = body.state.trim();
+        let challenge_trimmed = body.code_challenge.trim();
+        if state_trimmed.len() < 16 || challenge_trimmed.len() < 43 || body.installation_id.is_nil()
+        {
+            return Err(AuthError::DesktopAuthCodeInvalid);
+        }
+        let flow_str = match body.flow {
+            crate::desktop_auth::DesktopAuthFlow::Signin => "signin",
+            crate::desktop_auth::DesktopAuthFlow::Signup => "signup",
+        };
+        let platform_str = match body.platform {
+            crate::auth::device::DevicePlatform::Windows => "windows",
+            crate::auth::device::DevicePlatform::Linux => "linux",
+            crate::auth::device::DevicePlatform::Macos => "macos",
+            crate::auth::device::DevicePlatform::Web => "web",
+        };
+        let request_id = Uuid::now_v7();
+        let expires_at = now + crate::desktop_auth::PKCE_CODE_TTL_SECS;
+        let state_hash = blake3::hash(state_trimmed.as_bytes());
+        let dev_name = if body.device_name.trim().is_empty() {
+            "SafiData Desktop"
+        } else {
+            body.device_name.trim()
+        };
+        pg.start_desktop_pkce_pg(
+            request_id,
+            flow_str,
+            challenge_trimmed,
+            state_hash.as_bytes(),
+            body.installation_id,
+            platform_str,
+            dev_name,
+            expires_at,
+        )
         .await?;
+        let auth_url = format!(
+            "{}/auth/desktop?flow={flow_str}&request_id={request_id}&state={state_trimmed}",
+            origin.trim_end_matches('/')
+        );
+        return Ok((
+            StatusCode::CREATED,
+            Json(StartDesktopPkceResponse {
+                request_id,
+                auth_url,
+                expires_at,
+            }),
+        ));
+    }
+    let resp = state.desktop_auth.start_pkce(body, origin, now).await?;
     Ok((StatusCode::CREATED, Json(resp)))
 }
 
@@ -1917,6 +2067,38 @@ pub async fn desktop_pkce_approve(
         return Err(AuthError::AccountSuspended);
     }
 
+    let now = unix_now();
+    if let Some(pg) = &state.pg_store {
+        use ring::rand::{SecureRandom, SystemRandom};
+        let mut raw = [0u8; 24];
+        SystemRandom::new()
+            .fill(&mut raw)
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        let code = format!("sfcode_{}", hex::encode(raw));
+        let code_hash = blake3::hash(code.as_bytes());
+        let state_hash = blake3::hash(body.state.trim().as_bytes());
+        let ok = pg
+            .approve_desktop_pkce_pg(
+                body.request_id,
+                state_hash.as_bytes(),
+                user_id,
+                workspace_id,
+                &email,
+                code_hash.as_bytes(),
+                now,
+            )
+            .await?;
+        if !ok {
+            return Err(AuthError::DesktopAuthCodeInvalid);
+        }
+        let callback_uri = format!("safi://auth?code={code}&state={}", body.state.trim());
+        return Ok(Json(ApproveDesktopPkceResponse {
+            code,
+            state: body.state,
+            callback_uri,
+        }));
+    }
+
     let (code, callback_uri) = state
         .desktop_auth
         .approve_pkce(
@@ -1925,7 +2107,7 @@ pub async fn desktop_pkce_approve(
             user_id,
             workspace_id,
             &email,
-            unix_now(),
+            now,
         )
         .await?;
     Ok(Json(ApproveDesktopPkceResponse {
@@ -1952,16 +2134,58 @@ pub async fn desktop_pkce_exchange(
     Json(body): Json<ExchangeDesktopPkceRequest>,
 ) -> Result<(StatusCode, Json<EnrichedLoginResponse>), AuthError> {
     check_rate_limit(&state, "auth:desktop_pkce_exchange", 40).await?;
-    let (user_id, workspace_id, email, device_name, platform) = state
-        .desktop_auth
-        .consume_pkce_code(
-            &body.code,
-            &body.code_verifier,
-            &body.state,
-            body.installation_id,
-            unix_now(),
-        )
-        .await?;
+    let now = unix_now();
+    let (user_id, workspace_id, email, device_name, platform) = if let Some(pg) = &state.pg_store {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine as _;
+        use sha2::{Digest, Sha256};
+        use subtle::ConstantTimeEq;
+
+        let verifier = body.code_verifier.trim();
+        if verifier.len() < 43 || verifier.len() > 128 {
+            return Err(AuthError::DesktopAuthCodeInvalid);
+        }
+        let code_hash = blake3::hash(body.code.trim().as_bytes());
+        let state_hash = blake3::hash(body.state.trim().as_bytes());
+        let Some((expected_challenge, uid, ws, mail, plat_str, dev_name)) = pg
+            .consume_desktop_pkce_atomic_pg(
+                code_hash.as_bytes(),
+                state_hash.as_bytes(),
+                body.installation_id,
+                now,
+            )
+            .await?
+        else {
+            return Err(AuthError::DesktopAuthCodeInvalid);
+        };
+        let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+        if computed
+            .as_bytes()
+            .ct_eq(expected_challenge.as_bytes())
+            .unwrap_u8()
+            != 1
+        {
+            return Err(AuthError::DesktopAuthCodeInvalid);
+        }
+        let plat = match plat_str.as_str() {
+            "linux" => crate::auth::device::DevicePlatform::Linux,
+            "macos" => crate::auth::device::DevicePlatform::Macos,
+            "web" => crate::auth::device::DevicePlatform::Web,
+            _ => crate::auth::device::DevicePlatform::Windows,
+        };
+        (uid, ws, mail, dev_name, plat)
+    } else {
+        state
+            .desktop_auth
+            .consume_pkce_code(
+                &body.code,
+                &body.code_verifier,
+                &body.state,
+                body.installation_id,
+                now,
+            )
+            .await?
+    };
 
     if state
         .control_plane
@@ -1991,18 +2215,40 @@ pub async fn desktop_pkce_exchange(
         .await?;
     let authenticated = state.auth.authenticate_session(&issued.token).await?;
 
-    let (active_device, previous_device_id) = state
-        .device_authority
-        .activate_device_atomically(
-            user_id,
-            workspace_id,
-            &device_name,
-            body.installation_id,
-            body.device_public_key_hex,
-            issued.session.id,
-            authenticated.token_hash.clone(),
-        )
-        .await?;
+    let platform_str = match platform {
+        crate::auth::device::DevicePlatform::Windows => "windows",
+        crate::auth::device::DevicePlatform::Linux => "linux",
+        crate::auth::device::DevicePlatform::Macos => "macos",
+        crate::auth::device::DevicePlatform::Web => "web",
+    };
+    let (active_device, previous_device_id) = if let Some(pg) = &state.pg_store {
+        let (dev, prev, _ev) = pg
+            .activate_device_atomically_pg(
+                user_id,
+                workspace_id,
+                &device_name,
+                platform_str,
+                body.installation_id,
+                body.device_public_key_hex.as_deref(),
+                issued.session.id,
+                now,
+            )
+            .await?;
+        (dev, prev)
+    } else {
+        state
+            .device_authority
+            .activate_device_atomically(
+                user_id,
+                workspace_id,
+                &device_name,
+                body.installation_id,
+                body.device_public_key_hex,
+                issued.session.id,
+                authenticated.token_hash.clone(),
+            )
+            .await?
+    };
 
     state
         .upsert_managed_account(ManagedAccountRecord {
@@ -2083,6 +2329,10 @@ pub async fn owner_web_login(
     let (user_id, workspace_id, _email) = service
         .verify_credentials_only(&body.email, &body.password)
         .await?;
+    if let Some(pg) = &state.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        state.owner_mfa.import_snapshot(snap).await;
+    }
     state.owner_mfa.require_owner_identity(user_id).await?;
 
     let now = unix_now();
@@ -2132,7 +2382,18 @@ pub async fn owner_web_login(
 pub async fn owner_web_logout(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
-) -> StatusCode {
+    headers: HeaderMap,
+) -> Result<StatusCode, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        if let Some(tok) = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.strip_prefix("Bearer "))
+        {
+            let h = blake3::hash(tok.trim().as_bytes());
+            let _ = pg.revoke_owner_web_session_pg(h.as_bytes()).await?;
+        }
+    }
     state
         .owner_mfa
         .revoke_elevated_session(session.session_id)
@@ -2142,7 +2403,7 @@ pub async fn owner_web_logout(
         .revoke_owner_web_session(session.session_id)
         .await;
     state.persist_durable_state().await;
-    StatusCode::NO_CONTENT
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `GET /v1/announcements/public` — published product announcements for authenticated/regular users.
@@ -2165,7 +2426,11 @@ pub async fn list_public_announcements(
 pub async fn list_official_templates_for_user(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
-) -> Json<Vec<OfficialTemplateRecord>> {
+) -> Result<Json<Vec<OfficialTemplateRecord>>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        state.owner_mfa.import_snapshot(snap).await;
+    }
     let is_owner = state
         .owner_mfa
         .is_owner_user(session.principal.user_id)
@@ -2179,12 +2444,17 @@ pub async fn list_official_templates_for_user(
             unix_now(),
         )
         .await;
-    Json(
+    if let Some(pg) = &state.pg_store {
+        let include_paid = plan_allows_premium_recipe_exchange(ent.effective_plan);
+        let rows = pg.list_official_templates(false, include_paid).await?;
+        return Ok(Json(rows));
+    }
+    Ok(Json(
         state
             .templates_hub
             .list_official_for_plan(ent.effective_plan)
             .await,
-    )
+    ))
 }
 
 /// `POST /v1/templates/entitlement/export-import` — authoritative server entitlement check for
@@ -2193,6 +2463,10 @@ pub async fn check_premium_recipe_exchange_entitlement(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
 ) -> Result<Json<Value>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let snap = pg.load_owner_mfa_snapshot_pg().await?;
+        state.owner_mfa.import_snapshot(snap).await;
+    }
     let is_owner = state
         .owner_mfa
         .is_owner_user(session.principal.user_id)
@@ -2234,13 +2508,68 @@ pub async fn create_community_submission(
     {
         return Err(AuthError::AccountSuspended);
     }
+    if let Some(pg) = &state.pg_store {
+        // Validate consent, steps, secret/row smuggling BEFORE touching PostgreSQL.
+        if !body.consent_accepted || body.rows.is_some() || body.data_rows.is_some() {
+            return Err(AuthError::CommunitySubmissionRejected);
+        }
+        let name = body.name.trim();
+        let desc = body.description.trim();
+        if name.is_empty() || name.len() > 160 || desc.is_empty() || desc.len() > 2_000 {
+            return Err(AuthError::CommunitySubmissionRejected);
+        }
+        if body.schema_version != 1 {
+            return Err(AuthError::CommunitySubmissionRejected);
+        }
+        crate::templates_hub::validate_declarative_steps(&body.steps)?;
+        let scan = crate::templates_hub::scan_recipe_definition(name, desc, &body.steps);
+        if !scan.blocked_secrets.is_empty() {
+            return Err(AuthError::CommunitySubmissionRejected);
+        }
+        let now = unix_now();
+        let content_hash = blake3::hash(
+            serde_json::to_string(&body.steps)
+                .unwrap_or_default()
+                .as_bytes(),
+        )
+        .to_hex()
+        .to_string();
+        let rec = CommunitySubmissionRecord {
+            id: Uuid::now_v7(),
+            contributor_user_id: user_id,
+            workspace_id,
+            name: name.to_owned(),
+            description: desc.to_owned(),
+            recipe_type: body.recipe_type,
+            schema_version: body.schema_version,
+            app_version: body.app_version,
+            required_columns: body.required_columns,
+            steps: body.steps,
+            content_hash,
+            status: crate::templates_hub::SubmissionStatus::Pending,
+            reviewer_notes: String::new(),
+            reviewed_by: None,
+            consent_accepted: true,
+            consent_terms_version: body.consent_terms_version,
+            consent_at: now,
+            show_contributor_attribution: body.show_contributor_attribution,
+            pii_warnings: scan.pii_warnings,
+            published_template_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let saved = pg
+            .create_community_submission_atomic(
+                &rec,
+                crate::templates_hub::DEFAULT_MONTHLY_COMMUNITY_SUBMISSIONS,
+            )
+            .await?;
+        return Ok((StatusCode::CREATED, Json(saved)));
+    }
     let rec = state
         .templates_hub
         .submit_community_recipe(user_id, workspace_id, body, unix_now())
         .await?;
-    if let Some(pg) = &state.pg_store {
-        pg.upsert_community_submission(&rec, false).await?;
-    }
     state.persist_durable_state().await;
     Ok((StatusCode::CREATED, Json(rec)))
 }
@@ -2249,20 +2578,36 @@ pub async fn create_community_submission(
 pub async fn list_my_community_submissions(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
-) -> Json<Vec<CommunitySubmissionRecord>> {
-    Json(
+) -> Result<Json<Vec<CommunitySubmissionRecord>>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let rows = pg
+            .list_my_community_submissions_pg(
+                session.principal.user_id,
+                session.principal.workspace_id,
+            )
+            .await?;
+        return Ok(Json(rows));
+    }
+    Ok(Json(
         state
             .templates_hub
             .list_submissions_for_user(session.principal.user_id)
             .await,
-    )
+    ))
 }
 
 /// `GET /v1/owner/community/submissions` — Owner-only view of all community template submissions.
 pub async fn owner_list_community_submissions(
     State(state): State<AppState>,
-) -> Json<Vec<CommunitySubmissionRecord>> {
-    Json(state.templates_hub.list_all_submissions_for_owner().await)
+) -> Result<Json<Vec<CommunitySubmissionRecord>>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        return Ok(Json(
+            pg.list_all_community_submissions_for_owner_pg().await?,
+        ));
+    }
+    Ok(Json(
+        state.templates_hub.list_all_submissions_for_owner().await,
+    ))
 }
 
 /// `GET /v1/owner/community/submissions/{id}` — Owner-only detail inspection of one submission.
@@ -2270,6 +2615,15 @@ pub async fn owner_get_community_submission(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<CommunitySubmissionRecord>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let found = pg
+            .list_all_community_submissions_for_owner_pg()
+            .await?
+            .into_iter()
+            .find(|s| s.id == id)
+            .ok_or(AuthError::InvalidRequest)?;
+        return Ok(Json(found));
+    }
     Ok(Json(state.templates_hub.get_submission(id).await?))
 }
 
@@ -2280,13 +2634,20 @@ pub async fn owner_review_community_submission(
     Path(id): Path<Uuid>,
     Json(body): Json<ReviewSubmissionRequest>,
 ) -> Result<Json<CommunitySubmissionRecord>, AuthError> {
-    let updated = state
-        .templates_hub
-        .review_submission(id, session.principal.user_id, body, unix_now())
-        .await?;
-    if let Some(pg) = &state.pg_store {
-        pg.upsert_community_submission(&updated, true).await?;
-    }
+    let updated = if let Some(pg) = &state.pg_store {
+        pg.review_community_submission_pg(
+            id,
+            session.principal.user_id,
+            body.status,
+            &body.reviewer_notes,
+        )
+        .await?
+    } else {
+        state
+            .templates_hub
+            .review_submission(id, session.principal.user_id, body, unix_now())
+            .await?
+    };
     let audit = state
         .log_center
         .record(
@@ -2313,14 +2674,15 @@ pub async fn owner_publish_community_submission(
     Path(id): Path<Uuid>,
     Json(body): Json<PublishSubmissionRequest>,
 ) -> Result<(StatusCode, Json<Value>), AuthError> {
-    let (template, submission) = state
-        .templates_hub
-        .publish_submission(id, session.principal.user_id, body, unix_now())
-        .await?;
-    if let Some(pg) = &state.pg_store {
-        pg.upsert_official_template(&template).await?;
-        pg.upsert_community_submission(&submission, true).await?;
-    }
+    let (template, submission) = if let Some(pg) = &state.pg_store {
+        pg.publish_community_submission_atomic_pg(id, session.principal.user_id, &body, unix_now())
+            .await?
+    } else {
+        state
+            .templates_hub
+            .publish_submission(id, session.principal.user_id, body, unix_now())
+            .await?
+    };
     let audit = state
         .log_center
         .record(
@@ -2350,8 +2712,13 @@ pub async fn owner_publish_community_submission(
 /// `GET /v1/owner/templates/official` — Owner-only full Official Template Library + version history.
 pub async fn owner_list_official_templates(
     State(state): State<AppState>,
-) -> Json<Vec<OfficialTemplateRecord>> {
-    Json(state.templates_hub.list_all_official_for_owner().await)
+) -> Result<Json<Vec<OfficialTemplateRecord>>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        return Ok(Json(pg.list_official_templates(true, true).await?));
+    }
+    Ok(Json(
+        state.templates_hub.list_all_official_for_owner().await,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2366,13 +2733,14 @@ pub async fn owner_set_official_template_status(
     Path(id): Path<Uuid>,
     Json(body): Json<SetTemplateActiveRequest>,
 ) -> Result<Json<OfficialTemplateRecord>, AuthError> {
-    let updated = state
-        .templates_hub
-        .set_official_active(id, body.active, unix_now())
-        .await?;
-    if let Some(pg) = &state.pg_store {
-        pg.upsert_official_template(&updated).await?;
-    }
+    let updated = if let Some(pg) = &state.pg_store {
+        pg.set_official_template_active_pg(id, body.active).await?
+    } else {
+        state
+            .templates_hub
+            .set_official_active(id, body.active, unix_now())
+            .await?
+    };
     let audit = state
         .log_center
         .record(
@@ -2404,13 +2772,15 @@ pub async fn owner_rollback_official_template(
     Path(id): Path<Uuid>,
     Json(body): Json<RollbackTemplateRequest>,
 ) -> Result<Json<OfficialTemplateRecord>, AuthError> {
-    let updated = state
-        .templates_hub
-        .rollback_official_version(id, body.version_number, unix_now())
-        .await?;
-    if let Some(pg) = &state.pg_store {
-        pg.upsert_official_template(&updated).await?;
-    }
+    let updated = if let Some(pg) = &state.pg_store {
+        pg.rollback_official_template_pg(id, body.version_number)
+            .await?
+    } else {
+        state
+            .templates_hub
+            .rollback_official_version(id, body.version_number, unix_now())
+            .await?
+    };
     let audit = state
         .log_center
         .record(
@@ -2431,8 +2801,13 @@ pub async fn owner_rollback_official_template(
 }
 
 /// `GET /v1/owner/releases` — Owner-only list of Desktop releases.
-pub async fn owner_list_releases(State(state): State<AppState>) -> Json<Vec<AppReleaseRecord>> {
-    Json(state.templates_hub.list_releases().await)
+pub async fn owner_list_releases(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<AppReleaseRecord>>, AuthError> {
+    if let Some(pg) = &state.pg_store {
+        return Ok(Json(pg.list_app_releases_pg().await?));
+    }
+    Ok(Json(state.templates_hub.list_releases().await))
 }
 
 /// `POST /v1/owner/releases` — Owner step-up TOTP publish signed Desktop release metadata.
@@ -2441,13 +2816,42 @@ pub async fn owner_publish_release(
     Extension(session): Extension<AuthenticatedSession>,
     Json(body): Json<PublishAppReleaseRequest>,
 ) -> Result<(StatusCode, Json<AppReleaseRecord>), AuthError> {
-    let rec = state
-        .templates_hub
-        .publish_release(session.principal.user_id, body, unix_now())
-        .await?;
-    if let Some(pg) = &state.pg_store {
+    let now = unix_now();
+    let rec = if let Some(pg) = &state.pg_store {
+        let sha = body.sha256_hex.trim().to_ascii_lowercase();
+        if body.version_name.trim().is_empty()
+            || body.download_url.trim().is_empty()
+            || body.file_size_bytes == 0
+            || sha.len() != 64
+            || !sha.bytes().all(|b| b.is_ascii_hexdigit())
+            || !matches!(body.channel.as_str(), "stable" | "beta")
+        {
+            return Err(AuthError::InvalidRequest);
+        }
+        let rec = AppReleaseRecord {
+            id: Uuid::now_v7(),
+            version_code: body.version_code,
+            version_name: body.version_name.trim().to_owned(),
+            channel: body.channel,
+            platform: body.platform.trim().to_owned(),
+            download_url: body.download_url.trim().to_owned(),
+            sha256_hex: sha,
+            file_size_bytes: body.file_size_bytes,
+            min_required_version: body.min_required_version,
+            release_notes: body.release_notes.trim().to_owned(),
+            is_mandatory: body.is_mandatory,
+            active: true,
+            published_by: Some(session.principal.user_id),
+            created_at: now,
+        };
         pg.insert_app_release(&rec).await?;
-    }
+        rec
+    } else {
+        state
+            .templates_hub
+            .publish_release(session.principal.user_id, body, now)
+            .await?
+    };
     let audit = state
         .log_center
         .record(
@@ -2982,6 +3386,7 @@ pub fn build_router(state: AppState) -> Router {
             OwnerSessionGuard {
                 auth: auth.clone(),
                 desktop_auth: desktop_auth.clone(),
+                pg_store: state.pg_store.clone(),
                 required_scope: Scope::Read,
             },
             require_owner_session,
@@ -3036,6 +3441,7 @@ pub fn build_router(state: AppState) -> Router {
         .route_layer(from_fn_with_state(
             OwnerAccessGuard {
                 mfa: owner_mfa.clone(),
+                pg_store: state.pg_store.clone(),
                 require_step_up: false,
             },
             require_owner_mfa,
@@ -3044,6 +3450,7 @@ pub fn build_router(state: AppState) -> Router {
             OwnerSessionGuard {
                 auth: auth.clone(),
                 desktop_auth: desktop_auth.clone(),
+                pg_store: state.pg_store.clone(),
                 required_scope: Scope::Read,
             },
             require_owner_session,
@@ -3101,6 +3508,7 @@ pub fn build_router(state: AppState) -> Router {
         .route_layer(from_fn_with_state(
             OwnerAccessGuard {
                 mfa: owner_mfa,
+                pg_store: state.pg_store.clone(),
                 require_step_up: true,
             },
             require_owner_mfa,
@@ -3109,6 +3517,7 @@ pub fn build_router(state: AppState) -> Router {
             OwnerSessionGuard {
                 auth,
                 desktop_auth,
+                pg_store: state.pg_store.clone(),
                 required_scope: Scope::Read,
             },
             require_owner_session,

@@ -40,8 +40,15 @@ import {
   getStudioAuthorizationStatus,
   isDesktopRuntime,
   revalidateStudioSession,
-  setStudioAuthSession
+  setStudioAuthSession,
+  takePendingDeepLink
 } from "./desktop/studio-bridge";
+import {
+  clearPendingDesktopPkceFlow,
+  completeDesktopBrowserPkce,
+  startDesktopBrowserPkce,
+  type PendingDesktopPkceFlow
+} from "./lib/desktop-pkce";
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { OwnerWebPortal } from "./pages/OwnerWebPortal";
 import { DesktopBrowserAuthPage } from "./pages/DesktopBrowserAuthPage";
@@ -113,6 +120,7 @@ export function renderStudio(
       return desktopRuntime ? (
         <DesktopStudio
           lang={lang}
+          sessionToken={sessionToken}
           readOnlyOffline={readOnlyOffline}
           onRevalidateOnline={options?.onRevalidateOnline}
         />
@@ -184,6 +192,8 @@ export function ApplicationShell({
   const [offlineReadOnly, setOfflineReadOnly] = useState(false);
   const [hasPreviouslyAuthenticated, setHasPreviouslyAuthenticated] = useState(false);
   const [revocationNotice, setRevocationNotice] = useState<string | null>(null);
+  const [pkcePending, setPkcePending] = useState<PendingDesktopPkceFlow | null>(null);
+  const [pkceError, setPkceError] = useState<string | null>(null);
   const [browserRoute, setBrowserRoute] = useState<"showcase" | "owner" | "desktop-auth">(() => {
     if (typeof window === "undefined" || isDesktopRuntime()) {
       return "showcase";
@@ -458,10 +468,101 @@ export function ApplicationShell({
       />
     );
 
+  const handleStartDesktopPkce = useCallback(
+    async (flow: "signin" | "signup"): Promise<void> => {
+      if (!desktopRuntime) return;
+      setPkceError(null);
+      try {
+        const pending = await startDesktopBrowserPkce(flow);
+        setPkcePending(pending);
+      } catch (err) {
+        clearPendingDesktopPkceFlow();
+        setPkcePending(null);
+        const code =
+          err instanceof SafiAuthApiError
+            ? (err.code ?? `HTTP ${err.status}`)
+            : err instanceof Error
+              ? err.message
+              : "SF-AUTH-023";
+        setPkceError(
+          lang === "ar"
+            ? `تعذّر بدء مصادقة المتصفح الآمنة (${code}).`
+            : `Could not launch system-browser PKCE authentication (${code}).`
+        );
+      }
+    },
+    [desktopRuntime, lang]
+  );
+
+  const handleCancelDesktopPkce = useCallback((): void => {
+    clearPendingDesktopPkceFlow();
+    setPkcePending(null);
+    setPkceError(null);
+  }, []);
+
+  // Poll `take_pending_deep_link` while a Desktop Browser PKCE flow is awaiting `safi://auth`.
+  useEffect(() => {
+    if (!desktopRuntime || pkcePending === null) return;
+    let active = true;
+    const poll = async (): Promise<void> => {
+      if (!active) return;
+      try {
+        const link = await takePendingDeepLink();
+        if (!active || link === null) return;
+        if (
+          link.action === "auth_callback" &&
+          typeof link.code === "string" &&
+          typeof link.state === "string"
+        ) {
+          try {
+            const exchanged = await completeDesktopBrowserPkce(link.code, link.state);
+            await bindSessionAndUnlock(exchanged.token, exchanged.email ?? "", exchanged.is_owner);
+            if (active) {
+              setPkcePending(null);
+              setPkceError(null);
+              setAccountOpen(false);
+            }
+          } catch (err) {
+            clearPendingDesktopPkceFlow();
+            const code =
+              err instanceof SafiAuthApiError
+                ? (err.code ?? `HTTP ${err.status}`)
+                : err instanceof Error
+                  ? err.message
+                  : "SF-AUTH-023";
+            if (active) {
+              setPkcePending(null);
+              setPkceError(
+                lang === "ar"
+                  ? `فشل التحقق من رمز PKCE (${code}). بقي تطبيق سطح المكتب مقفلًا.`
+                  : `PKCE callback exchange rejected (${code}). Desktop workspace remains locked.`
+              );
+            }
+          }
+        }
+      } catch {
+        // Ignore transient poll errors while waiting for browser callback.
+      }
+    };
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 350);
+    void poll();
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [desktopRuntime, pkcePending, bindSessionAndUnlock, lang]);
+
   const authPortal = (
     <AuthModal
       open={authModalOpen}
       mandatory={authenticationRequired}
+      desktopRuntime={desktopRuntime}
+      pkcePending={pkcePending !== null}
+      pkceError={pkceError}
+      onStartDesktopPkce={handleStartDesktopPkce}
+      onCancelDesktopPkce={handleCancelDesktopPkce}
       onClose={() => setAccountOpen(false)}
       lang={lang}
       theme={theme}

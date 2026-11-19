@@ -351,6 +351,136 @@ fn take_pending_deep_link(
     Ok(state.0.lock().ok().and_then(|mut slot| slot.take()))
 }
 
+/// Launches the OS default browser strictly for a validated SafiData PKCE `/auth/desktop` URL.
+///
+/// Rejects any URL whose origin does not match `SAFI_API_BASE_URL` (or loopback dev origin in
+/// debug builds), whose path is not `/auth/desktop`, or whose query params contain anything
+/// outside `flow`, `request_id`, and `state` (`SF-SYS-009`).
+#[tauri::command]
+fn desktop_open_external_auth_url(url: String) -> Result<serde_json::Value, String> {
+    enforce_ipc_command(
+        "desktop_open_external_auth_url",
+        sf_desktop::ipc_payload_len!(("url", &url)),
+    )?;
+    let configured_origin = option_env!("SAFI_API_BASE_URL")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            if cfg!(debug_assertions) {
+                if url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:") {
+                    url.find("/auth/desktop?").map(|idx| &url[..idx])
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| AUTH_CONFIG_MISSING_CODE.to_owned())?;
+    sf_desktop::content::validate_desktop_auth_external_url(&url, configured_origin)
+        .map_err(|err| err.code().as_str().to_owned())?;
+
+    launch_os_browser(&url).map_err(|_| "SF-SYS-009".to_owned())?;
+    Ok(serde_json::json!({ "opened": true }))
+}
+
+fn launch_os_browser(validated_url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", validated_url])
+            .spawn()?;
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(validated_url)
+            .spawn()?;
+        Ok(())
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(validated_url)
+            .spawn()?;
+        Ok(())
+    }
+}
+
+/// Native folder picker for selecting local folders to index in the embedded Local Search engine.
+#[tauri::command]
+async fn pick_search_folder(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, StudioStore>,
+) -> Result<Option<String>, String> {
+    store.gate_command(
+        "pick_search_folder",
+        sf_desktop::ipc_payload_len!(),
+        Some(now_ms()),
+    )?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .blocking_pick_folder()
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.display().to_string())
+    })
+    .await
+    .map_err(|_| "SF-SYS-011".to_owned())
+}
+
+/// Native open dialog restricted to `.safitemplate` portable recipe files.
+#[tauri::command]
+async fn pick_safitemplate_open_file(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, StudioStore>,
+) -> Result<Option<String>, String> {
+    store.gate_command(
+        "pick_safitemplate_open_file",
+        sf_desktop::ipc_payload_len!(),
+        Some(now_ms()),
+    )?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("SafiData Template", &["safitemplate"])
+            .blocking_pick_file()
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.display().to_string())
+    })
+    .await
+    .map_err(|_| "SF-SYS-011".to_owned())
+}
+
+/// Native save dialog restricted to `.safitemplate` portable recipe files.
+#[tauri::command]
+async fn pick_safitemplate_save_file(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, StudioStore>,
+    default_name: Option<String>,
+) -> Result<Option<String>, String> {
+    let name = default_name
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "recipe.safitemplate".to_owned());
+    store.gate_command(
+        "pick_safitemplate_save_file",
+        sf_desktop::ipc_payload_len!(("defaultName", &name)),
+        Some(now_ms()),
+    )?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("SafiData Template", &["safitemplate"])
+            .set_file_name(&name)
+            .blocking_save_file()
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.display().to_string())
+    })
+    .await
+    .map_err(|_| "SF-SYS-011".to_owned())
+}
+
 /// Native open dialog restricted to spreadsheets (requires an authenticated Studio session).
 #[tauri::command]
 async fn pick_input_file(
@@ -922,15 +1052,118 @@ fn studio_export_deliverable(
     store.export_deliverable(&project, std::path::Path::new(&target), is_base64, &payload)
 }
 
+#[tauri::command]
+fn desktop_search_index_folders(
+    store: tauri::State<'_, StudioStore>,
+    folders: String,
+    project_id: Option<String>,
+) -> Result<String, String> {
+    store.desktop_search_index_folders(&folders, project_id.as_deref(), now_ms())
+}
+
+#[tauri::command]
+fn desktop_search_query(
+    store: tauri::State<'_, StudioStore>,
+    query: String,
+) -> Result<String, String> {
+    store.desktop_search_query(&query)
+}
+
+#[tauri::command]
+fn desktop_search_stats(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.desktop_search_stats()
+}
+
+#[tauri::command]
+fn desktop_recipes_list(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.desktop_recipes_list()
+}
+
+#[tauri::command]
+fn desktop_recipes_sync_official(
+    store: tauri::State<'_, StudioStore>,
+    templates: String,
+) -> Result<String, String> {
+    store.desktop_recipes_sync_official(&templates, now_ms())
+}
+
+#[tauri::command]
+fn desktop_recipes_save_as_new(
+    store: tauri::State<'_, StudioStore>,
+    payload: String,
+) -> Result<String, String> {
+    store.desktop_recipes_save_as_new(&payload, now_ms())
+}
+
+#[tauri::command]
+fn desktop_recipes_delete(
+    store: tauri::State<'_, StudioStore>,
+    recipe_id: String,
+    confirmed: bool,
+) -> Result<String, String> {
+    store.desktop_recipes_delete(&recipe_id, confirmed, now_ms())
+}
+
+#[tauri::command]
+fn desktop_recipes_export_safitemplate(
+    store: tauri::State<'_, StudioStore>,
+    recipe_id: String,
+    target_path: String,
+    premium_entitlement_verified: bool,
+) -> Result<String, String> {
+    store.desktop_recipes_export_safitemplate(
+        &recipe_id,
+        std::path::Path::new(&target_path),
+        premium_entitlement_verified,
+        now_ms(),
+    )
+}
+
+#[tauri::command]
+fn desktop_recipes_import_safitemplate(
+    store: tauri::State<'_, StudioStore>,
+    source_path: String,
+    premium_entitlement_verified: bool,
+    conflict_policy: Option<String>,
+) -> Result<String, String> {
+    store.desktop_recipes_import_safitemplate(
+        std::path::Path::new(&source_path),
+        premium_entitlement_verified,
+        conflict_policy.as_deref().unwrap_or("fail_on_duplicate"),
+        now_ms(),
+    )
+}
+
+#[tauri::command]
+fn desktop_recipes_prepare_community_share(
+    store: tauri::State<'_, StudioStore>,
+    recipe_id: String,
+    consent_accepted: bool,
+    consent_terms_version: String,
+    show_contributor_attribution: bool,
+) -> Result<String, String> {
+    store.desktop_recipes_prepare_community_share(
+        &recipe_id,
+        consent_accepted,
+        &consent_terms_version,
+        show_contributor_attribution,
+        now_ms(),
+    )
+}
+
 fn studio_generated_handler(
 ) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         app_info,
         take_pending_deep_link,
+        desktop_open_external_auth_url,
         pick_input_file,
         pick_output_file,
         pick_capsule_output_file,
         pick_deliverable_file,
+        pick_search_folder,
+        pick_safitemplate_open_file,
+        pick_safitemplate_save_file,
         studio_set_auth_session,
         studio_clear_auth_session,
         studio_authorization_status,
@@ -978,7 +1211,17 @@ fn studio_generated_handler(
         studio_list_templates,
         studio_instantiate_template,
         studio_export_capsule,
-        studio_export_deliverable
+        studio_export_deliverable,
+        desktop_search_index_folders,
+        desktop_search_query,
+        desktop_search_stats,
+        desktop_recipes_list,
+        desktop_recipes_sync_official,
+        desktop_recipes_save_as_new,
+        desktop_recipes_delete,
+        desktop_recipes_export_safitemplate,
+        desktop_recipes_import_safitemplate,
+        desktop_recipes_prepare_community_share
     ]
 }
 

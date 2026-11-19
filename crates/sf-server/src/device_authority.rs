@@ -362,12 +362,20 @@ impl DeviceAuthorityService {
             .session_generations
             .get(&user_id)
             .copied()
-            .unwrap_or(1);
+            .unwrap_or(0);
 
-        // If the user has registered devices, the presenting session MUST be the single active one.
+        // Fail closed when no device record exists for a user that has prior generation/events
+        // or when devices exist: missing device state after restart must NEVER grant unconditional access.
         let has_any_device = guard.devices.iter().any(|d| d.user_id == user_id);
+        let has_any_event = guard
+            .replacement_events
+            .iter()
+            .any(|e| e.user_id == user_id);
         if !has_any_device {
-            return Ok((None, current_gen));
+            if current_gen > 0 || has_any_event {
+                return Err(AuthError::Revoked);
+            }
+            return Err(AuthError::Revoked);
         }
 
         let active = guard

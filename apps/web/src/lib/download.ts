@@ -41,28 +41,28 @@ export interface PlatformDownloadArtifact {
 export interface DesktopReleaseManifest {
   readonly version: string;
   readonly channel: string;
-  readonly publishedAt: string;
+  readonly publishedAt: string | null;
   readonly platforms: Readonly<Record<DesktopOsKey, PlatformDownloadArtifact>>;
 }
 
 export const FALLBACK_RELEASE_MANIFEST: DesktopReleaseManifest = {
   version: "1.0.0",
   channel: "stable",
-  publishedAt: "2026-11-19T00:00:00Z",
+  publishedAt: null,
   platforms: {
     windows: {
-      available: true,
-      labelEn: "Windows 64-bit Desktop Executable (Local Unsigned Build)",
-      labelAr: "تطبيق سطح المكتب لنظام Windows 64-bit (إصدار محلي غير موقّع)",
-      fileName: "SafiData-Desktop-1.0.0-windows-x64.exe",
-      downloadUrl: "/downloads/SafiData-Desktop-1.0.0-windows-x64.exe",
-      fileSizeBytes: 6240768,
-      sha256: "f78a0776cb5cb7f9829aa95e108c8e5c8675509ac5445603d1136e4c566f9024",
+      available: false,
+      labelEn: "Windows 64-bit Installer (Not Yet Published to Release Storage)",
+      labelAr: "مثبت Windows 64-bit (غير منشور بعد على خادم الإصدارات العام)",
+      fileName: null,
+      downloadUrl: null,
+      fileSizeBytes: 0,
+      sha256: null,
       codeSigned: false,
       signingNoticeEn:
-        "Authenticode code-signing requires an external commercial certificate (not yet configured in this local build).",
+        "No public HTTPS Release Storage / CDN artifact or Authenticode-signed Windows installer has been published yet. Once published by the Owner in App Releases, download activates automatically.",
       signingNoticeAr:
-        "التوقيع الرقمي لـ Windows (Authenticode) يتطلب شهادة تجارية خارجية لم يتم إعدادها بعد في هذا البناء المحلي."
+        "لم يُنشر بعد ملف تثبيت موقّع على خادم إصدارات HTTPS عام. بمجرد نشر الإصدار من لوحة المالك يتفعّل التحميل تلقائيًا."
     },
     mac: {
       available: false,
@@ -91,6 +91,12 @@ export const FALLBACK_RELEASE_MANIFEST: DesktopReleaseManifest = {
     }
   }
 };
+
+export function isPublishedReleaseUrl(url: string | null | undefined): url is string {
+  if (typeof url !== "string") return false;
+  const trimmed = url.trim();
+  return trimmed.startsWith("https://") && trimmed.length > "https://a.b/c".length;
+}
 
 export function formatBytes(bytes: number): string {
   if (bytes <= 0) return "—";
@@ -124,10 +130,15 @@ export async function fetchDesktopReleaseManifest(): Promise<DesktopReleaseManif
         };
         if (
           typeof data.version_name === "string" &&
-          typeof data.download_url === "string" &&
+          isPublishedReleaseUrl(data.download_url) &&
           typeof data.sha256_hex === "string" &&
-          data.sha256_hex.length === 64
+          data.sha256_hex.length === 64 &&
+          typeof data.file_size_bytes === "number" &&
+          data.file_size_bytes > 0
         ) {
+          const fileName =
+            data.download_url.split("/").pop()?.split("?")[0] ??
+            `SafiData-Desktop-${data.version_name}-windows-x64.msi`;
           return {
             ...FALLBACK_RELEASE_MANIFEST,
             version: data.version_name,
@@ -136,12 +147,12 @@ export async function fetchDesktopReleaseManifest(): Promise<DesktopReleaseManif
               windows: {
                 ...FALLBACK_RELEASE_MANIFEST.platforms.windows,
                 available: true,
+                labelEn: `Windows 64-bit Installer (v${data.version_name})`,
+                labelAr: `مثبت Windows 64-bit (الإصدار v${data.version_name})`,
+                fileName,
                 downloadUrl: data.download_url,
                 sha256: data.sha256_hex,
-                fileSizeBytes:
-                  typeof data.file_size_bytes === "number" && data.file_size_bytes > 0
-                    ? data.file_size_bytes
-                    : FALLBACK_RELEASE_MANIFEST.platforms.windows.fileSizeBytes
+                fileSizeBytes: data.file_size_bytes
               }
             }
           };

@@ -1,9 +1,13 @@
-//! Ephemeral local HTTP `sf-server` auth server for Chromium UI + Harness integration testing.
+//! Ephemeral local HTTP `sf-server` harness for real unmocked Chromium + Rust Desktop E2E tests.
 //!
-//! Spawns a genuine `sf-server` Axum router with `AccountAuthService` + `AuthService` +
-//! `InMemorySessionRepository` on `127.0.0.1:0` (or `AUTH_HARNESS_ADDR`), registers and
-//! verifies the harness test account via the real Argon2id registration pipeline, and
-//! prints `{"ready":true,"addr":"127.0.0.1:<port>"}` to stdout.
+//! Spawns the genuine `sf-server` Axum router (`sf_server::app`) with:
+//! - Argon2id `AccountAuthService` + `AuthService` + `OwnerMfaService` + `TemplatesHubService`
+//!   + `DesktopPkceService` + `DeviceAuthorityService` + `EntitlementService`
+//! - Pre-verified accounts:
+//!   - `analyst@safidata.com` / `SafiAnalyst#2026` (Free tier)
+//!   - `pro@safidata.com` / `SafiPro#2026` (Paid/VIP tier — entitled to `.safitemplate` export/import)
+//!   - `owner@safidata.com` / `SafiOwner#2026` (Bootstrapped Platform Owner with confirmed RFC 6238 TOTP)
+//! - Prints a single JSON readiness line containing `addr` and `ownerTotpBase32` to stdout.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,7 +18,10 @@ use sf_server::auth::account::{
     VerificationEmailSender,
 };
 use sf_server::auth::service::in_memory_service;
+use sf_server::auth::unix_now;
+use sf_server::config::ServerConfig;
 use sf_server::error::AuthError;
+use sf_server::owner_mfa::{compute_totp_code, decode_base32, TOTP_PERIOD_SECS};
 use sf_server::{app, AppState};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -169,25 +176,19 @@ impl VerificationEmailSender for HarnessMailer {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let bind_addr = std::env::var("AUTH_HARNESS_ADDR").unwrap_or_else(|_| "127.0.0.1:0".to_owned());
-    let repo = Arc::new(HarnessAccountRepo::default());
-    let mailer = Arc::new(HarnessMailer::default());
-    let (auth_service, _, _, _) = in_memory_service();
-    let base_state = AppState::new(auth_service);
-    let account_auth = AccountAuthService::new(
-        repo,
-        mailer.clone(),
-        base_state.auth.clone(),
-        "http://127.0.0.1:4175",
-    );
-
+async fn seed_verified_account(
+    account_auth: &AccountAuthService,
+    mailer: &HarnessMailer,
+    repo: &HarnessAccountRepo,
+    email: &str,
+    display_name: &str,
+    password: &str,
+) -> (Uuid, Uuid) {
     if account_auth
         .register(RegisterAccountRequest {
-            email: "analyst@safidata.com".to_owned(),
-            display_name: "Safi Analyst".to_owned(),
-            password: "SafiAnalyst#2026".to_owned(),
+            email: email.to_owned(),
+            display_name: display_name.to_owned(),
+            password: password.to_owned(),
         })
         .await
         .is_err()
@@ -199,6 +200,101 @@ async fn main() {
     if account_auth.verify_email(verify_token).await.is_err() {
         std::process::exit(3);
     }
+    let Some(acc) = repo.find_for_login(email).await.ok().flatten() else {
+        std::process::exit(3);
+    };
+    (acc.user_id, acc.workspace_id.unwrap_or_else(Uuid::now_v7))
+}
+
+#[tokio::main]
+async fn main() {
+    let bind_addr = std::env::var("AUTH_HARNESS_ADDR").unwrap_or_else(|_| "127.0.0.1:0".to_owned());
+    let public_origin = std::env::var("AUTH_HARNESS_PUBLIC_ORIGIN")
+        .unwrap_or_else(|_| "http://127.0.0.1:4175".to_owned());
+
+    let repo = Arc::new(HarnessAccountRepo::default());
+    let mailer = Arc::new(HarnessMailer::default());
+    let (auth_service, _, _, _) = in_memory_service();
+
+    let mut cfg = ServerConfig::for_tests();
+    cfg.api_base_url = Some(public_origin.clone());
+    cfg.license_signing_seed = Some([0x55u8; 32]);
+
+    let base_state = AppState::with_config(auth_service, cfg);
+    let account_auth = AccountAuthService::new(
+        repo.clone(),
+        mailer.clone(),
+        base_state.auth.clone(),
+        public_origin,
+    );
+
+    let _free_ids = seed_verified_account(
+        &account_auth,
+        &mailer,
+        &repo,
+        "analyst@safidata.com",
+        "Safi Analyst",
+        "SafiAnalyst#2026",
+    )
+    .await;
+    let (pro_uid, pro_ws) = seed_verified_account(
+        &account_auth,
+        &mailer,
+        &repo,
+        "pro@safidata.com",
+        "Safi Pro User",
+        "SafiPro#2026",
+    )
+    .await;
+    let (owner_uid, _owner_ws) = seed_verified_account(
+        &account_auth,
+        &mailer,
+        &repo,
+        "owner@safidata.com",
+        "Platform Owner",
+        "SafiOwner#2026",
+    )
+    .await;
+
+    // Bootstrap Owner + pre-confirm RFC 6238 TOTP so E2E verifies real TOTP codes live.
+    if base_state
+        .owner_mfa
+        .bootstrap_owner_once(owner_uid, true)
+        .await
+        .is_err()
+    {
+        std::process::exit(7);
+    }
+    let Ok(bundle) = base_state
+        .owner_mfa
+        .enroll_totp(owner_uid, "owner@safidata.com")
+        .await
+    else {
+        std::process::exit(8);
+    };
+    let Ok(secret_bytes) = decode_base32(&bundle.manual_secret_base32) else {
+        std::process::exit(8);
+    };
+    let now = unix_now();
+    // Confirm with previous 30s window so the current window remains unused for E2E live verify!
+    let prev_step = (now / TOTP_PERIOD_SECS).saturating_sub(1);
+    let Ok(confirm_code) = compute_totp_code(&secret_bytes, prev_step) else {
+        std::process::exit(8);
+    };
+    if base_state
+        .owner_mfa
+        .confirm_totp_at(owner_uid, Uuid::now_v7(), &confirm_code, now)
+        .await
+        .is_err()
+    {
+        std::process::exit(9);
+    }
+
+    // Grant Paid/VIP entitlement to `pro@safidata.com` so `.safitemplate` E2E tests both Free (403) and Paid (200).
+    base_state
+        .entitlements
+        .set_friend_vip(pro_ws, pro_uid, owner_uid, true)
+        .await;
 
     let state = base_state.with_account_auth(account_auth);
     let router = app(state);
@@ -208,7 +304,15 @@ async fn main() {
     let Ok(addr) = listener.local_addr() else {
         std::process::exit(5);
     };
-    println!(r#"{{"ready":true,"addr":"{addr}"}}"#);
+    println!(
+        "{}",
+        serde_json::json!({
+            "ready": true,
+            "addr": addr.to_string(),
+            "ownerTotpBase32": bundle.manual_secret_base32
+        })
+    );
+    let _ = std::io::Write::flush(&mut std::io::stdout());
     if axum::serve(listener, router).await.is_err() {
         std::process::exit(6);
     }

@@ -104,6 +104,8 @@ import {
 import { AnomalyPanel } from "./components/AnomalyPanel";
 import { CommandBarPanel } from "./components/CommandBarPanel";
 import { DashboardChartsView } from "./components/DashboardChartsView";
+import { DesktopLocalSearchPanel } from "./components/DesktopLocalSearchPanel";
+import { DesktopRecipeLibraryPanel } from "./components/DesktopRecipeLibraryPanel";
 import {
   DeliverableExportModal,
   InteractiveTutorialOverlay,
@@ -169,17 +171,22 @@ type Aggregate = (typeof AGGREGATES)[number];
 
 export interface DesktopStudioProps {
   readonly lang?: SafiLang;
+  readonly sessionToken?: string | null;
   readonly readOnlyOffline?: boolean;
   readonly onRevalidateOnline?: (() => void) | undefined;
 }
 
 export function DesktopStudio({
   lang = "en",
+  sessionToken = null,
   readOnlyOffline = false,
   onRevalidateOnline
 }: DesktopStudioProps): ReactNode {
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const desktop = isDesktopRuntime();
+  const [activeDesktopUtility, setActiveDesktopUtility] = useState<
+    "none" | "local-search" | "recipe-library"
+  >("none");
   const [state, setState] = useState<DesktopStudioState | null>(null);
   const [rowPage, setRowPage] = useState<DesktopRowPage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -766,6 +773,27 @@ export function DesktopStudio({
         <button type="button" onClick={() => setTutorialOpen(true)} data-testid="open-tutorial-btn">
           <HelpCircle size={16} aria-hidden="true" /> {L("الجولة التعليمية", "Tutorial")}
         </button>
+        <button
+          type="button"
+          onClick={() =>
+            setActiveDesktopUtility((prev) => (prev === "local-search" ? "none" : "local-search"))
+          }
+          data-testid="toggle-local-search-panel"
+        >
+          <FolderOpen size={16} aria-hidden="true" /> {L("البحث المحلي", "Local Search")}
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setActiveDesktopUtility((prev) =>
+              prev === "recipe-library" ? "none" : "recipe-library"
+            )
+          }
+          data-testid="toggle-recipe-library-panel"
+        >
+          <LayoutTemplate size={16} aria-hidden="true" />{" "}
+          {L("القوالب والوصفات", "Templates & Recipes")}
+        </button>
         {analysisProgress ? (
           <button
             type="button"
@@ -817,6 +845,18 @@ export function DesktopStudio({
         <p className="safi-desktop-studio__error" role="alert">
           <XCircle size={16} aria-hidden="true" /> {error}
         </p>
+      ) : null}
+
+      {activeDesktopUtility === "local-search" ? (
+        <DesktopLocalSearchPanel lang={lang} readOnlyOffline={readOnlyOffline} />
+      ) : null}
+
+      {activeDesktopUtility === "recipe-library" ? (
+        <DesktopRecipeLibraryPanel
+          lang={lang}
+          sessionToken={sessionToken}
+          readOnlyOffline={readOnlyOffline}
+        />
       ) : null}
 
       {state === null ? (

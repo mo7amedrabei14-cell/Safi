@@ -17,6 +17,7 @@ pub mod error;
 pub mod log_center;
 pub mod organizations;
 pub mod owner_mfa;
+pub mod pg_source_of_truth;
 pub mod pg_store;
 pub mod routes;
 pub mod routes_updates;

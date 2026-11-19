@@ -1,19 +1,19 @@
 {
   "version": "1.0.0",
   "channel": "stable",
-  "publishedAt": "2026-11-19T00:00:00Z",
+  "publishedAt": null,
   "platforms": {
     "windows": {
-      "available": true,
-      "labelEn": "Windows 64-bit Desktop Executable (Local Unsigned Build)",
-      "labelAr": "تطبيق سطح المكتب لنظام Windows 64-bit (إصدار محلي غير موقّع بشهادة Authenticode)",
-      "fileName": "SafiData-Desktop-1.0.0-windows-x64.exe",
-      "downloadUrl": "/downloads/SafiData-Desktop-1.0.0-windows-x64.exe",
-      "fileSizeBytes": 6240768,
-      "sha256": "f78a0776cb5cb7f9829aa95e108c8e5c8675509ac5445603d1136e4c566f9024",
+      "available": false,
+      "labelEn": "Windows 64-bit Installer (Not Yet Published to Release Storage)",
+      "labelAr": "مثبت Windows 64-bit (غير منشور بعد على خادم الإصدارات العام)",
+      "fileName": null,
+      "downloadUrl": null,
+      "fileSizeBytes": 0,
+      "sha256": null,
       "codeSigned": false,
-      "signingNoticeEn": "Authenticode code-signing requires an external commercial certificate (not yet configured in this local build).",
-      "signingNoticeAr": "التوقيع الرقمي لـ Windows (Authenticode) يتطلب شهادة تجارية خارجية لم يتم إعدادها بعد في هذا البناء المحلي."
+      "signingNoticeEn": "No public HTTPS Release Storage / CDN artifact or Authenticode-signed Windows installer has been published yet. Once published by the Owner in App Releases, download activates automatically.",
+      "signingNoticeAr": "لم يُنشر بعد ملف تثبيت موقّع على خادم إصدارات HTTPS عام. بمجرد نشر الإصدار من لوحة المالك يتفعّل التحميل تلقائيًا."
     },
     "mac": {
       "available": false,

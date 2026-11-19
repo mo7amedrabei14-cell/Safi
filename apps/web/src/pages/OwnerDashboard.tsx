@@ -526,6 +526,7 @@ export function OwnerDashboard({
             key={id}
             type="button"
             className="safi-btn"
+            data-owner-tab={id}
             aria-current={panelTab === id ? "page" : undefined}
             onClick={() => setPanelTab(id)}
           >
@@ -1176,6 +1177,7 @@ export function OwnerDashboard({
                     <button
                       type="button"
                       className="safi-btn"
+                      data-community-approve={sub.id}
                       onClick={() =>
                         void runOwnerAction(
                           () =>
@@ -1195,6 +1197,7 @@ export function OwnerDashboard({
                     <button
                       type="button"
                       className="safi-btn"
+                      data-community-reject={sub.id}
                       onClick={() =>
                         void runOwnerAction(
                           () =>
@@ -1215,6 +1218,7 @@ export function OwnerDashboard({
                       <button
                         type="button"
                         className="safi-btn safi-btn-primary"
+                        data-community-publish={sub.id}
                         onClick={() =>
                           void runOwnerAction(
                             () =>

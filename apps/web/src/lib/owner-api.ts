@@ -232,6 +232,10 @@ export interface OwnerOfficialTemplate {
   readonly name: string;
   readonly description: string;
   readonly category: string;
+  readonly recipe_type?: string;
+  readonly origin?: string;
+  readonly required_columns?: readonly string[];
+  readonly steps?: readonly Record<string, unknown>[];
   readonly current_version: number;
   readonly active: boolean;
   readonly updated_at: number;
@@ -240,6 +244,8 @@ export interface OwnerOfficialTemplate {
     readonly release_notes: string;
     readonly content_hash: string;
     readonly published_at: number;
+    readonly required_columns?: readonly string[];
+    readonly steps?: readonly Record<string, unknown>[];
   }[];
 }
 
@@ -281,6 +287,33 @@ export interface DesktopPkceApproveResponse {
   readonly code: string;
   readonly state: string;
   readonly callback_uri: string;
+}
+
+export interface DesktopPkceStartResponse {
+  readonly request_id: string;
+  readonly auth_url: string;
+  readonly expires_at: number;
+}
+
+export interface DesktopPkceExchangeResponse {
+  readonly token: string;
+  readonly session: {
+    readonly id: string;
+    readonly workspace_id: string;
+    readonly expires_at: number;
+  };
+  readonly is_owner: boolean;
+  readonly mfa_required: boolean;
+  readonly device_id: string;
+  readonly session_generation: number;
+  readonly previous_device_revoked: boolean;
+  readonly email?: string;
+}
+
+export interface TemplateExportImportEntitlementResponse {
+  readonly allowed: boolean;
+  readonly plan_id: string;
+  readonly feature: string;
 }
 
 const BUILD_API_ORIGIN = typeof __SAFI_API_BASE_URL__ === "string" ? __SAFI_API_BASE_URL__ : "";
@@ -568,5 +601,38 @@ export const ownerApi = {
     readonly email: string;
     readonly password: string;
   }) =>
-    rawJsonRequest<DesktopPkceApproveResponse>("/v1/auth/desktop/approve", "POST", null, payload)
+    rawJsonRequest<DesktopPkceApproveResponse>("/v1/auth/desktop/approve", "POST", null, payload),
+  startDesktopPkceAuth: (payload: {
+    readonly code_challenge: string;
+    readonly code_challenge_method: "S256";
+    readonly state: string;
+    readonly installation_id: string;
+    readonly platform: string;
+    readonly device_name: string;
+    readonly flow: "signin" | "signup";
+  }) => rawJsonRequest<DesktopPkceStartResponse>("/v1/auth/desktop/start", "POST", null, payload),
+  exchangeDesktopPkceAuth: (payload: {
+    readonly code: string;
+    readonly code_verifier: string;
+    readonly state: string;
+    readonly installation_id: string;
+  }) =>
+    rawJsonRequest<DesktopPkceExchangeResponse>("/v1/auth/desktop/exchange", "POST", null, payload),
+  listUserOfficialTemplates: (token: string) =>
+    rawJsonRequest<readonly OwnerOfficialTemplate[]>("/v1/templates/official", "GET", token),
+  checkTemplateExportImportEntitlement: (token: string) =>
+    rawJsonRequest<TemplateExportImportEntitlementResponse>(
+      "/v1/templates/entitlement/export-import",
+      "POST",
+      token,
+      {}
+    ),
+  submitCommunityTemplate: (token: string, payload: Record<string, unknown>) =>
+    rawJsonRequest<OwnerCommunitySubmission>("/v1/community/submissions", "POST", token, payload),
+  listMyCommunitySubmissions: (token: string) =>
+    rawJsonRequest<readonly OwnerCommunitySubmission[]>(
+      "/v1/community/submissions/mine",
+      "GET",
+      token
+    )
 };

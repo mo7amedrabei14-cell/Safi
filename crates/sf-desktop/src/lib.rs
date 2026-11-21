@@ -2,6 +2,7 @@ pub mod api_origin;
 pub mod capabilities;
 pub mod commands;
 pub mod content;
+pub mod decision_engine;
 pub mod deep_link;
 pub mod device_identity;
 pub mod engine_bridge;

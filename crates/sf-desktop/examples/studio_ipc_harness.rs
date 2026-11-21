@@ -476,6 +476,14 @@ fn dispatch(
             store.desktop_learning_delete_rule(str_arg(args, "ruleId", "rule_id"), ts)
         }
         "desktop_learning_reset_profile" => store.desktop_learning_reset_profile(ts),
+        "desktop_decision_engine_evaluate" => {
+            store.desktop_decision_engine_evaluate(str_arg(args, "project", "project"))
+        }
+        "desktop_decision_engine_apply" => store.desktop_decision_engine_apply(
+            str_arg(args, "project", "project"),
+            str_arg(args, "decisionId", "decision_id"),
+            ts,
+        ),
         other => store
             .gate_command(other, 0, Some(ts))
             .map(|_| "null".to_owned()),

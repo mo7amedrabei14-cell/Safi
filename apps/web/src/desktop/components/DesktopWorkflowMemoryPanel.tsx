@@ -764,6 +764,39 @@ export function DesktopWorkflowMemoryPanel({
           </button>
         </div>
 
+        {/* Longitudinal Learning Effectiveness Metrics (Section 8.4) */}
+        {learningProfile?.effectivenessMetrics ? (
+          <div
+            data-learning-effectiveness-metrics="true"
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "12px",
+              fontSize: "12px",
+              padding: "8px 10px",
+              borderRadius: "8px",
+              background: "rgba(16, 185, 129, 0.08)"
+            }}
+          >
+            <span>
+              <strong>{L("أسئلة مكررة تم تجنّبها:", "Questions Avoided:")}</strong>{" "}
+              {learningProfile.effectivenessMetrics.questionsAvoidedTotal}
+            </span>
+            <span>
+              <strong>{L("خطوات إعداد موفّرة:", "Setup Steps Saved:")}</strong>{" "}
+              {learningProfile.effectivenessMetrics.setupStepsSavedTotal}
+            </span>
+            <span>
+              <strong>{L("مسارات مُعاد تشغيلها:", "Workflows Replayed:")}</strong>{" "}
+              {learningProfile.effectivenessMetrics.workflowsReplayedTotal}
+            </span>
+            <span>
+              <strong>{L("دقة واتساق القرارات:", "Decision Consistency:")}</strong>{" "}
+              {learningProfile.effectivenessMetrics.decisionAccuracyPct}%
+            </span>
+          </div>
+        ) : null}
+
         <div
           style={{
             display: "grid",

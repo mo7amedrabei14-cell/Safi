@@ -1240,6 +1240,23 @@ fn desktop_learning_reset_profile(store: tauri::State<'_, StudioStore>) -> Resul
     store.desktop_learning_reset_profile(now_ms())
 }
 
+#[tauri::command]
+fn desktop_decision_engine_evaluate(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+) -> Result<String, String> {
+    store.desktop_decision_engine_evaluate(&project)
+}
+
+#[tauri::command]
+fn desktop_decision_engine_apply(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    decision_id: String,
+) -> Result<String, String> {
+    store.desktop_decision_engine_apply(&project, &decision_id, now_ms())
+}
+
 fn studio_generated_handler(
 ) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
@@ -1322,7 +1339,9 @@ fn studio_generated_handler(
         desktop_learning_profile_get,
         desktop_learning_record_feedback,
         desktop_learning_delete_rule,
-        desktop_learning_reset_profile
+        desktop_learning_reset_profile,
+        desktop_decision_engine_evaluate,
+        desktop_decision_engine_apply
     ]
 }
 

@@ -108,6 +108,7 @@ import {
 import { AnomalyPanel } from "./components/AnomalyPanel";
 import { CommandBarPanel } from "./components/CommandBarPanel";
 import { DashboardChartsView } from "./components/DashboardChartsView";
+import { DesktopDecisionEnginePanel } from "./components/DesktopDecisionEnginePanel";
 import { DesktopLocalSearchPanel } from "./components/DesktopLocalSearchPanel";
 import { DesktopRecipeLibraryPanel } from "./components/DesktopRecipeLibraryPanel";
 import { DesktopWorkflowMemoryPanel } from "./components/DesktopWorkflowMemoryPanel";
@@ -190,7 +191,7 @@ export function DesktopStudio({
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const desktop = isDesktopRuntime();
   const [activeDesktopUtility, setActiveDesktopUtility] = useState<
-    "none" | "local-search" | "recipe-library" | "workflow-memory"
+    "none" | "local-search" | "recipe-library" | "workflow-memory" | "decision-engine"
   >("none");
   const [sheetWorkflowMatch, setSheetWorkflowMatch] = useState<{
     readonly report: SheetWorkflowMatchReport;
@@ -893,6 +894,18 @@ export function DesktopStudio({
           <BrainCircuit size={16} aria-hidden="true" />{" "}
           {L("ذاكرة الورقة والتعلّم", "Workflow Memory & Learning")}
         </button>
+        <button
+          type="button"
+          onClick={() =>
+            setActiveDesktopUtility((prev) =>
+              prev === "decision-engine" ? "none" : "decision-engine"
+            )
+          }
+          data-testid="toggle-decision-engine-panel"
+        >
+          <ShieldCheck size={16} aria-hidden="true" />{" "}
+          {L("محرك القرار الأمثل", "Optimal Decision Engine")}
+        </button>
         {analysisProgress ? (
           <button
             type="button"
@@ -979,6 +992,16 @@ export function DesktopStudio({
           }
           state={state}
           questionResolutions={artifacts.questionResolutions ?? []}
+          onStateUpdated={(nextState) => setState(nextState)}
+        />
+      ) : null}
+
+      {activeDesktopUtility === "decision-engine" ? (
+        <DesktopDecisionEnginePanel
+          lang={lang}
+          projectId={PROJECT}
+          state={state}
+          readOnlyOffline={readOnlyOffline}
           onStateUpdated={(nextState) => setState(nextState)}
         />
       ) : null}

@@ -20,7 +20,7 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 80] = [
+pub const ALLOWED_COMMANDS: [&str; 82] = [
     "app_info",
     "take_pending_deep_link",
     "desktop_open_external_auth_url",
@@ -101,6 +101,8 @@ pub const ALLOWED_COMMANDS: [&str; 80] = [
     "desktop_learning_record_feedback",
     "desktop_learning_delete_rule",
     "desktop_learning_reset_profile",
+    "desktop_decision_engine_evaluate",
+    "desktop_decision_engine_apply",
 ];
 
 /// Access classification separating offline read-only viewing of saved local projects
@@ -136,7 +138,8 @@ pub fn classify_command_access(command: &str) -> CommandAccessClass {
         | "desktop_recipes_list"
         | "desktop_workflow_memory_list"
         | "desktop_workflow_memory_match_sheet"
-        | "desktop_learning_profile_get" => CommandAccessClass::ReadOnlyOffline,
+        | "desktop_learning_profile_get"
+        | "desktop_decision_engine_evaluate" => CommandAccessClass::ReadOnlyOffline,
         _ => CommandAccessClass::ProtectedOnline,
     }
 }

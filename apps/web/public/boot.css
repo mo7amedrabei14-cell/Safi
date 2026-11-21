@@ -26,6 +26,22 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+:root[data-theme="light"],
+:root[data-theme="vision-glass"],
+:root[data-theme="light"] body,
+:root[data-theme="vision-glass"] body {
+  color-scheme: light;
+  background: #eaf0fb;
+  background-color: #eaf0fb;
+}
+
+:root[data-theme="apple-light"],
+:root[data-theme="apple-light"] body {
+  color-scheme: light;
+  background: #f5f5f7;
+  background-color: #f5f5f7;
+}
+
 html[data-safi-locale="ar"] body {
   font-family:
     "IBM Plex Sans Arabic",

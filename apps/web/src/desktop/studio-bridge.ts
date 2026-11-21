@@ -1486,11 +1486,22 @@ export interface LearnedPreferenceRule {
   readonly updatedAtMs: number;
 }
 
+export interface LearningEffectivenessMetrics {
+  readonly questionsAvoidedTotal: number;
+  readonly setupStepsSavedTotal: number;
+  readonly workflowsReplayedTotal: number;
+  readonly explicitCorrectionsRecorded: number;
+  readonly repeatedCorrectionsCount: number;
+  readonly undoOrRollbackCount: number;
+  readonly decisionAccuracyPct: number;
+}
+
 export interface PersonalLearningProfile {
   readonly schemaVersion: number;
   readonly profileVersion: number;
   readonly generalPreferences: Readonly<Record<string, string>>;
   readonly rules: readonly LearnedPreferenceRule[];
+  readonly effectivenessMetrics?: LearningEffectivenessMetrics;
   readonly updatedAtMs: number;
 }
 
@@ -1606,4 +1617,164 @@ export async function deleteDesktopLearningRule(ruleId: string): Promise<Persona
 
 export async function resetDesktopLearningProfile(): Promise<PersonalLearningProfile> {
   return JSON.parse(await call("desktop_learning_reset_profile")) as PersonalLearningProfile;
+}
+
+export type DecisionDomain =
+  | "spreadsheet_understanding"
+  | "data_cleaning"
+  | "kpi_selection"
+  | "chart_selection"
+  | "dashboard_layout"
+  | "report_and_presentation";
+
+export type OptimizationAlgorithm =
+  | "exact_constraint_solver"
+  | "lexicographic_branch_and_bound"
+  | "constrained_beam_search"
+  | "deterministic_rule_solver";
+
+export type OptimalityClass =
+  | "exact_proven_optimum"
+  | "best_valid_candidate_found"
+  | "heuristic_recommendation"
+  | "insufficient_evidence_requires_question";
+
+export interface LexicographicObjectiveVector {
+  readonly correctness: number;
+  readonly dataSafetyNoLoss: number;
+  readonly userConstraintCompliance: number;
+  readonly analyticalFit: number;
+  readonly explainabilityAudit: number;
+  readonly deliverableQuality: number;
+  readonly executionEfficiency: number;
+}
+
+export interface DecisionEvidenceItem {
+  readonly labelEn: string;
+  readonly labelAr: string;
+  readonly observedValue: string;
+  readonly impactEn: string;
+  readonly impactAr: string;
+}
+
+export interface EvaluatedCandidateAudit {
+  readonly candidateId: string;
+  readonly titleEn: string;
+  readonly titleAr: string;
+  readonly isValid: boolean;
+  readonly eliminationReasonEn?: string | null;
+  readonly eliminationReasonAr?: string | null;
+  readonly objective: LexicographicObjectiveVector;
+}
+
+export interface FocusedClarificationPrompt {
+  readonly questionId: string;
+  readonly promptEn: string;
+  readonly promptAr: string;
+  readonly options: readonly string[];
+}
+
+export interface RecommendedDecision {
+  readonly decisionId: string;
+  readonly domain: DecisionDomain;
+  readonly algorithmUsed: OptimizationAlgorithm;
+  readonly optimalityClass: OptimalityClass;
+  readonly recommendedTitleEn: string;
+  readonly recommendedTitleAr: string;
+  readonly whyEn: string;
+  readonly whyAr: string;
+  readonly objective: LexicographicObjectiveVector;
+  readonly evidence: readonly DecisionEvidenceItem[];
+  readonly assumptionsEn: readonly string[];
+  readonly assumptionsAr: readonly string[];
+  readonly whatExecutesEn: string;
+  readonly whatExecutesAr: string;
+  readonly undoWayEn: string;
+  readonly undoWayAr: string;
+  readonly executableAction: Readonly<Record<string, unknown>>;
+  readonly clarificationPrompt?: FocusedClarificationPrompt | null;
+  readonly candidatesEvaluatedCount: number;
+  readonly invalidEliminatedCount: number;
+  readonly advancedAuditCandidates: readonly EvaluatedCandidateAudit[];
+}
+
+export interface ColumnContentDecision {
+  readonly columnName: string;
+  readonly canonicalConcept: string;
+  readonly decidedRole: string;
+  readonly decidedSemanticType: string;
+  readonly optimalityClass: OptimalityClass;
+  readonly nonNullCount: number;
+  readonly nullCount: number;
+  readonly distinctCount: number;
+  readonly numericParsePct: number;
+  readonly dateParsePct: number;
+  readonly untrimmedWhitespaceCount: number;
+  readonly protectedIdentifierFromMeasure: boolean;
+  readonly reasonEn: string;
+  readonly reasonAr: string;
+}
+
+export interface DuplicateAnalysisReport {
+  readonly exactUnintendedDuplicateRowIds: readonly number[];
+  readonly validRepeatedEntityTransactionRows: number;
+  readonly conflictingKeyReviewRowIds: readonly number[];
+  readonly detectedPrimaryKeyColumn?: string | null;
+  readonly summaryEn: string;
+  readonly summaryAr: string;
+}
+
+export interface ConsistencyImpactReport {
+  readonly isFullyConsistent: boolean;
+  readonly datasetRevision: number;
+  readonly activeMetricIds: readonly string[];
+  readonly staleChartReferences: readonly string[];
+  readonly staleDeliverableMetricRefs: readonly string[];
+  readonly metricColumnLineage: Readonly<Record<string, readonly string[]>>;
+  readonly summaryEn: string;
+  readonly summaryAr: string;
+}
+
+export interface AiTaskRouteEntry {
+  readonly taskId: string;
+  readonly taskNameEn: string;
+  readonly taskNameAr: string;
+  readonly primaryEngine: string;
+  readonly allowsLlmNumericComputation: boolean;
+  readonly requiresConsentAndPiiMaskingIfExternal: boolean;
+}
+
+export interface AiArchitectureStatusReport {
+  readonly localOllamaEndpoint: string;
+  readonly localOllamaStatus: string;
+  readonly bundledModelClaimed: boolean;
+  readonly installedLocalModels: readonly string[];
+  readonly coreProductWorksWithoutAi: boolean;
+  readonly externalAiConsentGranted: boolean;
+  readonly localPiiMaskingEnforced: boolean;
+  readonly taskRoutingTable: readonly AiTaskRouteEntry[];
+}
+
+export interface WorkspaceOptimalDecisionSuite {
+  readonly detectedDomain: SheetBusinessDomain;
+  readonly columnDecisions: readonly ColumnContentDecision[];
+  readonly duplicateAnalysis: DuplicateAnalysisReport;
+  readonly recommendedDecisions: readonly RecommendedDecision[];
+  readonly consistencyReport: ConsistencyImpactReport;
+  readonly aiArchitecture: AiArchitectureStatusReport;
+}
+
+export async function evaluateDesktopDecisionEngine(
+  project: string
+): Promise<WorkspaceOptimalDecisionSuite> {
+  return JSON.parse(
+    await call("desktop_decision_engine_evaluate", { project })
+  ) as WorkspaceOptimalDecisionSuite;
+}
+
+export async function applyDesktopDecisionEngineAction(
+  project: string,
+  decisionId: string
+): Promise<DesktopStudioState> {
+  return stateCall("desktop_decision_engine_apply", { project, decisionId });
 }

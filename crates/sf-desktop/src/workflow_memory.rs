@@ -489,7 +489,42 @@ pub struct ExplainableLearnedSuggestion {
     pub why_ar: String,
 }
 
-/// Versioned, encrypted, explainable, and resettable Personal Learning Profile (Section 6.2).
+/// Longitudinal metrics proving how Continuous Local Learning reduces repeated questions,
+/// setup steps, and errors over time (Section 8.4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LearningEffectivenessMetrics {
+    /// Total clarification questions avoided/suppressed across matched sheets.
+    pub questions_avoided_total: u64,
+    /// Total cleaning operations and metrics replayed automatically without manual setup.
+    pub setup_steps_saved_total: u64,
+    /// Number of workflows replayed successfully.
+    pub workflows_replayed_total: u64,
+    /// Count of explicit user corrections recorded.
+    pub explicit_corrections_recorded: u64,
+    /// Count of times a user had to repeat a correction on the same concept.
+    pub repeated_corrections_count: u64,
+    /// Count of workflow rollbacks or rule undo actions.
+    pub undo_or_rollback_count: u64,
+    /// Computed consistency/accuracy rate (`0..=100`).
+    pub decision_accuracy_pct: u8,
+}
+
+impl Default for LearningEffectivenessMetrics {
+    fn default() -> Self {
+        Self {
+            questions_avoided_total: 0,
+            setup_steps_saved_total: 0,
+            workflows_replayed_total: 0,
+            explicit_corrections_recorded: 0,
+            repeated_corrections_count: 0,
+            undo_or_rollback_count: 0,
+            decision_accuracy_pct: 100,
+        }
+    }
+}
+
+/// Versioned, encrypted, explainable, and resettable Personal Learning Profile (Section 6.2 & 8.4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonalLearningProfile {
@@ -501,6 +536,9 @@ pub struct PersonalLearningProfile {
     pub general_preferences: BTreeMap<String, String>,
     /// Active learned preference rules keyed by `rule_id`.
     pub rules: Vec<LearnedPreferenceRule>,
+    /// Longitudinal effectiveness metrics (Section 8.4).
+    #[serde(default)]
+    pub effectiveness_metrics: LearningEffectivenessMetrics,
     /// Last updated timestamp in Unix ms.
     pub updated_at_ms: u64,
 }
@@ -512,6 +550,7 @@ impl Default for PersonalLearningProfile {
             profile_version: 1,
             general_preferences: BTreeMap::new(),
             rules: Vec::new(),
+            effectiveness_metrics: LearningEffectivenessMetrics::default(),
             updated_at_ms: 0,
         }
     }
@@ -1013,7 +1052,30 @@ impl LocalWorkflowMemoryStore {
             reused_questions,
         });
         let cloned = rec.clone();
+        self.learning_profile
+            .effectiveness_metrics
+            .workflows_replayed_total = self
+            .learning_profile
+            .effectiveness_metrics
+            .workflows_replayed_total
+            .saturating_add(1);
+        self.learning_profile
+            .effectiveness_metrics
+            .questions_avoided_total = self
+            .learning_profile
+            .effectiveness_metrics
+            .questions_avoided_total
+            .saturating_add(reused_questions as u64);
+        self.learning_profile
+            .effectiveness_metrics
+            .setup_steps_saved_total = self
+            .learning_profile
+            .effectiveness_metrics
+            .setup_steps_saved_total
+            .saturating_add((applied_operations + applied_metrics + reused_questions) as u64);
+        self.recompute_learning_accuracy();
         self.persist_workflows()?;
+        self.persist_learning_profile()?;
         Ok(cloned)
     }
 
@@ -1063,7 +1125,16 @@ impl LocalWorkflowMemoryStore {
         });
 
         let cloned = rec.clone();
+        self.learning_profile
+            .effectiveness_metrics
+            .undo_or_rollback_count = self
+            .learning_profile
+            .effectiveness_metrics
+            .undo_or_rollback_count
+            .saturating_add(1);
+        self.recompute_learning_accuracy();
         self.persist_workflows()?;
+        self.persist_learning_profile()?;
         Ok(cloned)
     }
 
@@ -1201,11 +1272,31 @@ impl LocalWorkflowMemoryStore {
                 source_sheet_label, existing.evidence_count
             );
             let updated_rule = existing.clone();
+            if signal_kind == LearningSignalKind::ExplicitCorrection {
+                self.learning_profile
+                    .effectiveness_metrics
+                    .repeated_corrections_count = self
+                    .learning_profile
+                    .effectiveness_metrics
+                    .repeated_corrections_count
+                    .saturating_add(1);
+            }
             self.learning_profile.profile_version =
                 self.learning_profile.profile_version.saturating_add(1);
             self.learning_profile.updated_at_ms = now_ms;
+            self.recompute_learning_accuracy();
             self.persist_learning_profile()?;
             return Ok(updated_rule);
+        }
+
+        if signal_kind == LearningSignalKind::ExplicitCorrection {
+            self.learning_profile
+                .effectiveness_metrics
+                .explicit_corrections_recorded = self
+                .learning_profile
+                .effectiveness_metrics
+                .explicit_corrections_recorded
+                .saturating_add(1);
         }
 
         let confidence_pct = compute_learning_confidence(signal_kind, 1);
@@ -1354,6 +1445,14 @@ impl LocalWorkflowMemoryStore {
         if self.learning_profile.rules.len() == before {
             return Err("SF-SYS-001".to_owned());
         }
+        self.learning_profile
+            .effectiveness_metrics
+            .undo_or_rollback_count = self
+            .learning_profile
+            .effectiveness_metrics
+            .undo_or_rollback_count
+            .saturating_add(1);
+        self.recompute_learning_accuracy();
         self.learning_profile.profile_version =
             self.learning_profile.profile_version.saturating_add(1);
         self.learning_profile.updated_at_ms = now_ms;
@@ -1374,10 +1473,24 @@ impl LocalWorkflowMemoryStore {
             profile_version: self.learning_profile.profile_version.saturating_add(1),
             general_preferences: BTreeMap::new(),
             rules: Vec::new(),
+            effectiveness_metrics: LearningEffectivenessMetrics::default(),
             updated_at_ms: now_ms,
         };
         self.persist_learning_profile()?;
         Ok(self.learning_profile.clone())
+    }
+
+    fn recompute_learning_accuracy(&mut self) {
+        let m = &mut self.learning_profile.effectiveness_metrics;
+        let positive = m.workflows_replayed_total * 3
+            + m.questions_avoided_total
+            + m.setup_steps_saved_total
+            + (self.learning_profile.rules.len() as u64) * 2;
+        let negative = m.repeated_corrections_count + m.undo_or_rollback_count;
+        m.decision_accuracy_pct = positive
+            .saturating_mul(100)
+            .checked_div(positive + negative)
+            .map_or(100, |v| v.clamp(50, 100) as u8);
     }
 
     fn persist_workflows(&self) -> Result<(), String> {

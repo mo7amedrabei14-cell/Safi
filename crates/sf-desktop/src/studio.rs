@@ -3822,6 +3822,119 @@ impl StudioStore {
         serde_json::to_string(&profile).map_err(|_| "SF-SYS-001".to_owned())
     }
 
+    /// Evaluates the central Rust [`crate::decision_engine::SafiDecisionEngine`] on the active
+    /// Studio project dataset, artifacts, workflow memory, and personal learning profile.
+    ///
+    /// Works in Offline Read-Only Mode (`CommandAccessClass::ReadOnlyOffline`).
+    ///
+    /// # Errors
+    /// Returns `SF-AUTH-001`, `SF-SYS-015`, or `SF-SYS-001`.
+    pub fn desktop_decision_engine_evaluate(&self, project: &str) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("project", project));
+        self.gate_command("desktop_decision_engine_evaluate", payload_len, None)?;
+        self.ensure_workflow_memory_loaded()?;
+
+        let projects = self
+            .projects
+            .lock()
+            .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+        let graph = projects
+            .get(project)
+            .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+
+        let artifacts = self
+            .artifacts
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project).cloned())
+            .unwrap_or_default();
+
+        let headers: Vec<String> = graph
+            .working()
+            .columns()
+            .iter()
+            .map(|c| c.schema().name.clone())
+            .collect();
+        let active_sheet_name = self
+            .active_regions
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project).map(|(s, _)| s.clone()))
+            .unwrap_or_else(|| "Sheet1".to_owned());
+
+        let (matched_wf, learning_prof) = {
+            let slot = self
+                .workflow_memory
+                .lock()
+                .map_err(|_| "SF-SYS-001".to_owned())?;
+            if let Some(store) = slot.as_ref() {
+                let rep = store.match_incoming_sheet(&active_sheet_name, &headers, None);
+                let wf = rep
+                    .matched_workflow_id
+                    .as_deref()
+                    .and_then(|id| store.get_sheet_workflow(id))
+                    .cloned();
+                (wf, Some(store.learning_profile().clone()))
+            } else {
+                (None, None)
+            }
+        };
+
+        let suite = crate::decision_engine::SafiDecisionEngine::evaluate_workspace(
+            graph,
+            &artifacts,
+            matched_wf.as_ref(),
+            learning_prof.as_ref(),
+        );
+        serde_json::to_string(&suite).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Executes the recommended action for `decision_id` from [`crate::decision_engine::SafiDecisionEngine`]
+    /// atomically on the open Studio project dataset and artifacts, returning the updated project state.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors, `SF-SYS-015`, or `SF-SYS-001`.
+    pub fn desktop_decision_engine_apply(
+        &self,
+        project: &str,
+        decision_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("decisionId", decision_id));
+        self.gate_command("desktop_decision_engine_apply", payload_len, Some(now_ms))?;
+        self.ensure_workflow_memory_loaded()?;
+
+        let suite_json = self.desktop_decision_engine_evaluate(project)?;
+        let suite: crate::decision_engine::WorkspaceOptimalDecisionSuite =
+            serde_json::from_str(&suite_json).map_err(|_| "SF-SYS-001".to_owned())?;
+        let target_decision = suite
+            .recommended_decisions
+            .iter()
+            .find(|d| d.decision_id == decision_id)
+            .ok_or_else(|| "SF-SYS-001".to_owned())?;
+
+        {
+            let mut projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let graph = projects
+                .get_mut(project)
+                .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let mut art_map = self.artifacts.lock().map_err(|_| "SF-SYS-001".to_owned())?;
+            let artifacts = art_map.entry(project.to_owned()).or_default();
+            let _ = crate::decision_engine::execute_recommended_decision_action(
+                graph,
+                artifacts,
+                &target_decision.executable_action,
+                now_ms,
+            )?;
+        }
+
+        self.state_unlocked(project)
+    }
+
     fn mutate(
         &self,
         project: &str,

@@ -420,6 +420,31 @@ try {
   );
 
   // -------------------------------------------------------------------------
+  // [2C/6] Real Rust Safi Optimal Decision Engine UI (6 Domains, Audit, Apply & Consistency)
+  // -------------------------------------------------------------------------
+  console.log("[2C/6] Verifying real Rust Safi Optimal Decision Engine UI (6 domains, lexicographic audit, apply & cross-product consistency)...");
+  await desktopPage.locator('[data-testid="toggle-decision-engine-panel"]').click();
+  await desktopPage.locator('[data-desktop-decision-engine="true"]').waitFor({ state: "visible", timeout: 10_000 });
+  await desktopPage.locator('[data-recommended-decision-card="dec_optimal_kpi"]').waitFor({ state: "visible", timeout: 10_000 });
+
+  const decisionCardsCount = await desktopPage.locator('[data-recommended-decision-card]').count();
+  assert.equal(decisionCardsCount, 6, `Expected 6 primary domain Recommended Decisions, got ${decisionCardsCount}`);
+
+  // Expand Advanced Details / Audit on Optimal KPI Decision
+  await desktopPage.click('[data-toggle-decision-audit="dec_optimal_kpi"]');
+  await desktopPage.locator('[data-decision-audit-drawer="dec_optimal_kpi"]').waitFor({ state: "visible", timeout: 10_000 });
+
+  // Apply Coherent Dashboard & Report Blueprint decision -> verify 100% Cross-Product Consistency
+  await desktopPage.click('[data-apply-recommended-decision="dec_dashboard_blueprint"]');
+  await desktopPage.locator('[data-decision-engine-notice="true"]').waitFor({ state: "visible", timeout: 10_000 });
+  const consistencyOk = await desktopPage
+    .locator('[data-consistency-report="true"]')
+    .getAttribute("data-consistency-ok");
+  assert.equal(consistencyOk, "true", "Expected 100% Cross-Product Consistency after applying blueprint decision");
+  const aiRouteCount = await desktopPage.locator('[data-ai-route-task]').count();
+  assert.equal(aiRouteCount, 8, `Expected 8 canonical AI Task Routing entries, got ${aiRouteCount}`);
+
+  // -------------------------------------------------------------------------
   // [3/6] Real Desktop Recipe Library UI (Sync Official, Save as New, Free SF-RCP-005, Share with SafiData)
   // -------------------------------------------------------------------------
   console.log("[3/6] Verifying real Desktop Recipe Library UI (Official sync, Save as New, Free SF-RCP-005, Community Share)...");

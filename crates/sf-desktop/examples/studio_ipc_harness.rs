@@ -442,6 +442,40 @@ fn dispatch(
                 .unwrap_or(true),
             ts,
         ),
+        "desktop_recipes_update_existing" => {
+            store.desktop_recipes_update_existing(str_arg(args, "payload", "payload"), ts)
+        }
+        "desktop_recipes_duplicate" => {
+            store.desktop_recipes_duplicate(str_arg(args, "recipeId", "recipe_id"), ts)
+        }
+        "desktop_recipes_apply_to_project" => store.desktop_recipes_apply_to_project(
+            str_arg(args, "project", "project"),
+            str_arg(args, "recipeId", "recipe_id"),
+            ts,
+        ),
+        "desktop_workflow_memory_list" => store.desktop_workflow_memory_list(),
+        "desktop_workflow_memory_save_sheet" => {
+            store.desktop_workflow_memory_save_sheet(str_arg(args, "payload", "payload"), ts)
+        }
+        "desktop_workflow_memory_match_sheet" => {
+            store.desktop_workflow_memory_match_sheet(str_arg(args, "payload", "payload"))
+        }
+        "desktop_workflow_memory_apply_replay" => store.desktop_workflow_memory_apply_replay(
+            str_arg(args, "project", "project"),
+            str_arg(args, "workflowId", "workflow_id"),
+            ts,
+        ),
+        "desktop_workflow_memory_manage" => {
+            store.desktop_workflow_memory_manage(str_arg(args, "payload", "payload"), ts)
+        }
+        "desktop_learning_profile_get" => store.desktop_learning_profile_get(),
+        "desktop_learning_record_feedback" => {
+            store.desktop_learning_record_feedback(str_arg(args, "payload", "payload"), ts)
+        }
+        "desktop_learning_delete_rule" => {
+            store.desktop_learning_delete_rule(str_arg(args, "ruleId", "rule_id"), ts)
+        }
+        "desktop_learning_reset_profile" => store.desktop_learning_reset_profile(ts),
         other => store
             .gate_command(other, 0, Some(ts))
             .map(|_| "null".to_owned()),

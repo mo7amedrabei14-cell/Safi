@@ -135,3 +135,15 @@
 1. Managed PostgreSQL 18 production database + running CI `database-migrations` job (`0001..0012` + `postgres_multi_instance_e2e`, `account_postgres`, `accounts_postgres`).
 2. Public HTTPS Release Storage / CDN hosting for signed Windows/macOS/Linux installers + Authenticode/Apple notarization certificates + updating `release-manifest.json` / `POST /v1/owner/releases` with real HTTPS download URLs.
 3. Production HTTPS domain, TLS certificates, SMTP credentials, `SAFI_UPDATE_SIGNING_PRIVATE_KEY`, and live Paymob/Paddle webhook credentials.
+
+---
+
+## 10. Follow-Up Completion Round (Workflow Memory, Continuous Local Learning, Website 17-Area Showcase & 0ms Intro Transition)
+
+Building directly on baseline commit `8474e919d5b7c62af652acadb0e454e5bc14c622`, the subsequent completion round added:
+1. **Persistent Per-Sheet Workflow Memory (`crates/sf-desktop/src/workflow_memory.rs` + `DesktopWorkflowMemoryPanel.tsx` + `DesktopStudio.tsx`)**: Filename-independent semantic sheet recognition, per-sheet isolation inside multi-sheet workbooks (`Sales` vs. `Employees` vs. `Inventory`), confidence-tiered replay (`High >= 80%` auto-replay & suppression of already-answered clarification questions; `Medium 55%..79%` partial reuse & targeted questions on structural changes), and non-destructive version history (`restore_version`, `duplicate`, `rename`, `delete`).
+2. **Continuous Local Learning & Explainable Personal Profile (`PersonalLearningProfile` in `learning_profile.safi.enc`)**: Learns from explicit user feedback (`explicit_correction`, `preferred_rule`, `explicit_acceptance`, `explicit_rejection`, `repeated_choice`) scoped to `this_sheet_only` or `matching_sheets`, produces explainable suggestions citing `influencingRuleId` and provenance, and supports single-rule undo/delete or full profile reset.
+3. **Complete Recipe & Local Search UI Integration**: In-place personal recipe editing (`desktop_recipes_update_existing`), duplication (`desktop_recipes_duplicate`), direct application to the active Studio sheet (`desktop_recipes_apply_to_project`), project-ID filter in Local Search, and one-click **"Open in Studio"** on spreadsheet search hits.
+4. **Public Website Complete 17-Area Bilingual Showcase (`BentoCommandCenter.tsx`)** and **0ms Post-Intro Hero Headline Transition (`tools/verify-intro-transition-performance.mjs`)**.
+
+See the full report: `docs/reports/SAFIDATA-WORKFLOW-MEMORY-LEARNING-WEBSITE-AND-UX-ACCEPTANCE.md`.

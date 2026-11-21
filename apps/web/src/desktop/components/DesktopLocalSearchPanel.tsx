@@ -24,6 +24,7 @@ import {
 export interface DesktopLocalSearchPanelProps {
   readonly lang?: SafiLang;
   readonly readOnlyOffline?: boolean;
+  readonly onOpenFileInStudio?: (filePath: string, matchLocation: string) => void;
 }
 
 const FILE_TYPE_OPTIONS = [
@@ -53,12 +54,14 @@ function renderHighlightedSnippet(snippet: string): ReactNode {
 
 export function DesktopLocalSearchPanel({
   lang = "en",
-  readOnlyOffline = false
+  readOnlyOffline = false,
+  onOpenFileInStudio
 }: DesktopLocalSearchPanelProps): ReactNode {
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const [folderPath, setFolderPath] = useState("");
   const [queryText, setQueryText] = useState("");
   const [fileType, setFileType] = useState("");
+  const [projectIdFilter, setProjectIdFilter] = useState("");
   const [enableFuzzy, setEnableFuzzy] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +131,7 @@ export function DesktopLocalSearchPanel({
       const result = await queryDesktopSearch({
         query: trimmed,
         fileType: fileType.length > 0 ? fileType : null,
+        projectId: projectIdFilter.trim().length > 0 ? projectIdFilter.trim() : null,
         enableFuzzy,
         limit: 30
       });
@@ -276,6 +280,16 @@ export function DesktopLocalSearchPanel({
             </option>
           ))}
         </select>
+        <input
+          type="text"
+          value={projectIdFilter}
+          onChange={(e) => setProjectIdFilter(e.target.value)}
+          placeholder={L("تصفية حسب المشروع (اختياري)", "Filter by project ID (optional)")}
+          aria-label={L("تصفية حسب المشروع", "Filter by project ID")}
+          className="safi-input"
+          data-local-search-project-filter="true"
+          style={{ width: "170px" }}
+        />
         <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
           <input
             type="checkbox"
@@ -325,8 +339,30 @@ export function DesktopLocalSearchPanel({
             <div style={{ fontSize: "12px", opacity: 0.9 }}>
               {renderHighlightedSnippet(hit.snippet)}
             </div>
-            <div style={{ fontSize: "11px", opacity: 0.65, wordBreak: "break-all" }}>
-              {hit.path}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "11px"
+              }}
+            >
+              <span style={{ opacity: 0.65, wordBreak: "break-all" }}>{hit.path}</span>
+              {onOpenFileInStudio &&
+              !readOnlyOffline &&
+              ["xlsx", "xlsm", "xlsb", "xls", "ods", "csv", "tsv"].includes(
+                hit.fileType.toLowerCase()
+              ) ? (
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  onClick={() => onOpenFileInStudio(hit.path, hit.matchLocation)}
+                  data-search-open-in-studio="true"
+                >
+                  {L("فتح في الاستوديو", "Open in Studio")}
+                </button>
+              ) : null}
             </div>
           </article>
         ))}

@@ -9,10 +9,11 @@ import { SafiIntroSplash } from "./components/brand/SafiIntroSplash";
 import { SafiCustomScrollbar } from "./components/layout/SafiCustomScrollbar";
 import { getInitialSafiLang } from "./lib/locale";
 
-const loadApplicationShell = async () => {
-  const module = await import("./ApplicationShell");
-  return { default: module.ApplicationShell };
-};
+const applicationShellPromise = import("./ApplicationShell").then((module) => ({
+  default: module.ApplicationShell
+}));
+
+const loadApplicationShell = () => applicationShellPromise;
 
 const ApplicationShell = lazy(loadApplicationShell);
 
@@ -93,7 +94,7 @@ export function App(): ReactNode {
       <Suspense fallback={null}>
         <ApplicationShell
           onReady={markApplicationReady}
-          introComplete={!introMounted}
+          introComplete={!introMounted || applicationReady}
           initialVerificationToken={verificationToken}
           initialResetToken={resetToken}
         />

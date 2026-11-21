@@ -374,11 +374,47 @@ try {
   const pdfHitText = await desktopPage.locator('[data-local-search-results="true"]').innerText();
   assert.ok(pdfHitText.includes("compressed_q4_report.pdf"), `Missing FlateDecode PDF hit: ${pdfHitText}`);
 
-  // Search Arabic content in CSV
+  // Search Arabic content in CSV & click "Open in Studio" on the CSV search hit!
   await desktopPage.fill('[data-local-search-query-input="true"]', "القاهرة");
   await desktopPage.click('[data-local-search-submit="true"]');
   await desktopPage.waitForFunction(
     () => document.querySelector('[data-local-search-results="true"]')?.textContent?.includes("مبيعات_القاهرة.csv"),
+    undefined,
+    { timeout: 10_000 }
+  );
+  await desktopPage.locator('[data-search-open-in-studio="true"]').first().click();
+
+  // -------------------------------------------------------------------------
+  // [2B/6] Real Desktop Per-Sheet Workflow Memory & Continuous Local Learning UI
+  // -------------------------------------------------------------------------
+  console.log("[2B/6] Verifying real Desktop Per-Sheet Workflow Memory & Continuous Local Learning UI...");
+  await desktopPage.locator('[data-testid="toggle-workflow-memory-panel"]').click();
+  await desktopPage.locator('[data-desktop-workflow-memory="true"]').waitFor({ state: "visible", timeout: 10_000 });
+
+  await desktopPage.fill('[data-workflow-name-input="true"]', "Cairo Monthly Sales Workflow");
+  await desktopPage.click('[data-save-workflow-memory-btn="true"]');
+  await desktopPage.locator('[data-saved-workflow-id]').first().waitFor({ state: "visible", timeout: 10_000 });
+
+  // Automatic match banner on active sheet -> verify high confidence semantic match
+  await desktopPage.locator('[data-workflow-match-banner="true"]').waitFor({ state: "visible", timeout: 10_000 });
+  const matchTier = (
+    (await desktopPage
+      .locator('[data-workflow-match-banner="true"]')
+      .getAttribute("data-match-tier")) ?? ""
+  ).toLowerCase();
+  assert.equal(matchTier, "high", `Expected high confidence semantic match on saved sheet, got ${matchTier}`);
+
+  // Record explicit user feedback rule in Continuous Local Learning Profile
+  await desktopPage.fill('[data-learn-target-input="true"]', "amount");
+  await desktopPage.fill('[data-learn-preferred-input="true"]', "Measure");
+  await desktopPage.click('[data-record-learning-btn="true"]');
+  await desktopPage.locator('[data-learned-rule-id]').first().waitFor({ state: "visible", timeout: 10_000 });
+  await desktopPage.locator('[data-learned-suggestion-rule]').first().waitFor({ state: "visible", timeout: 10_000 });
+
+  // Undo / delete the learned rule
+  await desktopPage.locator('[data-delete-learned-rule-btn]').first().click();
+  await desktopPage.waitForFunction(
+    () => document.querySelectorAll('[data-learned-rule-id]').length === 0,
     undefined,
     { timeout: 10_000 }
   );

@@ -1151,6 +1151,95 @@ fn desktop_recipes_prepare_community_share(
     )
 }
 
+#[tauri::command]
+fn desktop_recipes_update_existing(
+    store: tauri::State<'_, StudioStore>,
+    payload: String,
+) -> Result<String, String> {
+    store.desktop_recipes_update_existing(&payload, now_ms())
+}
+
+#[tauri::command]
+fn desktop_recipes_duplicate(
+    store: tauri::State<'_, StudioStore>,
+    recipe_id: String,
+) -> Result<String, String> {
+    store.desktop_recipes_duplicate(&recipe_id, now_ms())
+}
+
+#[tauri::command]
+fn desktop_recipes_apply_to_project(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    recipe_id: String,
+) -> Result<String, String> {
+    store.desktop_recipes_apply_to_project(&project, &recipe_id, now_ms())
+}
+
+#[tauri::command]
+fn desktop_workflow_memory_list(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.desktop_workflow_memory_list()
+}
+
+#[tauri::command]
+fn desktop_workflow_memory_save_sheet(
+    store: tauri::State<'_, StudioStore>,
+    payload: String,
+) -> Result<String, String> {
+    store.desktop_workflow_memory_save_sheet(&payload, now_ms())
+}
+
+#[tauri::command]
+fn desktop_workflow_memory_match_sheet(
+    store: tauri::State<'_, StudioStore>,
+    payload: String,
+) -> Result<String, String> {
+    store.desktop_workflow_memory_match_sheet(&payload)
+}
+
+#[tauri::command]
+fn desktop_workflow_memory_apply_replay(
+    store: tauri::State<'_, StudioStore>,
+    project: String,
+    workflow_id: String,
+) -> Result<String, String> {
+    store.desktop_workflow_memory_apply_replay(&project, &workflow_id, now_ms())
+}
+
+#[tauri::command]
+fn desktop_workflow_memory_manage(
+    store: tauri::State<'_, StudioStore>,
+    payload: String,
+) -> Result<String, String> {
+    store.desktop_workflow_memory_manage(&payload, now_ms())
+}
+
+#[tauri::command]
+fn desktop_learning_profile_get(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.desktop_learning_profile_get()
+}
+
+#[tauri::command]
+fn desktop_learning_record_feedback(
+    store: tauri::State<'_, StudioStore>,
+    payload: String,
+) -> Result<String, String> {
+    store.desktop_learning_record_feedback(&payload, now_ms())
+}
+
+#[tauri::command]
+fn desktop_learning_delete_rule(
+    store: tauri::State<'_, StudioStore>,
+    rule_id: String,
+) -> Result<String, String> {
+    store.desktop_learning_delete_rule(&rule_id, now_ms())
+}
+
+#[tauri::command]
+fn desktop_learning_reset_profile(store: tauri::State<'_, StudioStore>) -> Result<String, String> {
+    store.desktop_learning_reset_profile(now_ms())
+}
+
 fn studio_generated_handler(
 ) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
@@ -1218,10 +1307,22 @@ fn studio_generated_handler(
         desktop_recipes_list,
         desktop_recipes_sync_official,
         desktop_recipes_save_as_new,
+        desktop_recipes_update_existing,
+        desktop_recipes_duplicate,
+        desktop_recipes_apply_to_project,
         desktop_recipes_delete,
         desktop_recipes_export_safitemplate,
         desktop_recipes_import_safitemplate,
-        desktop_recipes_prepare_community_share
+        desktop_recipes_prepare_community_share,
+        desktop_workflow_memory_list,
+        desktop_workflow_memory_save_sheet,
+        desktop_workflow_memory_match_sheet,
+        desktop_workflow_memory_apply_replay,
+        desktop_workflow_memory_manage,
+        desktop_learning_profile_get,
+        desktop_learning_record_feedback,
+        desktop_learning_delete_rule,
+        desktop_learning_reset_profile
     ]
 }
 

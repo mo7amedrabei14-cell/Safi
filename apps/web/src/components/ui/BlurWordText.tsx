@@ -9,9 +9,11 @@
  * double-invocation never leaves words stuck at `opacity: 0`.
  */
 import type { CSSProperties, ReactNode } from "react";
-import { createElement, useEffect, useRef } from "react";
+import { createElement, useEffect, useLayoutEffect, useRef } from "react";
 import { gsap } from "gsap";
 import { canAnimate } from "./motion-preference";
+
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 export type BlurWordTextTag = "h1" | "h2" | "h3" | "p" | "span";
 
@@ -46,15 +48,15 @@ export function BlurWordText({
   as = "p",
   className,
   style,
-  stagger = 0.04,
+  stagger = 0.01,
   delay = 0,
-  duration = 0.55,
+  duration = 0.18,
   ariaLabel
 }: BlurWordTextProps): ReactNode {
   const containerRef = useRef<HTMLElement | null>(null);
   const words = splitIntoWords(text);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const container = containerRef.current;
     if (container === null || !canAnimate()) {
       return;
@@ -65,17 +67,19 @@ export function BlurWordText({
       return;
     }
 
+    const effectiveStagger = Math.min(stagger, 0.012);
+    const effectiveDuration = Math.min(duration, 0.22);
+
     const tween = gsap.fromTo(
       targets,
-      { opacity: 0.2, y: 10, filter: "blur(6px)" },
+      { opacity: 0.88, y: 4 },
       {
         opacity: 1,
         y: 0,
-        filter: "blur(0px)",
-        duration,
+        duration: effectiveDuration,
         delay,
-        stagger,
-        ease: "power3.out",
+        stagger: effectiveStagger,
+        ease: "power2.out",
         clearProps: "filter,transform,opacity"
       }
     );

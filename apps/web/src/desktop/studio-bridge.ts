@@ -1128,7 +1128,11 @@ export async function getDesktopSearchStats(): Promise<DesktopSearchStats> {
 
 export interface DesktopLocalRecipeStep {
   readonly id: string;
-  readonly op: Record<string, unknown>;
+  readonly op: string | Record<string, unknown>;
+  readonly columns?: readonly string[];
+  readonly params?: Record<string, unknown>;
+  readonly confidence?: number;
+  readonly reversible?: boolean;
   readonly enabled?: boolean;
 }
 
@@ -1285,4 +1289,321 @@ export async function prepareDesktopCommunityShare(
       showContributorAttribution
     })
   ) as DesktopCommunitySharePayload;
+}
+
+export async function updateDesktopExistingRecipe(payload: {
+  readonly recipeId: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly steps: readonly DesktopLocalRecipeStep[];
+}): Promise<{
+  readonly updated: DesktopLocalRecipeRecord;
+  readonly officialTemplates: readonly DesktopLocalRecipeRecord[];
+  readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+}> {
+  return JSON.parse(
+    await call("desktop_recipes_update_existing", { payload: JSON.stringify(payload) })
+  ) as {
+    readonly updated: DesktopLocalRecipeRecord;
+    readonly officialTemplates: readonly DesktopLocalRecipeRecord[];
+    readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+  };
+}
+
+export async function duplicateDesktopRecipe(recipeId: string): Promise<{
+  readonly duplicated: DesktopLocalRecipeRecord;
+  readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+}> {
+  return JSON.parse(await call("desktop_recipes_duplicate", { recipeId })) as {
+    readonly duplicated: DesktopLocalRecipeRecord;
+    readonly myRecipes: readonly DesktopLocalRecipeRecord[];
+  };
+}
+
+export async function applyDesktopRecipeToProject(
+  project: string,
+  recipeId: string
+): Promise<DesktopStudioState> {
+  return stateCall("desktop_recipes_apply_to_project", { project, recipeId });
+}
+
+export type SheetBusinessDomain =
+  | "sales"
+  | "employees"
+  | "inventory"
+  | "finance"
+  | "branch_operations"
+  | "general";
+
+export type WorkflowMatchTier = "high" | "medium" | "low";
+
+export interface SavedQuestionDecision {
+  readonly questionId: string;
+  readonly semanticTopic: string;
+  readonly canonicalConcept: string;
+  readonly action: string;
+  readonly answer: string;
+  readonly customText?: string;
+  readonly updatedAtMs: number;
+}
+
+export interface SavedColumnDecision {
+  readonly headerName: string;
+  readonly canonicalConcept: string;
+  readonly confirmedRole: string;
+  readonly confirmedSemanticType: string;
+  readonly dateFormat?: string | null;
+  readonly currencyOrUnit?: string | null;
+  readonly isIdentifier: boolean;
+}
+
+export interface SavedCleaningOperation {
+  readonly stepId: string;
+  readonly kind: string;
+  readonly targetColumn?: string | null;
+  readonly targetConcept?: string | null;
+  readonly parameter?: string | null;
+}
+
+export interface SavedMetricDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly unit?: string | null;
+  readonly formula: string;
+}
+
+export interface SavedDashboardPreferences {
+  readonly preferredChartTypes?: readonly string[];
+  readonly preferredGroupByConcept?: string | null;
+  readonly preferredTemplateId?: string | null;
+  readonly preferredExportFormat?: string | null;
+}
+
+export interface SheetWorkflowVersionSnapshot {
+  readonly workflowVersion: number;
+  readonly savedAtMs: number;
+  readonly duplicatePolicy: string;
+  readonly missingValuePolicy: string;
+  readonly questionResolutions: readonly SavedQuestionDecision[];
+  readonly cleaningOperations: readonly SavedCleaningOperation[];
+  readonly metrics: readonly SavedMetricDefinition[];
+}
+
+export interface SheetWorkflowMemoryRecord {
+  readonly workflowId: string;
+  readonly displayName: string;
+  readonly projectId: string;
+  readonly lastSheetName: string;
+  readonly lastTableId: string;
+  readonly businessDomain: SheetBusinessDomain;
+  readonly schemaVersion: number;
+  readonly workflowVersion: number;
+  readonly createdAtMs: number;
+  readonly updatedAtMs: number;
+  readonly signature: {
+    readonly businessDomain: SheetBusinessDomain;
+    readonly canonicalConcepts: readonly string[];
+    readonly structuralHash: string;
+  };
+  readonly questionResolutions: readonly SavedQuestionDecision[];
+  readonly columnDecisions: readonly SavedColumnDecision[];
+  readonly duplicatePolicy: string;
+  readonly missingValuePolicy: string;
+  readonly businessRules: readonly string[];
+  readonly cleaningOperations: readonly SavedCleaningOperation[];
+  readonly metrics: readonly SavedMetricDefinition[];
+  readonly dashboardPreferences: SavedDashboardPreferences;
+  readonly versions: readonly SheetWorkflowVersionSnapshot[];
+  readonly validationStatus: string;
+  readonly lastExecution?: {
+    readonly executedAtMs: number;
+    readonly appliedOperations: number;
+    readonly appliedMetrics: number;
+    readonly reusedQuestions: number;
+  } | null;
+}
+
+export interface ExplainableLearnedSuggestion {
+  readonly influencingRuleId: string;
+  readonly category: string;
+  readonly targetHeaderOrConcept: string;
+  readonly suggestedValue: string;
+  readonly avoidedValue?: string | null;
+  readonly confidencePct: number;
+  readonly requiresConfirmation: boolean;
+  readonly whyEn: string;
+  readonly whyAr: string;
+}
+
+export interface SheetWorkflowMatchReport {
+  readonly matchedWorkflowId: string | null;
+  readonly matchedWorkflowName: string | null;
+  readonly matchedWorkflowVersion: number | null;
+  readonly detectedDomain: SheetBusinessDomain;
+  readonly confidencePct: number;
+  readonly matchTier: WorkflowMatchTier;
+  readonly autoReplayEligible: boolean;
+  readonly columnMapping: Readonly<Record<string, string>>;
+  readonly addedColumns: readonly string[];
+  readonly missingRequiredColumns: readonly string[];
+  readonly schemaChangeNotices: readonly string[];
+  readonly reusedQuestionResolutions: readonly SavedQuestionDecision[];
+  readonly suppressedQuestionTopics: readonly string[];
+  readonly learnedSuggestions: readonly ExplainableLearnedSuggestion[];
+  readonly explanationEn: string;
+  readonly explanationAr: string;
+}
+
+export interface LearnedPreferenceRule {
+  readonly ruleId: string;
+  readonly signalKind:
+    | "explicit_correction"
+    | "explicit_acceptance"
+    | "explicit_rejection"
+    | "preferred_rule"
+    | "repeated_choice";
+  readonly category:
+    | "column_classification"
+    | "date_format"
+    | "currency_unit"
+    | "duplicate_handling"
+    | "missing_value_treatment"
+    | "metric_formula"
+    | "chart_layout"
+    | "export_format"
+    | "transformation_rule";
+  readonly scope: "this_sheet_only" | "matching_sheets";
+  readonly businessDomain?: SheetBusinessDomain | null;
+  readonly targetConcept: string;
+  readonly preferredValue: string;
+  readonly rejectedValue?: string | null;
+  readonly userExplanation: string;
+  readonly confidencePct: number;
+  readonly evidenceCount: number;
+  readonly provenanceEn: string;
+  readonly provenanceAr: string;
+  readonly createdAtMs: number;
+  readonly updatedAtMs: number;
+}
+
+export interface PersonalLearningProfile {
+  readonly schemaVersion: number;
+  readonly profileVersion: number;
+  readonly generalPreferences: Readonly<Record<string, string>>;
+  readonly rules: readonly LearnedPreferenceRule[];
+  readonly updatedAtMs: number;
+}
+
+export async function listDesktopWorkflowMemories(): Promise<{
+  readonly workflows: readonly SheetWorkflowMemoryRecord[];
+  readonly learningProfile: PersonalLearningProfile;
+}> {
+  return JSON.parse(await call("desktop_workflow_memory_list")) as {
+    readonly workflows: readonly SheetWorkflowMemoryRecord[];
+    readonly learningProfile: PersonalLearningProfile;
+  };
+}
+
+export async function saveDesktopSheetWorkflowMemory(payload: {
+  readonly workflowId?: string | null;
+  readonly displayName: string;
+  readonly projectId?: string;
+  readonly sheetName: string;
+  readonly tableId: string;
+  readonly headers: readonly string[];
+  readonly questionResolutions?: readonly SavedQuestionDecision[];
+  readonly columnDecisions?: readonly SavedColumnDecision[];
+  readonly duplicatePolicy?: string;
+  readonly missingValuePolicy?: string;
+  readonly businessRules?: readonly string[];
+  readonly cleaningOperations?: readonly SavedCleaningOperation[];
+  readonly metrics?: readonly SavedMetricDefinition[];
+  readonly dashboardPreferences?: SavedDashboardPreferences;
+}): Promise<{
+  readonly saved: SheetWorkflowMemoryRecord;
+  readonly workflows: readonly SheetWorkflowMemoryRecord[];
+}> {
+  return JSON.parse(
+    await call("desktop_workflow_memory_save_sheet", { payload: JSON.stringify(payload) })
+  ) as {
+    readonly saved: SheetWorkflowMemoryRecord;
+    readonly workflows: readonly SheetWorkflowMemoryRecord[];
+  };
+}
+
+export async function matchDesktopSheetWorkflowMemory(payload: {
+  readonly sheetName: string;
+  readonly headers: readonly string[];
+  readonly observedDateFormat?: string | null;
+}): Promise<{
+  readonly report: SheetWorkflowMatchReport;
+  readonly matchedWorkflow: SheetWorkflowMemoryRecord | null;
+}> {
+  return JSON.parse(
+    await call("desktop_workflow_memory_match_sheet", { payload: JSON.stringify(payload) })
+  ) as {
+    readonly report: SheetWorkflowMatchReport;
+    readonly matchedWorkflow: SheetWorkflowMemoryRecord | null;
+  };
+}
+
+export async function applyDesktopWorkflowMemoryReplay(
+  project: string,
+  workflowId: string
+): Promise<DesktopStudioState> {
+  return stateCall("desktop_workflow_memory_apply_replay", { project, workflowId });
+}
+
+export async function manageDesktopWorkflowMemory(payload: {
+  readonly action: "restore_version" | "duplicate" | "rename" | "delete";
+  readonly workflowId: string;
+  readonly targetVersion?: number;
+  readonly newName?: string;
+}): Promise<{
+  readonly workflow: SheetWorkflowMemoryRecord | null;
+  readonly workflows: readonly SheetWorkflowMemoryRecord[];
+}> {
+  return JSON.parse(
+    await call("desktop_workflow_memory_manage", { payload: JSON.stringify(payload) })
+  ) as {
+    readonly workflow: SheetWorkflowMemoryRecord | null;
+    readonly workflows: readonly SheetWorkflowMemoryRecord[];
+  };
+}
+
+export async function getDesktopLearningProfile(): Promise<PersonalLearningProfile> {
+  return JSON.parse(await call("desktop_learning_profile_get")) as PersonalLearningProfile;
+}
+
+export async function recordDesktopLearningFeedback(payload: {
+  readonly signalKind: LearnedPreferenceRule["signalKind"];
+  readonly category: LearnedPreferenceRule["category"];
+  readonly scope: LearnedPreferenceRule["scope"];
+  readonly boundStructuralHash?: string | null;
+  readonly businessDomain?: SheetBusinessDomain | null;
+  readonly targetConcept: string;
+  readonly preferredValue: string;
+  readonly rejectedValue?: string | null;
+  readonly userExplanation?: string;
+  readonly sourceSheetLabel?: string;
+}): Promise<{
+  readonly rule: LearnedPreferenceRule;
+  readonly learningProfile: PersonalLearningProfile;
+}> {
+  return JSON.parse(
+    await call("desktop_learning_record_feedback", { payload: JSON.stringify(payload) })
+  ) as {
+    readonly rule: LearnedPreferenceRule;
+    readonly learningProfile: PersonalLearningProfile;
+  };
+}
+
+export async function deleteDesktopLearningRule(ruleId: string): Promise<PersonalLearningProfile> {
+  return JSON.parse(
+    await call("desktop_learning_delete_rule", { ruleId })
+  ) as PersonalLearningProfile;
+}
+
+export async function resetDesktopLearningProfile(): Promise<PersonalLearningProfile> {
+  return JSON.parse(await call("desktop_learning_reset_profile")) as PersonalLearningProfile;
 }

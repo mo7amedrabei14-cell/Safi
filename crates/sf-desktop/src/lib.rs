@@ -15,6 +15,7 @@ pub mod studio;
 pub mod updater;
 pub mod vault;
 pub mod watcher;
+pub mod workflow_memory;
 
 #[cfg(test)]
 #[track_caller]

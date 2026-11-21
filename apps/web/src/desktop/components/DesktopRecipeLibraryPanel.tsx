@@ -12,8 +12,13 @@
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  Copy,
   CopyPlus,
   Download,
+  Edit3,
+  Play,
   RefreshCw,
   Send,
   ShieldAlert,
@@ -25,7 +30,9 @@ import type { SafiLang } from "../../components/layout/FloatingGlassDock";
 import { SafiAuthApiError } from "../../lib/auth-api";
 import { ownerApi, type OwnerCommunitySubmission } from "../../lib/owner-api";
 import {
+  applyDesktopRecipeToProject,
   deleteDesktopRecipe,
+  duplicateDesktopRecipe,
   exportDesktopSafiTemplate,
   importDesktopSafiTemplate,
   listDesktopRecipes,
@@ -34,26 +41,46 @@ import {
   prepareDesktopCommunityShare,
   saveDesktopRecipeAsNew,
   syncDesktopOfficialTemplates,
+  updateDesktopExistingRecipe,
   type DesktopCommunitySharePayload,
   type DesktopLocalRecipeRecord,
-  type DesktopLocalRecipeStep
+  type DesktopLocalRecipeStep,
+  type DesktopStudioState
 } from "../studio-bridge";
 
 export interface DesktopRecipeLibraryPanelProps {
   readonly lang?: SafiLang;
   readonly sessionToken?: string | null;
   readonly readOnlyOffline?: boolean;
+  readonly activeProjectId?: string | null;
+  readonly onStateUpdated?: (state: DesktopStudioState) => void;
 }
 
 const DEFAULT_CUSTOM_STEPS: readonly DesktopLocalRecipeStep[] = [
-  { id: "step_trim", op: { type: "trim_whitespace", columns: ["all"] }, enabled: true },
-  { id: "step_dedup", op: { type: "deduplicate_rows", columns: ["all"] }, enabled: true }
+  {
+    id: "step_trim",
+    op: "normalize_text",
+    columns: ["all"],
+    params: { trim: true },
+    confidence: 1.0,
+    reversible: true
+  },
+  {
+    id: "step_dedup",
+    op: "dedupe",
+    columns: ["all"],
+    params: {},
+    confidence: 1.0,
+    reversible: true
+  }
 ];
 
 export function DesktopRecipeLibraryPanel({
   lang = "en",
   sessionToken = null,
-  readOnlyOffline = false
+  readOnlyOffline = false,
+  activeProjectId = null,
+  onStateUpdated
 }: DesktopRecipeLibraryPanelProps): ReactNode {
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const [officialTemplates, setOfficialTemplates] = useState<readonly DesktopLocalRecipeRecord[]>(
@@ -65,8 +92,9 @@ export function DesktopRecipeLibraryPanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Customize & Save as New Recipe form state
+  // Customize & Save as New Recipe / Edit Existing Recipe form state
   const [sourceTemplateId, setSourceTemplateId] = useState<string | null>(null);
+  const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftCategory, setDraftCategory] = useState("finance");
@@ -150,6 +178,7 @@ export function DesktopRecipeLibraryPanel({
   };
 
   const beginCustomize = (tpl: DesktopLocalRecipeRecord): void => {
+    setEditingRecipeId(null);
     setSourceTemplateId(tpl.id);
     setDraftName(`${tpl.name} — Custom`);
     setDraftDescription(tpl.description);
@@ -164,15 +193,56 @@ export function DesktopRecipeLibraryPanel({
     );
   };
 
+  const beginEditMyRecipe = (rec: DesktopLocalRecipeRecord): void => {
+    setEditingRecipeId(rec.id);
+    setSourceTemplateId(rec.source_template_id ?? null);
+    setDraftName(rec.name);
+    setDraftDescription(rec.description);
+    setDraftCategory(rec.category || "custom");
+    setDraftSteps(rec.recipe.steps.length > 0 ? rec.recipe.steps : DEFAULT_CUSTOM_STEPS);
+    setError(null);
+    setNotice(
+      L(
+        `جاري تعديل وصفتك الشخصية "${rec.name}" مباشرةً.`,
+        `Editing your personal recipe "${rec.name}" in place.`
+      )
+    );
+  };
+
   const addNormalizeStep = (): void => {
     setDraftSteps((prev) => [
       ...prev,
       {
         id: `step_ar_${prev.length + 1}`,
-        op: { type: "normalize_arabic", columns: ["all"] },
-        enabled: true
+        op: "normalize_text",
+        columns: ["all"],
+        params: { trim: true, normalize_arabic: true },
+        confidence: 1.0,
+        reversible: true
       }
     ]);
+  };
+
+  const removeStepAt = (idx: number): void => {
+    setDraftSteps((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
+  };
+
+  const moveStep = (idx: number, direction: -1 | 1): void => {
+    setDraftSteps((prev) => {
+      const target = idx + direction;
+      if (target < 0 || target >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const current = next[idx];
+      const other = next[target];
+      if (!current || !other) {
+        return prev;
+      }
+      next[idx] = other;
+      next[target] = current;
+      return next;
+    });
   };
 
   const handleSaveAsNew = async (event: FormEvent): Promise<void> => {
@@ -196,6 +266,7 @@ export function DesktopRecipeLibraryPanel({
       });
       setOfficialTemplates(res.officialTemplates);
       setMyRecipes(res.myRecipes);
+      setEditingRecipeId(null);
       if (res.saved !== null) {
         setNotice(
           L(
@@ -204,6 +275,83 @@ export function DesktopRecipeLibraryPanel({
           )
         );
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUpdateExisting = async (): Promise<void> => {
+    if (!editingRecipeId) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await updateDesktopExistingRecipe({
+        recipeId: editingRecipeId,
+        name: draftName.trim(),
+        description: draftDescription.trim() || "Updated SafiData recipe",
+        steps: draftSteps
+      });
+      setOfficialTemplates(res.officialTemplates);
+      setMyRecipes(res.myRecipes);
+      setEditingRecipeId(null);
+      if (res.updated !== null) {
+        setNotice(
+          L(
+            `تم تحديث "${res.updated.name}" في وصفاتي بنجاح.`,
+            `Updated "${res.updated.name}" in My Recipes.`
+          )
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDuplicateMyRecipe = async (recipeId: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await duplicateDesktopRecipe(recipeId);
+      setMyRecipes(res.myRecipes);
+      if (res.duplicated !== null) {
+        setNotice(
+          L(
+            `تم إنشاء نسخة مستقلة: "${res.duplicated.name}".`,
+            `Created independent duplicate: "${res.duplicated.name}".`
+          )
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleApplyToActiveProject = async (recipe: DesktopLocalRecipeRecord): Promise<void> => {
+    if (!activeProjectId) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updatedState = await applyDesktopRecipeToProject(activeProjectId, recipe.id);
+      onStateUpdated?.(updatedState);
+      setNotice(
+        L(
+          `تم تطبيق الوصفة "${recipe.name}" على ورقة العمل المفتوحة (${updatedState.rowCount} صف).`,
+          `Applied recipe "${recipe.name}" to the active Studio sheet (${updatedState.rowCount} rows).`
+        )
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -475,16 +623,30 @@ export function DesktopRecipeLibraryPanel({
               <div style={{ fontSize: "11px", opacity: 0.7 }}>
                 {tpl.origin} • {tpl.recipe.steps.length} {L("خطوات", "steps")}
               </div>
-              <button
-                type="button"
-                className="safi-btn safi-btn-ghost"
-                onClick={() => beginCustomize(tpl)}
-                disabled={readOnlyOffline || busy}
-                data-customize-official-btn={tpl.id}
-              >
-                <CopyPlus size={14} aria-hidden="true" />
-                <span>{L("تخصيص وحفظ كوصفة جديدة", "Customize & Save as New")}</span>
-              </button>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  onClick={() => beginCustomize(tpl)}
+                  disabled={readOnlyOffline || busy}
+                  data-customize-official-btn={tpl.id}
+                >
+                  <CopyPlus size={14} aria-hidden="true" />
+                  <span>{L("تخصيص وحفظ كوصفة جديدة", "Customize & Save as New")}</span>
+                </button>
+                {activeProjectId ? (
+                  <button
+                    type="button"
+                    className="safi-btn safi-btn-ghost"
+                    onClick={() => void handleApplyToActiveProject(tpl)}
+                    disabled={readOnlyOffline || busy}
+                    data-apply-recipe-btn={tpl.id}
+                  >
+                    <Play size={14} aria-hidden="true" />
+                    <span>{L("تطبيق على الورقة", "Apply")}</span>
+                  </button>
+                ) : null}
+              </div>
             </article>
           ))}
         </div>
@@ -548,6 +710,59 @@ export function DesktopRecipeLibraryPanel({
             <option value="confirmed_replace">{L("استبدال مؤكد", "Confirmed replace")}</option>
           </select>
         </div>
+        <div style={{ display: "grid", gap: "4px" }}>
+          {draftSteps.map((step, idx) => (
+            <div
+              key={step.id}
+              data-recipe-draft-step={step.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontSize: "12px",
+                padding: "4px 8px",
+                borderRadius: "6px",
+                background: "rgba(148,163,184,0.08)"
+              }}
+            >
+              <span>
+                #{idx + 1} <strong>{step.id}</strong> —{" "}
+                {typeof step.op === "string"
+                  ? step.op
+                  : ((step.op as { type?: string }).type ?? "normalize_text")}
+              </span>
+              <span style={{ display: "flex", gap: "4px" }}>
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  onClick={() => moveStep(idx, -1)}
+                  disabled={readOnlyOffline || busy || idx === 0}
+                  aria-label={L("تحريك لأعلى", "Move step up")}
+                >
+                  <ArrowUp size={12} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  onClick={() => moveStep(idx, 1)}
+                  disabled={readOnlyOffline || busy || idx === draftSteps.length - 1}
+                  aria-label={L("تحريك لأسفل", "Move step down")}
+                >
+                  <ArrowDown size={12} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  onClick={() => removeStepAt(idx)}
+                  disabled={readOnlyOffline || busy || draftSteps.length <= 1}
+                  aria-label={L("حذف الخطوة", "Remove step")}
+                >
+                  <Trash2 size={12} aria-hidden="true" />
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
           <span style={{ fontSize: "12px", opacity: 0.8 }}>
             {L("الخطوات الحالية:", "Steps:")} {draftSteps.length}
@@ -561,6 +776,17 @@ export function DesktopRecipeLibraryPanel({
           >
             {L("+ إضافة خطوة تطبيع عربي", "+ Add Arabic Normalize Step")}
           </button>
+          {editingRecipeId !== null ? (
+            <button
+              type="button"
+              className="safi-btn safi-btn-primary"
+              onClick={() => void handleUpdateExisting()}
+              disabled={readOnlyOffline || busy}
+              data-recipe-update-existing-btn="true"
+            >
+              {L("حفظ التعديلات على الوصفة الحالية", "Update Existing Recipe")}
+            </button>
+          ) : null}
           <button
             type="submit"
             className="safi-btn safi-btn-primary"
@@ -640,6 +866,38 @@ export function DesktopRecipeLibraryPanel({
                 </div>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {activeProjectId ? (
+                  <button
+                    type="button"
+                    className="safi-btn safi-btn-primary"
+                    onClick={() => void handleApplyToActiveProject(rec)}
+                    disabled={readOnlyOffline || busy}
+                    data-apply-recipe-btn={rec.id}
+                  >
+                    <Play size={14} aria-hidden="true" />
+                    <span>{L("تطبيق على الورقة", "Apply")}</span>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  onClick={() => beginEditMyRecipe(rec)}
+                  disabled={readOnlyOffline || busy}
+                  data-edit-my-recipe-btn={rec.id}
+                >
+                  <Edit3 size={14} aria-hidden="true" />
+                  <span>{L("تعديل", "Edit")}</span>
+                </button>
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  onClick={() => void handleDuplicateMyRecipe(rec.id)}
+                  disabled={readOnlyOffline || busy}
+                  data-duplicate-recipe-btn={rec.id}
+                >
+                  <Copy size={14} aria-hidden="true" />
+                  <span>{L("تكرار", "Duplicate")}</span>
+                </button>
                 <button
                   type="button"
                   className="safi-btn safi-btn-ghost"

@@ -44,7 +44,10 @@ async function waitForIntroFonts(): Promise<void> {
   await Promise.all([
     document.fonts.load('700 44px "IBM Plex Sans Arabic"'),
     document.fonts.load('600 16px "IBM Plex Sans Arabic"'),
-    document.fonts.load('700 44px "Inter"')
+    document.fonts.load('400 16px "IBM Plex Sans Arabic"'),
+    document.fonts.load('700 44px "Inter"'),
+    document.fonts.load('600 16px "Inter"'),
+    document.fonts.load('400 16px "Inter"')
   ]);
   await document.fonts.ready;
 }

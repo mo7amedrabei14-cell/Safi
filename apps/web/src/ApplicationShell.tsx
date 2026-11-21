@@ -204,6 +204,7 @@ export function ApplicationShell({
     return "showcase";
   });
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const initialStageMountRef = useRef(true);
 
   useAnimatedFavicon();
 
@@ -297,17 +298,21 @@ export function ApplicationShell({
   }, [desktopRuntime, sessionToken]);
 
   useEffect(() => {
+    if (initialStageMountRef.current) {
+      initialStageMountRef.current = false;
+      return;
+    }
     const stage = stageRef.current;
     if (stage === null || !canAnimate()) {
       return;
     }
     const tween = gsap.fromTo(
       stage,
-      { opacity: 0.35, y: 10 },
+      { opacity: 0.82, y: 6 },
       {
         opacity: 1,
         y: 0,
-        duration: 0.28,
+        duration: 0.2,
         ease: "power2.out",
         clearProps: "transform,opacity"
       }

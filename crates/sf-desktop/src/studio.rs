@@ -42,6 +42,11 @@ use crate::recipe_library::{
     LocalRecipeLibrary, LocalRecipeRecord, NameConflictPolicy, RecipeOriginClass,
 };
 use crate::vault::{VaultKey, decrypt_vault_payload, encrypt_vault_payload};
+use crate::workflow_memory::{
+    LearningCategory, LearningRuleScope, LearningSignalKind, LocalWorkflowMemoryStore,
+    SavedCleaningOperation, SavedColumnDecision, SavedDashboardPreferences, SavedMetricDefinition,
+    SavedQuestionDecision, SavedRecommendationFeedback, SheetBusinessDomain,
+};
 
 /// Largest file the desktop app will import (`50 MiB`, matching the drop zone copy).
 pub const MAX_STUDIO_IMPORT_BYTES: u64 = 50 * 1024 * 1024;
@@ -704,6 +709,7 @@ pub struct StudioStore {
     clock_ms: Mutex<Option<u64>>,
     search_index: Mutex<Option<LocalSearchIndex>>,
     recipe_library: Mutex<Option<LocalRecipeLibrary>>,
+    workflow_memory: Mutex<Option<LocalWorkflowMemoryStore>>,
 }
 
 impl Default for StudioStore {
@@ -727,6 +733,7 @@ impl Default for StudioStore {
             clock_ms: Mutex::new(None),
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
+            workflow_memory: Mutex::new(None),
         }
     }
 }
@@ -761,6 +768,7 @@ impl StudioStore {
             clock_ms: Mutex::new(None),
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
+            workflow_memory: Mutex::new(None),
         }
     }
 
@@ -789,6 +797,7 @@ impl StudioStore {
             clock_ms: Mutex::new(None),
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
+            workflow_memory: Mutex::new(None),
         }
     }
 
@@ -2734,7 +2743,7 @@ impl StudioStore {
                 .unwrap_or_default();
             let steps: Vec<sf_recipe::recipe::RecipeStep> = item
                 .get("steps")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .and_then(parse_recipe_steps_flexible)
                 .unwrap_or_default();
             if id.is_empty() || name.is_empty() || steps.is_empty() {
                 continue;
@@ -2827,9 +2836,8 @@ impl StudioStore {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("fail_on_duplicate"),
         );
-        let custom_steps: Option<Vec<sf_recipe::recipe::RecipeStep>> = body
-            .get("steps")
-            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let custom_steps: Option<Vec<sf_recipe::recipe::RecipeStep>> =
+            body.get("steps").and_then(parse_recipe_steps_flexible);
         let required_columns: Option<Vec<String>> = body
             .get("requiredColumns")
             .and_then(|v| serde_json::from_value(v.clone()).ok());
@@ -3051,6 +3059,767 @@ impl StudioStore {
             show_contributor_attribution,
         )?;
         serde_json::to_string(&payload).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    fn ensure_workflow_memory_loaded(&self) -> Result<(), String> {
+        let mut slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        if slot.is_none() {
+            let dir = self.resolve_storage_dir()?;
+            let key = self.vault_key.lock().ok().and_then(|g| g.clone());
+            let loaded = LocalWorkflowMemoryStore::open(dir, key)?;
+            *slot = Some(loaded);
+        }
+        Ok(())
+    }
+
+    /// Updates an existing user-owned recipe in place (never allowed on Official Templates).
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-RCP-001` / `"DUPLICATE_RECIPE_NAME"`.
+    pub fn desktop_recipes_update_existing(
+        &self,
+        payload_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("payload", payload_json));
+        self.gate_command("desktop_recipes_update_existing", payload_len, Some(now_ms))?;
+        let body: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|_| "SF-RCP-001".to_owned())?;
+        let recipe_id = body
+            .get("recipeId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if recipe_id.is_empty() {
+            return Err("SF-RCP-001".to_owned());
+        }
+        let new_name = body
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let new_description = body.get("description").and_then(serde_json::Value::as_str);
+        let new_steps: Vec<sf_recipe::recipe::RecipeStep> = body
+            .get("steps")
+            .and_then(parse_recipe_steps_flexible)
+            .ok_or_else(|| "SF-RCP-001".to_owned())?;
+
+        self.ensure_recipe_library_loaded()?;
+        let mut slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        if let Some(name_str) = new_name {
+            let current_name = lib.get_my_recipe(recipe_id).map(|r| r.name.clone());
+            if current_name.as_deref() != Some(name_str) {
+                let _ = lib.rename_my_recipe(recipe_id, name_str, now_ms)?;
+            }
+        }
+        let updated = lib.update_my_recipe(recipe_id, new_steps, new_description, now_ms)?;
+        serde_json::to_string(&serde_json::json!({
+            "updated": updated,
+            "officialTemplates": lib.list_official_templates(),
+            "myRecipes": lib.list_my_recipes(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Duplicates an existing user-owned recipe under a unique generated copy name.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-RCP-001`.
+    pub fn desktop_recipes_duplicate(
+        &self,
+        recipe_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("recipeId", recipe_id));
+        self.gate_command("desktop_recipes_duplicate", payload_len, Some(now_ms))?;
+        self.ensure_recipe_library_loaded()?;
+        let mut slot = self
+            .recipe_library
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(lib) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let duplicated = lib.duplicate_my_recipe(recipe_id, now_ms)?;
+        serde_json::to_string(&serde_json::json!({
+            "duplicated": duplicated,
+            "myRecipes": lib.list_my_recipes(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Deterministically applies a saved or official recipe onto an open Studio project dataset.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors, `SF-RCP-001`, or `SF-SYS-015`.
+    pub fn desktop_recipes_apply_to_project(
+        &self,
+        project: &str,
+        recipe_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("project", project), ("recipeId", recipe_id));
+        self.gate_command(
+            "desktop_recipes_apply_to_project",
+            payload_len,
+            Some(now_ms),
+        )?;
+        self.ensure_recipe_library_loaded()?;
+        let record = {
+            let slot = self
+                .recipe_library
+                .lock()
+                .map_err(|_| "SF-SYS-001".to_owned())?;
+            let Some(lib) = slot.as_ref() else {
+                return Err("SF-SYS-001".to_owned());
+            };
+            lib.get_my_recipe(recipe_id)
+                .or_else(|| lib.get_official_template(recipe_id))
+                .cloned()
+                .ok_or_else(|| "SF-RCP-001".to_owned())?
+        };
+
+        let col_names: Vec<String> = {
+            let projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let graph = projects
+                .get(project)
+                .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+            graph
+                .working()
+                .columns()
+                .iter()
+                .map(|c| c.schema().name.clone())
+                .collect()
+        };
+
+        for step in &record.recipe.steps {
+            let cols = step.columns.clone().unwrap_or_default();
+            match step.op {
+                sf_recipe::recipe::RecipeOperation::NormalizeText
+                | sf_recipe::recipe::RecipeOperation::NormalizePhone
+                | sf_recipe::recipe::RecipeOperation::ParseDate
+                | sf_recipe::recipe::RecipeOperation::ParseNumber => {
+                    let targets: Vec<String> =
+                        if cols.is_empty() || cols.iter().any(|c| c == "all" || c == "*") {
+                            col_names.clone()
+                        } else {
+                            cols.into_iter().filter(|c| col_names.contains(c)).collect()
+                        };
+                    for col in targets {
+                        let _ = self.mutate(project, |graph| graph.trim_column(&col, now_ms));
+                    }
+                }
+                sf_recipe::recipe::RecipeOperation::Rename => {
+                    let from = step
+                        .params
+                        .get("from")
+                        .and_then(serde_json::Value::as_str)
+                        .or_else(|| cols.first().map(String::as_str));
+                    let to = step.params.get("to").and_then(serde_json::Value::as_str);
+                    if let (Some(from_col), Some(to_col)) = (from, to) {
+                        if col_names.contains(&from_col.to_owned()) {
+                            let _ = self.mutate(project, |graph| {
+                                graph.rename_column(from_col, to_col, now_ms)
+                            });
+                        }
+                    }
+                }
+                _ => {
+                    for col in cols {
+                        if col_names.contains(&col) {
+                            let _ = self.mutate(project, |graph| graph.trim_column(&col, now_ms));
+                        }
+                    }
+                }
+            }
+        }
+        self.state_unlocked(project)
+    }
+
+    /// Lists all saved per-sheet workflow memory records and the personal learning profile (works offline).
+    ///
+    /// # Errors
+    /// Returns `SF-AUTH-001` or `SF-SYS-001`.
+    pub fn desktop_workflow_memory_list(&self) -> Result<String, String> {
+        self.gate_command(
+            "desktop_workflow_memory_list",
+            crate::ipc_payload_len!(),
+            None,
+        )?;
+        self.ensure_workflow_memory_loaded()?;
+        let slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(store) = slot.as_ref() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        serde_json::to_string(&serde_json::json!({
+            "workflows": store.list_sheet_workflows(),
+            "learningProfile": store.learning_profile(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Saves or updates the complete per-sheet workflow memory for a worksheet/table.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-SYS-001`.
+    pub fn desktop_workflow_memory_save_sheet(
+        &self,
+        payload_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("payload", payload_json));
+        self.gate_command(
+            "desktop_workflow_memory_save_sheet",
+            payload_len,
+            Some(now_ms),
+        )?;
+        let body: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|_| "SF-SYS-001".to_owned())?;
+
+        let workflow_id = body.get("workflowId").and_then(serde_json::Value::as_str);
+        let display_name = body
+            .get("displayName")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let project_id = body
+            .get("projectId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("main");
+        let sheet_name = body
+            .get("sheetName")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Sheet1");
+        let table_id = body
+            .get("tableId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("tbl_1");
+        let headers: Vec<String> = body
+            .get("headers")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let question_resolutions: Vec<SavedQuestionDecision> = body
+            .get("questionResolutions")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let column_decisions: Vec<SavedColumnDecision> = body
+            .get("columnDecisions")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let duplicate_policy = body
+            .get("duplicatePolicy")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("exact_key");
+        let missing_value_policy = body
+            .get("missingValuePolicy")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("flag_only");
+        let business_rules: Vec<String> = body
+            .get("businessRules")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let cleaning_operations: Vec<SavedCleaningOperation> = body
+            .get("cleaningOperations")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let metrics: Vec<SavedMetricDefinition> = body
+            .get("metrics")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let dashboard_preferences: SavedDashboardPreferences = body
+            .get("dashboardPreferences")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let recommendation_feedback: Vec<SavedRecommendationFeedback> = body
+            .get("recommendationFeedback")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        self.ensure_workflow_memory_loaded()?;
+        let mut slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(store) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+
+        let saved = store.save_sheet_workflow(
+            workflow_id,
+            display_name,
+            project_id,
+            sheet_name,
+            table_id,
+            &headers,
+            question_resolutions,
+            column_decisions,
+            duplicate_policy,
+            missing_value_policy,
+            business_rules,
+            cleaning_operations,
+            metrics,
+            dashboard_preferences,
+            recommendation_feedback,
+            now_ms,
+        )?;
+        serde_json::to_string(&serde_json::json!({
+            "saved": saved,
+            "workflows": store.list_sheet_workflows(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Matches an incoming or active worksheet against saved per-sheet workflow memories and
+    /// learned personal preferences (works in Offline Read-Only Mode).
+    ///
+    /// # Errors
+    /// Returns `SF-AUTH-001` or `SF-SYS-001`.
+    pub fn desktop_workflow_memory_match_sheet(
+        &self,
+        payload_json: &str,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("payload", payload_json));
+        self.gate_command("desktop_workflow_memory_match_sheet", payload_len, None)?;
+        let body: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|_| "SF-SYS-001".to_owned())?;
+        let sheet_name = body
+            .get("sheetName")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Sheet1");
+        let headers: Vec<String> = body
+            .get("headers")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let observed_date_format = body
+            .get("observedDateFormat")
+            .and_then(serde_json::Value::as_str);
+
+        self.ensure_workflow_memory_loaded()?;
+        let slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(store) = slot.as_ref() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let report = store.match_incoming_sheet(sheet_name, &headers, observed_date_format);
+        let matched_record = report
+            .matched_workflow_id
+            .as_deref()
+            .and_then(|id| store.get_sheet_workflow(id))
+            .cloned();
+        serde_json::to_string(&serde_json::json!({
+            "report": report,
+            "matchedWorkflow": matched_record,
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Deterministically replays a saved sheet workflow's cleaning operations, metrics, and
+    /// question resolutions onto an open Studio project dataset.
+    ///
+    /// # Errors
+    /// Returns auth/offline errors, `SF-SYS-015`, or `SF-SYS-001`.
+    pub fn desktop_workflow_memory_apply_replay(
+        &self,
+        project: &str,
+        workflow_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len =
+            crate::ipc_payload_len!(("project", project), ("workflowId", workflow_id));
+        self.gate_command(
+            "desktop_workflow_memory_apply_replay",
+            payload_len,
+            Some(now_ms),
+        )?;
+        self.ensure_workflow_memory_loaded()?;
+
+        let current_headers: Vec<String> = {
+            let projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let graph = projects
+                .get(project)
+                .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
+            graph
+                .working()
+                .columns()
+                .iter()
+                .map(|c| c.schema().name.clone())
+                .collect()
+        };
+
+        let (workflow, match_report) = {
+            let slot = self
+                .workflow_memory
+                .lock()
+                .map_err(|_| "SF-SYS-001".to_owned())?;
+            let Some(store) = slot.as_ref() else {
+                return Err("SF-SYS-001".to_owned());
+            };
+            let wf = store
+                .get_sheet_workflow(workflow_id)
+                .cloned()
+                .ok_or_else(|| "SF-SYS-001".to_owned())?;
+            let rep = store.match_incoming_sheet(&wf.last_sheet_name, &current_headers, None);
+            (wf, rep)
+        };
+
+        let resolve_col = |saved_col: &str| -> String {
+            match_report
+                .column_mapping
+                .get(saved_col)
+                .cloned()
+                .unwrap_or_else(|| saved_col.to_owned())
+        };
+
+        let mut applied_ops = 0usize;
+        for op in &workflow.cleaning_operations {
+            match op.kind.as_str() {
+                "trim_column" => {
+                    if let Some(col) = op.target_column.as_deref() {
+                        let mapped = resolve_col(col);
+                        if self
+                            .mutate(project, |graph| graph.trim_column(&mapped, now_ms))
+                            .is_ok()
+                        {
+                            applied_ops += 1;
+                        }
+                    }
+                }
+                "rename_column" => {
+                    if let (Some(from), Some(to)) =
+                        (op.target_column.as_deref(), op.parameter.as_deref())
+                    {
+                        let mapped = resolve_col(from);
+                        if self
+                            .mutate(project, |graph| graph.rename_column(&mapped, to, now_ms))
+                            .is_ok()
+                        {
+                            applied_ops += 1;
+                        }
+                    }
+                }
+                "dsl_command" => {
+                    if let Some(cmd_str) = op.parameter.as_deref()
+                        && let Ok(parsed) = parse_command(cmd_str)
+                        && self
+                            .mutate(project, |graph| apply_command(graph, &parsed, now_ms))
+                            .is_ok()
+                    {
+                        applied_ops += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut applied_metrics = 0usize;
+        for m in &workflow.metrics {
+            // Translate any mapped column names in the formula (e.g. `SUM(amount)` -> `SUM(المبيعات)`).
+            let mut mapped_formula = m.formula.clone();
+            for (saved_h, incoming_h) in &match_report.column_mapping {
+                if saved_h != incoming_h {
+                    mapped_formula =
+                        mapped_formula.replace(&format!("({saved_h})"), &format!("({incoming_h})"));
+                }
+            }
+            if let Ok(mid) = MetricId::new(&m.id)
+                && self
+                    .mutate(project, |graph| {
+                        graph.define_metric(
+                            mid,
+                            &m.name,
+                            m.unit.as_deref(),
+                            &mapped_formula,
+                            now_ms,
+                        )
+                    })
+                    .is_ok()
+            {
+                applied_metrics += 1;
+            }
+        }
+
+        // Persist reused question resolutions into the project's StudioWorkspaceArtifacts.
+        let reused_count = match_report.reused_question_resolutions.len();
+        if let Ok(mut art_map) = self.artifacts.lock() {
+            let entry = art_map.entry(project.to_owned()).or_default();
+            for rq in &match_report.reused_question_resolutions {
+                if let Some(existing) = entry
+                    .question_resolutions
+                    .iter_mut()
+                    .find(|q| q.question_id == rq.question_id)
+                {
+                    existing.action = rq.action.clone();
+                    existing.answer = rq.answer.clone();
+                    existing.custom_text = rq.custom_text.clone();
+                    existing.updated_at_ms = now_ms;
+                } else {
+                    entry
+                        .question_resolutions
+                        .push(StudioQuestionResolutionArtifact {
+                            question_id: rq.question_id.clone(),
+                            action: rq.action.clone(),
+                            answer: rq.answer.clone(),
+                            custom_text: rq.custom_text.clone(),
+                            updated_at_ms: now_ms,
+                        });
+                }
+            }
+        }
+
+        {
+            let mut slot = self
+                .workflow_memory
+                .lock()
+                .map_err(|_| "SF-SYS-001".to_owned())?;
+            if let Some(store) = slot.as_mut() {
+                let _ = store.record_workflow_execution(
+                    workflow_id,
+                    applied_ops,
+                    applied_metrics,
+                    reused_count,
+                    now_ms,
+                );
+            }
+        }
+
+        self.state_unlocked(project)
+    }
+
+    /// Manages saved per-sheet workflows (`restore_version`, `duplicate`, `rename`, `delete`).
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-SYS-001`.
+    pub fn desktop_workflow_memory_manage(
+        &self,
+        payload_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("payload", payload_json));
+        self.gate_command("desktop_workflow_memory_manage", payload_len, Some(now_ms))?;
+        let body: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|_| "SF-SYS-001".to_owned())?;
+        let action = body
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let workflow_id = body
+            .get("workflowId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+
+        self.ensure_workflow_memory_loaded()?;
+        let mut slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(store) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+
+        let result_record = match action {
+            "restore_version" => {
+                let target_version = body
+                    .get("targetVersion")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|v| u32::try_from(v).ok())
+                    .ok_or_else(|| "SF-SYS-001".to_owned())?;
+                Some(store.restore_workflow_version(workflow_id, target_version, now_ms)?)
+            }
+            "duplicate" => {
+                let new_name = body.get("newName").and_then(serde_json::Value::as_str);
+                Some(store.duplicate_workflow(workflow_id, new_name, now_ms)?)
+            }
+            "rename" => {
+                let new_name = body
+                    .get("newName")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                Some(store.rename_workflow(workflow_id, new_name, now_ms)?)
+            }
+            "delete" => {
+                store.delete_workflow(workflow_id)?;
+                None
+            }
+            _ => return Err("SF-SYS-001".to_owned()),
+        };
+
+        serde_json::to_string(&serde_json::json!({
+            "workflow": result_record,
+            "workflows": store.list_sheet_workflows(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Returns the user's local [`PersonalLearningProfile`] (works in Offline Read-Only Mode).
+    ///
+    /// # Errors
+    /// Returns `SF-AUTH-001` or `SF-SYS-001`.
+    pub fn desktop_learning_profile_get(&self) -> Result<String, String> {
+        self.gate_command(
+            "desktop_learning_profile_get",
+            crate::ipc_payload_len!(),
+            None,
+        )?;
+        self.ensure_workflow_memory_loaded()?;
+        let slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(store) = slot.as_ref() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        serde_json::to_string(store.learning_profile()).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Records explicit user learning feedback into [`PersonalLearningProfile`].
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-SYS-001`.
+    pub fn desktop_learning_record_feedback(
+        &self,
+        payload_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("payload", payload_json));
+        self.gate_command(
+            "desktop_learning_record_feedback",
+            payload_len,
+            Some(now_ms),
+        )?;
+        let body: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|_| "SF-SYS-001".to_owned())?;
+
+        let signal_kind: LearningSignalKind = body
+            .get("signalKind")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or(LearningSignalKind::ExplicitCorrection);
+        let category: LearningCategory = body
+            .get("category")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or(LearningCategory::ColumnClassification);
+        let scope: LearningRuleScope = body
+            .get("scope")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or(LearningRuleScope::MatchingSheets);
+        let bound_hash = body
+            .get("boundStructuralHash")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        let business_domain: Option<SheetBusinessDomain> = body
+            .get("businessDomain")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let target_concept = body
+            .get("targetConcept")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let preferred_value = body
+            .get("preferredValue")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let rejected_value = body
+            .get("rejectedValue")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_owned);
+        let user_explanation = body
+            .get("userExplanation")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let source_sheet_label = body
+            .get("sourceSheetLabel")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Worksheet");
+
+        self.ensure_workflow_memory_loaded()?;
+        let mut slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(store) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let rule = store.record_learning_feedback(
+            signal_kind,
+            category,
+            scope,
+            bound_hash,
+            business_domain,
+            target_concept,
+            preferred_value,
+            rejected_value,
+            user_explanation,
+            source_sheet_label,
+            now_ms,
+        )?;
+        serde_json::to_string(&serde_json::json!({
+            "rule": rule,
+            "learningProfile": store.learning_profile(),
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Removes (undoes) a learned preference rule from [`PersonalLearningProfile`].
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-SYS-001`.
+    pub fn desktop_learning_delete_rule(
+        &self,
+        rule_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("ruleId", rule_id));
+        self.gate_command("desktop_learning_delete_rule", payload_len, Some(now_ms))?;
+        self.ensure_workflow_memory_loaded()?;
+        let mut slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(store) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        store.delete_learned_rule(rule_id, now_ms)?;
+        serde_json::to_string(store.learning_profile()).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Resets the local [`PersonalLearningProfile`].
+    ///
+    /// # Errors
+    /// Returns auth/offline errors or `SF-SYS-001`.
+    pub fn desktop_learning_reset_profile(&self, now_ms: u64) -> Result<String, String> {
+        self.gate_command(
+            "desktop_learning_reset_profile",
+            crate::ipc_payload_len!(),
+            Some(now_ms),
+        )?;
+        self.ensure_workflow_memory_loaded()?;
+        let mut slot = self
+            .workflow_memory
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_owned())?;
+        let Some(store) = slot.as_mut() else {
+            return Err("SF-SYS-001".to_owned());
+        };
+        let profile = store.reset_learning_profile(now_ms)?;
+        serde_json::to_string(&profile).map_err(|_| "SF-SYS-001".to_owned())
     }
 
     fn mutate(
@@ -3608,6 +4377,77 @@ fn parse_conflict_policy(raw: &str) -> NameConflictPolicy {
         "confirmed_replace" => NameConflictPolicy::ConfirmedReplace,
         _ => NameConflictPolicy::FailOnDuplicate,
     }
+}
+
+fn parse_recipe_steps_flexible(
+    value: &serde_json::Value,
+) -> Option<Vec<sf_recipe::recipe::RecipeStep>> {
+    if let Ok(canonical) =
+        serde_json::from_value::<Vec<sf_recipe::recipe::RecipeStep>>(value.clone())
+    {
+        return Some(canonical);
+    }
+    let arr = value.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (idx, item) in arr.iter().enumerate() {
+        if let Ok(single) = serde_json::from_value::<sf_recipe::recipe::RecipeStep>(item.clone()) {
+            out.push(single);
+            continue;
+        }
+        let id = item
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("step_{}", idx + 1));
+        let op_field = item.get("op")?;
+        let (op_type, nested_cols) = if let Some(s) = op_field.as_str() {
+            (s, None)
+        } else if let Some(obj) = op_field.as_object() {
+            let t = obj
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("normalize_text");
+            let c: Option<Vec<String>> = obj
+                .get("columns")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            (t, c)
+        } else {
+            ("normalize_text", None)
+        };
+        let mapped_op = match op_type {
+            "dedupe" | "deduplicate_rows" => sf_recipe::recipe::RecipeOperation::Dedupe,
+            "fill_blank" => sf_recipe::recipe::RecipeOperation::FillBlank,
+            "parse_date" => sf_recipe::recipe::RecipeOperation::ParseDate,
+            "parse_number" => sf_recipe::recipe::RecipeOperation::ParseNumber,
+            "normalize_phone" => sf_recipe::recipe::RecipeOperation::NormalizePhone,
+            "rename" | "rename_column" => sf_recipe::recipe::RecipeOperation::Rename,
+            "split" => sf_recipe::recipe::RecipeOperation::Split,
+            "merge" => sf_recipe::recipe::RecipeOperation::Merge,
+            _ => sf_recipe::recipe::RecipeOperation::NormalizeText,
+        };
+        let columns: Option<Vec<String>> = item
+            .get("columns")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .or(nested_cols);
+        let params = item
+            .get("params")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({ "trim": true }));
+        let confidence = item.get("confidence").and_then(serde_json::Value::as_f64);
+        let reversible = item
+            .get("reversible")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        out.push(sf_recipe::recipe::RecipeStep {
+            id,
+            op: mapped_op,
+            columns,
+            params,
+            confidence,
+            reversible,
+        });
+    }
+    Some(out)
 }
 
 #[cfg(test)]

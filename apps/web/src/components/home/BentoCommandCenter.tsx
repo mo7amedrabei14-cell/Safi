@@ -584,14 +584,13 @@ export function BentoCommandCenter({
 
     const cascade = gsap.fromTo(
       cards,
-      { opacity: 0.25, y: 18, scale: 0.99 },
+      { opacity: 0.88, y: 6 },
       {
         opacity: 1,
         y: 0,
-        scale: 1,
-        duration: 0.5,
-        stagger: 0.08,
-        ease: "power3.out",
+        duration: 0.22,
+        stagger: 0.02,
+        ease: "power2.out",
         clearProps: "transform,opacity"
       }
     );
@@ -2270,6 +2269,211 @@ export function BentoCommandCenter({
             </table>
           </div>
         </SpotlightCard>
+      </section>
+
+      {/* ====================================================================
+       * 5B. COMPLETE VERIFIED PRODUCT CAPABILITIES & ARCHITECTURE MATRIX (`#verified-capabilities-matrix` — Section 9)
+       *     Covers all 17 discovery areas in bilingual Arabic (RTL) & English (LTR) while preserving existing visual style.
+       * ==================================================================== */}
+      <section
+        id="verified-capabilities-matrix"
+        data-verified-capabilities-matrix="true"
+        style={{ display: "flex", flexDirection: "column", gap: "20px" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            textAlign: "center",
+            gap: "8px"
+          }}
+        >
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 14px",
+              borderRadius: "999px",
+              background: "var(--bg-glass)",
+              border: "1px solid var(--border-subtle)",
+              fontSize: "12.5px",
+              fontWeight: 700
+            }}
+          >
+            <CheckCircle2 size={14} style={{ color: "var(--status-ok)" }} />
+            <span>
+              {isAr
+                ? "مصفوفة القدرات الموثّقة • من مصنف واحد إلى منظومة مخرجات متكاملة"
+                : "Verified Product Capabilities • From One Workbook to Complete Deliverables"}
+            </span>
+          </span>
+          <h2 style={{ fontSize: "clamp(22px, 2.5vw, 34px)", fontWeight: 800, margin: 0 }}>
+            {isAr
+              ? "كل ما يقدّمه تطبيق صافي البيانات لسطح المكتب في مسار عمل واحد"
+              : "Everything SafiData Desktop Delivers in One Deterministic Pipeline"}
+          </h2>
+          <p
+            style={{
+              margin: 0,
+              maxWidth: "820px",
+              fontSize: "15px",
+              color: "var(--text-secondary)",
+              lineHeight: 1.7
+            }}
+          >
+            {isAr
+              ? "بدءًا من استيراد مصنفات Excel المتعددة الأوراق والجداول، مرورًا بالتنقية الحتمية وذاكرة الورقة المستقلة عن اسم الملف والتعلّم المحلي، وصولًا إلى تصدير العروض التقديمية والتقارير واللوحات التفاعلية."
+              : "From multi-sheet workbook ingestion, deterministic cleaning, filename-independent per-sheet workflow memory, and continuous local learning, to executive presentations, reports, and interactive capsules."}
+          </p>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: "16px"
+          }}
+        >
+          {[
+            {
+              id: "ingestion-multisheet",
+              badgeAr: "1–3 • استيراد وفهم المصنفات",
+              badgeEn: "1–3 • Workbook Ingestion & Profiling",
+              titleAr: "استيراد متعدد الصيغ وفهم الأوراق والجداول المتعددة",
+              titleEn: "Multi-Format Import & Multi-Sheet / Multi-Table Understanding",
+              descAr:
+                "يستورد ملفات .xlsx و.xlsm و.xlsb و.xls و.ods و.csv و.tsv محليًا، ويكتشف الأوراق الظاهرة والمخفية والمناطق الجدولية المتعددة والصفوف المفصولة، مع تحييد وحدات الماكرو والصيغ الخطرة تلقائيًا.",
+              descEn:
+                "Imports .xlsx, .xlsm, .xlsb, .xls, .ods, .csv, and .tsv locally, detects visible/hidden worksheets, multiple table regions, and separated header/total rows while neutralizing macros and formula injection."
+            },
+            {
+              id: "cleaning-recipes",
+              badgeAr: "4–5 • التنقية والقوالب والوصفات",
+              badgeEn: "4–5 • Deterministic Cleaning & Recipes",
+              titleAr: "تنقية حتمية، قوالب رسمية، وتبادل .safitemplate والمشاركة المجتمعية",
+              titleEn: "Deterministic Cleaning, Official Templates & .safitemplate Exchange",
+              descAr:
+                "توحيد النصوص العربية والإنجليزية والتواريخ والعملات وإزالة التكرار عبر محرك Rust الحتمي. خصّص القوالب الرسمية عبر (حفظ كوصفة جديدة) دون تعديل الأصل، وصدّر/استورد ملفات .safitemplate، أو شارك وصفتك المنقّاة عبر Share with SafiData بعد فحص الخصوصية والموافقة الصريحة.",
+              descEn:
+                "Deterministic Rust cleaning for Arabic/English text, dates, currencies, and duplicates. Customize Official Templates via Save as New Recipe, exchange signed .safitemplate files on paid plans, or Share with SafiData with PII scanning and explicit consent."
+            },
+            {
+              id: "workflow-memory-learning",
+              badgeAr: "6–7 • ذاكرة الورقة والتعلّم والأسئلة",
+              badgeEn: "6–7 • Per-Sheet Memory, Learning & Q&A",
+              titleAr: "ذاكرة مسار عمل لكل ورقة وتعلّم محلي مستمر وأسئلة توضيحية ذكية",
+              titleEn: "Filename-Independent Per-Sheet Workflow Memory & Continuous Learning",
+              descAr:
+                "يتعرّف التطبيق على بنية كل ورقة عمل دلاليًا حتى لو تغيّر اسم الملف أو اسم الورقة أو ترتيب الأعمدة (مثل مبيعات يناير -> مبيعات فبراير)، فيعيد تطبيق خطوات التنقية والمؤشرات دون تكرار الأسئلة المجاب عنها، مع ملف تعلّم شخصي محلي قابل للتفسير والتراجع.",
+              descEn:
+                "Recognizes each worksheet by semantic column signature even when filenames, sheet names, or column orders change (e.g. Jan Sales -> Feb Sales), replaying cleaning steps and suppressing already-answered questions with an explainable, undoable local learning profile."
+            },
+            {
+              id: "dashboards-charts-deliverables",
+              badgeAr: "8–11 • اللوحات والعروض والتقارير",
+              badgeEn: "8–11 • Dashboards, 21 Charts & Deliverables",
+              titleAr: "21 نوع رسم بياني، عروض PowerPoint، تقارير Word وPDF، وكبسولات تفاعلية",
+              titleEn: "21 Chart Types, Keynote PPTX, Word DOCX, Vector PDF & HTML Capsules",
+              descAr:
+                "من مصنف مصدر واحد، أنشئ لوحات مؤشرات تفاعلية (21 نوع رسم بياني)، وعروضًا تقديمية حقيقية (.pptx) مع ملاحظات المتحدث، وتقارير رسمية (.docx و.pdf متجهي يدعم العربية)، وكبسولات (.safi.html) تعمل دون اتصال، وحزم Power BI.",
+              descEn:
+                "From a single source workbook, generate interactive dashboards (21 chart types), genuine .pptx slide decks with presenter notes, executive .docx and Arabic vector .pdf reports, self-contained .safi.html capsules, and Power BI packages."
+            },
+            {
+              id: "local-search-projects",
+              badgeAr: "12–13 • البحث المحلي وخزنة المشاريع",
+              badgeEn: "12–13 • Local Full-Text Search & Encrypted Projects",
+              titleAr: "محرك بحث محلي شامل BM25 وإدارة مشاريع مشفّرة",
+              titleEn: "Embedded On-Device BM25 Full-Text Search & Encrypted Project Vault",
+              descAr:
+                "ابحث فورًا بالعربية والإنجليزية داخل ملفات Excel وCSV وWord وPowerPoint وTXT وHTML وملفات PDF النصية (بما يشمل FlateDecode) مع تنبيه صريح لملفات PDF المصوّرة بدون OCR، وافتح أي جدول مباشرةً في الاستوديو. تُحفظ المشاريع محليًا بتشفير ChaCha20-Poly1305.",
+              descEn:
+                "Search across local Excel, CSV, Word, PowerPoint, TXT, HTML, and extractable uncompressed/FlateDecode PDFs with Arabic/English normalization (honestly flagging image-only scanned PDFs without OCR), and open hits directly in Studio. Projects persist in a ChaCha20-Poly1305 vault."
+            },
+            {
+              id: "privacy-auth-formats",
+              badgeAr: "14–17 • الخصوصية والتفويض والصيغ",
+              badgeEn: "14–17 • Privacy, Online Auth & 9 Output Formats",
+              titleAr: "معالجة محلية 100%، تفويض متصل لجهاز واحد، و9 صيغ تصدير موثّقة",
+              titleEn: "100% Local Processing, Single-Device Online Auth & 9 Verified Outputs",
+              descAr:
+                "لا تغادر ملفاتك أو قيم خلاياك جهازك تلقائيًا أبدًا. يتطلب التطبيق تفويض حساب متصل للعمليات المحمية مع حصرية جهاز نشط واحد، ويوفر وضع قراءة فقط بدون اتصال (Offline Read-Only) للمشاريع والفهارس المحفوظة، وذكاءً اصطناعيًا اختياريًا بموافقة صريحة.",
+              descEn:
+                "Your spreadsheets and cell values never auto-upload. Protected operations require online account authorization with strict single-device exclusivity, while previously authenticated installs retain Offline Read-Only access to saved projects and local search."
+            }
+          ].map((card) => (
+            <SpotlightCard key={card.id} padding={20}>
+              <div
+                data-capability-card={card.id}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  textAlign: "start"
+                }}
+              >
+                <span
+                  style={{
+                    alignSelf: "flex-start",
+                    fontSize: "11.5px",
+                    fontWeight: 700,
+                    padding: "4px 10px",
+                    borderRadius: "999px",
+                    background: "rgba(16, 185, 129, 0.12)",
+                    color: "var(--status-ok)"
+                  }}
+                >
+                  {isAr ? card.badgeAr : card.badgeEn}
+                </span>
+                <h3 style={{ margin: 0, fontSize: "16.5px", fontWeight: 800 }}>
+                  {isAr ? card.titleAr : card.titleEn}
+                </h3>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "13.5px",
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.68
+                  }}
+                >
+                  {isAr ? card.descAr : card.descEn}
+                </p>
+              </div>
+            </SpotlightCard>
+          ))}
+        </div>
+
+        {/* Verified Input & Output Format Strip */}
+        <div
+          data-verified-io-formats-strip="true"
+          style={{
+            padding: "16px 22px",
+            borderRadius: "18px",
+            background: "var(--bg-glass)",
+            border: "1px solid var(--border-subtle)",
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "12px",
+            fontSize: "13px"
+          }}
+        >
+          <div>
+            <strong>{isAr ? "صيغ الاستيراد المدعومة (7):" : "Supported Input Formats (7):"}</strong>{" "}
+            <span>.xlsx • .xlsm • .xlsb • .xls • .ods • .csv • .tsv</span>
+          </div>
+          <div>
+            <strong>
+              {isAr ? "صيغ التصدير والمخرجات الموثّقة (9):" : "Verified Output Formats (9):"}
+            </strong>{" "}
+            <span>
+              .xlsx • .csv • .pptx • .docx • .pdf • .png • .svg • .safi.html • Power BI Package
+            </span>
+          </div>
+        </div>
       </section>
 
       {/* ====================================================================

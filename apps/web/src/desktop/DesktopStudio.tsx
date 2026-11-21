@@ -48,6 +48,8 @@ import type {
   DesktopRowPage,
   DesktopStudioState,
   DesktopWorkbookDetails,
+  SheetWorkflowMatchReport,
+  SheetWorkflowMemoryRecord,
   StudioAssetArtifact,
   StudioChartArtifact,
   StudioDocBlockArtifact,
@@ -64,6 +66,7 @@ import {
   addScenario,
   addSourceColumn,
   applyAnomalyFix,
+  applyDesktopWorkflowMemoryReplay,
   applyDslCommand,
   compareScenarios,
   createRequestTracker,
@@ -79,6 +82,7 @@ import {
   isDesktopRuntime,
   isNewerOrEqualRevision,
   loadProjectBundle,
+  matchDesktopSheetWorkflowMemory,
   openProject,
   pickCapsuleOutputFile,
   pickDeliverableFile,
@@ -106,6 +110,7 @@ import { CommandBarPanel } from "./components/CommandBarPanel";
 import { DashboardChartsView } from "./components/DashboardChartsView";
 import { DesktopLocalSearchPanel } from "./components/DesktopLocalSearchPanel";
 import { DesktopRecipeLibraryPanel } from "./components/DesktopRecipeLibraryPanel";
+import { DesktopWorkflowMemoryPanel } from "./components/DesktopWorkflowMemoryPanel";
 import {
   DeliverableExportModal,
   InteractiveTutorialOverlay,
@@ -185,8 +190,12 @@ export function DesktopStudio({
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const desktop = isDesktopRuntime();
   const [activeDesktopUtility, setActiveDesktopUtility] = useState<
-    "none" | "local-search" | "recipe-library"
+    "none" | "local-search" | "recipe-library" | "workflow-memory"
   >("none");
+  const [sheetWorkflowMatch, setSheetWorkflowMatch] = useState<{
+    readonly report: SheetWorkflowMatchReport;
+    readonly matchedWorkflow: SheetWorkflowMemoryRecord | null;
+  } | null>(null);
   const [state, setState] = useState<DesktopStudioState | null>(null);
   const [rowPage, setRowPage] = useState<DesktopRowPage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -347,11 +356,47 @@ export function DesktopStudio({
         const det = await workbookDetails(PROJECT).catch(() => null);
         if (controller.signal.aborted) return;
         setWbDetails(det);
+
+        const activeSheetName = det?.activeSheet ?? state.workbookSummary?.activeSheet ?? "Sheet1";
+        const activeHeaders = state.columns.map((c) => c.name);
+        const wfMatch =
+          activeHeaders.length > 0
+            ? await matchDesktopSheetWorkflowMemory({
+                sheetName: activeSheetName,
+                headers: activeHeaders
+              }).catch(() => null)
+            : null;
+        if (controller.signal.aborted) return;
+        setSheetWorkflowMatch(wfMatch);
+
+        const combinedResolutions: StudioQuestionResolutionArtifact[] = [
+          ...(state.artifacts?.questionResolutions ?? [])
+        ];
+        if (wfMatch?.report.reusedQuestionResolutions) {
+          for (const rq of wfMatch.report.reusedQuestionResolutions) {
+            if (!combinedResolutions.some((r) => r.questionId === rq.questionId)) {
+              combinedResolutions.push({
+                questionId: rq.questionId,
+                action:
+                  rq.action === "skipped" ||
+                  rq.action === "deferred" ||
+                  rq.action === "custom" ||
+                  rq.action === "corrected"
+                    ? rq.action
+                    : "answered",
+                answer: rq.answer,
+                ...(rq.customText ? { customText: rq.customText } : {}),
+                updatedAtMs: rq.updatedAtMs
+              });
+            }
+          }
+        }
+
         const snap = await buildDesktopIntelligenceSnapshotAsync({
           state,
           details: det,
           page: rowPage,
-          savedResolutions: state.artifacts?.questionResolutions ?? [],
+          savedResolutions: combinedResolutions,
           signal: controller.signal,
           onProgress: (pct, phase) => {
             if (!controller.signal.aborted) {
@@ -389,6 +434,48 @@ export function DesktopStudio({
         }
         // Switching regions starts a fresh DataGraph at revision 1, so bypass
         // isNewerOrEqualRevision (which would otherwise drop lower revisions).
+        setState(next);
+        setRowPage(null);
+        setPageOffset(0);
+        setSortColumn(null);
+        setSearchQuery("");
+        setFilterValue("");
+        setGroups([]);
+        const first = next.columns[0]?.name ?? "";
+        setGroupBy(first);
+        setValueColumn(next.columns[1]?.name ?? first);
+        setError(null);
+      } catch (cause) {
+        if (stateTracker.current.isCurrent(seq)) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      } finally {
+        if (stateTracker.current.isCurrent(seq)) {
+          setBusy(false);
+          setRecalculating(false);
+        }
+      }
+    },
+    []
+  );
+
+  const handleOpenFileFromSearch = useCallback(
+    async (filePath: string, matchLocation: string): Promise<void> => {
+      const seq = stateTracker.current.next();
+      setBusy(true);
+      setRecalculating(true);
+      try {
+        let next = await openProject(PROJECT, filePath);
+        if (matchLocation.startsWith("Sheet ")) {
+          const targetSheet = matchLocation.slice("Sheet ".length).trim();
+          const matchedSheet = next.workbookSummary?.sheets.find((s) => s.name === targetSheet);
+          if (matchedSheet) {
+            next = await selectRegion(PROJECT, matchedSheet.name, "tbl_1").catch(() => next);
+          }
+        }
+        if (!stateTracker.current.isCurrent(seq)) {
+          return;
+        }
         setState(next);
         setRowPage(null);
         setPageOffset(0);
@@ -794,6 +881,18 @@ export function DesktopStudio({
           <LayoutTemplate size={16} aria-hidden="true" />{" "}
           {L("القوالب والوصفات", "Templates & Recipes")}
         </button>
+        <button
+          type="button"
+          onClick={() =>
+            setActiveDesktopUtility((prev) =>
+              prev === "workflow-memory" ? "none" : "workflow-memory"
+            )
+          }
+          data-testid="toggle-workflow-memory-panel"
+        >
+          <BrainCircuit size={16} aria-hidden="true" />{" "}
+          {L("ذاكرة الورقة والتعلّم", "Workflow Memory & Learning")}
+        </button>
         {analysisProgress ? (
           <button
             type="button"
@@ -848,7 +947,13 @@ export function DesktopStudio({
       ) : null}
 
       {activeDesktopUtility === "local-search" ? (
-        <DesktopLocalSearchPanel lang={lang} readOnlyOffline={readOnlyOffline} />
+        <DesktopLocalSearchPanel
+          lang={lang}
+          readOnlyOffline={readOnlyOffline}
+          onOpenFileInStudio={(filePath, matchLocation) => {
+            void handleOpenFileFromSearch(filePath, matchLocation);
+          }}
+        />
       ) : null}
 
       {activeDesktopUtility === "recipe-library" ? (
@@ -856,7 +961,89 @@ export function DesktopStudio({
           lang={lang}
           sessionToken={sessionToken}
           readOnlyOffline={readOnlyOffline}
+          activeProjectId={state ? PROJECT : null}
+          onStateUpdated={(nextState) => setState(nextState)}
         />
+      ) : null}
+
+      {activeDesktopUtility === "workflow-memory" ? (
+        <DesktopWorkflowMemoryPanel
+          lang={lang}
+          readOnlyOffline={readOnlyOffline}
+          projectId={PROJECT}
+          activeSheetName={
+            wbDetails?.activeSheet ?? state?.workbookSummary?.activeSheet ?? "Sheet1"
+          }
+          activeTableId={
+            wbDetails?.activeTableId ?? state?.workbookSummary?.activeTableId ?? "tbl_1"
+          }
+          state={state}
+          questionResolutions={artifacts.questionResolutions ?? []}
+          onStateUpdated={(nextState) => setState(nextState)}
+        />
+      ) : null}
+
+      {state !== null &&
+      sheetWorkflowMatch !== null &&
+      sheetWorkflowMatch.report.matchedWorkflowId !== null ? (
+        <div
+          data-recognized-sheet-workflow-banner="true"
+          data-recognized-match-tier={sheetWorkflowMatch.report.matchTier}
+          style={{
+            padding: "12px 14px",
+            borderRadius: "10px",
+            border: "1px solid var(--accent-primary, #10b981)",
+            background: "rgba(16, 185, 129, 0.08)",
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "10px"
+          }}
+        >
+          <div style={{ display: "grid", gap: "2px" }}>
+            <strong style={{ fontSize: "13px" }}>
+              {L(
+                `تم التعرّف على بنية الورقة: ${sheetWorkflowMatch.report.matchedWorkflowName ?? ""} (${sheetWorkflowMatch.report.confidencePct}% • ${sheetWorkflowMatch.report.matchTier})`,
+                `Recognized Sheet Structure: ${sheetWorkflowMatch.report.matchedWorkflowName ?? ""} (${sheetWorkflowMatch.report.confidencePct}% • ${sheetWorkflowMatch.report.matchTier})`
+              )}
+            </strong>
+            <span style={{ fontSize: "12px", opacity: 0.88 }}>
+              {lang === "ar"
+                ? sheetWorkflowMatch.report.explanationAr
+                : sheetWorkflowMatch.report.explanationEn}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <button
+              type="button"
+              className="safi-btn safi-btn-primary"
+              disabled={readOnlyOffline || busy}
+              data-banner-replay-workflow-btn="true"
+              onClick={() => {
+                const wfId = sheetWorkflowMatch.report.matchedWorkflowId;
+                if (!wfId) return;
+                void (async () => {
+                  try {
+                    const nextState = await applyDesktopWorkflowMemoryReplay(PROJECT, wfId);
+                    setState(nextState);
+                  } catch (cause) {
+                    setError(cause instanceof Error ? cause.message : String(cause));
+                  }
+                })();
+              }}
+            >
+              {L("إعادة تشغيل مسار الورقة المحفوظ", "Replay Recognized Workflow")}
+            </button>
+            <button
+              type="button"
+              className="safi-btn safi-btn-ghost"
+              onClick={() => setActiveDesktopUtility("workflow-memory")}
+            >
+              {L("التفاصيل", "Details")}
+            </button>
+          </div>
+        </div>
       ) : null}
 
       {state === null ? (

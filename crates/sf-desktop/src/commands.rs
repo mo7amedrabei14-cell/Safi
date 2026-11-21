@@ -20,7 +20,7 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 68] = [
+pub const ALLOWED_COMMANDS: [&str; 80] = [
     "app_info",
     "take_pending_deep_link",
     "desktop_open_external_auth_url",
@@ -85,10 +85,22 @@ pub const ALLOWED_COMMANDS: [&str; 68] = [
     "desktop_recipes_list",
     "desktop_recipes_sync_official",
     "desktop_recipes_save_as_new",
+    "desktop_recipes_update_existing",
+    "desktop_recipes_duplicate",
+    "desktop_recipes_apply_to_project",
     "desktop_recipes_delete",
     "desktop_recipes_export_safitemplate",
     "desktop_recipes_import_safitemplate",
     "desktop_recipes_prepare_community_share",
+    "desktop_workflow_memory_list",
+    "desktop_workflow_memory_save_sheet",
+    "desktop_workflow_memory_match_sheet",
+    "desktop_workflow_memory_apply_replay",
+    "desktop_workflow_memory_manage",
+    "desktop_learning_profile_get",
+    "desktop_learning_record_feedback",
+    "desktop_learning_delete_rule",
+    "desktop_learning_reset_profile",
 ];
 
 /// Access classification separating offline read-only viewing of saved local projects
@@ -121,7 +133,10 @@ pub fn classify_command_access(command: &str) -> CommandAccessClass {
         | "studio_list_templates"
         | "desktop_search_query"
         | "desktop_search_stats"
-        | "desktop_recipes_list" => CommandAccessClass::ReadOnlyOffline,
+        | "desktop_recipes_list"
+        | "desktop_workflow_memory_list"
+        | "desktop_workflow_memory_match_sheet"
+        | "desktop_learning_profile_get" => CommandAccessClass::ReadOnlyOffline,
         _ => CommandAccessClass::ProtectedOnline,
     }
 }

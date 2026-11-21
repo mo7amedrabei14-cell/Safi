@@ -1240,11 +1240,67 @@ fn desktop_learning_reset_profile(store: tauri::State<'_, StudioStore>) -> Resul
     store.desktop_learning_reset_profile(now_ms())
 }
 
+/// Performs a bounded local-loopback health probe against `http://127.0.0.1:11434/api/tags`
+/// from the Desktop shell boundary (outside air-gapped engine crates) to report honest Ollama
+/// runtime status and installed models.
+fn probe_local_ollama_loopback() -> sf_desktop::decision_engine::OllamaRuntimeProbe {
+    use std::io::{Read, Write};
+    use std::net::{SocketAddr, TcpStream};
+    use std::time::Duration;
+
+    let endpoint = "http://127.0.0.1:11434".to_owned();
+    let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], 11434));
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(250)) else {
+        return sf_desktop::decision_engine::OllamaRuntimeProbe {
+            endpoint,
+            status: "service_unreachable".to_owned(),
+            installed_models: Vec::new(),
+        };
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
+    let req = "GET /api/tags HTTP/1.1\r\nHost: 127.0.0.1:11434\r\nConnection: close\r\n\r\n";
+    if stream.write_all(req.as_bytes()).is_err() {
+        return sf_desktop::decision_engine::OllamaRuntimeProbe {
+            endpoint,
+            status: "service_unreachable".to_owned(),
+            installed_models: Vec::new(),
+        };
+    }
+    let mut raw = Vec::new();
+    let _ = stream.take(128 * 1024).read_to_end(&mut raw);
+    let text = String::from_utf8_lossy(&raw);
+    let body = text
+        .split_once("\r\n\r\n")
+        .map_or(text.as_ref(), |(_, b)| b);
+    let mut models = Vec::new();
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(arr) = json.get("models").and_then(serde_json::Value::as_array) {
+            for item in arr {
+                if let Some(name) = item.get("name").and_then(serde_json::Value::as_str) {
+                    models.push(name.to_owned());
+                }
+            }
+        }
+    }
+    let status = if models.is_empty() {
+        "reachable_zero_models".to_owned()
+    } else {
+        "available_with_models".to_owned()
+    };
+    sf_desktop::decision_engine::OllamaRuntimeProbe {
+        endpoint,
+        status,
+        installed_models: models,
+    }
+}
+
 #[tauri::command]
 fn desktop_decision_engine_evaluate(
     store: tauri::State<'_, StudioStore>,
     project: String,
 ) -> Result<String, String> {
+    store.set_ollama_runtime_probe(Some(probe_local_ollama_loopback()));
     store.desktop_decision_engine_evaluate(&project)
 }
 
@@ -1384,11 +1440,12 @@ fn main() {
             let authority = Arc::new(StudioSessionAuthority::new());
             let verifier: Arc<dyn StudioSessionVerifier> =
                 Arc::new(DesktopShellSessionVerifier::new(authority.clone()));
-            app.manage(StudioStore::with_storage_dir_and_verifier(
-                storage_dir,
-                authority,
-                verifier,
-            ));
+            let store =
+                StudioStore::with_storage_dir_and_verifier(storage_dir, authority, verifier);
+            store
+                .ensure_local_vault_key()
+                .map_err(std::io::Error::other)?;
+            app.manage(store);
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",

@@ -128,6 +128,7 @@ export function DesktopWorkflowMemoryPanel({
       if (state && state.columns.length > 0) {
         const headers = state.columns.map((c) => c.name);
         const matchRes = await matchDesktopSheetWorkflowMemory({
+          projectId,
           sheetName: activeSheetName,
           headers,
           observedDateFormat
@@ -145,7 +146,7 @@ export function DesktopWorkflowMemoryPanel({
     } catch {
       // Ignore before session is bound.
     }
-  }, [state, activeSheetName, observedDateFormat, onReusedQuestionsApplied]);
+  }, [projectId, state, activeSheetName, observedDateFormat, onReusedQuestionsApplied]);
 
   useEffect(() => {
     void refreshMemoryAndMatch();
@@ -208,7 +209,7 @@ export function DesktopWorkflowMemoryPanel({
           confirmedRole: "",
           confirmedSemanticType: "",
           dateFormat: observedDateFormat,
-          currencyOrUnit: "EGP",
+          currencyOrUnit: null,
           isIdentifier: h.toLowerCase().includes("id") || h.includes("كود") || h.includes("رقم")
         })),
         duplicatePolicy,
@@ -764,36 +765,60 @@ export function DesktopWorkflowMemoryPanel({
           </button>
         </div>
 
-        {/* Longitudinal Learning Effectiveness Metrics (Section 8.4) */}
+        {/* Honest Longitudinal Learning Effectiveness Metrics (Section 3 & 8.4) */}
         {learningProfile?.effectivenessMetrics ? (
           <div
             data-learning-effectiveness-metrics="true"
             style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "12px",
+              display: "grid",
+              gap: "6px",
               fontSize: "12px",
-              padding: "8px 10px",
+              padding: "10px 12px",
               borderRadius: "8px",
               background: "rgba(16, 185, 129, 0.08)"
             }}
           >
-            <span>
-              <strong>{L("أسئلة مكررة تم تجنّبها:", "Questions Avoided:")}</strong>{" "}
-              {learningProfile.effectivenessMetrics.questionsAvoidedTotal}
-            </span>
-            <span>
-              <strong>{L("خطوات إعداد موفّرة:", "Setup Steps Saved:")}</strong>{" "}
-              {learningProfile.effectivenessMetrics.setupStepsSavedTotal}
-            </span>
-            <span>
-              <strong>{L("مسارات مُعاد تشغيلها:", "Workflows Replayed:")}</strong>{" "}
-              {learningProfile.effectivenessMetrics.workflowsReplayedTotal}
-            </span>
-            <span>
-              <strong>{L("دقة واتساق القرارات:", "Decision Consistency:")}</strong>{" "}
-              {learningProfile.effectivenessMetrics.decisionAccuracyPct}%
-            </span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+              <span>
+                <strong>{L("أسئلة أُعيد استخدامها:", "Questions Reused:")}</strong>{" "}
+                {learningProfile.effectivenessMetrics.questionsReusedTotal ??
+                  learningProfile.effectivenessMetrics.questionsAvoidedTotal}
+              </span>
+              <span>
+                <strong>{L("خطوات موثّقة مُطبّقة:", "Verified Steps Applied:")}</strong>{" "}
+                {learningProfile.effectivenessMetrics.verifiedStepsAppliedTotal ??
+                  learningProfile.effectivenessMetrics.setupStepsSavedTotal}
+              </span>
+              <span>
+                <strong>{L("إعادات تشغيل مكتملة:", "Completed Replays:")}</strong>{" "}
+                {learningProfile.effectivenessMetrics.completedReplaysTotal ??
+                  learningProfile.effectivenessMetrics.workflowsReplayedTotal}
+              </span>
+              <span>
+                <strong>{L("التصحيحات / التراجعات:", "Corrections / Undos:")}</strong>{" "}
+                {learningProfile.effectivenessMetrics.explicitCorrectionsRecorded +
+                  learningProfile.effectivenessMetrics.repeatedCorrectionsCount}{" "}
+                / {learningProfile.effectivenessMetrics.undoOrRollbackCount}
+              </span>
+              <span data-observed-retention-rate="true">
+                <strong>
+                  {L("معدل استبقاء القرارات المرصود:", "Observed Decision Retention Rate:")}
+                </strong>{" "}
+                {(learningProfile.effectivenessMetrics.observedEvaluationDenom ?? 0) === 0 ||
+                learningProfile.effectivenessMetrics.observedRetentionRatePct === null ||
+                learningProfile.effectivenessMetrics.observedRetentionRatePct === undefined
+                  ? L("لا توجد أحداث تقييم بعد (0/0)", "No evaluation evidence yet (0/0)")
+                  : `${learningProfile.effectivenessMetrics.observedRetentionRatePct}% (${learningProfile.effectivenessMetrics.observedRetentionNum ?? 0}/${learningProfile.effectivenessMetrics.observedEvaluationDenom ?? 0})`}
+              </span>
+            </div>
+            <div style={{ fontSize: "11px", opacity: 0.78 }}>
+              {L(
+                learningProfile.effectivenessMetrics.metricDefinitionAr ??
+                  "معدل استبقاء القرارات المرصود يقيس استمرار القرارات دون تصحيح أو تراجع، وليس دقة تحليلية مطلقة.",
+                learningProfile.effectivenessMetrics.metricDefinitionEn ??
+                  "Observed Decision Retention Rate tracks how often replayed/accepted decisions stayed unmodified; it is not ground-truth analytical accuracy."
+              )}
+            </div>
           </div>
         ) : null}
 

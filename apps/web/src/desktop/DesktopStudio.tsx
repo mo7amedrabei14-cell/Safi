@@ -197,6 +197,8 @@ export function DesktopStudio({
     readonly report: SheetWorkflowMatchReport;
     readonly matchedWorkflow: SheetWorkflowMemoryRecord | null;
   } | null>(null);
+  const [autoReplayBanner, setAutoReplayBanner] = useState<string | null>(null);
+  const autoReplayedKeysRef = useRef<Set<string>>(new Set());
   const [state, setState] = useState<DesktopStudioState | null>(null);
   const [rowPage, setRowPage] = useState<DesktopRowPage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -363,12 +365,45 @@ export function DesktopStudio({
         const wfMatch =
           activeHeaders.length > 0
             ? await matchDesktopSheetWorkflowMemory({
+                projectId: PROJECT,
                 sheetName: activeSheetName,
                 headers: activeHeaders
               }).catch(() => null)
             : null;
         if (controller.signal.aborted) return;
         setSheetWorkflowMatch(wfMatch);
+
+        // Automatic High-confidence replay guarded by a stable idempotency key so repeated
+        // React renders never re-run replay on the same opened sheet (Section 2.2).
+        if (
+          !readOnlyOffline &&
+          wfMatch?.report.autoReplayEligible &&
+          wfMatch.report.matchedWorkflowId
+        ) {
+          const wfId = wfMatch.report.matchedWorkflowId;
+          const wfVer = wfMatch.report.matchedWorkflowVersion ?? 1;
+          const replayKey = `${PROJECT}:${activeSheetName}:${wfId}:v${wfVer}:${state.originFingerprint}`;
+          if (!autoReplayedKeysRef.current.has(replayKey)) {
+            autoReplayedKeysRef.current.add(replayKey);
+            try {
+              const replayed = await applyDesktopWorkflowMemoryReplay(PROJECT, wfId);
+              if (
+                !controller.signal.aborted &&
+                isNewerOrEqualRevision(replayed, stateRef.current)
+              ) {
+                setState(replayed);
+                setAutoReplayBanner(
+                  lang === "ar"
+                    ? `تم التشغيل التلقائي الآمن لمسار العمل المحفوظ «${wfMatch.report.matchedWorkflowName ?? wfId}» (v${wfVer} • تطابق ${wfMatch.report.confidencePct}%). يمكنك التراجع فورًا بزر Undo.`
+                    : `Auto-replayed verified sheet workflow "${wfMatch.report.matchedWorkflowName ?? wfId}" (v${wfVer} • ${wfMatch.report.confidencePct}% match). Instant Undo is available.`
+                );
+                return;
+              }
+            } catch {
+              // If preflight or atomic replay fails closed, keep original sheet untouched without crashing.
+            }
+          }
+        }
 
         const combinedResolutions: StudioQuestionResolutionArtifact[] = [
           ...(state.artifacts?.questionResolutions ?? [])
@@ -421,7 +456,7 @@ export function DesktopStudio({
     return () => {
       controller.abort();
     };
-  }, [desktop, state, state?.revision, rowPage]);
+  }, [desktop, state, state?.revision, rowPage, readOnlyOffline, lang]);
 
   const handleSelectRegion = useCallback(
     async (sheetName: string, tableId: string): Promise<void> => {
@@ -957,6 +992,44 @@ export function DesktopStudio({
         <p className="safi-desktop-studio__error" role="alert">
           <XCircle size={16} aria-hidden="true" /> {error}
         </p>
+      ) : null}
+
+      {autoReplayBanner !== null ? (
+        <div
+          className="safi-desktop-studio__note"
+          data-auto-replay-banner="true"
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "10px"
+          }}
+        >
+          <span>{autoReplayBanner}</span>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              type="button"
+              className="safi-btn safi-btn-ghost"
+              disabled={busy || readOnlyOffline}
+              onClick={() => {
+                setAutoReplayBanner(null);
+                void run(() => undo(PROJECT));
+              }}
+            >
+              <Undo2 size={14} aria-hidden="true" /> {L("تراجع فوري (Undo)", "Undo Replay")}
+            </button>
+            <button
+              type="button"
+              className="safi-btn safi-btn-ghost"
+              onClick={() => setAutoReplayBanner(null)}
+            >
+              {L("إغلاق", "Dismiss")}
+            </button>
+          </div>
+        </div>
       ) : null}
 
       {activeDesktopUtility === "local-search" ? (

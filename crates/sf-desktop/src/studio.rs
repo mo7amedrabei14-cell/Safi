@@ -41,7 +41,9 @@ use crate::local_search::{LocalSearchIndex, SearchQuery};
 use crate::recipe_library::{
     LocalRecipeLibrary, LocalRecipeRecord, NameConflictPolicy, RecipeOriginClass,
 };
-use crate::vault::{VaultKey, decrypt_vault_payload, encrypt_vault_payload};
+use crate::vault::{
+    VaultKey, decrypt_vault_payload, read_encrypted_or_migrate_legacy, write_encrypted_mandatory,
+};
 use crate::workflow_memory::{
     LearningCategory, LearningRuleScope, LearningSignalKind, LocalWorkflowMemoryStore,
     SavedCleaningOperation, SavedColumnDecision, SavedDashboardPreferences, SavedMetricDefinition,
@@ -704,12 +706,14 @@ pub struct StudioStore {
     last_online_verified_ms: Mutex<Option<u64>>,
     high_water_clock_ms: Mutex<u64>,
     vault_key: Mutex<Option<VaultKey>>,
+    vault_key_explicitly_disabled: Mutex<bool>,
     authority: Arc<StudioSessionAuthority>,
     verifier: Arc<dyn StudioSessionVerifier>,
     clock_ms: Mutex<Option<u64>>,
     search_index: Mutex<Option<LocalSearchIndex>>,
     recipe_library: Mutex<Option<LocalRecipeLibrary>>,
     workflow_memory: Mutex<Option<LocalWorkflowMemoryStore>>,
+    ollama_probe: Mutex<Option<crate::decision_engine::OllamaRuntimeProbe>>,
 }
 
 impl Default for StudioStore {
@@ -728,12 +732,14 @@ impl Default for StudioStore {
             last_online_verified_ms: Mutex::new(None),
             high_water_clock_ms: Mutex::new(0),
             vault_key: Mutex::new(None),
+            vault_key_explicitly_disabled: Mutex::new(false),
             authority,
             verifier,
             clock_ms: Mutex::new(None),
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
             workflow_memory: Mutex::new(None),
+            ollama_probe: Mutex::new(None),
         }
     }
 }
@@ -751,6 +757,7 @@ impl StudioStore {
         let authority = Arc::new(StudioSessionAuthority::new());
         let verifier: Arc<dyn StudioSessionVerifier> = authority.clone();
         let has_prior_auth = dir.join("prior_auth.marker").is_file();
+        let init_key = VaultKey::load_or_init_for_storage_dir(&dir).ok();
         Self {
             projects: Mutex::new(BTreeMap::new()),
             artifacts: Mutex::new(BTreeMap::new()),
@@ -762,13 +769,15 @@ impl StudioStore {
             offline_read_only: Mutex::new(false),
             last_online_verified_ms: Mutex::new(None),
             high_water_clock_ms: Mutex::new(0),
-            vault_key: Mutex::new(None),
+            vault_key: Mutex::new(init_key),
+            vault_key_explicitly_disabled: Mutex::new(false),
             authority,
             verifier,
             clock_ms: Mutex::new(None),
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
             workflow_memory: Mutex::new(None),
+            ollama_probe: Mutex::new(None),
         }
     }
 
@@ -780,6 +789,7 @@ impl StudioStore {
         verifier: Arc<dyn StudioSessionVerifier>,
     ) -> Self {
         let has_prior_auth = dir.join("prior_auth.marker").is_file();
+        let init_key = VaultKey::load_or_init_for_storage_dir(&dir).ok();
         Self {
             projects: Mutex::new(BTreeMap::new()),
             artifacts: Mutex::new(BTreeMap::new()),
@@ -791,21 +801,79 @@ impl StudioStore {
             offline_read_only: Mutex::new(false),
             last_online_verified_ms: Mutex::new(None),
             high_water_clock_ms: Mutex::new(0),
-            vault_key: Mutex::new(None),
+            vault_key: Mutex::new(init_key),
+            vault_key_explicitly_disabled: Mutex::new(false),
             authority,
             verifier,
             clock_ms: Mutex::new(None),
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
             workflow_memory: Mutex::new(None),
+            ollama_probe: Mutex::new(None),
         }
     }
 
-    /// Configures an optional local Argon2id + ChaCha20-Poly1305 vault key for encrypting
-    /// saved `.safi.enc` local project bundles at rest on the customer's computer.
+    /// Updates the runtime Ollama loopback probe result captured by the Desktop shell boundary
+    /// (outside the zero-network engine crate).
+    pub fn set_ollama_runtime_probe(
+        &self,
+        probe: Option<crate::decision_engine::OllamaRuntimeProbe>,
+    ) {
+        if let Ok(mut guard) = self.ollama_probe.lock() {
+            *guard = probe;
+        }
+    }
+
+    /// Configures a local Argon2id + ChaCha20-Poly1305 vault key for encrypting
+    /// saved `.safi.enc` local project bundles and workflow/learning stores at rest.
+    /// Passing `None` explicitly disables the vault key (causing persistence operations
+    /// to fail closed with `SF-SYS-024`).
     pub fn set_local_vault_key(&self, key: Option<VaultKey>) {
+        if let Ok(mut disabled) = self.vault_key_explicitly_disabled.lock() {
+            *disabled = key.is_none();
+        }
         if let Ok(mut guard) = self.vault_key.lock() {
             *guard = key;
+        }
+    }
+
+    /// Ensures the local `VaultKey` is loaded or initialized from the storage keystore,
+    /// failing closed with `SF-SYS-024` if the key is missing or explicitly disabled.
+    pub fn ensure_local_vault_key(&self) -> Result<VaultKey, String> {
+        let explicitly_disabled = self
+            .vault_key_explicitly_disabled
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(false);
+        if explicitly_disabled {
+            return Err("SF-SYS-024".to_string());
+        }
+        if let Ok(guard) = self.vault_key.lock() {
+            if let Some(ref key) = *guard {
+                return Ok(key.clone());
+            }
+        }
+        let storage_dir = self
+            .storage_dir
+            .lock()
+            .map_err(|_| "SF-SYS-001".to_string())?
+            .clone();
+        if let Some(dir) = storage_dir {
+            let key =
+                VaultKey::load_or_init_for_storage_dir(&dir).map_err(|code| code.to_string())?;
+            if let Ok(mut guard) = self.vault_key.lock() {
+                *guard = Some(key.clone());
+            }
+            Ok(key)
+        } else {
+            // In-memory store without a storage directory derives an ephemeral per-store key
+            let salt = [0x53u8; 16];
+            let key = VaultKey::derive_from_passphrase("safi-ephemeral-in-memory-vault-v1", &salt)
+                .map_err(|code| code.to_string())?;
+            if let Ok(mut guard) = self.vault_key.lock() {
+                *guard = Some(key.clone());
+            }
+            Ok(key)
         }
     }
 
@@ -1207,9 +1275,9 @@ impl StudioStore {
 
     fn list_project_bundles_unlocked(&self) -> Result<String, String> {
         let dir = self.resolve_storage_dir()?;
+        let key = self.ensure_local_vault_key()?;
         let mut entries = Vec::new();
         let read_dir = fs::read_dir(&dir).map_err(|_| EXPORT_FAILED_CODE.to_owned())?;
-        let maybe_key = self.vault_key.lock().ok().and_then(|g| g.clone());
         for item in read_dir {
             let Ok(entry) = item else { continue };
             let path = entry.path();
@@ -1217,23 +1285,27 @@ impl StudioStore {
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or_default();
-            // Ignore any temporary crash-recovery files (`.tmp`).
-            if file_name.ends_with(".tmp") {
+            // Ignore any temporary crash-recovery files (`.tmp`) and internal keystore/store files.
+            if file_name.ends_with(".tmp")
+                || file_name.starts_with("workflow_memory.")
+                || file_name.starts_with("learning_profile.")
+                || file_name.starts_with("recipe_library.")
+                || file_name.starts_with("local_search_index.")
+            {
                 continue;
             }
             let raw_json = if file_name.ends_with(".safi.enc") {
-                let Some(ref key) = maybe_key else { continue };
                 let Ok(cipher) = fs::read(&path) else {
                     continue;
                 };
-                let Ok(plain) = decrypt_vault_payload(key, &cipher) else {
+                let Ok(plain) = decrypt_vault_payload(&key, &cipher) else {
                     continue;
                 };
                 let Ok(text) = String::from_utf8(plain) else {
                     continue;
                 };
                 text
-            } else if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            } else if file_name.ends_with(".safi.json") {
                 let Ok(raw) = fs::read_to_string(&path) else {
                     continue;
                 };
@@ -1529,23 +1601,20 @@ impl StudioStore {
             checksum_blake3,
         };
         let encoded = serde_json::to_string(&bundle).map_err(|_| "SF-SYS-001".to_owned())?;
-        let maybe_key = self.vault_key.lock().ok().and_then(|g| g.clone());
-        let encrypted = if let Some(key) = maybe_key {
-            let cipher = encrypt_vault_payload(&key, encoded.as_bytes())
-                .map_err(|_| "SF-SYS-023".to_owned())?;
-            let target = dir.join(format!("{safe_id}.safi.enc"));
-            write_atomic_bytes(&target, &cipher)?;
-            true
-        } else {
-            let target = dir.join(format!("{safe_id}.safi.json"));
-            write_atomic(&target, &encoded)?;
-            false
-        };
+        let key = self.ensure_local_vault_key()?;
+        let enc_target = dir.join(format!("{safe_id}.safi.enc"));
+        let legacy_json_target = dir.join(format!("{safe_id}.safi.json"));
+        write_encrypted_mandatory(
+            &enc_target,
+            Some(&legacy_json_target),
+            Some(&key),
+            encoded.as_bytes(),
+        )?;
         serde_json::to_string(&serde_json::json!({
             "id": bundle.project_id,
             "displayName": bundle.display_name,
             "updatedAtMs": bundle.updated_at_ms,
-            "encrypted": encrypted,
+            "encrypted": true,
         }))
         .map_err(|_| "SF-SYS-001".to_owned())
     }
@@ -1559,9 +1628,9 @@ impl StudioStore {
         self.list_project_bundles_unlocked()
     }
 
-    /// Loads a saved `.safi.json` or encrypted `.safi.enc` project bundle, checks `BLAKE3`
-    /// integrity (`SF-CAL-008`), restores both `DataGraph` and creative artifacts into `project`,
-    /// and returns its state.
+    /// Loads a saved encrypted `.safi.enc` (or migrates a legacy `.safi.json`) project bundle,
+    /// checks `BLAKE3` integrity (`SF-CAL-008`), restores both `DataGraph` and creative artifacts
+    /// into `project`, and returns its state.
     ///
     /// # Errors
     /// [`AUTH_REQUIRED_CODE`], `SF-SYS-001` when missing/unreadable, `SF-SYS-024` on vault
@@ -1576,22 +1645,12 @@ impl StudioStore {
         self.gate_command("studio_load_project", payload_len, Some(now_ms))?;
         let safe_id = validate_project_id(saved_id)?;
         let dir = self.resolve_storage_dir()?;
+        let key = self.ensure_local_vault_key()?;
         let enc_path = dir.join(format!("{safe_id}.safi.enc"));
         let json_path = dir.join(format!("{safe_id}.safi.json"));
-        let raw = if enc_path.exists() {
-            let key = self
-                .vault_key
-                .lock()
-                .ok()
-                .and_then(|g| g.clone())
-                .ok_or_else(|| "SF-SYS-024".to_owned())?;
-            let cipher = fs::read(&enc_path).map_err(|_| "SF-SYS-001".to_owned())?;
-            let plain =
-                decrypt_vault_payload(&key, &cipher).map_err(|_| "SF-SYS-024".to_owned())?;
-            String::from_utf8(plain).map_err(|_| "SF-SYS-024".to_owned())?
-        } else {
-            fs::read_to_string(&json_path).map_err(|_| "SF-SYS-001".to_owned())?
-        };
+        let raw_bytes = read_encrypted_or_migrate_legacy(&enc_path, Some(&json_path), Some(&key))?
+            .ok_or_else(|| "SF-SYS-001".to_owned())?;
+        let raw = String::from_utf8(raw_bytes).map_err(|_| "SF-SYS-024".to_owned())?;
         let bundle: StudioProjectBundle =
             serde_json::from_str(&raw).map_err(|_| "SF-SYS-001".to_owned())?;
         let expected = bundle_checksum(
@@ -1637,6 +1696,10 @@ impl StudioStore {
         )?;
         let safe_id = validate_project_id(saved_id)?;
         let dir = self.resolve_storage_dir()?;
+        let enc_path = dir.join(format!("{safe_id}.safi.enc"));
+        if enc_path.exists() {
+            fs::remove_file(&enc_path).map_err(|_| EXPORT_FAILED_CODE.to_owned())?;
+        }
         let path = dir.join(format!("{safe_id}.safi.json"));
         if path.exists() {
             fs::remove_file(&path).map_err(|_| EXPORT_FAILED_CODE.to_owned())?;
@@ -2551,28 +2614,28 @@ impl StudioStore {
     }
 
     fn ensure_search_index_loaded(&self) -> Result<(), String> {
+        let key = self.ensure_local_vault_key()?;
         let mut slot = self
             .search_index
             .lock()
             .map_err(|_| "SF-SYS-001".to_owned())?;
         if slot.is_none() {
             let dir = self.resolve_storage_dir()?;
-            let key = self.vault_key.lock().ok().and_then(|g| g.clone());
-            let loaded = LocalSearchIndex::load_from_dir(&dir, key.as_ref())?;
+            let loaded = LocalSearchIndex::load_from_dir(&dir, Some(&key))?;
             *slot = Some(loaded);
         }
         Ok(())
     }
 
     fn ensure_recipe_library_loaded(&self) -> Result<(), String> {
+        let key = self.ensure_local_vault_key()?;
         let mut slot = self
             .recipe_library
             .lock()
             .map_err(|_| "SF-SYS-001".to_owned())?;
         if slot.is_none() {
             let dir = self.resolve_storage_dir()?;
-            let key = self.vault_key.lock().ok().and_then(|g| g.clone());
-            let loaded = LocalRecipeLibrary::open(dir, key)?;
+            let loaded = LocalRecipeLibrary::open(dir, Some(key))?;
             *slot = Some(loaded);
         }
         Ok(())
@@ -2612,7 +2675,7 @@ impl StudioStore {
 
         self.ensure_search_index_loaded()?;
         let dir = self.resolve_storage_dir()?;
-        let key = self.vault_key.lock().ok().and_then(|g| g.clone());
+        let key = self.ensure_local_vault_key()?;
         let mut slot = self
             .search_index
             .lock()
@@ -2621,7 +2684,7 @@ impl StudioStore {
             return Err("SF-SYS-001".to_owned());
         };
         let summary = index.index_folders(&roots, project_id, None, |_| {})?;
-        index.save_to_dir(&dir, key.as_ref())?;
+        index.save_to_dir(&dir, Some(&key))?;
         let stats = index.stats_snapshot();
         serde_json::to_string(&serde_json::json!({
             "summary": summary,
@@ -3062,14 +3125,14 @@ impl StudioStore {
     }
 
     fn ensure_workflow_memory_loaded(&self) -> Result<(), String> {
+        let key = self.ensure_local_vault_key()?;
         let mut slot = self
             .workflow_memory
             .lock()
             .map_err(|_| "SF-SYS-001".to_owned())?;
         if slot.is_none() {
             let dir = self.resolve_storage_dir()?;
-            let key = self.vault_key.lock().ok().and_then(|g| g.clone());
-            let loaded = LocalWorkflowMemoryStore::open(dir, key)?;
+            let loaded = LocalWorkflowMemoryStore::open(dir, Some(key))?;
             *slot = Some(loaded);
         }
         Ok(())
@@ -3349,6 +3412,12 @@ impl StudioStore {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
+        let active_table = self
+            .projects
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project_id).map(|g| g.working().clone()));
+
         self.ensure_workflow_memory_loaded()?;
         let mut slot = self
             .workflow_memory
@@ -3358,13 +3427,14 @@ impl StudioStore {
             return Err("SF-SYS-001".to_owned());
         };
 
-        let saved = store.save_sheet_workflow(
+        let saved = store.save_sheet_workflow_with_table(
             workflow_id,
             display_name,
             project_id,
             sheet_name,
             table_id,
             &headers,
+            active_table.as_ref(),
             question_resolutions,
             column_decisions,
             duplicate_policy,
@@ -3396,6 +3466,10 @@ impl StudioStore {
         self.gate_command("desktop_workflow_memory_match_sheet", payload_len, None)?;
         let body: serde_json::Value =
             serde_json::from_str(payload_json).map_err(|_| "SF-SYS-001".to_owned())?;
+        let project_id = body
+            .get("projectId")
+            .or_else(|| body.get("project"))
+            .and_then(serde_json::Value::as_str);
         let sheet_name = body
             .get("sheetName")
             .and_then(serde_json::Value::as_str)
@@ -3408,6 +3482,23 @@ impl StudioStore {
             .get("observedDateFormat")
             .and_then(serde_json::Value::as_str);
 
+        let active_table = project_id.and_then(|pid| {
+            self.projects.lock().ok().and_then(|map| {
+                let g = map.get(pid)?;
+                let working = g.working();
+                let working_headers: Vec<String> = working
+                    .columns()
+                    .iter()
+                    .map(|c| c.schema().name.clone())
+                    .collect();
+                if working_headers == headers {
+                    Some(working.clone())
+                } else {
+                    None
+                }
+            })
+        });
+
         self.ensure_workflow_memory_loaded()?;
         let slot = self
             .workflow_memory
@@ -3416,7 +3507,12 @@ impl StudioStore {
         let Some(store) = slot.as_ref() else {
             return Err("SF-SYS-001".to_owned());
         };
-        let report = store.match_incoming_sheet(sheet_name, &headers, observed_date_format);
+        let report = store.match_incoming_sheet_with_table(
+            sheet_name,
+            &headers,
+            observed_date_format,
+            active_table.as_ref(),
+        );
         let matched_record = report
             .matched_workflow_id
             .as_deref()
@@ -3429,11 +3525,17 @@ impl StudioStore {
         .map_err(|_| "SF-SYS-001".to_owned())
     }
 
-    /// Deterministically replays a saved sheet workflow's cleaning operations, metrics, and
-    /// question resolutions onto an open Studio project dataset.
+    /// Deterministically and atomically replays a saved sheet workflow's cleaning operations,
+    /// metrics, and question resolutions onto an open Studio project dataset.
+    ///
+    /// Executes against an isolated staged clone of `DataGraph` and `StudioWorkspaceArtifacts`,
+    /// preflight-validating confidence tier, required column mapping, every operation, and every
+    /// metric. If any step fails or is unsupported, returns an explicit error code and leaves the
+    /// active project state completely untouched.
     ///
     /// # Errors
-    /// Returns auth/offline errors, `SF-SYS-015`, or `SF-SYS-001`.
+    /// Returns auth/offline errors, `SF-RCP-001` when eligibility/preflight/operation fails,
+    /// `SF-CAL-*` on formula/column failure, `SF-SYS-015`, or `SF-SYS-001`.
     pub fn desktop_workflow_memory_apply_replay(
         &self,
         project: &str,
@@ -3449,21 +3551,24 @@ impl StudioStore {
         )?;
         self.ensure_workflow_memory_loaded()?;
 
-        let current_headers: Vec<String> = {
-            let projects = self
-                .projects
-                .lock()
-                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
-            let graph = projects
-                .get(project)
-                .ok_or_else(|| UNKNOWN_PROJECT_CODE.to_owned())?;
-            graph
-                .working()
-                .columns()
-                .iter()
-                .map(|c| c.schema().name.clone())
-                .collect()
-        };
+        // Stage an isolated clone of the active DataGraph and StudioWorkspaceArtifacts for atomic replay.
+        let snapshot_json = self.snapshot_unlocked(project)?;
+        let mut staged_graph =
+            DataGraph::from_json(&snapshot_json, now_ms).map_err(|error| code_of(&error))?;
+        let mut staged_artifacts = self.current_artifacts(project);
+
+        let current_headers: Vec<String> = staged_graph
+            .working()
+            .columns()
+            .iter()
+            .map(|c| c.schema().name.clone())
+            .collect();
+        let active_sheet_name = self
+            .active_regions
+            .lock()
+            .ok()
+            .and_then(|map| map.get(project).map(|(s, _)| s.clone()))
+            .unwrap_or_else(|| "Sheet1".to_owned());
 
         let (workflow, match_report) = {
             let slot = self
@@ -3477,9 +3582,25 @@ impl StudioStore {
                 .get_sheet_workflow(workflow_id)
                 .cloned()
                 .ok_or_else(|| "SF-SYS-001".to_owned())?;
-            let rep = store.match_incoming_sheet(&wf.last_sheet_name, &current_headers, None);
+            let rep = store.match_incoming_sheet_with_table(
+                &active_sheet_name,
+                &current_headers,
+                None,
+                Some(staged_graph.working()),
+            );
             (wf, rep)
         };
+
+        // Fail closed if confidence is Low, required columns are missing, or content types drifted.
+        if match_report.match_tier == crate::workflow_memory::WorkflowMatchTier::Low
+            || !match_report.missing_required_columns.is_empty()
+            || match_report
+                .schema_change_notices
+                .iter()
+                .any(|n| n.contains("Content type mismatch"))
+        {
+            return Err("SF-RCP-001".to_owned());
+        }
 
         let resolve_col = |saved_col: &str| -> String {
             match_report
@@ -3493,40 +3614,111 @@ impl StudioStore {
         for op in &workflow.cleaning_operations {
             match op.kind.as_str() {
                 "trim_column" => {
-                    if let Some(col) = op.target_column.as_deref() {
-                        let mapped = resolve_col(col);
-                        if self
-                            .mutate(project, |graph| graph.trim_column(&mapped, now_ms))
-                            .is_ok()
-                        {
-                            applied_ops += 1;
-                        }
-                    }
+                    let col = op
+                        .target_column
+                        .as_deref()
+                        .ok_or_else(|| "SF-RCP-001".to_owned())?;
+                    let mapped = resolve_col(col);
+                    let _ = staged_graph
+                        .trim_column(&mapped, now_ms)
+                        .map_err(|error| code_of(&error))?;
+                    applied_ops += 1;
                 }
                 "rename_column" => {
-                    if let (Some(from), Some(to)) =
-                        (op.target_column.as_deref(), op.parameter.as_deref())
-                    {
-                        let mapped = resolve_col(from);
-                        if self
-                            .mutate(project, |graph| graph.rename_column(&mapped, to, now_ms))
-                            .is_ok()
-                        {
-                            applied_ops += 1;
-                        }
-                    }
+                    let from = op
+                        .target_column
+                        .as_deref()
+                        .ok_or_else(|| "SF-RCP-001".to_owned())?;
+                    let to = op
+                        .parameter
+                        .as_deref()
+                        .ok_or_else(|| "SF-RCP-001".to_owned())?;
+                    let mapped = resolve_col(from);
+                    let _ = staged_graph
+                        .rename_column(&mapped, to, now_ms)
+                        .map_err(|error| code_of(&error))?;
+                    applied_ops += 1;
                 }
                 "dsl_command" => {
-                    if let Some(cmd_str) = op.parameter.as_deref()
-                        && let Ok(parsed) = parse_command(cmd_str)
-                        && self
-                            .mutate(project, |graph| apply_command(graph, &parsed, now_ms))
-                            .is_ok()
-                    {
-                        applied_ops += 1;
-                    }
+                    let cmd_str = op
+                        .parameter
+                        .as_deref()
+                        .ok_or_else(|| "SF-RCP-001".to_owned())?;
+                    let parsed = parse_command(cmd_str).map_err(|error| code_of(&error))?;
+                    let _ = apply_command(&mut staged_graph, &parsed, now_ms)
+                        .map_err(|error| code_of(&error))?;
+                    applied_ops += 1;
                 }
-                _ => {}
+                "fill_missing" => {
+                    let col = op
+                        .target_column
+                        .as_deref()
+                        .ok_or_else(|| "SF-RCP-001".to_owned())?;
+                    let replacement = op.parameter.as_deref().unwrap_or("0");
+                    let mapped = resolve_col(col);
+                    let target_col = staged_graph
+                        .working()
+                        .columns()
+                        .iter()
+                        .find(|c| c.schema().name == mapped)
+                        .ok_or_else(|| "SF-CAL-001".to_owned())?;
+                    let mut blank_row_ids = Vec::new();
+                    for r_idx in 0..staged_graph.working().row_count() {
+                        let is_blank = target_col
+                            .cell_at(r_idx)
+                            .is_none_or(|c| c.raw_text().trim().is_empty());
+                        if is_blank && let Some(rid) = staged_graph.row_id_at(r_idx) {
+                            blank_row_ids.push(rid.get());
+                        }
+                    }
+                    if !blank_row_ids.is_empty() {
+                        let _ = staged_graph
+                            .apply_anomaly_fix(
+                                AnomalyFix::FillMissing {
+                                    column: mapped,
+                                    row_ids: blank_row_ids,
+                                    replacement: replacement.to_owned(),
+                                },
+                                now_ms,
+                            )
+                            .map_err(|error| code_of(&error))?;
+                    }
+                    applied_ops += 1;
+                }
+                "drop_duplicate_rows" => {
+                    let mut seen = std::collections::BTreeSet::new();
+                    let mut dup_row_ids = Vec::new();
+                    let rc = staged_graph.working().row_count();
+                    let cols = staged_graph.working().columns();
+                    for r_idx in 0..rc {
+                        let key: Vec<String> = cols
+                            .iter()
+                            .map(|c| {
+                                c.cell_at(r_idx)
+                                    .map_or_else(String::new, |cell| cell.raw_text().to_owned())
+                            })
+                            .collect();
+                        if !seen.insert(key)
+                            && let Some(rid) = staged_graph.row_id_at(r_idx)
+                        {
+                            dup_row_ids.push(rid.get());
+                        }
+                    }
+                    if !dup_row_ids.is_empty() {
+                        let _ = staged_graph
+                            .apply_anomaly_fix(
+                                AnomalyFix::DropDuplicateRows {
+                                    row_ids: dup_row_ids,
+                                },
+                                now_ms,
+                            )
+                            .map_err(|error| code_of(&error))?;
+                    }
+                    applied_ops += 1;
+                }
+                _ => {
+                    return Err("SF-RCP-001".to_owned());
+                }
             }
         }
 
@@ -3540,65 +3732,67 @@ impl StudioStore {
                         mapped_formula.replace(&format!("({saved_h})"), &format!("({incoming_h})"));
                 }
             }
-            if let Ok(mid) = MetricId::new(&m.id)
-                && self
-                    .mutate(project, |graph| {
-                        graph.define_metric(
-                            mid,
-                            &m.name,
-                            m.unit.as_deref(),
-                            &mapped_formula,
-                            now_ms,
-                        )
-                    })
-                    .is_ok()
-            {
-                applied_metrics += 1;
-            }
+            let mid = MetricId::new(&m.id).map_err(|error| code_of(&error))?;
+            let _ = staged_graph
+                .define_metric(mid, &m.name, m.unit.as_deref(), &mapped_formula, now_ms)
+                .map_err(|error| code_of(&error))?;
+            applied_metrics += 1;
         }
 
-        // Persist reused question resolutions into the project's StudioWorkspaceArtifacts.
+        // Update staged question resolutions.
         let reused_count = match_report.reused_question_resolutions.len();
-        if let Ok(mut art_map) = self.artifacts.lock() {
-            let entry = art_map.entry(project.to_owned()).or_default();
-            for rq in &match_report.reused_question_resolutions {
-                if let Some(existing) = entry
+        for rq in &match_report.reused_question_resolutions {
+            if let Some(existing) = staged_artifacts
+                .question_resolutions
+                .iter_mut()
+                .find(|q| q.question_id == rq.question_id)
+            {
+                existing.action = rq.action.clone();
+                existing.answer = rq.answer.clone();
+                existing.custom_text = rq.custom_text.clone();
+                existing.updated_at_ms = now_ms;
+            } else {
+                staged_artifacts
                     .question_resolutions
-                    .iter_mut()
-                    .find(|q| q.question_id == rq.question_id)
-                {
-                    existing.action = rq.action.clone();
-                    existing.answer = rq.answer.clone();
-                    existing.custom_text = rq.custom_text.clone();
-                    existing.updated_at_ms = now_ms;
-                } else {
-                    entry
-                        .question_resolutions
-                        .push(StudioQuestionResolutionArtifact {
-                            question_id: rq.question_id.clone(),
-                            action: rq.action.clone(),
-                            answer: rq.answer.clone(),
-                            custom_text: rq.custom_text.clone(),
-                            updated_at_ms: now_ms,
-                        });
-                }
+                    .push(StudioQuestionResolutionArtifact {
+                        question_id: rq.question_id.clone(),
+                        action: rq.action.clone(),
+                        answer: rq.answer.clone(),
+                        custom_text: rq.custom_text.clone(),
+                        updated_at_ms: now_ms,
+                    });
             }
         }
 
+        // Persist execution telemetry BEFORE committing live project state (propagate any vault/disk error!).
         {
             let mut slot = self
                 .workflow_memory
                 .lock()
                 .map_err(|_| "SF-SYS-001".to_owned())?;
-            if let Some(store) = slot.as_mut() {
-                let _ = store.record_workflow_execution(
-                    workflow_id,
-                    applied_ops,
-                    applied_metrics,
-                    reused_count,
-                    now_ms,
-                );
-            }
+            let Some(store) = slot.as_mut() else {
+                return Err("SF-SYS-001".to_owned());
+            };
+            let _ = store.record_workflow_execution(
+                workflow_id,
+                applied_ops,
+                applied_metrics,
+                reused_count,
+                now_ms,
+            )?;
+        }
+
+        // Atomic commit: replace active project DataGraph and artifacts only after every step succeeded!
+        {
+            let mut projects = self
+                .projects
+                .lock()
+                .map_err(|_| UNKNOWN_PROJECT_CODE.to_owned())?;
+            let _ = projects.insert(project.to_owned(), staged_graph);
+        }
+        {
+            let mut art_map = self.artifacts.lock().map_err(|_| "SF-SYS-001".to_owned())?;
+            let _ = art_map.insert(project.to_owned(), staged_artifacts);
         }
 
         self.state_unlocked(project)
@@ -3868,7 +4062,12 @@ impl StudioStore {
                 .lock()
                 .map_err(|_| "SF-SYS-001".to_owned())?;
             if let Some(store) = slot.as_ref() {
-                let rep = store.match_incoming_sheet(&active_sheet_name, &headers, None);
+                let rep = store.match_incoming_sheet_with_table(
+                    &active_sheet_name,
+                    &headers,
+                    None,
+                    Some(graph.working()),
+                );
                 let wf = rep
                     .matched_workflow_id
                     .as_deref()
@@ -3880,11 +4079,13 @@ impl StudioStore {
             }
         };
 
-        let suite = crate::decision_engine::SafiDecisionEngine::evaluate_workspace(
+        let ollama_probe = self.ollama_probe.lock().ok().and_then(|g| g.clone());
+        let suite = crate::decision_engine::SafiDecisionEngine::evaluate_workspace_with_ollama(
             graph,
             &artifacts,
             matched_wf.as_ref(),
             learning_prof.as_ref(),
+            ollama_probe.as_ref(),
         );
         serde_json::to_string(&suite).map_err(|_| "SF-SYS-001".to_owned())
     }
@@ -4915,14 +5116,17 @@ mod tests {
         assert!(html.contains(r#"data-chart-type="donut""#));
         assert!(!html.contains("unsafe-inline"));
 
-        // Tamper bundle on disk -> SF-CAL-008 checksum rejection
-        let saved_path = storage.join("q4_board.safi.json");
-        let corrupted =
-            test_result(fs::read_to_string(&saved_path)).replace("Q4 Board", "Tampered");
+        // Tamper encrypted bundle on disk -> SF-SYS-024 AEAD tamper rejection (and no plaintext .safi.json exists!)
+        assert!(!storage.join("q4_board.safi.json").exists());
+        let saved_path = storage.join("q4_board.safi.enc");
+        let mut corrupted = test_result(fs::read(&saved_path));
+        if let Some(last) = corrupted.last_mut() {
+            *last ^= 0x5A;
+        }
         test_result(fs::write(&saved_path, corrupted));
         assert_eq!(
             store.load_project_bundle("p3", "q4_board", 4_000),
-            Err("SF-CAL-008".to_owned())
+            Err("SF-SYS-024".to_owned())
         );
 
         // Delete column & delete bundle
@@ -5746,5 +5950,128 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn studio_store_writes_only_encrypted_files_and_atomic_workflow_replay_rolls_back_on_error() {
+        let dir = test_result(tempfile::tempdir());
+        let storage = dir.path().join("prod-storage");
+        let csv_path = dir.path().join("sales_nov.csv");
+        test_result(fs::write(
+            &csv_path,
+            "sale_date,region,customer,amount\n2026-11-01,  Cairo  ,ACME,100\n2026-11-02,Giza,Beta,250\n",
+        ));
+
+        // 1. Production StudioStore initializes VaultKey automatically and NEVER writes plaintext .json files.
+        let store = authenticated_store_with_dir(storage.clone());
+        test_result(store.open_file("p_enc", &csv_path, 1_000));
+        // Explicitly set untrimmed whitespace in row 0 `region` so we can prove atomic rollback on failed replay!
+        test_result(store.set_cell("p_enc", 0, "region", "  Cairo  ", 1_050));
+        test_result(store.save_project_bundle("p_enc", "nov_sales", "Nov Sales", 1_100));
+        test_result(store.desktop_workflow_memory_save_sheet(
+            r#"{
+                "displayName": "Valid Sales Workflow",
+                "projectId": "p_enc",
+                "sheetName": "Nov_Sales",
+                "tableId": "tbl_1",
+                "headers": ["sale_date", "region", "customer", "amount"],
+                "cleaningOperations": [
+                    {"stepId": "s1", "kind": "trim_column", "targetColumn": "region"}
+                ],
+                "metrics": [
+                    {"id": "total_sales", "name": "Total Sales", "unit": "USD", "formula": "SUM(amount)"}
+                ]
+            }"#,
+            1_200,
+        ));
+        test_result(store.desktop_learning_record_feedback(
+            r#"{
+                "signalKind": "explicit_acceptance",
+                "category": "currency_unit",
+                "scope": "matching_sheets",
+                "businessDomain": "sales",
+                "targetConcept": "sales_currency_amount",
+                "preferredValue": "USD",
+                "sourceSheetLabel": "Nov_Sales"
+            }"#,
+            1_250,
+        ));
+        let folders_json = test_result(serde_json::to_string(&vec![
+            dir.path().to_string_lossy().into_owned(),
+        ]));
+        let _ =
+            test_result(store.desktop_search_index_folders(&folders_json, Some("p_enc"), 1_300));
+        let _ = test_result(store.desktop_recipes_list());
+
+        // Inspect storage directory: ZERO .json files may exist!
+        let entries: Vec<String> = test_result(fs::read_dir(&storage))
+            .filter_map(Result::ok)
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        assert!(
+            !entries.iter().any(|name| name.ends_with(".json")),
+            "Production writes must NEVER create plaintext .json files, found: {entries:?}"
+        );
+        assert!(storage.join("nov_sales.safi.enc").is_file());
+        assert!(storage.join("workflow_memory.safi.enc").is_file());
+        assert!(storage.join("learning_profile.safi.enc").is_file());
+        assert!(storage.join("local_search_index.safi.enc").is_file());
+
+        // 2. Atomic workflow replay: a workflow with a valid op followed by an unsupported op MUST fail closed
+        //    with SF-RCP-001 and leave `region` untrimmed (zero partial mutation!).
+        let bad_wf_resp = json(&test_result(store.desktop_workflow_memory_save_sheet(
+            r#"{
+                "workflowId": "wfm_broken_op_test",
+                "displayName": "Broken Op Workflow",
+                "projectId": "p_enc",
+                "sheetName": "Nov_Sales",
+                "tableId": "tbl_1",
+                "headers": ["sale_date", "region", "customer", "amount"],
+                "cleaningOperations": [
+                    {"stepId": "s1", "kind": "trim_column", "targetColumn": "region"},
+                    {"stepId": "s2", "kind": "unsupported_magic_op", "targetColumn": "amount"}
+                ],
+                "metrics": []
+            }"#,
+            1_400,
+        )));
+        let bad_wf_id = bad_wf_resp["saved"]["workflowId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let bad_replay = store.desktop_workflow_memory_apply_replay("p_enc", &bad_wf_id, 1_500);
+        assert_eq!(bad_replay, Err("SF-RCP-001".to_owned()));
+        // Verify row 0 `region` is STILL untrimmed `"  Cairo  "` (atomic rollback!).
+        let page_after_failed = json(&test_result(store.rows_page("p_enc", "{}")));
+        assert_eq!(
+            page_after_failed["rows"][0]["cells"][1]["visible"],
+            serde_json::json!("  Cairo  ")
+        );
+
+        // 3. Valid High-confidence workflow replays cleanly and atomically!
+        let list_resp = json(&test_result(store.desktop_workflow_memory_list()));
+        let valid_wf_id = list_resp["workflows"]
+            .as_array()
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|w| w["displayName"] == "Valid Sales Workflow")
+                    .and_then(|w| w["workflowId"].as_str())
+            })
+            .unwrap_or_default()
+            .to_owned();
+        let replayed_state = json(&test_result(store.desktop_workflow_memory_apply_replay(
+            "p_enc",
+            &valid_wf_id,
+            1_600,
+        )));
+        assert_eq!(
+            replayed_state["metrics"][0]["value"],
+            serde_json::json!("350")
+        );
+        let page_after_good = json(&test_result(store.rows_page("p_enc", "{}")));
+        assert_eq!(
+            page_after_good["rows"][0]["cells"][1]["visible"],
+            serde_json::json!("Cairo")
+        );
     }
 }

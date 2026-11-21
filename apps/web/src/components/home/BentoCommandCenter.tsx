@@ -705,16 +705,17 @@ export function BentoCommandCenter({
           </div>
 
           <p
+            data-hero-summary="true"
             style={{
               margin: 0,
-              fontSize: "clamp(15.5px, 1.2vw, 18.5px)",
+              fontSize: "clamp(15px, 1.12vw, 17.5px)",
               color: "var(--text-secondary)",
               lineHeight: 1.75
             }}
           >
             {isAr
-              ? "حوّل جداول Excel وCSV المليئة بالأخطاء والتكرار إلى بيانات نظيفة، محمية، وجاهزة للتقارير والرسوم البيانية في ثوانٍ — بمعالجة محلية على جهازك دون رفع تلقائي للسحابة، مع تفويض حساب متصل ووضع قراءة فقط للمشاريع المحفوظة."
-              : "Transform messy Excel & CSV spreadsheets into clean, privacy-protected datasets and executive PDF reports in seconds — processed locally on your desktop with zero automatic cloud uploads, online account authorization, and Offline Read-Only access to saved projects."}
+              ? "حوّل ملفات Excel وCSV وغيرها من الصيغ المدعومة — حتى المصنفات متعددة الأوراق — إلى بيانات موثوقة وجاهزة للتحليل، ثم حوّل النتائج إلى لوحات معلومات تفاعلية و21 نوعًا من الرسوم البيانية وعروض PowerPoint وتقارير تنفيذية بصيغ Word وPDF. يجمع صافي البيانات بين فهم المصنفات، والتنقية والتحويل الحتمي، والوصفات القابلة لإعادة الاستخدام، وذاكرة مسارات العمل والتعلّم المحلي، والبحث الكامل داخل المشاريع، ودعم اتخاذ القرار، في تطبيق سطح مكتب يراعي الخصوصية. تظل ملفاتك على جهازك دون رفع تلقائي للسحابة، وتتطلب العمليات المحمية تفويض الحساب عبر الإنترنت."
+              : "Turn messy Excel, CSV, and other supported workbooks into trustworthy, analysis-ready data—then turn those results into interactive dashboards, 21 chart types, PowerPoint presentations, and executive Word/PDF reports. SafiData combines multi-sheet profiling, deterministic cleaning and transformation, reusable recipes, local workflow memory and learning, full-text project search, and evidence-based decision support in one privacy-first desktop workspace. Your files stay on your device with no automatic cloud uploads; protected operations require online account authorization."}
           </p>
 
           {/* ReactBits Magnetic + StarBorder CTA Buttons */}
@@ -2329,13 +2330,7 @@ export function BentoCommandCenter({
           </p>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-            gap: "16px"
-          }}
-        >
+        <div className="safi-capabilities-grid-3x2" data-capabilities-grid-3x2="true">
           {[
             {
               id: "ingestion-multisheet",

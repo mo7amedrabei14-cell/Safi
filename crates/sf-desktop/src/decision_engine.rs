@@ -283,25 +283,42 @@ pub struct ColumnContentDecision {
     pub reason_ar: String,
 }
 
-/// Duplicate detection classification (Section 11.2) distinguishing exact unintended duplicates
-/// from valid multi-transaction records and conflicting-key rows requiring review/merge.
+/// Duplicate detection classification (Section 11.2 & Section 4.4) distinguishing exact unintended
+/// duplicates from valid multi-transaction records, conflicting-key rows, and ambiguous rows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicateAnalysisReport {
     /// Row IDs that are 100% identical across EVERY column (safe to drop automatically).
     pub exact_unintended_duplicate_row_ids: Vec<u64>,
-    /// Count of rows sharing an entity/customer/dimension value but having distinct dates/amounts
-    /// (valid repeated transactions — MUST NOT be deleted!).
+    /// Count of rows sharing an entity/customer/party value WITH a distinct transaction identifier
+    /// or distinct temporal/amount event (valid repeated transactions — MUST NOT be deleted!).
     pub valid_repeated_entity_transaction_rows: usize,
     /// Row IDs sharing the primary identifier key (`order_id`, `emp_id`, etc.) but having
     /// conflicting non-key values (unsafe to auto-delete; requires review or merge).
     pub conflicting_key_review_row_ids: Vec<u64>,
+    /// Row IDs that look potentially duplicated without a unique transaction key or with identical
+    /// `(entity, date, amount)` values (ambiguous — requires human confirmation, never auto-dropped).
+    #[serde(default)]
+    pub ambiguous_duplicate_review_row_ids: Vec<u64>,
     /// Key column used for key-conflict check, if detected.
     pub detected_primary_key_column: Option<String>,
     /// Summary explanation (English).
     pub summary_en: String,
     /// Summary explanation (Arabic).
     pub summary_ar: String,
+}
+
+/// Optional runtime probe result supplied by the Desktop shell boundary (outside air-gapped engine crates).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaRuntimeProbe {
+    /// Loopback endpoint probed (`http://127.0.0.1:11434`).
+    pub endpoint: String,
+    /// Measured runtime state: `"available_with_models"`, `"reachable_zero_models"`,
+    /// `"service_unreachable"`, or `"not_configured"`.
+    pub status: String,
+    /// Installed model tags discovered from `/api/tags` (empty if unreachable or zero models).
+    pub installed_models: Vec<String>,
 }
 
 /// Cross-product consistency & lineage audit report (Section 11.7).
@@ -404,6 +421,25 @@ impl SafiDecisionEngine {
         matched_workflow: Option<&SheetWorkflowMemoryRecord>,
         learning_profile: Option<&PersonalLearningProfile>,
     ) -> WorkspaceOptimalDecisionSuite {
+        Self::evaluate_workspace_with_ollama(
+            graph,
+            artifacts,
+            matched_workflow,
+            learning_profile,
+            None,
+        )
+    }
+
+    /// Evaluates the workspace with an optional runtime [`OllamaRuntimeProbe`] supplied by the
+    /// Desktop shell boundary (`apps/desktop/src-tauri` or `studio_ipc_harness`).
+    #[must_use]
+    pub fn evaluate_workspace_with_ollama(
+        graph: &DataGraph,
+        artifacts: &StudioWorkspaceArtifacts,
+        matched_workflow: Option<&SheetWorkflowMemoryRecord>,
+        learning_profile: Option<&PersonalLearningProfile>,
+        ollama_probe: Option<&OllamaRuntimeProbe>,
+    ) -> WorkspaceOptimalDecisionSuite {
         let table = graph.working();
         let row_count = table.row_count();
         let columns = table.columns();
@@ -458,7 +494,21 @@ impl SafiDecisionEngine {
                 {
                     leading_zero_code_count += 1;
                 }
-                let cleaned_num = trimmed.replace([',', '$', ' '], "");
+                let cleaned_num = trimmed
+                    .replace([',', '$', '€', '£', '%', ' '], "")
+                    .replace("EGP", "")
+                    .replace("egp", "")
+                    .replace("USD", "")
+                    .replace("usd", "")
+                    .replace("SAR", "")
+                    .replace("sar", "")
+                    .replace("EUR", "")
+                    .replace("eur", "")
+                    .replace("GBP", "")
+                    .replace("AED", "")
+                    .replace("ج.م", "")
+                    .replace("ر.س", "")
+                    .replace("د.إ", "");
                 if cleaned_num.parse::<Decimal>().is_ok() {
                     numeric_count += 1;
                     if !cleaned_num.contains('.') {
@@ -675,12 +725,14 @@ impl SafiDecisionEngine {
         );
 
         // --------------------------------------------------------------------
-        // 2. Smart Duplicate Analysis (Section 11.2)
+        // 2. Smart Duplicate Analysis (Section 11.2 & Section 4.4)
         // --------------------------------------------------------------------
         let duplicate_analysis = analyze_duplicates(
             graph,
+            &column_decisions,
             identifier_cols.first().map(String::as_str),
-            dimension_cols.first().map(String::as_str),
+            temporal_cols.first().map(String::as_str),
+            measure_cols.first().map(String::as_str),
         );
 
         // --------------------------------------------------------------------
@@ -699,48 +751,63 @@ impl SafiDecisionEngine {
 
         // Domain 2: Data Cleaning Decision
         recommended_decisions.push(build_data_cleaning_decision(
+            row_count,
             &untrimmed_cols,
             &missing_numeric_cols,
             &duplicate_analysis,
         ));
 
         // Domain 3: Optimal KPI Selection Decision
-        let (kpi_decision, best_measure_col, best_metric_id, best_metric_name, best_metric_formula) =
-            build_kpi_selection_decision(
-                table,
-                &column_decisions,
-                &measure_cols,
-                &identifier_cols,
-                detected_domain,
-            );
-        recommended_decisions.push(kpi_decision);
+        let kpi_out = build_kpi_selection_decision(
+            table,
+            &column_decisions,
+            &measure_cols,
+            &identifier_cols,
+            detected_domain,
+            matched_workflow,
+            learning_profile,
+        );
+        recommended_decisions.push(kpi_out.decision);
 
         // Domain 4: Optimal Chart Selection Decision
         let (chart_decision, best_chart_type, best_group_col) = build_chart_selection_decision(
+            table,
             &column_decisions,
-            &best_measure_col,
+            &kpi_out.best_measure_col,
+            &kpi_out.best_agg_fn,
+            &measure_cols,
             &dimension_cols,
             &temporal_cols,
+            detected_domain,
             row_count,
+            matched_workflow,
+            learning_profile,
         );
         recommended_decisions.push(chart_decision);
 
         // Domain 5: Coherent Dashboard Builder Decision
         recommended_decisions.push(build_dashboard_layout_decision(
-            &best_metric_id,
-            &best_metric_name,
-            &best_metric_formula,
+            &kpi_out.best_metric_id,
+            &kpi_out.best_metric_name,
+            kpi_out.best_metric_unit.as_deref(),
+            &kpi_out.best_metric_formula,
             &best_chart_type,
-            &best_measure_col,
+            &kpi_out.best_measure_col,
             &best_group_col,
             detected_domain,
+            row_count,
+            &measure_cols,
+            &dimension_cols,
         ));
 
         // Domain 6: Executive Report & PowerPoint Decision
         recommended_decisions.push(build_report_and_presentation_decision(
             graph,
-            &best_metric_id,
-            &best_metric_name,
+            &kpi_out.best_metric_id,
+            &kpi_out.best_metric_name,
+            kpi_out.best_metric_unit.as_deref(),
+            &kpi_out.best_metric_formula,
+            &kpi_out.best_measure_col,
             &best_chart_type,
             &best_group_col,
             detected_domain,
@@ -752,9 +819,9 @@ impl SafiDecisionEngine {
         let consistency_report = audit_cross_product_consistency(graph, artifacts);
 
         // --------------------------------------------------------------------
-        // 5. AI Architecture & Task Router Status (Section 12)
+        // 5. AI Architecture & Task Router Status (Section 12 & Section 5)
         // --------------------------------------------------------------------
-        let ai_architecture = build_ai_architecture_status(artifacts);
+        let ai_architecture = build_ai_architecture_status(artifacts, ollama_probe);
 
         WorkspaceOptimalDecisionSuite {
             detected_domain,
@@ -820,8 +887,10 @@ fn infer_domain_from_concepts(concepts: &[String]) -> SheetBusinessDomain {
 
 fn analyze_duplicates(
     graph: &DataGraph,
+    column_decisions: &[ColumnContentDecision],
     primary_key_col: Option<&str>,
-    entity_col: Option<&str>,
+    temporal_col: Option<&str>,
+    measure_col: Option<&str>,
 ) -> DuplicateAnalysisReport {
     let table = graph.working();
     let row_count = table.row_count();
@@ -830,11 +899,31 @@ fn analyze_duplicates(
     let mut exact_dups = Vec::new();
 
     let pk_idx = primary_key_col.and_then(|pk| cols.iter().position(|c| c.schema().name == pk));
-    let entity_idx = entity_col.and_then(|en| cols.iter().position(|c| c.schema().name == en));
+    let temporal_idx = temporal_col.and_then(|t| cols.iter().position(|c| c.schema().name == t));
+    let measure_idx = measure_col.and_then(|m| cols.iter().position(|c| c.schema().name == m));
+
+    // Only treat a genuine party/account/customer/employee/branch column as an entity for
+    // repeated-transaction evidence (never generic categorical buckets like `Department` alone!).
+    let entity_col_name = column_decisions
+        .iter()
+        .find(|c| {
+            c.decided_role == "Dimension"
+                && matches!(
+                    c.canonical_concept.as_str(),
+                    "sales_customer_party" | "hr_employee_identity" | "dimension_branch_region"
+                )
+        })
+        .map(|c| c.column_name.as_str());
+    let entity_idx = entity_col_name.and_then(|en| cols.iter().position(|c| c.schema().name == en));
 
     let mut seen_pk_payloads: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut conflicting_key_rows = Vec::new();
-    let mut seen_entities: BTreeMap<String, usize> = BTreeMap::new();
+    // Map entity -> set of distinct transaction fingerprints `(pk, temporal, measure)`
+    let mut entity_tx_fingerprints: BTreeMap<String, BTreeSet<(String, String, String)>> =
+        BTreeMap::new();
+    // Without a primary key, track `(entity, temporal, measure)` repeats that differ only in notes/secondary columns.
+    let mut seen_no_pk_events: BTreeSet<(String, String, String)> = BTreeSet::new();
+    let mut ambiguous_rows = Vec::new();
 
     for row_idx in 0..row_count {
         let row_id = graph
@@ -848,55 +937,94 @@ fn analyze_duplicates(
             tuple.push(txt);
         }
 
+        // 1. Exact full-row unintended duplicates (100% identical across all columns)
         if !seen_full_rows.insert(tuple.clone()) {
             exact_dups.push(row_id);
             continue;
         }
 
-        if let Some(p_i) = pk_idx {
-            let key_val = tuple.get(p_i).cloned().unwrap_or_default();
-            if !key_val.is_empty() {
-                if let Some(prev_tuple) = seen_pk_payloads.get(&key_val) {
-                    if prev_tuple != &tuple {
-                        conflicting_key_rows.push(row_id);
-                    }
-                } else {
-                    let _ = seen_pk_payloads.insert(key_val, tuple.clone());
+        // 2. Conflicting primary key rows (same primary key, different non-key attributes)
+        let mut is_pk_conflict = false;
+        let pk_val = pk_idx
+            .and_then(|i| tuple.get(i))
+            .cloned()
+            .unwrap_or_default();
+        if pk_idx.is_some() && !pk_val.is_empty() {
+            if let Some(prev_tuple) = seen_pk_payloads.get(&pk_val) {
+                if prev_tuple != &tuple {
+                    conflicting_key_rows.push(row_id);
+                    is_pk_conflict = true;
                 }
+            } else {
+                let _ = seen_pk_payloads.insert(pk_val.clone(), tuple.clone());
             }
         }
 
-        if let Some(e_i) = entity_idx {
-            let ent_val = tuple.get(e_i).cloned().unwrap_or_default();
-            if !ent_val.is_empty() {
-                *seen_entities.entry(ent_val).or_insert(0) += 1;
+        let date_val = temporal_idx
+            .and_then(|i| tuple.get(i))
+            .cloned()
+            .unwrap_or_default();
+        let amt_val = measure_idx
+            .and_then(|i| tuple.get(i))
+            .cloned()
+            .unwrap_or_default();
+
+        // 3. Valid repeated entity transactions vs. Ambiguous duplicates:
+        //    Only count as a valid repeated transaction when backed by a distinct transaction ID
+        //    OR distinct temporal date/amount event (never from a bare category repetition!).
+        if !is_pk_conflict {
+            if let Some(e_i) = entity_idx {
+                let ent_val = tuple.get(e_i).cloned().unwrap_or_default();
+                if !ent_val.is_empty() {
+                    let has_tx_evidence =
+                        pk_idx.is_some() || temporal_idx.is_some() || measure_idx.is_some();
+                    if has_tx_evidence {
+                        let tx_fp = (pk_val.clone(), date_val.clone(), amt_val.clone());
+                        let entry = entity_tx_fingerprints.entry(ent_val.clone()).or_default();
+                        if !entry.insert(tx_fp.clone()) && pk_idx.is_none() {
+                            // Same (entity, date, amount) without a unique transaction key -> ambiguous duplicate!
+                            ambiguous_rows.push(row_id);
+                        }
+                    }
+                }
+            } else if pk_idx.is_none() && (temporal_idx.is_some() || measure_idx.is_some()) {
+                // No entity column and no primary key: check if `(first_col, date, amount)` repeats ambiguously
+                let first_val = tuple.first().cloned().unwrap_or_default();
+                let ev_key = (first_val, date_val, amt_val);
+                if !seen_no_pk_events.insert(ev_key) {
+                    ambiguous_rows.push(row_id);
+                }
             }
         }
     }
 
-    let valid_repeated_entity_transaction_rows: usize = seen_entities
+    // Valid repeated transactions = distinct transactions beyond the first per entity.
+    let valid_repeated_entity_transaction_rows: usize = entity_tx_fingerprints
         .values()
-        .filter(|&&count| count > 1)
-        .map(|&count| count - 1)
+        .filter(|fps| fps.len() > 1)
+        .map(|fps| fps.len() - 1)
         .sum();
 
     let summary_en = format!(
-        "Detected {} exact unintended duplicate row(s), {} valid repeated entity transaction(s) (preserved safely), and {} conflicting primary-key row(s) requiring review.",
+        "Detected {} exact unintended duplicate row(s), {} verified repeated entity transaction(s) (preserved safely), {} conflicting primary-key row(s), and {} ambiguous near-duplicate row(s) requiring review.",
         exact_dups.len(),
         valid_repeated_entity_transaction_rows,
-        conflicting_key_rows.len()
+        conflicting_key_rows.len(),
+        ambiguous_rows.len()
     );
     let summary_ar = format!(
-        "تم رصد {} صفوف مكررة بالكامل عن غير قصد، و{} معاملات متكررة صحيحة لنفس الجهة/الفرع (تم الحفاظ عليها بأمان)، و{} صفوف ذات تعارض في المفتاح الأساسي تحتاج مراجعة.",
+        "تم رصد {} صفوف مكررة بالكامل عن غير قصد، و{} معاملات متكررة موثّقة لنفس الجهة (تم الحفاظ عليها بأمان)، و{} صفوف ذات تعارض في المفتاح الأساسي، و{} صفوف محتملة التكرار تحتاج مراجعة.",
         exact_dups.len(),
         valid_repeated_entity_transaction_rows,
-        conflicting_key_rows.len()
+        conflicting_key_rows.len(),
+        ambiguous_rows.len()
     );
 
     DuplicateAnalysisReport {
         exact_unintended_duplicate_row_ids: exact_dups,
         valid_repeated_entity_transaction_rows,
         conflicting_key_review_row_ids: conflicting_key_rows,
+        ambiguous_duplicate_review_row_ids: ambiguous_rows,
         detected_primary_key_column: primary_key_col.map(str::to_owned),
         summary_en,
         summary_ar,
@@ -915,6 +1043,21 @@ fn build_spreadsheet_understanding_decision(
         .filter(|c| c.protected_identifier_from_measure)
         .map(|c| c.column_name.clone())
         .collect();
+
+    // Compute real data-driven completeness & parse-rate metrics across columns.
+    let total_cells: usize = column_decisions
+        .iter()
+        .map(|c| c.non_null_count + c.null_count)
+        .sum();
+    let total_non_null: usize = column_decisions.iter().map(|c| c.non_null_count).sum();
+    let completeness_permille: u16 = (total_non_null.saturating_mul(1000))
+        .checked_div(total_cells)
+        .map_or(0, |v| v.min(1000) as u16);
+
+    let typed_cols = measure_cols.len() + temporal_cols.len() + identifier_cols.len();
+    let schema_signal_permille: u16 = (typed_cols.saturating_mul(1000))
+        .checked_div(column_decisions.len().max(1))
+        .map_or(500, |v| (600 + (v * 400) / 1000).min(1000) as u16);
 
     let mut audit = Vec::new();
     if !protected_ids.is_empty() {
@@ -939,24 +1082,57 @@ fn build_spreadsheet_understanding_decision(
             ),
             objective: LexicographicObjectiveVector {
                 correctness: 0,
-                data_safety_no_loss: 500,
+                data_safety_no_loss: completeness_permille,
                 user_constraint_compliance: 200,
                 analytical_fit: 0,
                 explainability_audit: 300,
                 deliverable_quality: 100,
-                execution_efficiency: 1000,
+                execution_efficiency: 990,
             },
         });
     }
 
+    // Candidate B: Header-only classification (valid only if all columns match header semantics; scores lower when content evidence was needed).
+    let header_only_correctness: u16 = if protected_ids.is_empty() { 880 } else { 0 };
+    audit.push(EvaluatedCandidateAudit {
+        candidate_id: "cand_header_only_schema".to_owned(),
+        title_en: "Header-Only Column Role Inference (Without Cell Distribution Verification)"
+            .to_owned(),
+        title_ar: "استنتاج أدوار الأعمدة من العناوين فقط دون فحص توزيع القيم".to_owned(),
+        is_valid: protected_ids.is_empty(),
+        elimination_reason_en: if protected_ids.is_empty() {
+            None
+        } else {
+            Some("Eliminated: header-only inference failed to protect numeric identifier columns from summation.".to_owned())
+        },
+        elimination_reason_ar: if protected_ids.is_empty() {
+            None
+        } else {
+            Some("تم استبعاده: الاعتماد على العناوين فقط فشل في حماية أعمدة المعرّفات الرقمية.".to_owned())
+        },
+        objective: LexicographicObjectiveVector {
+            correctness: header_only_correctness,
+            data_safety_no_loss: completeness_permille,
+            user_constraint_compliance: 800,
+            analytical_fit: schema_signal_permille.saturating_sub(120),
+            explainability_audit: 750,
+            deliverable_quality: 800,
+            execution_efficiency: 995,
+        },
+    });
+
     let winning_obj = LexicographicObjectiveVector {
-        correctness: 1000,
-        data_safety_no_loss: 1000,
+        correctness: if column_decisions.is_empty() {
+            0
+        } else {
+            950u16.saturating_add((completeness_permille / 20).min(50))
+        },
+        data_safety_no_loss: completeness_permille,
         user_constraint_compliance: 1000,
-        analytical_fit: 960,
-        explainability_audit: 1000,
-        deliverable_quality: 950,
-        execution_efficiency: 980,
+        analytical_fit: schema_signal_permille,
+        explainability_audit: 980,
+        deliverable_quality: 880u16.saturating_add((completeness_permille / 10).min(100)),
+        execution_efficiency: 970,
     };
     audit.push(EvaluatedCandidateAudit {
         candidate_id: "cand_joint_header_content_schema".to_owned(),
@@ -974,7 +1150,7 @@ fn build_spreadsheet_understanding_decision(
             temporal_cols.len(),
             identifier_cols.len()
         ),
-        is_valid: true,
+        is_valid: !column_decisions.is_empty(),
         elimination_reason_en: None,
         elimination_reason_ar: None,
         objective: winning_obj,
@@ -984,7 +1160,11 @@ fn build_spreadsheet_understanding_decision(
         decision_id: "dec_spreadsheet_understanding".to_owned(),
         domain: DecisionDomain::SpreadsheetUnderstanding,
         algorithm_used: OptimizationAlgorithm::ExactConstraintSolver,
-        optimality_class: OptimalityClass::ExactProvenOptimum,
+        optimality_class: if column_decisions.is_empty() {
+            OptimalityClass::InsufficientEvidenceRequiresQuestion
+        } else {
+            OptimalityClass::ExactProvenOptimum
+        },
         recommended_title_en: format!(
             "Lock Verified Schema: {} Measure(s), {} Dimension(s), {} Temporal, {} Identifier(s)",
             measure_cols.len(),
@@ -1000,16 +1180,22 @@ fn build_spreadsheet_understanding_decision(
             identifier_cols.len()
         ),
         why_en: if protected_ids.is_empty() {
-            "Every column was verified by inspecting both cell value distributions and bilingual header semantics."
-                .to_owned()
+            format!(
+                "Every column was verified by inspecting both cell value distributions ({:.1}% non-null completeness) and bilingual header semantics.",
+                f64::from(completeness_permille) / 10.0
+            )
         } else {
             format!(
-                "Protected numeric identifier column(s) [{}] from being summed as Measures based on uniqueness and identifier patterns.",
-                protected_ids.join(", ")
+                "Protected numeric identifier column(s) [{}] from being summed as Measures based on uniqueness and identifier patterns ({:.1}% completeness).",
+                protected_ids.join(", "),
+                f64::from(completeness_permille) / 10.0
             )
         },
         why_ar: if protected_ids.is_empty() {
-            "تم التحقق من كل عمود بفحص توزيع القيم الفعلية مع الدلالة اللغوية للعناوين.".to_owned()
+            format!(
+                "تم التحقق من كل عمود بفحص توزيع القيم الفعلية (اكتمال {:.1}%) مع الدلالة اللغوية للعناوين.",
+                f64::from(completeness_permille) / 10.0
+            )
         } else {
             format!(
                 "تمت حماية أعمدة المعرّفات الرقمية [{}] من الجمع الخاطئ كمقاييس بناءً على تفرد القيم ونمط المعرّف.",
@@ -1040,6 +1226,13 @@ fn build_spreadsheet_understanding_decision(
                 impact_en: "Excluded from numeric summation to prevent corrupted KPIs.".to_owned(),
                 impact_ar: "مستبعدة من الجمع الرقمي لمنع تشويه المؤشرات.".to_owned(),
             },
+            DecisionEvidenceItem {
+                label_en: "Observed Non-Null Completeness".to_owned(),
+                label_ar: "نسبة اكتمال القيم الفعلية".to_owned(),
+                observed_value: format!("{:.1}% ({total_non_null}/{total_cells})", f64::from(completeness_permille) / 10.0),
+                impact_en: "Directly drives data-safety and analytical-fit scoring.".to_owned(),
+                impact_ar: "تُستخدم مباشرة في حساب درجات سلامة البيانات والملاءمة التحليلية.".to_owned(),
+            },
         ],
         assumptions_en: vec![
             "Header row is the first analytical row extracted by the workbook region detector.".to_owned(),
@@ -1064,36 +1257,40 @@ fn build_spreadsheet_understanding_decision(
 }
 
 fn build_data_cleaning_decision(
+    row_count: usize,
     untrimmed_cols: &[(String, usize)],
     missing_numeric_cols: &[(String, Vec<u64>)],
     dup: &DuplicateAnalysisReport,
 ) -> RecommendedDecision {
     let mut audit = Vec::new();
+    let total_rows = row_count.max(1);
 
-    // Candidate A (Pruned as unsafe if repeated entity transactions or conflicting keys exist):
-    // Aggressive deduplication by entity/dimension or blind key drop
+    // Candidate A (Pruned as unsafe if repeated entity transactions, conflicting keys, or ambiguous duplicates exist):
     if dup.valid_repeated_entity_transaction_rows > 0
         || !dup.conflicting_key_review_row_ids.is_empty()
+        || !dup.ambiguous_duplicate_review_row_ids.is_empty()
     {
         audit.push(EvaluatedCandidateAudit {
             candidate_id: "cand_aggressive_key_or_entity_dedup".to_owned(),
-            title_en: "Aggressive Deduplication on Entity / Conflicting Keys".to_owned(),
-            title_ar: "حذف التكرارات العدواني حسب الجهة أو المفاتيح المتعارضة".to_owned(),
+            title_en: "Aggressive Deduplication on Entity / Conflicting / Ambiguous Rows".to_owned(),
+            title_ar: "حذف التكرارات العدواني حسب الجهة أو المفاتيح المتعارضة أو الغامضة".to_owned(),
             is_valid: false,
             elimination_reason_en: Some(format!(
-                "Eliminated by Data-Safety Gate: would destroy {} valid repeated transaction row(s) and {} conflicting-key row(s) that require human review.",
+                "Eliminated by Data-Safety Gate: would destroy {} verified repeated transaction(s), {} conflicting-key row(s), and {} ambiguous row(s) requiring human review.",
                 dup.valid_repeated_entity_transaction_rows,
-                dup.conflicting_key_review_row_ids.len()
+                dup.conflicting_key_review_row_ids.len(),
+                dup.ambiguous_duplicate_review_row_ids.len()
             )),
             elimination_reason_ar: Some(format!(
-                "تم استبعاده بواسطة بوابة سلامة البيانات: يؤدي إلى حذف {} معاملات متكررة صحيحة و{} صفوف متعارضة المفتاح تتطلب مراجعة.",
+                "تم استبعاده بواسطة بوابة سلامة البيانات: يؤدي إلى حذف {} معاملات متكررة صحيحة و{} صفوف متعارضة المفتاح و{} صفوف غامضة تتطلب مراجعة.",
                 dup.valid_repeated_entity_transaction_rows,
-                dup.conflicting_key_review_row_ids.len()
+                dup.conflicting_key_review_row_ids.len(),
+                dup.ambiguous_duplicate_review_row_ids.len()
             )),
             objective: LexicographicObjectiveVector {
                 correctness: 0,
                 data_safety_no_loss: 100,
-                user_constraint_compliance: 300,
+                user_constraint_compliance: 200,
                 analytical_fit: 200,
                 explainability_audit: 400,
                 deliverable_quality: 200,
@@ -1102,128 +1299,243 @@ fn build_data_cleaning_decision(
         });
     }
 
-    // Determine the highest-priority safe deterministic cleaning action
-    let (title_en, title_ar, why_en, why_ar, action, what_en, what_ar) = if !dup
-        .exact_unintended_duplicate_row_ids
-        .is_empty()
-    {
+    // Build all valid candidate cleaning plans and score them dynamically from dataset impact!
+    struct CleaningCandidate {
+        id: String,
+        title_en: String,
+        title_ar: String,
+        why_en: String,
+        why_ar: String,
+        what_en: String,
+        what_ar: String,
+        action: DecisionExecutableAction,
+        objective: LexicographicObjectiveVector,
+    }
+
+    let mut valid_candidates: Vec<CleaningCandidate> = Vec::new();
+    let has_unresolved_ambiguity = !dup.conflicting_key_review_row_ids.is_empty()
+        || !dup.ambiguous_duplicate_review_row_ids.is_empty();
+
+    if !dup.exact_unintended_duplicate_row_ids.is_empty() {
         let ids = dup.exact_unintended_duplicate_row_ids.clone();
-        (
-                format!(
-                    "Remove {} Exact Full-Row Duplicate(s) While Preserving {} Valid Repeated Transaction(s)",
-                    ids.len(),
-                    dup.valid_repeated_entity_transaction_rows
-                ),
-                format!(
-                    "إزالة {} صفوف مكررة بالكامل مع الحفاظ على {} معاملات متكررة صحيحة",
-                    ids.len(),
-                    dup.valid_repeated_entity_transaction_rows
-                ),
-                "Only rows that are 100% byte-identical across every column are removed; multi-transaction rows for the same entity/branch are preserved."
-                    .to_owned(),
-                "يتم حذف الصفوف المتطابقة بنسبة 100% في جميع الأعمدة فقط، مع الحفاظ الكامل على المعاملات المتعددة لنفس العميل أو الفرع."
-                    .to_owned(),
-                DecisionExecutableAction::DropExactDuplicateRows { row_ids: ids.clone() },
-                format!("Drops exact duplicate row IDs {:?} atomically in Rust DataGraph.", ids),
-                format!("يحذف الصفوف المكررة المتطابقة {:?} ذريًا داخل محرك Rust.", ids),
-            )
-    } else if !untrimmed_cols.is_empty() {
+        let dup_impact_permille = ((ids.len() * 1000) / total_rows).min(1000) as u16;
+        valid_candidates.push(CleaningCandidate {
+            id: "cand_drop_exact_duplicates".to_owned(),
+            title_en: format!(
+                "Remove {} Exact Full-Row Duplicate(s) While Preserving {} Verified Repeated Transaction(s)",
+                ids.len(),
+                dup.valid_repeated_entity_transaction_rows
+            ),
+            title_ar: format!(
+                "إزالة {} صفوف مكررة بالكامل مع الحفاظ على {} معاملات متكررة موثّقة",
+                ids.len(),
+                dup.valid_repeated_entity_transaction_rows
+            ),
+            why_en: "Only rows that are 100% byte-identical across every column are removed; verified multi-transaction rows and ambiguous/conflicting keys are preserved."
+                .to_owned(),
+            why_ar: "يتم حذف الصفوف المتطابقة بنسبة 100% في جميع الأعمدة فقط، مع الحفاظ الكامل على المعاملات الصحيحة والصفوف التي تحتاج مراجعة."
+                .to_owned(),
+            what_en: format!("Drops exact duplicate row IDs {:?} atomically in Rust DataGraph.", ids),
+            what_ar: format!("يحذف الصفوف المكررة المتطابقة {:?} ذريًا داخل محرك Rust.", ids),
+            action: DecisionExecutableAction::DropExactDuplicateRows { row_ids: ids },
+            objective: LexicographicObjectiveVector {
+                correctness: 990,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: 980,
+                analytical_fit: 850u16.saturating_add((dup_impact_permille / 7).min(140)),
+                explainability_audit: 1000,
+                deliverable_quality: 960,
+                execution_efficiency: 970,
+            },
+        });
+    }
+
+    if !untrimmed_cols.is_empty() {
         let cols: Vec<String> = untrimmed_cols.iter().map(|(c, _)| c.clone()).collect();
         let total_cells: usize = untrimmed_cols.iter().map(|(_, n)| *n).sum();
-        (
-                format!(
-                    "Normalize & Trim Whitespace Across {} Column(s) ({} Cell(s))",
-                    cols.len(),
-                    total_cells
-                ),
-                format!(
-                    "تطبيع وإزالة الفراغات الزائدة في {} أعمدة ({} خلية)",
-                    cols.len(),
-                    total_cells
-                ),
-                "Leading/trailing whitespace splits identical categories during GROUP BY aggregation; trimming restores exact category grouping without losing any data."
-                    .to_owned(),
-                "الفراغات الزائدة في بداية أو نهاية النص تؤدي لتقسيم نفس الفئة عند التجميع؛ تنظيفها يوحّد الفئات دون فقدان أي بيانات."
-                    .to_owned(),
-                DecisionExecutableAction::TrimColumns {
-                    columns: cols.clone(),
-                },
-                format!("Executes deterministic trim_column on [{}].", cols.join(", ")),
-                format!("ينفّذ تنظيف الفراغات الحتمي على الأعمدة [{}].", cols.join("، ")),
-            )
-    } else if let Some((col, row_ids)) = missing_numeric_cols.first() {
-        (
-                format!(
-                    "Impute {} Missing Numeric Cell(s) in '{}' with Verified 0",
-                    row_ids.len(),
-                    col
-                ),
-                format!(
-                    "تعويض {} خلايا رقمية مفقودة في العمود '{}' بالقيمة 0 الموثقة",
-                    row_ids.len(),
-                    col
-                ),
-                "Prevents null-propagation errors in downstream SUM/AVG formulas while preserving full row lineage."
-                    .to_owned(),
-                "يمنع أخطاء القيم الفارغة في معادلات الجمع والمتوسط مع الحفاظ على كامل الصفوف وسلسلة المصدر."
-                    .to_owned(),
-                DecisionExecutableAction::FillMissingNumericZero {
-                    column: col.clone(),
-                    row_ids: row_ids.clone(),
-                },
-                format!("Fills missing cells in '{}' at row IDs {:?} with 0.", col, row_ids),
-                format!("يعوّض الخلايا المفقودة في '{}' عند الصفوف {:?} بالقيمة 0.", col, row_ids),
-            )
-    } else {
-        (
-                "Dataset Passed All Deterministic Hygiene Gates (Zero Destructive Changes Needed)".to_owned(),
-                "اجتازت البيانات جميع بوابات النظافة الحتمية (لا حاجة لأي تعديل حذفي)".to_owned(),
-                "No exact duplicates, untrimmed whitespace, or missing numeric cells were detected; preserving the working table as-is is provably optimal."
-                    .to_owned(),
-                "لم يتم رصد أي تكرارات متطابقة أو فراغات زائدة أو قيم رقمية مفقودة؛ الحفاظ على الجدول الحالي هو القرار الأمثل."
-                    .to_owned(),
-                DecisionExecutableAction::ConfirmClassificationOnly {
-                    summary: "clean_noop".to_owned(),
-                },
-                "No mutation required; working dataset is already normalized.".to_owned(),
-                "لا يتطلب أي تعديل؛ بيانات العمل منقّاة وجاهزة.".to_owned(),
-            )
-    };
+        let trim_impact = ((total_cells * 1000) / total_rows).min(1000) as u16;
+        valid_candidates.push(CleaningCandidate {
+            id: "cand_trim_whitespace".to_owned(),
+            title_en: format!(
+                "Normalize & Trim Whitespace Across {} Column(s) ({} Cell(s))",
+                cols.len(),
+                total_cells
+            ),
+            title_ar: format!(
+                "تطبيع وإزالة الفراغات الزائدة في {} أعمدة ({} خلية)",
+                cols.len(),
+                total_cells
+            ),
+            why_en: "Leading/trailing whitespace splits identical categories during GROUP BY aggregation; trimming restores exact category grouping without losing any data."
+                .to_owned(),
+            why_ar: "الفراغات الزائدة في بداية أو نهاية النص تؤدي لتقسيم نفس الفئة عند التجميع؛ تنظيفها يوحّد الفئات دون فقدان أي بيانات."
+                .to_owned(),
+            what_en: format!("Executes deterministic trim_column on [{}].", cols.join(", ")),
+            what_ar: format!("ينفّذ تنظيف الفراغات الحتمي على الأعمدة [{}].", cols.join("، ")),
+            action: DecisionExecutableAction::TrimColumns { columns: cols },
+            objective: LexicographicObjectiveVector {
+                correctness: 985,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: 980,
+                analytical_fit: 840u16.saturating_add((trim_impact / 8).min(130)),
+                explainability_audit: 1000,
+                deliverable_quality: 940,
+                execution_efficiency: 985,
+            },
+        });
+    }
 
-    let winning_obj = LexicographicObjectiveVector {
-        correctness: 1000,
-        data_safety_no_loss: 1000,
-        user_constraint_compliance: 1000,
-        analytical_fit: 970,
-        explainability_audit: 1000,
-        deliverable_quality: 960,
-        execution_efficiency: 975,
-    };
+    if let Some((col, row_ids)) = missing_numeric_cols.first() {
+        let miss_impact = ((row_ids.len() * 1000) / total_rows).min(1000) as u16;
+        valid_candidates.push(CleaningCandidate {
+            id: format!("cand_fill_missing_zero_{col}"),
+            title_en: format!(
+                "Impute {} Missing Numeric Cell(s) in '{}' with Verified 0",
+                row_ids.len(),
+                col
+            ),
+            title_ar: format!(
+                "تعويض {} خلايا رقمية مفقودة في العمود '{}' بالقيمة 0 الموثقة",
+                row_ids.len(),
+                col
+            ),
+            why_en: "Prevents null-propagation errors in downstream SUM/AVG formulas while preserving full row lineage."
+                .to_owned(),
+            why_ar: "يمنع أخطاء القيم الفارغة في معادلات الجمع والمتوسط مع الحفاظ على كامل الصفوف وسلسلة المصدر."
+                .to_owned(),
+            what_en: format!("Fills missing cells in '{}' at row IDs {:?} with 0.", col, row_ids),
+            what_ar: format!("يعوّض الخلايا المفقودة في '{}' عند الصفوف {:?} بالقيمة 0.", col, row_ids),
+            action: DecisionExecutableAction::FillMissingNumericZero {
+                column: col.clone(),
+                row_ids: row_ids.clone(),
+            },
+            objective: LexicographicObjectiveVector {
+                correctness: 960,
+                data_safety_no_loss: 950u16.saturating_sub((miss_impact / 10).min(80)),
+                user_constraint_compliance: 940,
+                analytical_fit: 820u16.saturating_add((miss_impact / 8).min(120)),
+                explainability_audit: 980,
+                deliverable_quality: 920,
+                execution_efficiency: 980,
+            },
+        });
+    }
 
-    audit.push(EvaluatedCandidateAudit {
-        candidate_id: "cand_safe_deterministic_cleaning".to_owned(),
-        title_en: title_en.clone(),
-        title_ar: title_ar.clone(),
-        is_valid: true,
-        elimination_reason_en: None,
-        elimination_reason_ar: None,
-        objective: winning_obj,
+    // Always evaluate the non-destructive preserve-as-is candidate!
+    let has_hygiene_issues = !valid_candidates.is_empty();
+    valid_candidates.push(CleaningCandidate {
+        id: "cand_preserve_working_table".to_owned(),
+        title_en: if has_hygiene_issues {
+            "Keep Working Dataset Unmodified (Defer Cleaning)".to_owned()
+        } else {
+            "Dataset Passed All Deterministic Hygiene Gates (Zero Destructive Changes Needed)"
+                .to_owned()
+        },
+        title_ar: if has_hygiene_issues {
+            "إبقاء جدول البيانات كما هو دون تنظيف حاليًا".to_owned()
+        } else {
+            "اجتازت البيانات جميع بوابات النظافة الحتمية (لا حاجة لأي تعديل حذفي)".to_owned()
+        },
+        why_en: if has_hygiene_issues {
+            "Preserves raw values intact, though detected duplicates/whitespace/nulls remain."
+                .to_owned()
+        } else {
+            "No exact duplicates, untrimmed whitespace, or missing numeric cells were detected; preserving the working table as-is is provably optimal."
+                .to_owned()
+        },
+        why_ar: if has_hygiene_issues {
+            "يبقي القيم الخام كما هي مع بقاء مشكلات النظافة المرصودة.".to_owned()
+        } else {
+            "لم يتم رصد أي تكرارات متطابقة أو فراغات زائدة أو قيم رقمية مفقودة؛ الحفاظ على الجدول الحالي هو القرار الأمثل."
+                .to_owned()
+        },
+        what_en: "No mutation required; working dataset remains preserved.".to_owned(),
+        what_ar: "لا يتطلب أي تعديل؛ بيانات العمل تبقى محفوظة كما هي.".to_owned(),
+        action: DecisionExecutableAction::ConfirmClassificationOnly {
+            summary: "clean_noop".to_owned(),
+        },
+        objective: LexicographicObjectiveVector {
+            correctness: if has_hygiene_issues { 820 } else { 1000 },
+            data_safety_no_loss: 1000,
+            user_constraint_compliance: 950,
+            analytical_fit: if has_hygiene_issues { 700 } else { 980 },
+            explainability_audit: 1000,
+            deliverable_quality: if has_hygiene_issues { 780 } else { 970 },
+            execution_efficiency: 1000,
+        },
     });
+
+    valid_candidates.sort_by_key(|a| std::cmp::Reverse(a.objective));
+    for cand in &valid_candidates {
+        audit.push(EvaluatedCandidateAudit {
+            candidate_id: cand.id.clone(),
+            title_en: cand.title_en.clone(),
+            title_ar: cand.title_ar.clone(),
+            is_valid: true,
+            elimination_reason_en: None,
+            elimination_reason_ar: None,
+            objective: cand.objective,
+        });
+    }
+
+    let strictly_dominates = valid_candidates.len() == 1
+        || valid_candidates[0].objective > valid_candidates[1].objective;
+    let winner = &valid_candidates[0];
+
+    let optimality_class = if has_unresolved_ambiguity {
+        OptimalityClass::InsufficientEvidenceRequiresQuestion
+    } else if strictly_dominates {
+        OptimalityClass::ExactProvenOptimum
+    } else {
+        OptimalityClass::BestValidCandidateFound
+    };
+
+    let clarification_prompt = if !dup.conflicting_key_review_row_ids.is_empty() {
+        Some(FocusedClarificationPrompt {
+            question_id: "q_conflicting_primary_key_policy".to_owned(),
+            prompt_en: format!(
+                "Found {} row(s) sharing the same primary key with different values. How should SafiData handle them?",
+                dup.conflicting_key_review_row_ids.len()
+            ),
+            prompt_ar: format!(
+                "تم العثور على {} صفوف تشترك في نفس المفتاح الأساسي ولكن بقيم مختلفة. كيف تفضّل معالجتها؟",
+                dup.conflicting_key_review_row_ids.len()
+            ),
+            options: vec![
+                "Keep all and flag for manual review (Recommended)".to_owned(),
+                "Keep latest record by date".to_owned(),
+            ],
+        })
+    } else if !dup.ambiguous_duplicate_review_row_ids.is_empty() {
+        Some(FocusedClarificationPrompt {
+            question_id: "q_ambiguous_duplicate_policy".to_owned(),
+            prompt_en: format!(
+                "Found {} potentially repeated row(s) with no unique transaction ID key. Are these separate valid events or accidental near-duplicates?",
+                dup.ambiguous_duplicate_review_row_ids.len()
+            ),
+            prompt_ar: format!(
+                "تم رصد {} صفوف متكررة محتملة بدون مفتاح معاملة فريد. هل تمثل معاملات منفصلة صحيحة أم تكرارات غير مقصودة؟",
+                dup.ambiguous_duplicate_review_row_ids.len()
+            ),
+            options: vec![
+                "Preserve all rows (treat as separate valid events)".to_owned(),
+                "Flag for manual deduplication review".to_owned(),
+            ],
+        })
+    } else {
+        None
+    };
 
     RecommendedDecision {
         decision_id: "dec_data_cleaning".to_owned(),
         domain: DecisionDomain::DataCleaning,
         algorithm_used: OptimizationAlgorithm::LexicographicBranchAndBound,
-        optimality_class: if dup.conflicting_key_review_row_ids.is_empty() {
-            OptimalityClass::ExactProvenOptimum
-        } else {
-            OptimalityClass::BestValidCandidateFound
-        },
-        recommended_title_en: title_en,
-        recommended_title_ar: title_ar,
-        why_en,
-        why_ar,
-        objective: winning_obj,
+        optimality_class,
+        recommended_title_en: winner.title_en.clone(),
+        recommended_title_ar: winner.title_ar.clone(),
+        why_en: winner.why_en.clone(),
+        why_ar: winner.why_ar.clone(),
+        objective: winner.objective,
         evidence: vec![
             DecisionEvidenceItem {
                 label_en: "Exact Unintended Duplicates".to_owned(),
@@ -1233,11 +1545,22 @@ fn build_data_cleaning_decision(
                 impact_ar: "متطابقة بنسبة 100% في كل الأعمدة؛ آمنة للإزالة.".to_owned(),
             },
             DecisionEvidenceItem {
-                label_en: "Valid Repeated Entity Transactions".to_owned(),
-                label_ar: "معاملات متكررة صحيحة لنفس الجهة".to_owned(),
+                label_en: "Verified Repeated Entity Transactions".to_owned(),
+                label_ar: "معاملات متكررة موثّقة لنفس الجهة".to_owned(),
                 observed_value: dup.valid_repeated_entity_transaction_rows.to_string(),
-                impact_en: "Protected from deletion by Data-Safety Gate.".to_owned(),
-                impact_ar: "محمية من الحذف بواسطة بوابة سلامة البيانات.".to_owned(),
+                impact_en: "Backed by distinct transaction ID/date/amount; protected by Data-Safety Gate.".to_owned(),
+                impact_ar: "مدعومة بمعرّف معاملة أو تاريخ/مبلغ مختلف؛ محمية من الحذف.".to_owned(),
+            },
+            DecisionEvidenceItem {
+                label_en: "Ambiguous / Conflicting Review Rows".to_owned(),
+                label_ar: "صفوف متعارضة أو غامضة للمراجعة".to_owned(),
+                observed_value: format!(
+                    "{} conflicting, {} ambiguous",
+                    dup.conflicting_key_review_row_ids.len(),
+                    dup.ambiguous_duplicate_review_row_ids.len()
+                ),
+                impact_en: "Never auto-deleted; routed to user confirmation.".to_owned(),
+                impact_ar: "لا تُحذف تلقائيًا أبدًا؛ تُحال لتأكيد المستخدم.".to_owned(),
             },
             DecisionEvidenceItem {
                 label_en: "Untrimmed Text Columns".to_owned(),
@@ -1255,44 +1578,97 @@ fn build_data_cleaning_decision(
             "لا يتم المساس بالملف الأصلي على القرص أبدًا؛ تُنفَّذ التنقية داخل DataGraph مع سجل تراجع كامل."
                 .to_owned(),
         ],
-        what_executes_en: what_en,
-        what_executes_ar: what_ar,
+        what_executes_en: winner.what_en.clone(),
+        what_executes_ar: winner.what_ar.clone(),
         undo_way_en: "Single-click Undo (studio_undo) immediately restores the previous DataGraph revision."
             .to_owned(),
         undo_way_ar: "ضغطة واحدة على زر التراجع (Undo) تستعيد النسخة السابقة من البيانات فورًا.".to_owned(),
-        executable_action: action,
-        clarification_prompt: if !dup.conflicting_key_review_row_ids.is_empty() {
-            Some(FocusedClarificationPrompt {
-                question_id: "q_conflicting_primary_key_policy".to_owned(),
-                prompt_en: format!(
-                    "Found {} row(s) sharing the same primary key with different values. How should SafiData handle them?",
-                    dup.conflicting_key_review_row_ids.len()
-                ),
-                prompt_ar: format!(
-                    "تم العثور على {} صفوف تشترك في نفس المفتاح الأساسي ولكن بقيم مختلفة. كيف تفضّل معالجتها؟",
-                    dup.conflicting_key_review_row_ids.len()
-                ),
-                options: vec![
-                    "Keep all and flag for manual review (Recommended)".to_owned(),
-                    "Keep latest record by date".to_owned(),
-                ],
-            })
-        } else {
-            None
-        },
+        executable_action: winner.action.clone(),
+        clarification_prompt,
         candidates_evaluated_count: audit.len(),
         invalid_eliminated_count: audit.iter().filter(|c| !c.is_valid).count(),
         advanced_audit_candidates: audit,
     }
 }
 
+struct KpiSelectionOutput {
+    decision: RecommendedDecision,
+    best_measure_col: String,
+    best_agg_fn: String,
+    best_metric_id: String,
+    best_metric_name: String,
+    best_metric_unit: Option<String>,
+    best_metric_formula: String,
+}
+
+fn detect_currencies_in_column(table: &sf_core::Table, col_name: &str) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    let detect_token = |raw: &str, out: &mut BTreeSet<String>| {
+        let upper = raw.to_ascii_uppercase();
+        if upper.contains("EGP") || raw.contains("ج.م") || raw.contains("جنيه") {
+            let _ = out.insert("EGP".to_owned());
+        }
+        if upper.contains("USD") || raw.contains('$') {
+            let _ = out.insert("USD".to_owned());
+        }
+        if upper.contains("SAR") || raw.contains("ر.س") || raw.contains("ريال") {
+            let _ = out.insert("SAR".to_owned());
+        }
+        if upper.contains("EUR") || raw.contains('€') {
+            let _ = out.insert("EUR".to_owned());
+        }
+        if upper.contains("GBP") || raw.contains('£') {
+            let _ = out.insert("GBP".to_owned());
+        }
+        if upper.contains("AED") || raw.contains("د.إ") {
+            let _ = out.insert("AED".to_owned());
+        }
+        if raw.trim().ends_with('%') {
+            let _ = out.insert("%".to_owned());
+        }
+    };
+
+    detect_token(col_name, &mut found);
+    if let Some(col) = table.columns().iter().find(|c| c.schema().name == col_name) {
+        for r in 0..table.row_count() {
+            if let Some(cell) = col.cell_at(r) {
+                detect_token(cell.raw_text(), &mut found);
+            }
+        }
+    }
+    found
+}
+
+fn column_has_negative_values(table: &sf_core::Table, col_name: &str) -> bool {
+    let Some(col) = table.columns().iter().find(|c| c.schema().name == col_name) else {
+        return false;
+    };
+    for r in 0..table.row_count() {
+        if let Some(cell) = col.cell_at(r) {
+            let cleaned = cell
+                .raw_text()
+                .trim()
+                .replace([',', '$', '€', '£', ' '], "");
+            if let Ok(d) = cleaned.parse::<Decimal>()
+                && d < Decimal::ZERO
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_kpi_selection_decision(
     table: &sf_core::Table,
     column_decisions: &[ColumnContentDecision],
     measure_cols: &[String],
     identifier_cols: &[String],
     domain: SheetBusinessDomain,
-) -> (RecommendedDecision, String, String, String, String) {
+    matched_workflow: Option<&SheetWorkflowMemoryRecord>,
+    learning_profile: Option<&PersonalLearningProfile>,
+) -> KpiSelectionOutput {
     let mut audit = Vec::new();
 
     // Prune any candidate that tries to SUM an Identifier column!
@@ -1320,212 +1696,876 @@ fn build_kpi_selection_decision(
         });
     }
 
-    // Select primary Measure column (prefer CurrencyAmount >NumericMeasure > Quantity)
-    let best_measure = column_decisions
-        .iter()
-        .find(|c| c.decided_role == "Measure" && c.decided_semantic_type == "CurrencyAmount")
-        .or_else(|| {
-            column_decisions
+    // Check learned or workflow-saved currency preference (NEVER hardcode "EGP"!).
+    let saved_currency_pref: Option<String> = learning_profile
+        .and_then(|prof| {
+            prof.rules
                 .iter()
-                .find(|c| c.decided_role == "Measure")
+                .find(|r| r.category == crate::workflow_memory::LearningCategory::CurrencyUnit)
+                .map(|r| r.preferred_value.clone())
         })
-        .map(|c| c.column_name.clone())
-        .or_else(|| measure_cols.first().cloned())
-        .unwrap_or_else(|| {
-            table
-                .columns()
-                .first()
-                .map_or_else(|| "amount".to_owned(), |c| c.schema().name.clone())
+        .or_else(|| {
+            matched_workflow.and_then(|wf| {
+                wf.question_resolutions
+                    .iter()
+                    .find(|q| {
+                        q.semantic_topic == "currency_unit"
+                            && matches!(q.action.as_str(), "answered" | "custom" | "corrected")
+                    })
+                    .map(|q| q.answer.clone())
+            })
         });
 
-    let use_sum = measure_cols.contains(&best_measure);
-    let formula = if use_sum {
-        format!("SUM({best_measure})")
-    } else {
-        format!("COUNT({best_measure})")
-    };
-    let metric_id = if use_sum {
-        format!("optimal_total_{}", sanitize_metric_token(&best_measure))
-    } else {
-        "optimal_record_count".to_owned()
-    };
-    let metric_name = match domain {
-        SheetBusinessDomain::Sales => format!("Verified Total {best_measure}"),
-        SheetBusinessDomain::Employees => format!("Verified Payroll / HR {best_measure}"),
-        SheetBusinessDomain::Inventory => format!("Verified Inventory {best_measure}"),
-        SheetBusinessDomain::Finance => format!("Verified Ledger {best_measure}"),
-        _ => format!("Verified {formula}"),
-    };
-    let unit = column_decisions
-        .iter()
-        .find(|c| c.column_name == best_measure && c.decided_semantic_type == "CurrencyAmount")
-        .map(|_| "EGP".to_owned());
+    struct KpiCandidate {
+        id: String,
+        col: String,
+        agg_fn: String,
+        metric_id: String,
+        metric_name: String,
+        formula: String,
+        unit: Option<String>,
+        mixed_currencies: Vec<String>,
+        objective: LexicographicObjectiveVector,
+    }
 
-    let winning_obj = LexicographicObjectiveVector {
-        correctness: 1000,
-        data_safety_no_loss: 1000,
-        user_constraint_compliance: 1000,
-        analytical_fit: 985,
-        explainability_audit: 1000,
-        deliverable_quality: 965,
-        execution_efficiency: 990,
+    let mut valid_candidates: Vec<KpiCandidate> = Vec::new();
+
+    for m_col in measure_cols {
+        let Some(col_dec) = column_decisions.iter().find(|c| c.column_name == *m_col) else {
+            continue;
+        };
+        let total = (col_dec.non_null_count + col_dec.null_count).max(1);
+        let completeness_permille = ((col_dec.non_null_count * 1000) / total).min(1000) as u16;
+        let parse_score = (u16::from(col_dec.numeric_parse_pct) * 10).min(1000);
+        let spread_bonus: u16 = if col_dec.distinct_count > 1 { 60 } else { 0 };
+
+        let observed_currencies = detect_currencies_in_column(table, m_col);
+        let mixed_currencies: Vec<String> = if observed_currencies.len() > 1 {
+            observed_currencies.iter().cloned().collect()
+        } else {
+            Vec::new()
+        };
+        let resolved_unit: Option<String> = if observed_currencies.len() > 1 {
+            None
+        } else if let Some(single) = observed_currencies.iter().next() {
+            Some(single.clone())
+        } else if col_dec.decided_semantic_type == "CurrencyAmount" {
+            saved_currency_pref.clone()
+        } else {
+            None
+        };
+
+        let unit_quality: u16 = if !mixed_currencies.is_empty() {
+            620
+        } else if resolved_unit.is_some() {
+            960
+        } else {
+            880
+        };
+
+        let domain_fit_base: u16 = match col_dec.decided_semantic_type.as_str() {
+            "CurrencyAmount" => 910,
+            "Quantity" => 850,
+            "UnitPrice" => 820,
+            _ => 800,
+        };
+        let is_rate_or_price =
+            col_dec.decided_semantic_type == "UnitPrice" || resolved_unit.as_deref() == Some("%");
+
+        // Evaluate SUM(col)
+        let sum_fit = if is_rate_or_price {
+            domain_fit_base.saturating_sub(140)
+        } else {
+            domain_fit_base.saturating_add(spread_bonus).min(995)
+        };
+        let sum_metric_id = format!("optimal_total_{}", sanitize_metric_token(m_col));
+        let sum_name = match domain {
+            SheetBusinessDomain::Sales => format!("Verified Total {m_col}"),
+            SheetBusinessDomain::Employees => format!("Verified Payroll / HR {m_col}"),
+            SheetBusinessDomain::Inventory => format!("Verified Inventory {m_col}"),
+            SheetBusinessDomain::Finance => format!("Verified Ledger {m_col}"),
+            _ => format!("Verified SUM({m_col})"),
+        };
+        valid_candidates.push(KpiCandidate {
+            id: format!("cand_kpi_sum_{}", sanitize_metric_token(m_col)),
+            col: m_col.clone(),
+            agg_fn: "SUM".to_owned(),
+            metric_id: sum_metric_id,
+            metric_name: sum_name,
+            formula: format!("SUM({m_col})"),
+            unit: resolved_unit.clone(),
+            mixed_currencies: mixed_currencies.clone(),
+            objective: LexicographicObjectiveVector {
+                correctness: if is_rate_or_price {
+                    parse_score.saturating_sub(80)
+                } else if !mixed_currencies.is_empty() {
+                    parse_score.saturating_sub(120)
+                } else {
+                    parse_score
+                },
+                data_safety_no_loss: completeness_permille,
+                user_constraint_compliance: if saved_currency_pref.is_some()
+                    && resolved_unit == saved_currency_pref
+                {
+                    1000
+                } else {
+                    940
+                },
+                analytical_fit: sum_fit,
+                explainability_audit: 1000,
+                deliverable_quality: unit_quality,
+                execution_efficiency: 990,
+            },
+        });
+
+        // Evaluate AVG(col)
+        let avg_fit = if is_rate_or_price {
+            domain_fit_base.saturating_add(spread_bonus).min(990)
+        } else {
+            domain_fit_base
+                .saturating_sub(70)
+                .saturating_add(spread_bonus / 2)
+        };
+        valid_candidates.push(KpiCandidate {
+            id: format!("cand_kpi_avg_{}", sanitize_metric_token(m_col)),
+            col: m_col.clone(),
+            agg_fn: "AVG".to_owned(),
+            metric_id: format!("optimal_avg_{}", sanitize_metric_token(m_col)),
+            metric_name: format!("Verified Average {m_col}"),
+            formula: format!("AVG({m_col})"),
+            unit: resolved_unit,
+            mixed_currencies,
+            objective: LexicographicObjectiveVector {
+                correctness: parse_score,
+                data_safety_no_loss: completeness_permille,
+                user_constraint_compliance: 940,
+                analytical_fit: avg_fit,
+                explainability_audit: 1000,
+                deliverable_quality: unit_quality,
+                execution_efficiency: 980,
+            },
+        });
+    }
+
+    // Zero-Measure Dataset Handling (Section 4.3): NEVER emit SUM() for a non-numeric column!
+    if valid_candidates.is_empty() {
+        let fallback_col = table
+            .columns()
+            .first()
+            .map_or_else(|| "record".to_owned(), |c| c.schema().name.clone());
+        let non_null_ratio: u16 = column_decisions
+            .first()
+            .map(|c| {
+                let total = (c.non_null_count + c.null_count).max(1);
+                ((c.non_null_count * 1000) / total).min(1000) as u16
+            })
+            .unwrap_or(1000);
+
+        // Explicitly audit why SUM(fallback_col) was pruned!
+        audit.push(EvaluatedCandidateAudit {
+            candidate_id: format!("cand_kpi_pruned_sum_{}", sanitize_metric_token(&fallback_col)),
+            title_en: format!("SUM({fallback_col})"),
+            title_ar: format!("جمع SUM({fallback_col})"),
+            is_valid: false,
+            elimination_reason_en: Some(format!(
+                "Eliminated: dataset has zero numeric Measures; '{fallback_col}' is non-numeric and cannot be summed."
+            )),
+            elimination_reason_ar: Some(format!(
+                "تم استبعاده: لا توجد أعمدة مقاييس رقمية في الجدول؛ العمود '{fallback_col}' غير رقمي ولا يمكن جمعه."
+            )),
+            objective: LexicographicObjectiveVector {
+                correctness: 0,
+                data_safety_no_loss: non_null_ratio,
+                user_constraint_compliance: 0,
+                analytical_fit: 0,
+                explainability_audit: 200,
+                deliverable_quality: 0,
+                execution_efficiency: 990,
+            },
+        });
+
+        valid_candidates.push(KpiCandidate {
+            id: "cand_kpi_count_records".to_owned(),
+            col: fallback_col.clone(),
+            agg_fn: "COUNT".to_owned(),
+            metric_id: "optimal_record_count".to_owned(),
+            metric_name: format!("Verified Record Count ({fallback_col})"),
+            formula: format!("COUNT({fallback_col})"),
+            unit: None,
+            mixed_currencies: Vec::new(),
+            objective: LexicographicObjectiveVector {
+                correctness: 1000,
+                data_safety_no_loss: non_null_ratio,
+                user_constraint_compliance: 950,
+                analytical_fit: 860,
+                explainability_audit: 1000,
+                deliverable_quality: 900,
+                execution_efficiency: 995,
+            },
+        });
+    }
+
+    valid_candidates.sort_by_key(|a| std::cmp::Reverse(a.objective));
+    for cand in &valid_candidates {
+        audit.push(EvaluatedCandidateAudit {
+            candidate_id: cand.id.clone(),
+            title_en: format!("{} = {}", cand.metric_name, cand.formula),
+            title_ar: format!("{} = {}", cand.metric_name, cand.formula),
+            is_valid: true,
+            elimination_reason_en: None,
+            elimination_reason_ar: None,
+            objective: cand.objective,
+        });
+    }
+
+    let winner = &valid_candidates[0];
+    let has_mixed_currency = !winner.mixed_currencies.is_empty();
+    let near_tie_measures = valid_candidates.len() >= 2
+        && valid_candidates[0].col != valid_candidates[1].col
+        && valid_candidates[0].objective.correctness == valid_candidates[1].objective.correctness
+        && valid_candidates[0].objective.data_safety_no_loss
+            == valid_candidates[1].objective.data_safety_no_loss
+        && valid_candidates[0]
+            .objective
+            .analytical_fit
+            .abs_diff(valid_candidates[1].objective.analytical_fit)
+            <= 15;
+
+    let optimality_class = if has_mixed_currency || near_tie_measures {
+        OptimalityClass::InsufficientEvidenceRequiresQuestion
+    } else if valid_candidates.len() == 1
+        || valid_candidates[0].objective > valid_candidates[1].objective
+    {
+        OptimalityClass::ExactProvenOptimum
+    } else {
+        OptimalityClass::BestValidCandidateFound
     };
 
-    audit.push(EvaluatedCandidateAudit {
-        candidate_id: format!("cand_kpi_{metric_id}"),
-        title_en: format!("{metric_name} = {formula}"),
-        title_ar: format!("{metric_name} = {formula}"),
-        is_valid: true,
-        elimination_reason_en: None,
-        elimination_reason_ar: None,
-        objective: winning_obj,
-    });
+    let clarification_prompt = if has_mixed_currency {
+        Some(FocusedClarificationPrompt {
+            question_id: "q_mixed_currency_clarification".to_owned(),
+            prompt_en: format!(
+                "Multiple currency symbols ({}) were detected in '{}'. Summing mixed currencies directly is invalid without FX conversion. Which currency or conversion policy applies?",
+                winner.mixed_currencies.join(", "),
+                winner.col
+            ),
+            prompt_ar: format!(
+                "تم رصد أكثر من عملة ({}) في العمود '{}'. جمع عملات مختلفة مباشرةً غير صحيح دون تحويل سعر الصرف. ما العملة أو السياسة المعتمدة؟",
+                winner.mixed_currencies.join("، "),
+                winner.col
+            ),
+            options: vec![
+                "Group totals separately by currency (Recommended)".to_owned(),
+                "Convert all rows using explicit FX rate".to_owned(),
+            ],
+        })
+    } else if near_tie_measures {
+        Some(FocusedClarificationPrompt {
+            question_id: "q_primary_kpi_tiebreaker".to_owned(),
+            prompt_en: format!(
+                "Two valid quantitative measures ('{}' and '{}') scored nearly identically. Which should be your headline KPI?",
+                valid_candidates[0].col, valid_candidates[1].col
+            ),
+            prompt_ar: format!(
+                "حقق مقياسان كميان ('{}' و'{}') درجات متقاربة جدًا. أيهما تريد اعتماده كمؤشر رئيسي؟",
+                valid_candidates[0].col, valid_candidates[1].col
+            ),
+            options: vec![
+                format!(
+                    "{} ({})",
+                    valid_candidates[0].col, valid_candidates[0].formula
+                ),
+                format!(
+                    "{} ({})",
+                    valid_candidates[1].col, valid_candidates[1].formula
+                ),
+            ],
+        })
+    } else {
+        None
+    };
+
+    let unit_display = winner
+        .unit
+        .as_deref()
+        .unwrap_or("Unspecified (no currency assumed)");
 
     let decision = RecommendedDecision {
         decision_id: "dec_optimal_kpi".to_owned(),
         domain: DecisionDomain::KpiSelection,
         algorithm_used: OptimizationAlgorithm::ExactConstraintSolver,
-        optimality_class: OptimalityClass::ExactProvenOptimum,
-        recommended_title_en: format!("Define Verified Primary KPI: {metric_name} ({formula})"),
-        recommended_title_ar: format!("تعريف المؤشر الرئيسي الموثق: {metric_name} ({formula})"),
-        why_en: format!(
-            "Selected '{best_measure}' as the primary quantitative measure for {:?} domain; computed deterministically in Rust with full row/column lineage and zero LLM involvement.",
-            domain
+        optimality_class,
+        recommended_title_en: format!(
+            "Define Verified Primary KPI: {} ({})",
+            winner.metric_name, winner.formula
         ),
-        why_ar: format!(
-            "تم اختيار العمود '{best_measure}' كمقياس كمي رئيسي؛ يُحسب حتميًا داخل محرك Rust مع تتبع كامل للصفوف والأعمدة دون أي تدخل من نماذج اللغة."
+        recommended_title_ar: format!(
+            "تعريف المؤشر الرئيسي الموثق: {} ({})",
+            winner.metric_name, winner.formula
         ),
-        objective: winning_obj,
-        evidence: vec![DecisionEvidenceItem {
-            label_en: "Verified Formula".to_owned(),
-            label_ar: "المعادلة الحتمية الموثقة".to_owned(),
-            observed_value: formula.clone(),
-            impact_en: "Produces a cryptographically fingerprinted VerifiedMetricToken.".to_owned(),
-            impact_ar: "تنتج رمز مؤشر موثق ببصمة BLAKE3 قابلة للتدقيق.".to_owned(),
+        why_en: if winner.agg_fn == "COUNT" {
+            format!(
+                "Dataset contains zero numeric Measure columns; selected deterministic record count '{}' instead of an invalid SUM().",
+                winner.formula
+            )
+        } else {
+            format!(
+                "Evaluated {} valid KPI candidate(s) across {} Measure column(s); '{}' achieved the highest lexicographic score (correctness={}, completeness={}, fit={}) with unit '{}'.",
+                valid_candidates.len(),
+                measure_cols.len(),
+                winner.formula,
+                winner.objective.correctness,
+                winner.objective.data_safety_no_loss,
+                winner.objective.analytical_fit,
+                unit_display
+            )
+        },
+        why_ar: if winner.agg_fn == "COUNT" {
+            format!(
+                "لا يحتوي الجدول على أعمدة مقاييس رقمية؛ تم اختيار عدّ السجلات الحتمي '{}' بدلًا من جمع نصي غير صالح.",
+                winner.formula
+            )
+        } else {
+            format!(
+                "تمت مقارنة {} مرشح مؤشر عبر {} أعمدة رقمية؛ حققت المعادلة '{}' أعلى نتيجة معجمية بوحدة «{}» وحساب حتمي داخل Rust.",
+                valid_candidates.len(),
+                measure_cols.len(),
+                winner.formula,
+                unit_display
+            )
+        },
+        objective: winner.objective,
+        evidence: vec![
+            DecisionEvidenceItem {
+                label_en: "Verified Formula".to_owned(),
+                label_ar: "المعادلة الحتمية الموثقة".to_owned(),
+                observed_value: winner.formula.clone(),
+                impact_en: "Produces a cryptographically fingerprinted VerifiedMetricToken.".to_owned(),
+                impact_ar: "تنتج رمز مؤشر موثق ببصمة BLAKE3 قابلة للتدقيق.".to_owned(),
+            },
+            DecisionEvidenceItem {
+                label_en: "Detected Currency / Unit".to_owned(),
+                label_ar: "العملة / الوحدة المرصودة".to_owned(),
+                observed_value: if has_mixed_currency {
+                    format!("MIXED: {}", winner.mixed_currencies.join(", "))
+                } else {
+                    unit_display.to_owned()
+                },
+                impact_en: "Never hardcoded; derived strictly from cell text, headers, or saved workflow preference.".to_owned(),
+                impact_ar: "لا يتم افتراض عملة ثابتة أبدًا؛ تُستخرج من البيانات الفعلية أو تفضيل المستخدم المحفوظ.".to_owned(),
+            },
+        ],
+        assumptions_en: vec![if has_mixed_currency {
+            "Mixed currencies detected; user confirmation is required before summing across currencies."
+                .to_owned()
+        } else {
+            "All rows in the active worksheet table share a consistent unit of measure.".to_owned()
         }],
-        assumptions_en: vec![
-            "All rows in the active worksheet table share a consistent unit of measure.".to_owned(),
-        ],
-        assumptions_ar: vec![
-            "جميع الصفوف في جدول الورقة النشطة تتبع نفس وحدة القياس/العملة.".to_owned(),
-        ],
-        what_executes_en: format!("Defines metric '{metric_id}' = '{formula}' in Rust DataGraph."),
-        what_executes_ar: format!("يعرّف المؤشر '{metric_id}' بالمعادلة '{formula}' في محرك Rust."),
+        assumptions_ar: vec![if has_mixed_currency {
+            "تم رصد عملات متعددة؛ يلزم تأكيد المستخدم قبل الجمع عبر العملات.".to_owned()
+        } else {
+            "جميع الصفوف في جدول الورقة النشطة تتبع نفس وحدة القياس.".to_owned()
+        }],
+        what_executes_en: format!(
+            "Defines metric '{}' = '{}' in Rust DataGraph.",
+            winner.metric_id, winner.formula
+        ),
+        what_executes_ar: format!(
+            "يعرّف المؤشر '{}' بالمعادلة '{}' في محرك Rust.",
+            winner.metric_id, winner.formula
+        ),
         undo_way_en: "Click Undo (studio_undo) to remove the metric definition.".to_owned(),
         undo_way_ar: "اضغط تراجع (Undo) لإلغاء تعريف المؤشر فورًا.".to_owned(),
         executable_action: DecisionExecutableAction::DefineVerifiedMetric {
-            metric_id: metric_id.clone(),
-            name: metric_name.clone(),
-            unit,
-            formula: formula.clone(),
+            metric_id: winner.metric_id.clone(),
+            name: winner.metric_name.clone(),
+            unit: winner.unit.clone(),
+            formula: winner.formula.clone(),
         },
-        clarification_prompt: None,
+        clarification_prompt,
         candidates_evaluated_count: audit.len(),
         invalid_eliminated_count: audit.iter().filter(|c| !c.is_valid).count(),
         advanced_audit_candidates: audit,
     };
 
-    (decision, best_measure, metric_id, metric_name, formula)
+    KpiSelectionOutput {
+        decision,
+        best_measure_col: winner.col.clone(),
+        best_agg_fn: winner.agg_fn.clone(),
+        best_metric_id: winner.metric_id.clone(),
+        best_metric_name: winner.metric_name.clone(),
+        best_metric_unit: winner.unit.clone(),
+        best_metric_formula: winner.formula.clone(),
+    }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_chart_selection_decision(
+    table: &sf_core::Table,
     column_decisions: &[ColumnContentDecision],
     best_measure_col: &str,
+    best_agg_fn: &str,
+    measure_cols: &[String],
     dimension_cols: &[String],
     temporal_cols: &[String],
+    domain: SheetBusinessDomain,
     row_count: usize,
+    matched_workflow: Option<&SheetWorkflowMemoryRecord>,
+    learning_profile: Option<&PersonalLearningProfile>,
 ) -> (RecommendedDecision, String, String) {
     let mut audit = Vec::new();
 
-    // Prefer a categorical dimension with 2..=25 distinct categories, otherwise temporal column
-    let chosen_group = dimension_cols
-        .first()
-        .cloned()
-        .or_else(|| temporal_cols.first().cloned())
-        .unwrap_or_else(|| best_measure_col.to_owned());
+    // Choose best grouping column: prefer temporal column if 2+ dates and no lower-cardinality categorical override,
+    // or a categorical dimension with 2..=25 distinct categories!
+    let best_cat_dim = dimension_cols
+        .iter()
+        .filter_map(|d| {
+            let distinct = column_decisions
+                .iter()
+                .find(|c| c.column_name == *d)
+                .map_or(0, |c| c.distinct_count);
+            if (2..=30).contains(&distinct) {
+                Some((d.clone(), distinct))
+            } else {
+                None
+            }
+        })
+        .min_by_key(|(_, distinct)| distinct.abs_diff(6))
+        .map(|(d, _)| d);
+
+    let best_temp_dim = temporal_cols.iter().find(|t| {
+        column_decisions
+            .iter()
+            .find(|c| c.column_name == **t)
+            .is_some_and(|c| c.distinct_count >= 2)
+    });
+
+    // If temporal dimension exists and has >= 3 distinct points while categorical has none or > 15, prefer temporal!
+    let chosen_group = if let Some(temp) = best_temp_dim {
+        if best_cat_dim.is_none() {
+            temp.clone()
+        } else if let Some(ref cat) = best_cat_dim {
+            let cat_d = column_decisions
+                .iter()
+                .find(|c| c.column_name == *cat)
+                .map_or(0, |c| c.distinct_count);
+            if cat_d > 15 {
+                temp.clone()
+            } else {
+                cat.clone()
+            }
+        } else {
+            temp.clone()
+        }
+    } else {
+        best_cat_dim
+            .or_else(|| dimension_cols.first().cloned())
+            .or_else(|| temporal_cols.first().cloned())
+            .unwrap_or_else(|| best_measure_col.to_owned())
+    };
 
     let group_distinct = column_decisions
         .iter()
         .find(|c| c.column_name == chosen_group)
         .map_or(row_count.max(1), |c| c.distinct_count);
     let is_temporal_group = temporal_cols.contains(&chosen_group);
+    let has_negative =
+        best_agg_fn != "COUNT" && column_has_negative_values(table, best_measure_col);
+    let measure_count = measure_cols.len();
+    let dimension_count = dimension_cols.len();
 
-    // Prune Pie/Donut if categories > 6 (perceptual distortion guard — Section 11.4)
-    if group_distinct > 6 || is_temporal_group {
-        audit.push(EvaluatedCandidateAudit {
-            candidate_id: "cand_chart_pie".to_owned(),
-            title_en: format!("Pie Chart of {best_measure_col} by {chosen_group}"),
-            title_ar: format!("رسم دائري (Pie) لـ {best_measure_col} حسب {chosen_group}"),
-            is_valid: false,
-            elimination_reason_en: Some(format!(
-                "Eliminated by Perceptual Guard: '{}' has {} distinct categories / temporal ordering, which causes angle-comparison distortion in Pie charts.",
-                chosen_group, group_distinct
-            )),
-            elimination_reason_ar: Some(format!(
-                "تم استبعاده بواسطة حارس الوضوح البصري: البُعد '{}' يحتوي على {} فئة/ترتيب زمني مما يسبب تضليلًا بصريًا في الرسم الدائري.",
-                chosen_group, group_distinct
-            )),
+    let preferred_charts: Vec<String> = matched_workflow
+        .map(|wf| wf.dashboard_preferences.preferred_chart_types.clone())
+        .unwrap_or_default();
+    let learned_chart_pref: Option<String> = learning_profile.and_then(|p| {
+        p.rules
+            .iter()
+            .find(|r| r.category == crate::workflow_memory::LearningCategory::ChartLayout)
+            .map(|r| r.preferred_value.to_ascii_lowercase())
+    });
+
+    struct ChartCandidate {
+        chart_type: String,
+        label_en: String,
+        label_ar: String,
+        why_en: String,
+        why_ar: String,
+        objective: LexicographicObjectiveVector,
+    }
+
+    let mut valid_charts: Vec<ChartCandidate> = Vec::new();
+    let mut push_pruned =
+        |chart_type: &str, title_en: &str, title_ar: &str, reason_en: String, reason_ar: String| {
+            audit.push(EvaluatedCandidateAudit {
+                candidate_id: format!("cand_chart_{chart_type}"),
+                title_en: title_en.to_owned(),
+                title_ar: title_ar.to_owned(),
+                is_valid: false,
+                elimination_reason_en: Some(reason_en),
+                elimination_reason_ar: Some(reason_ar),
+                objective: LexicographicObjectiveVector {
+                    correctness: 0,
+                    data_safety_no_loss: 1000,
+                    user_constraint_compliance: 400,
+                    analytical_fit: 150,
+                    explainability_audit: 500,
+                    deliverable_quality: 200,
+                    execution_efficiency: 980,
+                },
+            });
+        };
+
+    let pref_bonus = |ct: &str| -> u16 {
+        let in_wf = preferred_charts.iter().any(|p| p.eq_ignore_ascii_case(ct));
+        let in_lrn = learned_chart_pref
+            .as_deref()
+            .is_some_and(|p| p.contains(ct));
+        if in_wf || in_lrn { 1000 } else { 930 }
+    };
+
+    // 1. Evaluate Line & Area (temporal families)
+    if is_temporal_group && group_distinct >= 2 {
+        let line_fit = (930u16 + (group_distinct.min(12) as u16) * 5).min(995);
+        valid_charts.push(ChartCandidate {
+            chart_type: "line".to_owned(),
+            label_en: "Temporal Trend Line Chart".to_owned(),
+            label_ar: "رسم خطي للاتجاه الزمني (Line Chart)".to_owned(),
+            why_en: format!("Selected Line Chart because '{}' is a chronological Temporal dimension with {} periods.", chosen_group, group_distinct),
+            why_ar: format!("تم اختيار الرسم الخطي لأن '{}' بُعد زمني يحتوي {} فترة زمنية.", chosen_group, group_distinct),
             objective: LexicographicObjectiveVector {
-                correctness: 0,
+                correctness: 1000,
                 data_safety_no_loss: 1000,
-                user_constraint_compliance: 500,
-                analytical_fit: 200,
-                explainability_audit: 600,
-                deliverable_quality: 200,
+                user_constraint_compliance: pref_bonus("line"),
+                analytical_fit: line_fit,
+                explainability_audit: 1000,
+                deliverable_quality: 975,
+                execution_efficiency: 990,
+            },
+        });
+        valid_charts.push(ChartCandidate {
+            chart_type: "area".to_owned(),
+            label_en: "Cumulative Temporal Area Chart".to_owned(),
+            label_ar: "رسم مساحي زمني (Area Chart)".to_owned(),
+            why_en: format!(
+                "Area Chart emphasizes cumulative magnitude across {} temporal periods in '{}'.",
+                group_distinct, chosen_group
+            ),
+            why_ar: format!(
+                "الرسم المساحي يبرز الحجم التراكمي عبر {} فترات في '{}'.",
+                group_distinct, chosen_group
+            ),
+            objective: LexicographicObjectiveVector {
+                correctness: if has_negative { 850 } else { 980 },
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("area"),
+                analytical_fit: line_fit.saturating_sub(35),
+                explainability_audit: 980,
+                deliverable_quality: 940,
+                execution_efficiency: 985,
+            },
+        });
+    } else {
+        push_pruned(
+            "line",
+            &format!("Line Chart of {best_measure_col} by {chosen_group}"),
+            &format!("رسم خطي لـ {best_measure_col} حسب {chosen_group}"),
+            format!(
+                "Eliminated: '{chosen_group}' is unordered categorical data (not temporal); connecting unordered categories with lines implies a false continuous trend."
+            ),
+            format!(
+                "تم استبعاده: '{chosen_group}' فئات غير مرتبة زمنيًا؛ وصلها بخط يوحي باتجاه زمني مضلل."
+            ),
+        );
+    }
+
+    // 2. Evaluate Pie & Donut (strict perceptual guard: 2..=6 non-negative unordered categories ONLY!)
+    if !is_temporal_group && (2..=6).contains(&group_distinct) && !has_negative {
+        valid_charts.push(ChartCandidate {
+            chart_type: "donut".to_owned(),
+            label_en: "Part-to-Whole Donut Chart".to_owned(),
+            label_ar: "رسم حلقي لنسب الأجزاء (Donut Chart)".to_owned(),
+            why_en: format!(
+                "Valid part-to-whole Donut Chart ({} non-negative categories in '{}').",
+                group_distinct, chosen_group
+            ),
+            why_ar: format!(
+                "رسم حلقي صالح لتوزيع النسب ({} فئات غير سالبة في '{}').",
+                group_distinct, chosen_group
+            ),
+            objective: LexicographicObjectiveVector {
+                correctness: 960,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("donut"),
+                analytical_fit: if group_distinct <= 4 { 870 } else { 810 },
+                explainability_audit: 960,
+                deliverable_quality: 910,
+                execution_efficiency: 990,
+            },
+        });
+        valid_charts.push(ChartCandidate {
+            chart_type: "pie".to_owned(),
+            label_en: "Part-to-Whole Pie Chart".to_owned(),
+            label_ar: "رسم دائري لنسب الأجزاء (Pie Chart)".to_owned(),
+            why_en: format!(
+                "Valid part-to-whole Pie Chart ({} non-negative categories in '{}').",
+                group_distinct, chosen_group
+            ),
+            why_ar: format!(
+                "رسم دائري صالح لتوزيع النسب ({} فئات غير سالبة في '{}').",
+                group_distinct, chosen_group
+            ),
+            objective: LexicographicObjectiveVector {
+                correctness: 950,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("pie"),
+                analytical_fit: if group_distinct <= 4 { 855 } else { 790 },
+                explainability_audit: 950,
+                deliverable_quality: 890,
+                execution_efficiency: 990,
+            },
+        });
+    } else {
+        push_pruned(
+            "pie",
+            &format!("Pie / Donut Chart of {best_measure_col} by {chosen_group}"),
+            &format!("رسم دائري/حلقي لـ {best_measure_col} حسب {chosen_group}"),
+            format!(
+                "Eliminated by Perceptual Guard: '{}' has {} distinct categories (temporal={}, negative={}), violating the 2..=6 non-negative part-to-whole rule.",
+                chosen_group, group_distinct, is_temporal_group, has_negative
+            ),
+            format!(
+                "تم استبعاده بواسطة حارس الوضوح البصري: '{}' يحتوي {} فئة (زمني={}، سالب={}) مما يسبب تضليلًا في الرسم الدائري.",
+                chosen_group, group_distinct, is_temporal_group, has_negative
+            ),
+        );
+    }
+
+    // 3. Evaluate Bar & Column (Cleveland-McGill aligned length encoding for categorical comparisons)
+    if (2..=40).contains(&group_distinct) {
+        let bar_fit: u16 = if is_temporal_group {
+            875
+        } else if group_distinct > 6 {
+            975
+        } else {
+            955
+        };
+        let col_fit: u16 = if is_temporal_group {
+            890
+        } else if group_distinct <= 6 {
+            950
+        } else {
+            920
+        };
+        valid_charts.push(ChartCandidate {
+            chart_type: "bar".to_owned(),
+            label_en: "Ranked Categorical Bar Chart".to_owned(),
+            label_ar: "رسم أعمدة مقارن للفئات (Bar Chart)".to_owned(),
+            why_en: format!("Selected Bar Chart for comparing {best_agg_fn}({best_measure_col}) across {group_distinct} categories in '{chosen_group}' using aligned lengths (highest Cleveland-McGill perceptual accuracy)."),
+            why_ar: format!("تم اختيار رسم الأعمدة لمقارنة {best_agg_fn}({best_measure_col}) عبر {group_distinct} فئات في '{chosen_group}' بأعلى دقة إدراكية دون تضليل بصري."),
+            objective: LexicographicObjectiveVector {
+                correctness: 1000,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("bar"),
+                analytical_fit: bar_fit,
+                explainability_audit: 1000,
+                deliverable_quality: 980,
+                execution_efficiency: 990,
+            },
+        });
+        valid_charts.push(ChartCandidate {
+            chart_type: "column".to_owned(),
+            label_en: "Vertical Column Chart".to_owned(),
+            label_ar: "رسم أعمدة رأسية (Column Chart)".to_owned(),
+            why_en: format!("Vertical Column Chart cleanly compares {group_distinct} categories in '{chosen_group}'."),
+            why_ar: format!("الأعمدة الرأسية تقارن {group_distinct} فئات في '{chosen_group}' بوضوح."),
+            objective: LexicographicObjectiveVector {
+                correctness: 1000,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("column"),
+                analytical_fit: col_fit,
+                explainability_audit: 1000,
+                deliverable_quality: 970,
                 execution_efficiency: 990,
             },
         });
     }
 
-    let (best_chart_type, chart_label_en, chart_label_ar, why_en, why_ar) = if is_temporal_group {
-        (
-            "line".to_owned(),
-            "Temporal Trend Line Chart",
-            "رسم خطي للاتجاه الزمني (Line Chart)",
-            format!(
-                "Selected Line Chart because '{}' is a chronological Temporal dimension; position-along-common-scale encodes trends without distortion.",
-                chosen_group
+    // 4. Evaluate Pareto, Treemap, Waterfall, Scatter, Histogram, Boxplot, Stacked, Combo, Heatmap, KPI
+    if !is_temporal_group && group_distinct >= 4 && !has_negative {
+        valid_charts.push(ChartCandidate {
+            chart_type: "pareto".to_owned(),
+            label_en: "Pareto 80/20 Concentration Chart".to_owned(),
+            label_ar: "رسم باريتو للتركّز (Pareto Chart)".to_owned(),
+            why_en: format!(
+                "Highlights top contributors among {group_distinct} categories in '{chosen_group}'."
             ),
-            format!(
-                "تم اختيار الرسم الخطي لأن '{}' بُعد زمني؛ يوضّح الاتجاه عبر الزمن بأعلى دقة بصرية.",
-                chosen_group
-            ),
-        )
+            why_ar: format!("يبرز أكبر المساهمين ضمن {group_distinct} فئات في '{chosen_group}'."),
+            objective: LexicographicObjectiveVector {
+                correctness: 980,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("pareto"),
+                analytical_fit: if group_distinct >= 7 { 935 } else { 860 },
+                explainability_audit: 970,
+                deliverable_quality: 940,
+                execution_efficiency: 970,
+            },
+        });
+        valid_charts.push(ChartCandidate {
+            chart_type: "treemap".to_owned(),
+            label_en: "Hierarchical Treemap".to_owned(),
+            label_ar: "خريطة شجرية (Treemap)".to_owned(),
+            why_en: format!("Compares proportional share across {group_distinct} categories."),
+            why_ar: format!("تقارن الحصص النسبية عبر {group_distinct} فئات."),
+            objective: LexicographicObjectiveVector {
+                correctness: 960,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("treemap"),
+                analytical_fit: if group_distinct >= 8 { 900 } else { 810 },
+                explainability_audit: 940,
+                deliverable_quality: 900,
+                execution_efficiency: 960,
+            },
+        });
+    }
+
+    if has_negative || domain == SheetBusinessDomain::Finance {
+        valid_charts.push(ChartCandidate {
+            chart_type: "waterfall".to_owned(),
+            label_en: "Financial Bridge Waterfall Chart".to_owned(),
+            label_ar: "رسم شلالي مالي (Waterfall Chart)".to_owned(),
+            why_en: format!("Waterfall Chart accurately displays positive and negative variance contributions across '{chosen_group}'."),
+            why_ar: format!("الرسم الشلالي يعرض المساهمات الموجبة والسالبة بوضوح عبر '{chosen_group}'."),
+            objective: LexicographicObjectiveVector {
+                correctness: 1000,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("waterfall"),
+                analytical_fit: if has_negative { 985 } else { 910 },
+                explainability_audit: 990,
+                deliverable_quality: 975,
+                execution_efficiency: 975,
+            },
+        });
+    }
+
+    if measure_count >= 2 {
+        valid_charts.push(ChartCandidate {
+            chart_type: "scatter".to_owned(),
+            label_en: "Bivariate Scatter Correlation Plot".to_owned(),
+            label_ar: "مخطط التبعثر للارتباط (Scatter Plot)".to_owned(),
+            why_en: format!("Compares relationship across {measure_count} numeric measures."),
+            why_ar: format!("يقارن العلاقة بين {measure_count} مقاييس رقمية."),
+            objective: LexicographicObjectiveVector {
+                correctness: 980,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("scatter"),
+                analytical_fit: if dimension_cols.is_empty() && temporal_cols.is_empty() {
+                    970
+                } else {
+                    850
+                },
+                explainability_audit: 970,
+                deliverable_quality: 930,
+                execution_efficiency: 970,
+            },
+        });
     } else {
-        (
-            "bar".to_owned(),
-            "Ranked Categorical Bar Chart",
-            "رسم أعمدة مقارن للفئات (Bar Chart)",
+        push_pruned(
+            "scatter",
+            "Scatter Correlation Plot",
+            "مخطط التبعثر (Scatter)",
             format!(
-                "Selected Bar Chart for comparing '{}' across {} distinct categories in '{}'; aligned horizontal/vertical lengths provide the highest Cleveland-McGill perceptual accuracy.",
-                best_measure_col, group_distinct, chosen_group
+                "Eliminated: Scatter plots require at least 2 numeric Measures (dataset has {measure_count})."
             ),
             format!(
-                "تم اختيار رسم الأعمدة لمقارنة '{}' عبر {} فئات في '{}'؛ مقارنة الأطوال المتحاذاة توفر أعلى دقة إدراكية دون تضليل بصري.",
-                best_measure_col, group_distinct, chosen_group
+                "تم استبعاده: يتطلب مخطط التبعثر مقياسين رقميين على الأقل (المتوفر: {measure_count})."
             ),
-        )
-    };
+        );
+    }
 
-    let winning_obj = LexicographicObjectiveVector {
-        correctness: 1000,
-        data_safety_no_loss: 1000,
-        user_constraint_compliance: 1000,
-        analytical_fit: 980,
-        explainability_audit: 1000,
-        deliverable_quality: 985,
-        execution_efficiency: 990,
-    };
+    if measure_count >= 1 && row_count >= 4 {
+        let dist_fit = if dimension_cols.is_empty() && temporal_cols.is_empty() {
+            960
+        } else {
+            820
+        };
+        valid_charts.push(ChartCandidate {
+            chart_type: "histogram".to_owned(),
+            label_en: "Numeric Distribution Histogram".to_owned(),
+            label_ar: "مدرج تكراري للتوزيع (Histogram)".to_owned(),
+            why_en: format!("Shows value frequency distribution of '{best_measure_col}' across {row_count} rows."),
+            why_ar: format!("يوضّح توزيع قيم '{best_measure_col}' عبر {row_count} صف."),
+            objective: LexicographicObjectiveVector {
+                correctness: 980,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("histogram"),
+                analytical_fit: dist_fit,
+                explainability_audit: 970,
+                deliverable_quality: 920,
+                execution_efficiency: 980,
+            },
+        });
+    }
 
-    audit.push(EvaluatedCandidateAudit {
-        candidate_id: format!("cand_chart_{best_chart_type}"),
-        title_en: format!("{chart_label_en}: SUM({best_measure_col}) by {chosen_group}"),
-        title_ar: format!("{chart_label_ar}: SUM({best_measure_col}) حسب {chosen_group}"),
-        is_valid: true,
-        elimination_reason_en: None,
-        elimination_reason_ar: None,
-        objective: winning_obj,
-    });
+    if dimension_count >= 2 {
+        valid_charts.push(ChartCandidate {
+            chart_type: "stacked".to_owned(),
+            label_en: "Multi-Dimension Stacked Bar Chart".to_owned(),
+            label_ar: "أعمدة متراكمة متعددة الأبعاد (Stacked)".to_owned(),
+            why_en: format!("Shows composition across {dimension_count} categorical dimensions."),
+            why_ar: format!("يعرض التركيبة عبر {dimension_count} أبعاد تصنيفية."),
+            objective: LexicographicObjectiveVector {
+                correctness: if has_negative { 840 } else { 980 },
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("stacked"),
+                analytical_fit: 880,
+                explainability_audit: 960,
+                deliverable_quality: 930,
+                execution_efficiency: 975,
+            },
+        });
+    }
+
+    // Fallback scalar KPI card when only 1 category or 1 row exists
+    if valid_charts.is_empty() || group_distinct <= 1 {
+        valid_charts.push(ChartCandidate {
+            chart_type: "kpi".to_owned(),
+            label_en: "Verified Headline KPI Card".to_owned(),
+            label_ar: "بطاقة مؤشر رئيسي موثق (KPI Card)".to_owned(),
+            why_en: format!("Single-group summary ({group_distinct} distinct group) is clearest as a direct verified KPI card."),
+            why_ar: "ملخص الفئة الواحدة أوضح كبطاقة مؤشر مباشر دون رسم بياني زائد.".to_owned(),
+            objective: LexicographicObjectiveVector {
+                correctness: 1000,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: pref_bonus("kpi"),
+                analytical_fit: if group_distinct <= 1 { 990 } else { 760 },
+                explainability_audit: 1000,
+                deliverable_quality: 960,
+                execution_efficiency: 1000,
+            },
+        });
+    }
+
+    valid_charts.sort_by_key(|a| std::cmp::Reverse(a.objective));
+    for cand in &valid_charts {
+        audit.push(EvaluatedCandidateAudit {
+            candidate_id: format!("cand_chart_{}", cand.chart_type),
+            title_en: format!(
+                "{}: {best_agg_fn}({best_measure_col}) by {chosen_group}",
+                cand.label_en
+            ),
+            title_ar: format!(
+                "{}: {best_agg_fn}({best_measure_col}) حسب {chosen_group}",
+                cand.label_ar
+            ),
+            is_valid: true,
+            elimination_reason_en: None,
+            elimination_reason_ar: None,
+            objective: cand.objective,
+        });
+    }
+
+    let winner = &valid_charts[0];
+    let best_chart_type = winner.chart_type.clone();
 
     let decision = RecommendedDecision {
         decision_id: "dec_optimal_chart".to_owned(),
@@ -1533,22 +2573,33 @@ fn build_chart_selection_decision(
         algorithm_used: OptimizationAlgorithm::ConstrainedBeamSearch,
         optimality_class: OptimalityClass::BestValidCandidateFound,
         recommended_title_en: format!(
-            "Build {chart_label_en}: {best_measure_col} by {chosen_group}"
+            "Build {}: {best_measure_col} by {chosen_group}",
+            winner.label_en
         ),
         recommended_title_ar: format!(
-            "إنشاء {chart_label_ar}: {best_measure_col} حسب {chosen_group}"
+            "إنشاء {}: {best_measure_col} حسب {chosen_group}",
+            winner.label_ar
         ),
-        why_en,
-        why_ar,
-        objective: winning_obj,
-        evidence: vec![DecisionEvidenceItem {
-            label_en: "Grouping Cardinality".to_owned(),
-            label_ar: "عدد الفئات المميزة".to_owned(),
-            observed_value: group_distinct.to_string(),
-            impact_en: "Fits optimal perceptual comparison density without label collision."
-                .to_owned(),
-            impact_ar: "يتناسب مع الكثافة البصرية المثلى للمقارنة دون تداخل العناوين.".to_owned(),
-        }],
+        why_en: winner.why_en.clone(),
+        why_ar: winner.why_ar.clone(),
+        objective: winner.objective,
+        evidence: vec![
+            DecisionEvidenceItem {
+                label_en: "Grouping Cardinality".to_owned(),
+                label_ar: "عدد الفئات المميزة".to_owned(),
+                observed_value: group_distinct.to_string(),
+                impact_en: "Evaluated across all feasible chart families with perceptual distortion guards."
+                    .to_owned(),
+                impact_ar: "تم التقييم عبر جميع عائلات الرسوم الممكنة مع حراس منع التضليل البصري.".to_owned(),
+            },
+            DecisionEvidenceItem {
+                label_en: "Aggregation Function".to_owned(),
+                label_ar: "دالة التجميع".to_owned(),
+                observed_value: format!("{best_agg_fn}({best_measure_col})"),
+                impact_en: "Matched to column data type (COUNT for zero-measure sheets, SUM/AVG for verified numeric measures).".to_owned(),
+                impact_ar: "متوافقة مع نوع بيانات العمود (COUNT بدون مقاييس رقمية، وSUM/AVG للمقاييس الرقمية).".to_owned(),
+            },
+        ],
         assumptions_en: vec![
             "Chart series are aggregated strictly inside Rust (studio_chart_data) before rendering."
                 .to_owned(),
@@ -1557,17 +2608,17 @@ fn build_chart_selection_decision(
             "تُجمع سلاسل البيانات حتميًا داخل محرك Rust قبل رسمها في الواجهة.".to_owned(),
         ],
         what_executes_en: format!(
-            "Adds a verified '{best_chart_type}' chart aggregating SUM({best_measure_col}) by {chosen_group}."
+            "Adds a verified '{best_chart_type}' chart aggregating {best_agg_fn}({best_measure_col}) by {chosen_group}."
         ),
         what_executes_ar: format!(
-            "يضيف رسم '{best_chart_type}' موثقًا يجمع SUM({best_measure_col}) حسب {chosen_group}."
+            "يضيف رسم '{best_chart_type}' موثقًا يجمع {best_agg_fn}({best_measure_col}) حسب {chosen_group}."
         ),
         undo_way_en: "Remove or edit the chart card in Dashboard view or click Undo.".to_owned(),
         undo_way_ar: "احذف أو عدّل بطاقة الرسم من لوحة المؤشرات أو اضغط تراجع.".to_owned(),
         executable_action: DecisionExecutableAction::ConfigureOptimalChart {
             chart_type: best_chart_type.clone(),
             title: format!("{best_measure_col} by {chosen_group}"),
-            function: "SUM".to_owned(),
+            function: best_agg_fn.to_owned(),
             value_column: best_measure_col.to_owned(),
             group_by_column: chosen_group.clone(),
         },
@@ -1580,40 +2631,74 @@ fn build_chart_selection_decision(
     (decision, best_chart_type, chosen_group)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_dashboard_layout_decision(
     metric_id: &str,
     metric_name: &str,
+    metric_unit: Option<&str>,
     metric_formula: &str,
     chart_type: &str,
     value_col: &str,
     group_col: &str,
     domain: SheetBusinessDomain,
+    row_count: usize,
+    measure_cols: &[String],
+    dimension_cols: &[String],
 ) -> RecommendedDecision {
+    let kpi_strip_fit: u16 = 910u16
+        .saturating_add((measure_cols.len().min(3) as u16) * 20)
+        .saturating_add((dimension_cols.len().min(2) as u16) * 15)
+        .min(990);
     let winning_obj = LexicographicObjectiveVector {
         correctness: 1000,
         data_safety_no_loss: 1000,
-        user_constraint_compliance: 1000,
-        analytical_fit: 970,
+        user_constraint_compliance: 960,
+        analytical_fit: kpi_strip_fit,
         explainability_audit: 1000,
-        deliverable_quality: 975,
-        execution_efficiency: 980,
+        deliverable_quality: 960,
+        execution_efficiency: if row_count > 10_000 { 950 } else { 985 },
     };
 
-    let audit = vec![EvaluatedCandidateAudit {
-        candidate_id: "cand_coherent_dashboard_blueprint".to_owned(),
-        title_en: format!(
-            "Executive {:?} Dashboard: Top KPI Strip ({metric_name}) + Primary {chart_type} Breakdown by {group_col}",
-            domain
-        ),
-        title_ar: format!(
-            "لوحة مؤشرات تنفيذية ({:?}): شريط المؤشر الموثق ({metric_name}) + رسم {chart_type} حسب {group_col}",
-            domain
-        ),
-        is_valid: true,
-        elimination_reason_en: None,
-        elimination_reason_ar: None,
-        objective: winning_obj,
-    }];
+    let audit = vec![
+        EvaluatedCandidateAudit {
+            candidate_id: "cand_coherent_dashboard_blueprint".to_owned(),
+            title_en: format!(
+                "Executive {:?} Dashboard: Top KPI Strip ({metric_name}) + Primary {chart_type} Breakdown by {group_col}",
+                domain
+            ),
+            title_ar: format!(
+                "لوحة مؤشرات تنفيذية ({:?}): شريط المؤشر الموثق ({metric_name}) + رسم {chart_type} حسب {group_col}",
+                domain
+            ),
+            is_valid: true,
+            elimination_reason_en: None,
+            elimination_reason_ar: None,
+            objective: winning_obj,
+        },
+        EvaluatedCandidateAudit {
+            candidate_id: "cand_dense_unlinked_grid".to_owned(),
+            title_en: "Unlinked Multi-Widget Grid Without Verified KPI Lineage".to_owned(),
+            title_ar: "شبكة بطاقات غير مترابطة بدون سلسلة تحقق للمؤشرات".to_owned(),
+            is_valid: false,
+            elimination_reason_en: Some(
+                "Eliminated: unlinked widgets risk showing totals inconsistent with the primary DataGraph KPI."
+                    .to_owned(),
+            ),
+            elimination_reason_ar: Some(
+                "تم استبعاده: البطاقات غير المترابطة قد تعرض أرقامًا متعارضة مع المؤشر الموثق في DataGraph."
+                    .to_owned(),
+            ),
+            objective: LexicographicObjectiveVector {
+                correctness: 0,
+                data_safety_no_loss: 1000,
+                user_constraint_compliance: 500,
+                analytical_fit: 500,
+                explainability_audit: 300,
+                deliverable_quality: 400,
+                execution_efficiency: 980,
+            },
+        },
+    ];
 
     RecommendedDecision {
         decision_id: "dec_dashboard_blueprint".to_owned(),
@@ -1634,8 +2719,8 @@ fn build_dashboard_layout_decision(
             label_en: "KPI-to-Chart Lineage".to_owned(),
             label_ar: "ترابط المؤشر والرسم البياني".to_owned(),
             observed_value: format!("{metric_id} <-> {chart_type}({value_col} by {group_col})"),
-            impact_en: "Guarantees zero discrepancy between headline KPI total and chart bar sums.".to_owned(),
-            impact_ar: "يضمن تطابق الرقم الإجمالي للمؤشر مع مجموع أعمدة الرسم البياني بنسبة 100%.".to_owned(),
+            impact_en: "Guarantees zero discrepancy between headline KPI total and chart sums.".to_owned(),
+            impact_ar: "يضمن تطابق الرقم الإجمالي للمؤشر مع مجموع الرسم البياني بنسبة 100%.".to_owned(),
         }],
         assumptions_en: vec![
             "Dashboard cards stay dynamically bound to the live DataGraph revision.".to_owned(),
@@ -1652,23 +2737,27 @@ fn build_dashboard_layout_decision(
         executable_action: DecisionExecutableAction::ApplyDashboardAndReportBlueprint {
             primary_metric_id: metric_id.to_owned(),
             primary_metric_name: metric_name.to_owned(),
-            primary_metric_unit: Some("EGP".to_owned()),
+            primary_metric_unit: metric_unit.map(str::to_owned),
             primary_metric_formula: metric_formula.to_owned(),
             primary_chart_type: chart_type.to_owned(),
             value_column: value_col.to_owned(),
             group_by_column: group_col.to_owned(),
         },
         clarification_prompt: None,
-        candidates_evaluated_count: 1,
-        invalid_eliminated_count: 0,
+        candidates_evaluated_count: audit.len(),
+        invalid_eliminated_count: audit.iter().filter(|c| !c.is_valid).count(),
         advanced_audit_candidates: audit,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_report_and_presentation_decision(
     graph: &DataGraph,
     metric_id: &str,
     metric_name: &str,
+    metric_unit: Option<&str>,
+    metric_formula: &str,
+    value_col: &str,
     chart_type: &str,
     group_col: &str,
     _domain: SheetBusinessDomain,
@@ -1677,12 +2766,26 @@ fn build_report_and_presentation_decision(
     let winning_obj = LexicographicObjectiveVector {
         correctness: 1000,
         data_safety_no_loss: 1000,
-        user_constraint_compliance: 1000,
-        analytical_fit: 960,
+        user_constraint_compliance: 960,
+        analytical_fit: 920,
         explainability_audit: 1000,
-        deliverable_quality: 970,
+        deliverable_quality: 960,
         execution_efficiency: 985,
     };
+
+    let audit = vec![EvaluatedCandidateAudit {
+        candidate_id: "cand_verified_token_report_deck".to_owned(),
+        title_en: format!(
+            "Token-Bound Executive Report & Slides ({{{{metric:{metric_id}}}}} = {metric_formula})"
+        ),
+        title_ar: format!(
+            "تقرير تنفيذي وشرائح مربوطة بالرموز الموثقة ({{{{metric:{metric_id}}}}} = {metric_formula})"
+        ),
+        is_valid: true,
+        elimination_reason_en: None,
+        elimination_reason_ar: None,
+        objective: winning_obj,
+    }];
 
     RecommendedDecision {
         decision_id: "dec_report_and_presentation".to_owned(),
@@ -1705,7 +2808,7 @@ fn build_report_and_presentation_decision(
         evidence: vec![DecisionEvidenceItem {
             label_en: "Narrative Token Binding".to_owned(),
             label_ar: "ربط النصوص بالرموز الموثقة".to_owned(),
-            observed_value: format!("{{{{metric:{metric_id}}}}}"),
+            observed_value: format!("{{{{metric:{metric_id}}}}} ({metric_formula})"),
             impact_en: "Every number in Word (.docx), Vector PDF (.pdf), PowerPoint (.pptx), and HTML Capsule (.safi.html) resolves directly from Rust."
                 .to_owned(),
             impact_ar: "كل رقم في ملفات Word وPDF وPowerPoint وكبسولة HTML يُستمد مباشرة من محرك Rust."
@@ -1719,26 +2822,26 @@ fn build_report_and_presentation_decision(
             "يتم عرض الفروقات والترتيبات وصفيًا بدقة دون ادعاء علاقة سببية غير مبرهنة.".to_owned(),
         ],
         what_executes_en: format!(
-            "Synchronizes executive slide deck and document report blocks with metric '{metric_name}' and '{chart_type}' breakdown by '{group_col}'."
+            "Synchronizes executive slide deck and document report blocks with metric '{metric_name}' ({metric_formula}) and '{chart_type}' breakdown by '{group_col}'."
         ),
         what_executes_ar: format!(
-            "يزامن شرائح العرض التقديمي وفقرات التقرير مع المؤشر '{metric_name}' والتوزيع حسب '{group_col}'."
+            "يزامن شرائح العرض التقديمي وفقرات التقرير مع المؤشر '{metric_name}' ({metric_formula}) والتوزيع حسب '{group_col}'."
         ),
         undo_way_en: "Edit or remove generated slides/blocks in the Slides and Doc tabs.".to_owned(),
         undo_way_ar: "يمكنك تعديل أو حذف الشرائح والفقرات من تبويبي الشرائح والمستند.".to_owned(),
         executable_action: DecisionExecutableAction::ApplyDashboardAndReportBlueprint {
             primary_metric_id: metric_id.to_owned(),
             primary_metric_name: metric_name.to_owned(),
-            primary_metric_unit: Some("EGP".to_owned()),
-            primary_metric_formula: format!("SUM({group_col})"),
+            primary_metric_unit: metric_unit.map(str::to_owned),
+            primary_metric_formula: metric_formula.to_owned(),
             primary_chart_type: chart_type.to_owned(),
-            value_column: group_col.to_owned(),
+            value_column: value_col.to_owned(),
             group_by_column: group_col.to_owned(),
         },
         clarification_prompt: None,
-        candidates_evaluated_count: 1,
+        candidates_evaluated_count: audit.len(),
         invalid_eliminated_count: 0,
-        advanced_audit_candidates: Vec::new(),
+        advanced_audit_candidates: audit,
     }
 }
 
@@ -1851,12 +2954,25 @@ fn audit_cross_product_consistency(
 
 fn build_ai_architecture_status(
     artifacts: &StudioWorkspaceArtifacts,
+    ollama_probe: Option<&OllamaRuntimeProbe>,
 ) -> AiArchitectureStatusReport {
+    let (endpoint, status, models) = match ollama_probe {
+        Some(p) => (
+            p.endpoint.clone(),
+            p.status.clone(),
+            p.installed_models.clone(),
+        ),
+        None => (
+            "http://127.0.0.1:11434".to_owned(),
+            "not_probed".to_owned(),
+            Vec::new(),
+        ),
+    };
     AiArchitectureStatusReport {
-        local_ollama_endpoint: "http://127.0.0.1:11434".to_owned(),
-        local_ollama_status: "not_probed_in_airgapped_engine".to_owned(),
+        local_ollama_endpoint: endpoint,
+        local_ollama_status: status,
         bundled_model_claimed: false,
-        installed_local_models: Vec::new(),
+        installed_local_models: models,
         core_product_works_without_ai: true,
         external_ai_consent_granted: artifacts.privacy_settings.external_ai_consent_granted,
         local_pii_masking_enforced: artifacts.privacy_settings.mask_pii_on_cloud,
@@ -2048,6 +3164,13 @@ pub fn execute_recommended_decision_action(
                     now_ms,
                 );
             }
+            let chart_fn = if primary_metric_formula.starts_with("COUNT(") {
+                "COUNT"
+            } else if primary_metric_formula.starts_with("AVG(") {
+                "AVG"
+            } else {
+                "SUM"
+            };
             if !artifacts
                 .charts
                 .iter()
@@ -2057,7 +3180,7 @@ pub fn execute_recommended_decision_action(
                     id: format!("chart_opt_{now_ms}"),
                     chart_type: primary_chart_type.clone(),
                     title: format!("{value_column} by {group_by_column}"),
-                    function: "SUM".to_owned(),
+                    function: chart_fn.to_owned(),
                     column: value_column.clone(),
                     group_by: group_by_column.clone(),
                 });
@@ -2116,30 +3239,30 @@ mod tests {
     use super::*;
     use crate::test_result;
 
+    fn graph_from_csv(name: &str, csv: &str) -> DataGraph {
+        let report = test_result(sf_io::ingest_workbook_universal(
+            std::io::Cursor::new(csv.as_bytes()),
+            sf_core::limits::PlatformLimits::DESKTOP_CLI,
+            Some(name),
+            None,
+        ));
+        let table = test_result(report.worksheets[0].tables[0].to_core_table());
+        let source = test_result(sf_core::datagraph::SourceId::new(
+            name.trim_end_matches(".csv"),
+        ));
+        test_result(DataGraph::new(source, table, 1_000))
+    }
+
     #[test]
     fn decision_engine_protects_numeric_employee_id_distinguishes_duplicates_and_optimizes_lexicographically()
      {
-        // Dataset with:
-        // - Numeric `Employee ID` (1001, 1002, 1003) -> MUST be classified as Identifier, NEVER Measure!
-        // - `Department` with untrimmed whitespace ("Sales ")
-        // - Exact unintended duplicate row (row 2 and row 3 are 100% identical)
-        // - Valid repeated department transaction (row 1 and row 2 are both Sales but different employees/salaries)
-        // - Conflicting primary key row (row 4 has Employee ID 1001 with different salary 9500)
         let csv = "Employee ID,Department,Hire Date,Salary\n\
                    1001,Sales,2026-01-10,8000\n\
                    1002,Sales ,2026-01-15,9000\n\
                    1002,Sales ,2026-01-15,9000\n\
                    1001,Sales,2026-02-01,9500\n\
                    1003,Engineering,2026-02-05,12000\n";
-        let report = test_result(sf_io::ingest_workbook_universal(
-            std::io::Cursor::new(csv.as_bytes()),
-            sf_core::limits::PlatformLimits::DESKTOP_CLI,
-            Some("hr_sheet.csv"),
-            None,
-        ));
-        let table = test_result(report.worksheets[0].tables[0].to_core_table());
-        let source = test_result(sf_core::datagraph::SourceId::new("hr_sheet"));
-        let mut graph = test_result(DataGraph::new(source, table, 1_000));
+        let mut graph = graph_from_csv("hr_sheet.csv", csv);
         let mut artifacts = StudioWorkspaceArtifacts::default();
 
         let suite = SafiDecisionEngine::evaluate_workspace(&graph, &artifacts, None, None);
@@ -2165,7 +3288,10 @@ mod tests {
         );
         assert_eq!(salary_col.decided_role, "Measure");
 
-        // 2. Verify Smart Duplicate Analysis distinguishes exact duplicates vs. valid transactions vs. key conflicts
+        // 2. Smart Duplicate Analysis:
+        //    - 1 exact duplicate (row 3 == row 2)
+        //    - 1 conflicting primary key (Employee ID 1001 with different salary)
+        //    - Repeated `Department = Sales` is a category, NOT falsely counted as a repeated entity transaction!
         assert_eq!(
             suite
                 .duplicate_analysis
@@ -2173,11 +3299,11 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
+        assert_eq!(
             suite
                 .duplicate_analysis
-                .valid_repeated_entity_transaction_rows
-                >= 1
+                .valid_repeated_entity_transaction_rows,
+            0
         );
         assert_eq!(
             suite
@@ -2187,7 +3313,7 @@ mod tests {
             1
         );
 
-        // 3. Verify KPI Decision pruned `SUM(Employee ID)` and selected `SUM(Salary)`
+        // 3. KPI Decision pruned `SUM(Employee ID)`, selected `SUM(Salary)`, and did NOT hardcode EGP!
         let kpi_dec = test_result(
             suite
                 .recommended_decisions
@@ -2200,6 +3326,14 @@ mod tests {
             OptimalityClass::ExactProvenOptimum
         );
         assert!(kpi_dec.recommended_title_en.contains("SUM(Salary)"));
+        if let DecisionExecutableAction::DefineVerifiedMetric { unit, .. } =
+            &kpi_dec.executable_action
+        {
+            assert_eq!(
+                unit, &None,
+                "Must NEVER hardcode EGP when no currency is present"
+            );
+        }
         assert!(
             kpi_dec
                 .advanced_audit_candidates
@@ -2207,13 +3341,41 @@ mod tests {
                 .any(|c| !c.is_valid && c.title_en.contains("SUM(Employee ID)"))
         );
 
-        // 4. Execute the cleaning decision (drops only the 1 exact duplicate row, preserving 4 rows)
+        // 4. Report & Presentation action MUST reference `SUM(Salary)` and `value_column = Salary`, NEVER `SUM(Department)`!
+        let rep_dec = test_result(
+            suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::ReportAndPresentation)
+                .ok_or("Missing Report decision"),
+        );
+        assert_eq!(
+            rep_dec.optimality_class,
+            OptimalityClass::HeuristicRecommendation
+        );
+        if let DecisionExecutableAction::ApplyDashboardAndReportBlueprint {
+            primary_metric_formula,
+            primary_metric_unit,
+            value_column,
+            ..
+        } = &rep_dec.executable_action
+        {
+            assert_eq!(primary_metric_formula, "SUM(Salary)");
+            assert_eq!(value_column, "Salary");
+            assert_eq!(primary_metric_unit, &None);
+        }
+
+        // 5. Execute cleaning decision (drops only the 1 exact duplicate row, preserving 4 rows)
         let clean_dec = test_result(
             suite
                 .recommended_decisions
                 .iter()
                 .find(|d| d.domain == DecisionDomain::DataCleaning)
                 .ok_or("Missing Cleaning decision"),
+        );
+        assert_eq!(
+            clean_dec.optimality_class,
+            OptimalityClass::InsufficientEvidenceRequiresQuestion
         );
         let _ = test_result(execute_recommended_decision_action(
             &mut graph,
@@ -2223,7 +3385,7 @@ mod tests {
         ));
         assert_eq!(graph.working().row_count(), 4);
 
-        // 5. Execute the dashboard & report blueprint decision and verify 100% cross-product consistency
+        // 6. Execute dashboard blueprint and verify 100% cross-product consistency
         let dash_dec = test_result(
             suite
                 .recommended_decisions
@@ -2245,6 +3407,255 @@ mod tests {
                 .task_routing_table
                 .iter()
                 .all(|r| !r.allows_llm_numeric_computation)
+        );
+    }
+
+    #[test]
+    fn decision_engine_covers_currency_safety_zero_measures_charts_duplicates_learning_and_ollama()
+    {
+        let artifacts = StudioWorkspaceArtifacts::default();
+
+        // Scenario A: USD currency detected from cell symbols -> never hardcoded EGP!
+        let usd_graph = graph_from_csv(
+            "usd_sales.csv",
+            "Order ID,Customer,Sale Date,Revenue\n\
+             ORD-1,ACME,2026-01-01,$1200\n\
+             ORD-2,ACME,2026-01-15,$1500\n\
+             ORD-3,Beta,2026-01-20,$800\n",
+        );
+        let usd_suite = SafiDecisionEngine::evaluate_workspace(&usd_graph, &artifacts, None, None);
+        // Repeated Customer `ACME` with distinct Order IDs ORD-1 & ORD-2 -> 1 verified repeated entity transaction!
+        assert_eq!(
+            usd_suite
+                .duplicate_analysis
+                .valid_repeated_entity_transaction_rows,
+            1
+        );
+        let usd_kpi = test_result(
+            usd_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::KpiSelection)
+                .ok_or("missing KPI"),
+        );
+        if let DecisionExecutableAction::DefineVerifiedMetric { unit, formula, .. } =
+            &usd_kpi.executable_action
+        {
+            assert_eq!(unit.as_deref(), Some("USD"));
+            assert_eq!(formula, "SUM(Revenue)");
+        }
+
+        // Scenario B: Mixed currencies ($ and EGP) -> InsufficientEvidenceRequiresQuestion + clarification prompt!
+        let mixed_graph = graph_from_csv(
+            "mixed_cur.csv",
+            "Order ID,Customer,Revenue\n\
+             101,ACME,$500\n\
+             102,Beta,12000 EGP\n",
+        );
+        let mixed_suite =
+            SafiDecisionEngine::evaluate_workspace(&mixed_graph, &artifacts, None, None);
+        let mixed_kpi = test_result(
+            mixed_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::KpiSelection)
+                .ok_or("missing KPI"),
+        );
+        assert_eq!(
+            mixed_kpi.optimality_class,
+            OptimalityClass::InsufficientEvidenceRequiresQuestion
+        );
+        assert!(mixed_kpi.clarification_prompt.is_some());
+        if let DecisionExecutableAction::DefineVerifiedMetric { unit, .. } =
+            &mixed_kpi.executable_action
+        {
+            assert_eq!(unit, &None);
+        }
+
+        // Scenario C: Zero-measure all-text dataset -> NEVER emits SUM(), selects COUNT() everywhere!
+        let text_graph = graph_from_csv(
+            "text_only.csv",
+            "City,Status,Notes\n\
+             Cairo,Open,First ticket\n\
+             Alex,Closed,Second ticket\n\
+             Cairo,Open,Third ticket\n",
+        );
+        let text_suite =
+            SafiDecisionEngine::evaluate_workspace(&text_graph, &artifacts, None, None);
+        let text_kpi = test_result(
+            text_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::KpiSelection)
+                .ok_or("missing KPI"),
+        );
+        assert!(text_kpi.recommended_title_en.contains("COUNT("));
+        assert!(!text_kpi.recommended_title_en.contains("SUM("));
+        let text_chart = test_result(
+            text_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::ChartSelection)
+                .ok_or("missing Chart"),
+        );
+        if let DecisionExecutableAction::ConfigureOptimalChart { function, .. } =
+            &text_chart.executable_action
+        {
+            assert_eq!(function, "COUNT");
+        }
+
+        // Scenario D: Ambiguous near-duplicates without a primary key -> flagged for review!
+        let ambig_graph = graph_from_csv(
+            "ambig_dup.csv",
+            "Customer,Sale Date,Amount,Notes\n\
+             ACME,2026-03-01,500,Invoice A\n\
+             ACME,2026-03-01,500,Invoice A copy?\n",
+        );
+        let ambig_suite =
+            SafiDecisionEngine::evaluate_workspace(&ambig_graph, &artifacts, None, None);
+        assert_eq!(
+            ambig_suite
+                .duplicate_analysis
+                .ambiguous_duplicate_review_row_ids
+                .len(),
+            1
+        );
+        let ambig_clean = test_result(
+            ambig_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::DataCleaning)
+                .ok_or("missing Cleaning"),
+        );
+        assert_eq!(
+            ambig_clean.optimality_class,
+            OptimalityClass::InsufficientEvidenceRequiresQuestion
+        );
+        assert!(ambig_clean.clarification_prompt.is_some());
+
+        // Scenario E: Temporal time series -> selects `line` chart and prunes `pie`!
+        let ts_graph = graph_from_csv(
+            "timeseries.csv",
+            "Sale Date,Revenue\n\
+             2026-01-01,100\n\
+             2026-02-01,150\n\
+             2026-03-01,210\n\
+             2026-04-01,260\n",
+        );
+        let ts_suite = SafiDecisionEngine::evaluate_workspace(&ts_graph, &artifacts, None, None);
+        let ts_chart = test_result(
+            ts_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::ChartSelection)
+                .ok_or("missing Chart"),
+        );
+        if let DecisionExecutableAction::ConfigureOptimalChart { chart_type, .. } =
+            &ts_chart.executable_action
+        {
+            assert_eq!(chart_type, "line");
+        }
+        assert!(
+            ts_chart
+                .advanced_audit_candidates
+                .iter()
+                .any(|c| !c.is_valid && c.candidate_id == "cand_chart_pie")
+        );
+
+        // Scenario F: Negative financial variance -> selects `waterfall` and prunes `pie`!
+        let wf_graph = graph_from_csv(
+            "pnl_bridge.csv",
+            "Category,Cost\n\
+             Gross,5000\n\
+             COGS,-2000\n\
+             Opex,-1200\n\
+             Tax,-400\n",
+        );
+        let wf_suite = SafiDecisionEngine::evaluate_workspace(&wf_graph, &artifacts, None, None);
+        let wf_chart = test_result(
+            wf_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::ChartSelection)
+                .ok_or("missing Chart"),
+        );
+        if let DecisionExecutableAction::ConfigureOptimalChart { chart_type, .. } =
+            &wf_chart.executable_action
+        {
+            assert_eq!(chart_type, "waterfall");
+        }
+        assert!(
+            wf_chart
+                .advanced_audit_candidates
+                .iter()
+                .any(|c| !c.is_valid && c.candidate_id == "cand_chart_pie")
+        );
+
+        // Scenario G: Multi-measure table evaluates multiple KPI candidates & allows scatter chart!
+        let mm_graph = graph_from_csv(
+            "multi_measure.csv",
+            "Region,Revenue,Quantity,Unit Price\n\
+             Cairo,5000,50,100\n\
+             Alex,3000,30,100\n\
+             Giza,2000,20,100\n\
+             Delta,4000,40,100\n\
+             Upper,1500,15,100\n\
+             Canal,2500,25,100\n\
+             Sinai,1200,12,100\n",
+        );
+        let mm_suite = SafiDecisionEngine::evaluate_workspace(&mm_graph, &artifacts, None, None);
+        let mm_kpi = test_result(
+            mm_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::KpiSelection)
+                .ok_or("missing KPI"),
+        );
+        assert!(
+            mm_kpi.candidates_evaluated_count >= 6,
+            "Must evaluate SUM & AVG across all 3 valid numeric measures"
+        );
+        let mm_chart = test_result(
+            mm_suite
+                .recommended_decisions
+                .iter()
+                .find(|d| d.domain == DecisionDomain::ChartSelection)
+                .ok_or("missing Chart"),
+        );
+        assert!(
+            mm_chart
+                .advanced_audit_candidates
+                .iter()
+                .any(|c| c.is_valid && c.candidate_id == "cand_chart_scatter")
+        );
+        // 7 regions -> Pie must be pruned!
+        assert!(
+            mm_chart
+                .advanced_audit_candidates
+                .iter()
+                .any(|c| !c.is_valid && c.candidate_id == "cand_chart_pie")
+        );
+
+        // Scenario H: Real Ollama runtime probe injection reflects exact status & models!
+        let probe = OllamaRuntimeProbe {
+            endpoint: "http://127.0.0.1:11434".to_owned(),
+            status: "available_with_models".to_owned(),
+            installed_models: vec!["qwen2.5:7b".to_owned()],
+        };
+        let probed_suite = SafiDecisionEngine::evaluate_workspace_with_ollama(
+            &usd_graph,
+            &artifacts,
+            None,
+            None,
+            Some(&probe),
+        );
+        assert_eq!(
+            probed_suite.ai_architecture.local_ollama_status,
+            "available_with_models"
+        );
+        assert_eq!(
+            probed_suite.ai_architecture.installed_local_models,
+            vec!["qwen2.5:7b".to_owned()]
         );
     }
 }

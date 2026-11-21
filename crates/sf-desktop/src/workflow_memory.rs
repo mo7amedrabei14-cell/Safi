@@ -14,14 +14,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sf_arabic::{NormOptions, normalize_text};
+use sf_core::Table;
 
-use crate::vault::{VaultKey, decrypt_vault_payload, encrypt_vault_payload};
+use crate::vault::{VaultKey, read_encrypted_or_migrate_legacy, write_encrypted_mandatory};
 
 /// Current schema version for persisted workflow memory and learning profiles.
 pub const WORKFLOW_MEMORY_SCHEMA_VERSION: u32 = 1;
@@ -64,7 +63,7 @@ pub enum WorkflowMatchTier {
     Low,
 }
 
-/// Signature of a single column inside a sheet's semantic identity.
+/// Signature of a single column inside a sheet's semantic identity (including content-based profile).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColumnSemanticDescriptor {
@@ -80,6 +79,27 @@ pub struct ColumnSemanticDescriptor {
     pub semantic_type: String,
     /// Whether the user or engine marked this column as required for the workflow.
     pub required: bool,
+    /// Observed content data type from actual cell values (`"numeric"`, `"temporal"`, `"identifier_code"`, `"categorical"`, `"text"`, `"unknown"`).
+    #[serde(default)]
+    pub observed_data_type: String,
+    /// Observed percentage of non-null values that parse as numeric (`0..=100`).
+    #[serde(default)]
+    pub numeric_parse_pct: u8,
+    /// Observed percentage of non-null values that parse as dates (`0..=100`).
+    #[serde(default)]
+    pub date_parse_pct: u8,
+    /// Observed percentage of null/blank rows (`0..=100`).
+    #[serde(default)]
+    pub null_ratio_pct: u8,
+    /// Observed distinct value ratio (`distinct_non_null / non_null`, `0..=100`).
+    #[serde(default)]
+    pub uniqueness_ratio_pct: u8,
+    /// Whether actual cell values contain leading-zero identifier codes (e.g. `"00142"`).
+    #[serde(default)]
+    pub has_leading_zero_codes: bool,
+    /// Detected currency or unit symbol in cell values (`"EGP"`, `"USD"`, `"SAR"`, `"EUR"`, `"%"`).
+    #[serde(default)]
+    pub detected_currency_or_unit: Option<String>,
 }
 
 /// Filename-independent and sheet-name-independent semantic & structural signature of a worksheet.
@@ -489,37 +509,80 @@ pub struct ExplainableLearnedSuggestion {
     pub why_ar: String,
 }
 
-/// Longitudinal metrics proving how Continuous Local Learning reduces repeated questions,
-/// setup steps, and errors over time (Section 8.4).
+/// Honest, auditable longitudinal metrics measuring Continuous Local Learning events (Section 3 & 8.4).
+///
+/// Never fabricates `100%` accuracy on empty history (`observed_retention_rate_pct` is `None` when
+/// `observed_evaluation_denom == 0`) and never uses arbitrary multipliers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LearningEffectivenessMetrics {
-    /// Total clarification questions avoided/suppressed across matched sheets.
+    /// Total clarification questions genuinely reused across committed workflow replays.
     pub questions_avoided_total: u64,
-    /// Total cleaning operations and metrics replayed automatically without manual setup.
+    /// Explicit alias for auditable question-reuse count.
+    #[serde(default)]
+    pub questions_reused_total: u64,
+    /// Total verified cleaning operations and metric definitions applied in committed replays.
     pub setup_steps_saved_total: u64,
-    /// Number of workflows replayed successfully.
+    /// Explicit alias for verified cleaning operations + metrics applied.
+    #[serde(default)]
+    pub verified_steps_applied_total: u64,
+    /// Number of workflows replayed and committed atomically without error.
     pub workflows_replayed_total: u64,
+    /// Explicit alias for completed atomic workflow replays.
+    #[serde(default)]
+    pub completed_replays_total: u64,
     /// Count of explicit user corrections recorded.
     pub explicit_corrections_recorded: u64,
     /// Count of times a user had to repeat a correction on the same concept.
     pub repeated_corrections_count: u64,
+    /// Count of explicit user acceptances recorded.
+    #[serde(default)]
+    pub explicit_acceptances_total: u64,
+    /// Count of explicit user rejections recorded.
+    #[serde(default)]
+    pub explicit_rejections_total: u64,
     /// Count of workflow rollbacks or rule undo actions.
     pub undo_or_rollback_count: u64,
-    /// Computed consistency/accuracy rate (`0..=100`).
+    /// Observed retention numerator: `completed_replays_total + explicit_acceptances_total`.
+    #[serde(default)]
+    pub observed_retention_num: u64,
+    /// Observed evaluation denominator:
+    /// `completed_replays_total + explicit_acceptances_total + explicit_corrections_recorded + repeated_corrections_count + explicit_rejections_total + undo_or_rollback_count`.
+    #[serde(default)]
+    pub observed_evaluation_denom: u64,
+    /// Observed decision retention rate (`0..=100`), or `None` when `observed_evaluation_denom == 0`.
+    #[serde(default)]
+    pub observed_retention_rate_pct: Option<u8>,
+    /// Legacy integer representation (`0` when `observed_evaluation_denom == 0`, otherwise matches `observed_retention_rate_pct`).
     pub decision_accuracy_pct: u8,
+    /// Explicit English definition of the retention metric.
+    #[serde(default)]
+    pub metric_definition_en: String,
+    /// Explicit Arabic definition of the retention metric.
+    #[serde(default)]
+    pub metric_definition_ar: String,
 }
 
 impl Default for LearningEffectivenessMetrics {
     fn default() -> Self {
         Self {
             questions_avoided_total: 0,
+            questions_reused_total: 0,
             setup_steps_saved_total: 0,
+            verified_steps_applied_total: 0,
             workflows_replayed_total: 0,
+            completed_replays_total: 0,
             explicit_corrections_recorded: 0,
             repeated_corrections_count: 0,
+            explicit_acceptances_total: 0,
+            explicit_rejections_total: 0,
             undo_or_rollback_count: 0,
-            decision_accuracy_pct: 100,
+            observed_retention_num: 0,
+            observed_evaluation_denom: 0,
+            observed_retention_rate_pct: None,
+            decision_accuracy_pct: 0,
+            metric_definition_en: "Observed Decision Retention Rate = (completed_replays + explicit_acceptances) / (completed_replays + explicit_acceptances + explicit_corrections + repeated_corrections + explicit_rejections + undo_or_rollbacks). Null when denominator is 0 (no evaluation evidence yet).".to_owned(),
+            metric_definition_ar: "معدل استبقاء القرارات المرصود = (إعادات التشغيل المكتملة + القبول الصريح) ÷ إجمالي أحداث التقييم المرصودة. لا يُحتسب عند عدم وجود أحداث تقييم (0/0).".to_owned(),
         }
     }
 }
@@ -673,10 +736,63 @@ impl LocalWorkflowMemoryStore {
         recommendation_feedback: Vec<SavedRecommendationFeedback>,
         now_ms: u64,
     ) -> Result<SheetWorkflowMemoryRecord, String> {
+        self.save_sheet_workflow_with_table(
+            workflow_id,
+            display_name,
+            project_id,
+            sheet_name,
+            table_id,
+            headers,
+            None,
+            question_resolutions,
+            column_decisions,
+            duplicate_policy,
+            missing_value_policy,
+            business_rules,
+            cleaning_operations,
+            metrics,
+            dashboard_preferences,
+            recommendation_feedback,
+            now_ms,
+        )
+    }
+
+    /// Saves or updates a per-sheet workflow memory record with optional content-based [`Table`]
+    /// profiling so future matching validates actual value types, parse ratios, null ratios,
+    /// cardinality, and leading-zero identifier patterns (Section 2.1).
+    ///
+    /// # Errors
+    /// Returns `SF-SYS-001` or `SF-SYS-023` on validation or persistence failure.
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_sheet_workflow_with_table(
+        &mut self,
+        workflow_id: Option<&str>,
+        display_name: &str,
+        project_id: &str,
+        sheet_name: &str,
+        table_id: &str,
+        headers: &[String],
+        table: Option<&Table>,
+        question_resolutions: Vec<SavedQuestionDecision>,
+        column_decisions: Vec<SavedColumnDecision>,
+        duplicate_policy: &str,
+        missing_value_policy: &str,
+        business_rules: Vec<String>,
+        cleaning_operations: Vec<SavedCleaningOperation>,
+        metrics: Vec<SavedMetricDefinition>,
+        dashboard_preferences: SavedDashboardPreferences,
+        recommendation_feedback: Vec<SavedRecommendationFeedback>,
+        now_ms: u64,
+    ) -> Result<SheetWorkflowMemoryRecord, String> {
         if headers.is_empty() {
             return Err("SF-SYS-001".to_owned());
         }
-        let signature = build_sheet_semantic_signature(sheet_name, headers, &column_decisions);
+        let signature = build_sheet_semantic_signature_with_table(
+            sheet_name,
+            headers,
+            &column_decisions,
+            table,
+        );
         let resolved_id = workflow_id
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -820,7 +936,21 @@ impl LocalWorkflowMemoryStore {
         headers: &[String],
         observed_date_format: Option<&str>,
     ) -> SheetWorkflowMatchReport {
-        let incoming_sig = build_sheet_semantic_signature(sheet_name, headers, &[]);
+        self.match_incoming_sheet_with_table(sheet_name, headers, observed_date_format, None)
+    }
+
+    /// Matches an incoming worksheet using both header semantics and actual observed cell content
+    /// distributions (`table`) so generic headers or data-type drift never falsely auto-replay.
+    #[must_use]
+    pub fn match_incoming_sheet_with_table(
+        &self,
+        sheet_name: &str,
+        headers: &[String],
+        observed_date_format: Option<&str>,
+        table: Option<&Table>,
+    ) -> SheetWorkflowMatchReport {
+        let incoming_sig =
+            build_sheet_semantic_signature_with_table(sheet_name, headers, &[], table);
         let learned_suggestions = self.suggest_from_learning(sheet_name, &incoming_sig);
 
         let mut best_score: u8 = 0;
@@ -828,6 +958,7 @@ impl LocalWorkflowMemoryStore {
         let mut best_mapping: BTreeMap<String, String> = BTreeMap::new();
         let mut best_added: Vec<String> = Vec::new();
         let mut best_missing_req: Vec<String> = Vec::new();
+        let mut best_content_notices: Vec<String> = Vec::new();
 
         for candidate in self.sheet_workflows.values() {
             // Hard domain isolation: NEVER cross-apply Sales workflow to Employees or Inventory!
@@ -838,7 +969,7 @@ impl LocalWorkflowMemoryStore {
                 continue;
             }
 
-            let (score, mapping, added, missing_req) =
+            let (score, mapping, added, missing_req, content_notices) =
                 score_signature_compatibility(&candidate.signature, &incoming_sig);
             if score > best_score
                 || (score == best_score
@@ -849,6 +980,7 @@ impl LocalWorkflowMemoryStore {
                 best_mapping = mapping;
                 best_added = added;
                 best_missing_req = missing_req;
+                best_content_notices = content_notices;
             }
         }
 
@@ -875,7 +1007,7 @@ impl LocalWorkflowMemoryStore {
             };
         };
 
-        let mut schema_notices = Vec::new();
+        let mut schema_notices = best_content_notices;
         if !best_added.is_empty() {
             schema_notices.push(format!("New column(s) detected: {}", best_added.join(", ")));
         }
@@ -902,7 +1034,7 @@ impl LocalWorkflowMemoryStore {
         let has_schema_shift =
             !best_added.is_empty() || !best_missing_req.is_empty() || !schema_notices.is_empty();
 
-        // Clamp confidence to Medium if there is a structural schema change (new column or date shift)
+        // Clamp confidence to Medium if there is a structural schema change (new column, content mismatch, or date shift)
         // so SafiData reuses safe prior decisions and asks ONLY about the new/changed elements!
         let effective_confidence =
             if has_schema_shift && best_score >= HIGH_CONFIDENCE_REPLAY_THRESHOLD_PCT {
@@ -1029,7 +1161,7 @@ impl LocalWorkflowMemoryStore {
         }
     }
 
-    /// Records that a saved workflow was executed on a sheet.
+    /// Records that a saved workflow was executed and committed atomically on a sheet.
     ///
     /// # Errors
     /// Returns `SF-SYS-001` if `workflow_id` is not found.
@@ -1052,27 +1184,17 @@ impl LocalWorkflowMemoryStore {
             reused_questions,
         });
         let cloned = rec.clone();
-        self.learning_profile
-            .effectiveness_metrics
-            .workflows_replayed_total = self
-            .learning_profile
-            .effectiveness_metrics
-            .workflows_replayed_total
-            .saturating_add(1);
-        self.learning_profile
-            .effectiveness_metrics
-            .questions_avoided_total = self
-            .learning_profile
-            .effectiveness_metrics
+        let m = &mut self.learning_profile.effectiveness_metrics;
+        m.workflows_replayed_total = m.workflows_replayed_total.saturating_add(1);
+        m.completed_replays_total = m.workflows_replayed_total;
+        m.questions_avoided_total = m
             .questions_avoided_total
             .saturating_add(reused_questions as u64);
-        self.learning_profile
-            .effectiveness_metrics
-            .setup_steps_saved_total = self
-            .learning_profile
-            .effectiveness_metrics
-            .setup_steps_saved_total
-            .saturating_add((applied_operations + applied_metrics + reused_questions) as u64);
+        m.questions_reused_total = m.questions_avoided_total;
+        m.verified_steps_applied_total = m
+            .verified_steps_applied_total
+            .saturating_add((applied_operations + applied_metrics) as u64);
+        m.setup_steps_saved_total = m.verified_steps_applied_total;
         self.recompute_learning_accuracy();
         self.persist_workflows()?;
         self.persist_learning_profile()?;
@@ -1272,14 +1394,35 @@ impl LocalWorkflowMemoryStore {
                 source_sheet_label, existing.evidence_count
             );
             let updated_rule = existing.clone();
-            if signal_kind == LearningSignalKind::ExplicitCorrection {
-                self.learning_profile
-                    .effectiveness_metrics
-                    .repeated_corrections_count = self
-                    .learning_profile
-                    .effectiveness_metrics
-                    .repeated_corrections_count
-                    .saturating_add(1);
+            match signal_kind {
+                LearningSignalKind::ExplicitCorrection => {
+                    self.learning_profile
+                        .effectiveness_metrics
+                        .repeated_corrections_count = self
+                        .learning_profile
+                        .effectiveness_metrics
+                        .repeated_corrections_count
+                        .saturating_add(1);
+                }
+                LearningSignalKind::ExplicitAcceptance => {
+                    self.learning_profile
+                        .effectiveness_metrics
+                        .explicit_acceptances_total = self
+                        .learning_profile
+                        .effectiveness_metrics
+                        .explicit_acceptances_total
+                        .saturating_add(1);
+                }
+                LearningSignalKind::ExplicitRejection => {
+                    self.learning_profile
+                        .effectiveness_metrics
+                        .explicit_rejections_total = self
+                        .learning_profile
+                        .effectiveness_metrics
+                        .explicit_rejections_total
+                        .saturating_add(1);
+                }
+                LearningSignalKind::PreferredRule | LearningSignalKind::RepeatedChoice => {}
             }
             self.learning_profile.profile_version =
                 self.learning_profile.profile_version.saturating_add(1);
@@ -1289,14 +1432,35 @@ impl LocalWorkflowMemoryStore {
             return Ok(updated_rule);
         }
 
-        if signal_kind == LearningSignalKind::ExplicitCorrection {
-            self.learning_profile
-                .effectiveness_metrics
-                .explicit_corrections_recorded = self
-                .learning_profile
-                .effectiveness_metrics
-                .explicit_corrections_recorded
-                .saturating_add(1);
+        match signal_kind {
+            LearningSignalKind::ExplicitCorrection => {
+                self.learning_profile
+                    .effectiveness_metrics
+                    .explicit_corrections_recorded = self
+                    .learning_profile
+                    .effectiveness_metrics
+                    .explicit_corrections_recorded
+                    .saturating_add(1);
+            }
+            LearningSignalKind::ExplicitAcceptance => {
+                self.learning_profile
+                    .effectiveness_metrics
+                    .explicit_acceptances_total = self
+                    .learning_profile
+                    .effectiveness_metrics
+                    .explicit_acceptances_total
+                    .saturating_add(1);
+            }
+            LearningSignalKind::ExplicitRejection => {
+                self.learning_profile
+                    .effectiveness_metrics
+                    .explicit_rejections_total = self
+                    .learning_profile
+                    .effectiveness_metrics
+                    .explicit_rejections_total
+                    .saturating_add(1);
+            }
+            LearningSignalKind::PreferredRule | LearningSignalKind::RepeatedChoice => {}
         }
 
         let confidence_pct = compute_learning_confidence(signal_kind, 1);
@@ -1339,6 +1503,7 @@ impl LocalWorkflowMemoryStore {
         self.learning_profile.profile_version =
             self.learning_profile.profile_version.saturating_add(1);
         self.learning_profile.updated_at_ms = now_ms;
+        self.recompute_learning_accuracy();
         self.persist_learning_profile()?;
         Ok(rule)
     }
@@ -1482,15 +1647,32 @@ impl LocalWorkflowMemoryStore {
 
     fn recompute_learning_accuracy(&mut self) {
         let m = &mut self.learning_profile.effectiveness_metrics;
-        let positive = m.workflows_replayed_total * 3
-            + m.questions_avoided_total
-            + m.setup_steps_saved_total
-            + (self.learning_profile.rules.len() as u64) * 2;
-        let negative = m.repeated_corrections_count + m.undo_or_rollback_count;
-        m.decision_accuracy_pct = positive
-            .saturating_mul(100)
-            .checked_div(positive + negative)
-            .map_or(100, |v| v.clamp(50, 100) as u8);
+        m.completed_replays_total = m.workflows_replayed_total;
+        m.questions_reused_total = m.questions_avoided_total;
+        m.verified_steps_applied_total = m.setup_steps_saved_total;
+
+        let num = m
+            .completed_replays_total
+            .saturating_add(m.explicit_acceptances_total);
+        let denom = num
+            .saturating_add(m.explicit_corrections_recorded)
+            .saturating_add(m.repeated_corrections_count)
+            .saturating_add(m.explicit_rejections_total)
+            .saturating_add(m.undo_or_rollback_count);
+
+        m.observed_retention_num = num;
+        m.observed_evaluation_denom = denom;
+        match num.saturating_mul(100).checked_div(denom) {
+            None => {
+                m.observed_retention_rate_pct = None;
+                m.decision_accuracy_pct = 0;
+            }
+            Some(raw_pct) => {
+                let pct = raw_pct.min(100) as u8;
+                m.observed_retention_rate_pct = Some(pct);
+                m.decision_accuracy_pct = pct;
+            }
+        }
     }
 
     fn persist_workflows(&self) -> Result<(), String> {
@@ -1549,10 +1731,25 @@ pub fn build_sheet_semantic_signature(
     headers: &[String],
     overrides: &[SavedColumnDecision],
 ) -> SheetSemanticSignature {
+    build_sheet_semantic_signature_with_table(sheet_name, headers, overrides, None)
+}
+
+/// Builds a filename-independent semantic, structural, and content-based signature for a worksheet.
+///
+/// When `table` is provided, inspects actual cell values to record observed data types, numeric/date
+/// parse ratios, null ratios, distinct cardinality ratios, leading-zero identifier patterns, and
+/// currency symbols so generic headers or weak structural coincidence never falsely auto-replay.
+#[must_use]
+pub fn build_sheet_semantic_signature_with_table(
+    sheet_name: &str,
+    headers: &[String],
+    overrides: &[SavedColumnDecision],
+    table: Option<&Table>,
+) -> SheetSemanticSignature {
     let mut columns = Vec::with_capacity(headers.len());
     let mut concept_set = BTreeSet::new();
 
-    for h in headers {
+    for (col_idx, h) in headers.iter().enumerate() {
         let norm = normalize_identifier_token(h);
         let default_concept = canonicalize_header_concept(h);
         let override_opt = overrides.iter().find(|o| {
@@ -1560,19 +1757,46 @@ pub fn build_sheet_semantic_signature(
                 || o.canonical_concept == default_concept
         });
 
-        let canonical_concept = override_opt
+        let (obs_dtype, num_pct, date_pct, null_pct, uniq_pct, has_leading_zeros, detected_unit) =
+            profile_column_content(table, col_idx);
+
+        let mut canonical_concept = override_opt
             .map(|o| o.canonical_concept.clone())
             .filter(|c| !c.is_empty())
             .unwrap_or(default_concept);
+
+        // If header was generic/unrecognized, refine concept from observed content only if unambiguous,
+        // while keeping generic placeholder headers flagged so they cannot trigger High confidence on name alone.
+        if canonical_concept == norm && is_generic_placeholder_header(&norm) {
+            canonical_concept = format!("generic_placeholder_{norm}");
+        }
+
         let (default_role, default_sem) = infer_role_and_type_from_concept(&canonical_concept);
-        let analytical_role = override_opt
+        let mut analytical_role = override_opt
             .map(|o| o.confirmed_role.clone())
             .filter(|r| !r.is_empty())
             .unwrap_or_else(|| default_role.to_owned());
-        let semantic_type = override_opt
+        let mut semantic_type = override_opt
             .map(|o| o.confirmed_semantic_type.clone())
             .filter(|t| !t.is_empty())
             .unwrap_or_else(|| default_sem.to_owned());
+
+        if override_opt.is_none() && obs_dtype != "unknown" {
+            if has_leading_zeros || obs_dtype == "identifier_code" {
+                analytical_role = "Identifier".to_owned();
+                semantic_type = "IdentifierCode".to_owned();
+            } else if obs_dtype == "temporal" && date_pct >= 70 {
+                analytical_role = "Temporal".to_owned();
+                semantic_type = "CalendarDate".to_owned();
+            } else if obs_dtype == "numeric" && num_pct >= 70 && analytical_role == "Dimension" {
+                analytical_role = "Measure".to_owned();
+                if detected_unit.is_some() {
+                    semantic_type = "CurrencyAmount".to_owned();
+                } else {
+                    semantic_type = "Quantity".to_owned();
+                }
+            }
+        }
 
         let _ = concept_set.insert(canonical_concept.clone());
         columns.push(ColumnSemanticDescriptor {
@@ -1582,6 +1806,13 @@ pub fn build_sheet_semantic_signature(
             analytical_role,
             semantic_type,
             required: true,
+            observed_data_type: obs_dtype,
+            numeric_parse_pct: num_pct,
+            date_parse_pct: date_pct,
+            null_ratio_pct: null_pct,
+            uniqueness_ratio_pct: uniq_pct,
+            has_leading_zero_codes: has_leading_zeros,
+            detected_currency_or_unit: detected_unit,
         });
     }
 
@@ -1600,6 +1831,149 @@ pub fn build_sheet_semantic_signature(
         canonical_concepts,
         structural_hash,
     }
+}
+
+fn is_generic_placeholder_header(norm: &str) -> bool {
+    if norm.is_empty() || norm.len() <= 2 {
+        return true;
+    }
+    for prefix in [
+        "col", "column", "field", "var", "c", "f", "data", "value", "val", "item_",
+    ] {
+        if norm == prefix {
+            return true;
+        }
+        if let Some(rest) = norm.strip_prefix(prefix) {
+            let trimmed = rest.trim_start_matches('_');
+            if !trimmed.is_empty()
+                && trimmed.chars().all(|ch| {
+                    ch.is_ascii_digit()
+                        || ch.len_utf8() == 1 && ch.is_ascii_lowercase() && trimmed.len() == 1
+                })
+            {
+                return true;
+            }
+        }
+    }
+    matches!(norm, "unknown_column" | "unnamed" | "sheet" | "table")
+}
+
+#[allow(clippy::type_complexity)]
+fn profile_column_content(
+    table: Option<&Table>,
+    col_idx: usize,
+) -> (String, u8, u8, u8, u8, bool, Option<String>) {
+    let Some(tbl) = table else {
+        return ("unknown".to_owned(), 0, 0, 0, 0, false, None);
+    };
+    let Some(col) = tbl.columns().get(col_idx) else {
+        return ("unknown".to_owned(), 0, 0, 0, 0, false, None);
+    };
+    let total = tbl.row_count();
+    if total == 0 {
+        return ("unknown".to_owned(), 0, 0, 0, 0, false, None);
+    }
+
+    let mut nulls = 0usize;
+    let mut numeric_ok = 0usize;
+    let mut date_ok = 0usize;
+    let mut leading_zero = 0usize;
+    let mut distinct = BTreeSet::new();
+    let mut detected_currency: Option<String> = None;
+
+    for row_idx in 0..total {
+        let raw = col.cell_at(row_idx).map_or("", |c| c.raw_text());
+        let t = raw.trim();
+        if t.is_empty() {
+            nulls += 1;
+            continue;
+        }
+        let _ = distinct.insert(t.to_lowercase());
+        let is_leading_zero =
+            t.len() > 1 && t.starts_with('0') && t.chars().all(|c| c.is_ascii_digit());
+        if is_leading_zero {
+            leading_zero += 1;
+        }
+        if detected_currency.is_none() {
+            detected_currency = detect_currency_or_unit_token(t);
+        }
+        if looks_like_date_literal(t) {
+            date_ok += 1;
+        } else if !is_leading_zero && parse_numeric_with_unit(t).is_some() {
+            numeric_ok += 1;
+        }
+    }
+
+    let non_null = total.saturating_sub(nulls);
+    let null_pct = ((nulls.saturating_mul(100)) / total).min(100) as u8;
+    if non_null == 0 {
+        return ("unknown".to_owned(), 0, 0, null_pct, 0, false, None);
+    }
+
+    let num_pct = ((numeric_ok.saturating_mul(100)) / non_null).min(100) as u8;
+    let date_pct = ((date_ok.saturating_mul(100)) / non_null).min(100) as u8;
+    let uniq_pct = ((distinct.len().saturating_mul(100)) / non_null).min(100) as u8;
+    let has_leading_zeros = leading_zero > 0;
+
+    let obs_dtype = if has_leading_zeros {
+        "identifier_code".to_owned()
+    } else if date_pct >= 70 {
+        "temporal".to_owned()
+    } else if num_pct >= 70 {
+        "numeric".to_owned()
+    } else if uniq_pct <= 45 && non_null >= 4 {
+        "categorical".to_owned()
+    } else {
+        "text".to_owned()
+    };
+
+    (
+        obs_dtype,
+        num_pct,
+        date_pct,
+        null_pct,
+        uniq_pct,
+        has_leading_zeros,
+        detected_currency,
+    )
+}
+
+fn detect_currency_or_unit_token(text: &str) -> Option<String> {
+    let upper = text.to_ascii_uppercase();
+    if upper.contains("EGP") || text.contains("ج.م") || text.contains("جنيه") {
+        Some("EGP".to_owned())
+    } else if upper.contains("USD") || text.contains('$') {
+        Some("USD".to_owned())
+    } else if upper.contains("SAR") || text.contains("ر.س") || text.contains("ريال") {
+        Some("SAR".to_owned())
+    } else if upper.contains("EUR") || text.contains('€') {
+        Some("EUR".to_owned())
+    } else if text.ends_with('%') {
+        Some("%".to_owned())
+    } else {
+        None
+    }
+}
+
+fn parse_numeric_with_unit(text: &str) -> Option<f64> {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| c.is_ascii_digit() || matches!(c, '.' | '-'))
+        .collect();
+    if cleaned.is_empty() || cleaned == "-" || cleaned == "." {
+        return None;
+    }
+    cleaned.parse::<f64>().ok()
+}
+
+fn looks_like_date_literal(text: &str) -> bool {
+    let t = text.trim();
+    if t.len() < 8 || t.len() > 25 {
+        return false;
+    }
+    let sep_count = t.chars().filter(|c| matches!(c, '-' | '/')).count();
+    let digit_count = t.chars().filter(char::is_ascii_digit).count();
+    sep_count == 2 && (6..=8).contains(&digit_count)
 }
 
 fn normalize_identifier_token(raw: &str) -> String {
@@ -1894,21 +2268,38 @@ fn classify_sheet_business_domain(sheet_name: &str, concepts: &[String]) -> Shee
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn score_signature_compatibility(
     saved: &SheetSemanticSignature,
     incoming: &SheetSemanticSignature,
-) -> (u8, BTreeMap<String, String>, Vec<String>, Vec<String>) {
+) -> (
+    u8,
+    BTreeMap<String, String>,
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+) {
     let mut mapping = BTreeMap::new();
     let mut used_incoming = BTreeSet::new();
     let mut missing_required = Vec::new();
+    let mut content_notices = Vec::new();
+    let mut generic_only_matches = 0usize;
+    let mut content_mismatch_penalty: u8 = 0;
 
-    // Pass 1: exact normalized header match.
+    // Pass 1: exact normalized header match (validated against content profile when available).
     for s_col in &saved.columns {
         if let Some((idx, i_col)) = incoming.columns.iter().enumerate().find(|(idx, ic)| {
             !used_incoming.contains(idx) && ic.normalized_header == s_col.normalized_header
         }) {
             let _ = used_incoming.insert(idx);
             let _ = mapping.insert(s_col.header_name.clone(), i_col.header_name.clone());
+            check_column_content_compatibility(
+                s_col,
+                i_col,
+                &mut generic_only_matches,
+                &mut content_mismatch_penalty,
+                &mut content_notices,
+            );
         }
     }
 
@@ -1918,10 +2309,40 @@ fn score_signature_compatibility(
             continue;
         }
         if let Some((idx, i_col)) = incoming.columns.iter().enumerate().find(|(idx, ic)| {
-            !used_incoming.contains(idx) && ic.canonical_concept == s_col.canonical_concept
+            !used_incoming.contains(idx)
+                && ic.canonical_concept == s_col.canonical_concept
+                && !s_col.canonical_concept.starts_with("generic_placeholder_")
         }) {
             let _ = used_incoming.insert(idx);
             let _ = mapping.insert(s_col.header_name.clone(), i_col.header_name.clone());
+            check_column_content_compatibility(
+                s_col,
+                i_col,
+                &mut generic_only_matches,
+                &mut content_mismatch_penalty,
+                &mut content_notices,
+            );
+        }
+    }
+
+    // Pass 3: content-distribution matching for unfamiliar renamed headers (downgrades to Medium review).
+    for s_col in &saved.columns {
+        if mapping.contains_key(&s_col.header_name) {
+            continue;
+        }
+        let mut content_candidates = incoming.columns.iter().enumerate().filter(|(idx, ic)| {
+            !used_incoming.contains(idx) && columns_have_compatible_content_profile(s_col, ic)
+        });
+        let first = content_candidates.next();
+        let second = content_candidates.next();
+        // Only pair by content profile when there is a unique unambiguous candidate among remaining columns!
+        if let (Some((idx, i_col)), None) = (first, second) {
+            let _ = used_incoming.insert(idx);
+            let _ = mapping.insert(s_col.header_name.clone(), i_col.header_name.clone());
+            content_notices.push(format!(
+                "Content-inferred column mapping '{}' -> '{}' ({}); confirm before auto-replay",
+                s_col.header_name, i_col.header_name, i_col.observed_data_type
+            ));
         } else if s_col.required {
             missing_required.push(s_col.header_name.clone());
         }
@@ -1952,8 +2373,116 @@ fn score_signature_compatibility(
     if !missing_required.is_empty() {
         score = score.saturating_sub(18);
     }
+    if content_mismatch_penalty > 0 {
+        score = score.saturating_sub(content_mismatch_penalty);
+    }
+    // Generic placeholder headers (`col1`, `col2`, `data`, `value`) without domain concepts or
+    // verified content profiles must NEVER produce High confidence!
+    if generic_only_matches > 0 {
+        let generic_penalty =
+            u8::try_from(generic_only_matches.saturating_mul(16).min(45)).unwrap_or(45);
+        score = score.saturating_sub(generic_penalty);
+        if saved.business_domain == SheetBusinessDomain::General
+            && score >= HIGH_CONFIDENCE_REPLAY_THRESHOLD_PCT
+        {
+            score = 72;
+        }
+    }
 
-    (score, mapping, added_columns, missing_required)
+    (
+        score,
+        mapping,
+        added_columns,
+        missing_required,
+        content_notices,
+    )
+}
+
+fn check_column_content_compatibility(
+    saved: &ColumnSemanticDescriptor,
+    incoming: &ColumnSemanticDescriptor,
+    generic_only_matches: &mut usize,
+    content_mismatch_penalty: &mut u8,
+    content_notices: &mut Vec<String>,
+) {
+    let is_generic = saved.canonical_concept.starts_with("generic_placeholder_")
+        || is_generic_placeholder_header(&saved.normalized_header);
+    let both_have_content = !saved.observed_data_type.is_empty()
+        && saved.observed_data_type != "unknown"
+        && !incoming.observed_data_type.is_empty()
+        && incoming.observed_data_type != "unknown";
+
+    if is_generic && !both_have_content {
+        *generic_only_matches = generic_only_matches.saturating_add(1);
+        content_notices.push(format!(
+            "Generic header '{}' requires content verification before automatic replay",
+            incoming.header_name
+        ));
+    }
+
+    if both_have_content {
+        let incompatible_type = (saved.observed_data_type == "numeric"
+            && incoming.numeric_parse_pct < 40)
+            || (saved.observed_data_type == "temporal" && incoming.date_parse_pct < 40)
+            || (saved.has_leading_zero_codes
+                && !incoming.has_leading_zero_codes
+                && incoming.observed_data_type == "numeric")
+            || (saved.observed_data_type != incoming.observed_data_type
+                && (saved.observed_data_type == "numeric"
+                    || saved.observed_data_type == "temporal"
+                    || incoming.observed_data_type == "numeric"
+                    || incoming.observed_data_type == "temporal"));
+        if incompatible_type {
+            *content_mismatch_penalty = content_mismatch_penalty.saturating_add(28).min(60);
+            content_notices.push(format!(
+                "Content type mismatch on '{}': expected {} (num {}%, date {}%), observed {} (num {}%, date {}%)",
+                incoming.header_name,
+                saved.observed_data_type,
+                saved.numeric_parse_pct,
+                saved.date_parse_pct,
+                incoming.observed_data_type,
+                incoming.numeric_parse_pct,
+                incoming.date_parse_pct
+            ));
+        } else if let (Some(s_cur), Some(i_cur)) = (
+            saved.detected_currency_or_unit.as_deref(),
+            incoming.detected_currency_or_unit.as_deref(),
+        ) && !s_cur.eq_ignore_ascii_case(i_cur)
+        {
+            *content_mismatch_penalty = content_mismatch_penalty.saturating_add(15).min(60);
+            content_notices.push(format!(
+                "Currency/unit shift on '{}': previously {}, now {}",
+                incoming.header_name, s_cur, i_cur
+            ));
+        }
+    }
+}
+
+fn columns_have_compatible_content_profile(
+    saved: &ColumnSemanticDescriptor,
+    incoming: &ColumnSemanticDescriptor,
+) -> bool {
+    if saved.observed_data_type.is_empty()
+        || saved.observed_data_type == "unknown"
+        || incoming.observed_data_type.is_empty()
+        || incoming.observed_data_type == "unknown"
+    {
+        return false;
+    }
+    if saved.observed_data_type != incoming.observed_data_type
+        || saved.analytical_role != incoming.analytical_role
+    {
+        return false;
+    }
+    let num_diff = saved.numeric_parse_pct.abs_diff(incoming.numeric_parse_pct);
+    let date_diff = saved.date_parse_pct.abs_diff(incoming.date_parse_pct);
+    let uniq_diff = saved
+        .uniqueness_ratio_pct
+        .abs_diff(incoming.uniqueness_ratio_pct);
+    num_diff <= 20
+        && date_diff <= 20
+        && uniq_diff <= 35
+        && saved.has_leading_zero_codes == incoming.has_leading_zero_codes
 }
 
 fn read_optional_encrypted_or_plain(
@@ -1961,17 +2490,13 @@ fn read_optional_encrypted_or_plain(
     json_path: &Path,
     vault_key: Option<&VaultKey>,
 ) -> Result<Option<String>, String> {
-    if enc_path.exists() {
-        let key = vault_key.ok_or_else(|| "SF-SYS-024".to_owned())?;
-        let cipher = fs::read(enc_path).map_err(|_| "SF-SYS-001".to_owned())?;
-        let plain = decrypt_vault_payload(key, &cipher).map_err(|_| "SF-SYS-024".to_owned())?;
-        let text = String::from_utf8(plain).map_err(|_| "SF-SYS-024".to_owned())?;
-        Ok(Some(text))
-    } else if json_path.exists() {
-        let text = fs::read_to_string(json_path).map_err(|_| "SF-SYS-001".to_owned())?;
-        Ok(Some(text))
-    } else {
-        Ok(None)
+    let maybe_bytes = read_encrypted_or_migrate_legacy(enc_path, Some(json_path), vault_key)?;
+    match maybe_bytes {
+        Some(bytes) => {
+            let text = String::from_utf8(bytes).map_err(|_| "SF-SYS-024".to_owned())?;
+            Ok(Some(text))
+        }
+        None => Ok(None),
     }
 }
 
@@ -1981,48 +2506,13 @@ fn write_encrypted_or_plain(
     vault_key: Option<&VaultKey>,
     plain_bytes: &[u8],
 ) -> Result<(), String> {
-    if let Some(key) = vault_key {
-        let cipher =
-            encrypt_vault_payload(key, plain_bytes).map_err(|_| "SF-SYS-023".to_owned())?;
-        write_atomic_bytes(enc_path, &cipher)?;
-        if json_path.exists() {
-            let _ = fs::remove_file(json_path);
-        }
-        Ok(())
-    } else {
-        write_atomic_bytes(json_path, plain_bytes)
-    }
-}
-
-fn write_atomic_bytes(target: &Path, contents: &[u8]) -> Result<(), String> {
-    let dir = target.parent().ok_or_else(|| "SF-SYS-016".to_owned())?;
-    fs::create_dir_all(dir).map_err(|_| "SF-SYS-016".to_owned())?;
-    let name = target
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("safi_wf");
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = dir.join(format!(".{name}.{stamp}.tmp"));
-    let write_res = (|| -> std::io::Result<()> {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(contents)?;
-        f.sync_all()?;
-        drop(f);
-        fs::rename(&tmp, target)
-    })();
-    if write_res.is_err() {
-        let _ = fs::remove_file(&tmp);
-        return Err("SF-SYS-016".to_owned());
-    }
-    Ok(())
+    write_encrypted_mandatory(enc_path, Some(json_path), vault_key, plain_bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_test_dir(tag: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -2375,6 +2865,156 @@ mod tests {
         assert_eq!(restored.workflow_version, 3);
         assert_eq!(restored.duplicate_policy, "exact_key");
         assert_eq!(restored.question_resolutions.len(), 2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn content_based_matching_generic_headers_and_honest_learning_metrics() {
+        let dir = temp_test_dir("content_and_metrics");
+        let vault_key = crate::test_result(VaultKey::load_or_init_for_storage_dir(&dir));
+        let mut store =
+            crate::test_result(LocalWorkflowMemoryStore::open(dir.clone(), Some(vault_key)));
+
+        // 1. Honest initial metrics: 0/0 evaluation denominator -> observed_retention_rate_pct is None (NOT 100%).
+        let init_metrics = &store.learning_profile().effectiveness_metrics;
+        assert_eq!(init_metrics.observed_evaluation_denom, 0);
+        assert_eq!(init_metrics.observed_retention_rate_pct, None);
+        assert_eq!(init_metrics.decision_accuracy_pct, 0);
+
+        // 2. Generic headers ("col1", "col2", "data") must NEVER auto-replay with High confidence on header match alone.
+        let generic_headers = vec!["col1".to_owned(), "col2".to_owned(), "data".to_owned()];
+        let _generic_wf = crate::test_result(store.save_sheet_workflow(
+            None,
+            "Generic Sheet",
+            "proj_gen",
+            "Sheet1",
+            "tbl_gen",
+            &generic_headers,
+            vec![],
+            vec![],
+            "exact_key",
+            "flag_only",
+            vec![],
+            vec![],
+            vec![],
+            SavedDashboardPreferences::default(),
+            vec![],
+            1_000,
+        ));
+        let generic_match = store.match_incoming_sheet("Sheet2", &generic_headers, None);
+        assert_ne!(generic_match.match_tier, WorkflowMatchTier::High);
+        assert!(!generic_match.auto_replay_eligible);
+
+        // 3. Content-based mismatch: save a Sales workflow with numeric `amount` column, then match an incoming sheet
+        // where `amount` contains free-form text instead of numbers -> must detect content mismatch and block auto-replay.
+        let sales_headers = vec![
+            "sale_date".to_owned(),
+            "region".to_owned(),
+            "amount".to_owned(),
+        ];
+        let good_csv = "sale_date,region,amount\n2026-01-01,Cairo,1200\n2026-01-02,Alex,3400\n";
+        let good_rep = crate::test_result(sf_io::ingest_workbook_universal(
+            std::io::Cursor::new(good_csv.as_bytes()),
+            sf_core::limits::PlatformLimits::DESKTOP_CLI,
+            Some("sales_jan.csv"),
+            None,
+        ));
+        let good_table = crate::test_result(good_rep.worksheets[0].tables[0].to_core_table());
+
+        let sales_wf = crate::test_result(store.save_sheet_workflow_with_table(
+            None,
+            "Verified Sales Table",
+            "proj_sales",
+            "Sales_Jan",
+            "tbl_1",
+            &sales_headers,
+            Some(&good_table),
+            vec![],
+            vec![],
+            "exact_key",
+            "fill_zero",
+            vec![],
+            vec![],
+            vec![],
+            SavedDashboardPreferences::default(),
+            vec![],
+            2_000,
+        ));
+
+        let bad_csv = "sale_date,region,amount\n2026-02-01,Cairo,PendingApproval\n2026-02-02,Alex,CancelledOrder\n";
+        let bad_rep = crate::test_result(sf_io::ingest_workbook_universal(
+            std::io::Cursor::new(bad_csv.as_bytes()),
+            sf_core::limits::PlatformLimits::DESKTOP_CLI,
+            Some("sales_feb.csv"),
+            None,
+        ));
+        let corrupted_type_table =
+            crate::test_result(bad_rep.worksheets[0].tables[0].to_core_table());
+        let bad_content_match = store.match_incoming_sheet_with_table(
+            "Sales_Feb",
+            &sales_headers,
+            None,
+            Some(&corrupted_type_table),
+        );
+        assert!(!bad_content_match.auto_replay_eligible);
+        assert_ne!(bad_content_match.match_tier, WorkflowMatchTier::High);
+        assert!(
+            bad_content_match
+                .schema_change_notices
+                .iter()
+                .any(|n| n.contains("Content type mismatch"))
+        );
+
+        // Compatible numeric table matches with High confidence!
+        let good_content_match = store.match_incoming_sheet_with_table(
+            "Sales_Mar",
+            &sales_headers,
+            None,
+            Some(&good_table),
+        );
+        assert_eq!(
+            good_content_match.matched_workflow_id.as_deref(),
+            Some(sales_wf.workflow_id.as_str())
+        );
+        assert_eq!(good_content_match.match_tier, WorkflowMatchTier::High);
+        assert!(good_content_match.auto_replay_eligible);
+
+        // 4. Record 1 replay and 1 explicit correction -> honest retention rate = 1 / 2 = 50%.
+        let _ = crate::test_result(store.record_workflow_execution(
+            &sales_wf.workflow_id,
+            2,
+            1,
+            2,
+            3_000,
+        ));
+        let _ = crate::test_result(store.record_learning_feedback(
+            LearningSignalKind::ExplicitCorrection,
+            LearningCategory::CurrencyUnit,
+            LearningRuleScope::MatchingSheets,
+            None,
+            Some(SheetBusinessDomain::Sales),
+            "sales_currency_amount",
+            "USD",
+            Some("EGP".to_owned()),
+            "Export sales are billed in USD",
+            "Sales_Mar",
+            3_500,
+        ));
+        let after_metrics = &store.learning_profile().effectiveness_metrics;
+        assert_eq!(after_metrics.completed_replays_total, 1);
+        assert_eq!(after_metrics.questions_reused_total, 2);
+        assert_eq!(after_metrics.verified_steps_applied_total, 3);
+        assert_eq!(after_metrics.explicit_corrections_recorded, 1);
+        assert_eq!(after_metrics.observed_retention_num, 1);
+        assert_eq!(after_metrics.observed_evaluation_denom, 2);
+        assert_eq!(after_metrics.observed_retention_rate_pct, Some(50));
+
+        // 5. Verify zero plaintext .json files were created on disk.
+        assert!(dir.join("workflow_memory.safi.enc").is_file());
+        assert!(dir.join("learning_profile.safi.enc").is_file());
+        assert!(!dir.join("workflow_memory.json").exists());
+        assert!(!dir.join("learning_profile.json").exists());
 
         let _ = fs::remove_dir_all(&dir);
     }

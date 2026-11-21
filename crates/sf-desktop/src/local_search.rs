@@ -689,39 +689,41 @@ impl LocalSearchIndex {
         serde_json::from_slice(&decrypted).map_err(|_| "SF-SYS-001".to_owned())
     }
 
-    /// Saves the index atomically into `storage_dir`, encrypted with `vault_key` when configured.
+    /// Saves the index atomically into `storage_dir`, encrypted with `vault_key` (mandatory).
     ///
     /// # Errors
-    /// Returns `SF-SYS-023`, `SF-SYS-016`, or `SF-SYS-001`.
+    /// Returns `SF-SYS-024`, `SF-SYS-023`, `SF-SYS-016`, or `SF-SYS-001`.
     pub fn save_to_dir(
         &self,
         storage_dir: &Path,
         vault_key: Option<&VaultKey>,
     ) -> Result<(), String> {
         fs::create_dir_all(storage_dir).map_err(|_| "SF-SYS-016".to_owned())?;
-        if let Some(key) = vault_key {
-            self.save_encrypted(&storage_dir.join("local_search_index.safi.enc"), key)
-        } else {
-            let json = serde_json::to_vec(self).map_err(|_| "SF-SYS-001".to_owned())?;
-            atomic_write_bytes(&storage_dir.join("local_search_index.json"), &json)
-        }
+        let json = serde_json::to_vec(self).map_err(|_| "SF-SYS-001".to_owned())?;
+        crate::vault::write_encrypted_mandatory(
+            &storage_dir.join("local_search_index.safi.enc"),
+            Some(&storage_dir.join("local_search_index.json")),
+            vault_key,
+            &json,
+        )
     }
 
-    /// Loads an existing persisted index from `storage_dir`, or returns an empty index if none exists.
+    /// Loads an existing persisted index from `storage_dir` (migrating legacy plaintext if present),
+    /// or returns an empty index if none exists.
     ///
     /// # Errors
-    /// Returns `SF-SYS-024` or `SF-SYS-001` when persisted data is corrupt or cannot be decrypted.
+    /// Returns `SF-SYS-024` or `SF-SYS-001` when `vault_key` is missing, persisted data is corrupt,
+    /// or decryption fails.
     pub fn load_from_dir(storage_dir: &Path, vault_key: Option<&VaultKey>) -> Result<Self, String> {
         let enc_path = storage_dir.join("local_search_index.safi.enc");
         let json_path = storage_dir.join("local_search_index.json");
-        if enc_path.exists() {
-            let key = vault_key.ok_or_else(|| "SF-SYS-024".to_owned())?;
-            Self::load_encrypted(&enc_path, key)
-        } else if json_path.exists() {
-            let bytes = fs::read(&json_path).map_err(|_| "SF-SYS-001".to_owned())?;
-            serde_json::from_slice(&bytes).map_err(|_| "SF-SYS-001".to_owned())
-        } else {
-            Ok(Self::new())
+        match crate::vault::read_encrypted_or_migrate_legacy(
+            &enc_path,
+            Some(&json_path),
+            vault_key,
+        )? {
+            Some(bytes) => serde_json::from_slice(&bytes).map_err(|_| "SF-SYS-001".to_owned()),
+            None => Ok(Self::new()),
         }
     }
 

@@ -1488,12 +1488,22 @@ export interface LearnedPreferenceRule {
 
 export interface LearningEffectivenessMetrics {
   readonly questionsAvoidedTotal: number;
+  readonly questionsReusedTotal?: number;
   readonly setupStepsSavedTotal: number;
+  readonly verifiedStepsAppliedTotal?: number;
   readonly workflowsReplayedTotal: number;
+  readonly completedReplaysTotal?: number;
   readonly explicitCorrectionsRecorded: number;
   readonly repeatedCorrectionsCount: number;
+  readonly explicitAcceptancesTotal?: number;
+  readonly explicitRejectionsTotal?: number;
   readonly undoOrRollbackCount: number;
+  readonly observedRetentionNum?: number;
+  readonly observedEvaluationDenom?: number;
+  readonly observedRetentionRatePct?: number | null;
   readonly decisionAccuracyPct: number;
+  readonly metricDefinitionEn?: string;
+  readonly metricDefinitionAr?: string;
 }
 
 export interface PersonalLearningProfile {
@@ -1543,6 +1553,7 @@ export async function saveDesktopSheetWorkflowMemory(payload: {
 }
 
 export async function matchDesktopSheetWorkflowMemory(payload: {
+  readonly projectId?: string;
   readonly sheetName: string;
   readonly headers: readonly string[];
   readonly observedDateFormat?: string | null;
@@ -1719,6 +1730,7 @@ export interface DuplicateAnalysisReport {
   readonly exactUnintendedDuplicateRowIds: readonly number[];
   readonly validRepeatedEntityTransactionRows: number;
   readonly conflictingKeyReviewRowIds: readonly number[];
+  readonly ambiguousDuplicateReviewRowIds?: readonly number[];
   readonly detectedPrimaryKeyColumn?: string | null;
   readonly summaryEn: string;
   readonly summaryAr: string;

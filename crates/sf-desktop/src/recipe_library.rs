@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sf_recipe::recipe::{RecipeMatchReport, RecipeOperation, RecipeStep, SafiRecipe};
 
-use crate::vault::{VaultKey, decrypt_vault_payload, encrypt_vault_payload};
+use crate::vault::VaultKey;
 
 /// Maximum permitted `.safitemplate` file size (512 KiB).
 pub const MAX_SAFI_TEMPLATE_BYTES: usize = 512 * 1024;
@@ -131,15 +131,13 @@ impl LocalRecipeLibrary {
 
         let enc_path = storage_dir.join("recipe_library.safi.enc");
         let json_path = storage_dir.join("recipe_library.json");
-        let raw_opt = if enc_path.exists() {
-            let key = vault_key.as_ref().ok_or_else(|| "SF-SYS-024".to_owned())?;
-            let cipher = fs::read(&enc_path).map_err(|_| "SF-SYS-001".to_owned())?;
-            let plain = decrypt_vault_payload(key, &cipher).map_err(|_| "SF-SYS-024".to_owned())?;
-            Some(String::from_utf8(plain).map_err(|_| "SF-SYS-024".to_owned())?)
-        } else if json_path.exists() {
-            Some(fs::read_to_string(&json_path).map_err(|_| "SF-SYS-001".to_owned())?)
-        } else {
-            None
+        let raw_opt = match crate::vault::read_encrypted_or_migrate_legacy(
+            &enc_path,
+            Some(&json_path),
+            vault_key.as_ref(),
+        )? {
+            Some(bytes) => Some(String::from_utf8(bytes).map_err(|_| "SF-SYS-024".to_owned())?),
+            None => None,
         };
 
         if let Some(raw) = raw_opt {
@@ -642,13 +640,12 @@ impl LocalRecipeLibrary {
             cached_official: self.official_templates.values().cloned().collect(),
         };
         let encoded = serde_json::to_vec_pretty(&data).map_err(|_| "SF-SYS-001".to_owned())?;
-        if let Some(ref key) = self.vault_key {
-            let cipher =
-                encrypt_vault_payload(key, &encoded).map_err(|_| "SF-SYS-023".to_owned())?;
-            write_atomic_bytes(&self.storage_dir.join("recipe_library.safi.enc"), &cipher)
-        } else {
-            write_atomic_bytes(&self.storage_dir.join("recipe_library.json"), &encoded)
-        }
+        crate::vault::write_encrypted_mandatory(
+            &self.storage_dir.join("recipe_library.safi.enc"),
+            Some(&self.storage_dir.join("recipe_library.json")),
+            self.vault_key.as_ref(),
+            &encoded,
+        )
     }
 }
 

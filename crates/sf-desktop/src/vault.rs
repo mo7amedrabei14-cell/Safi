@@ -70,6 +70,18 @@ impl VaultKey {
     ///   tag so corrupted or tampered keystore files fail closed immediately (`SF-SYS-024`).
     /// - Zeroizes intermediate secret buffers before returning.
     ///
+    /// Key-custody threat model & known limitation (honest audit note):
+    /// - Format `SFK1` currently persists `salt` and `master_secret` in `storage_dir/.keystore/vault.master.key`
+    ///   (with `0o700`/`0o600` permissions on Unix and standard user-profile directory ACLs on Windows).
+    /// - This protects against accidental plaintext `.json` persistence, casual inspection/tampering
+    ///   of `.safi.enc` files, and backup/sync exposure when `.keystore/` is excluded.
+    /// - It does **NOT** yet bind `master_secret` to an OS keystore (Windows DPAPI / Credential Manager,
+    ///   macOS Keychain, or Linux Secret Service), so an attacker who can read both `.keystore/vault.master.key`
+    ///   and `.safi.enc` under the same OS user account or offline disk image can derive the vault key.
+    /// - Because workspace policy forbids `unsafe_code` (`Cargo.toml`), OS keystore integration must be
+    ///   introduced via an audited safe cross-platform wrapper (e.g. `SFK2` DPAPI / Keychain / Secret Service
+    ///   envelope with verified round-trip migration and zero-data-loss fallback) in a dedicated platform release.
+    ///
     /// # Errors
     /// Returns `SF-SYS-023` or `SF-SYS-024` if CSPRNG, filesystem, or verification fails.
     pub fn load_or_init_for_storage_dir(storage_dir: &Path) -> Result<Self, &'static str> {

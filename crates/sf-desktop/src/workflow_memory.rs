@@ -1161,6 +1161,161 @@ impl LocalWorkflowMemoryStore {
         }
     }
 
+    /// Evaluates compatibility of an incoming worksheet strictly against ONE specific `workflow_id`
+    /// so direct replay IPC calls cannot bypass domain isolation or High-confidence eligibility
+    /// by piggybacking on another matching workflow.
+    ///
+    /// # Errors
+    /// Returns `SF-SYS-001` if `workflow_id` does not exist.
+    pub fn match_specific_workflow_with_table(
+        &self,
+        workflow_id: &str,
+        sheet_name: &str,
+        headers: &[String],
+        observed_date_format: Option<&str>,
+        table: Option<&Table>,
+    ) -> Result<SheetWorkflowMatchReport, String> {
+        let candidate = self
+            .sheet_workflows
+            .get(workflow_id)
+            .ok_or_else(|| "SF-SYS-001".to_owned())?;
+        let incoming_sig =
+            build_sheet_semantic_signature_with_table(sheet_name, headers, &[], table);
+        let learned_suggestions = self.suggest_from_learning(sheet_name, &incoming_sig);
+
+        // Hard domain isolation: NEVER cross-apply a workflow from an incompatible business domain!
+        if candidate.business_domain != incoming_sig.business_domain
+            && candidate.business_domain != SheetBusinessDomain::General
+            && incoming_sig.business_domain != SheetBusinessDomain::General
+        {
+            return Ok(SheetWorkflowMatchReport {
+                matched_workflow_id: None,
+                matched_workflow_name: None,
+                matched_workflow_version: None,
+                detected_domain: incoming_sig.business_domain,
+                confidence_pct: 0,
+                match_tier: WorkflowMatchTier::Low,
+                auto_replay_eligible: false,
+                column_mapping: BTreeMap::new(),
+                added_columns: headers.to_vec(),
+                missing_required_columns: candidate
+                    .signature
+                    .columns
+                    .iter()
+                    .filter(|c| c.required)
+                    .map(|c| c.header_name.clone())
+                    .collect(),
+                schema_change_notices: vec![format!(
+                    "Business domain mismatch: saved={:?}, incoming={:?}",
+                    candidate.business_domain, incoming_sig.business_domain
+                )],
+                reused_question_resolutions: Vec::new(),
+                suppressed_question_topics: Vec::new(),
+                learned_suggestions,
+                explanation_en: "Workflow business domain does not match the active worksheet."
+                    .to_owned(),
+                explanation_ar: "مجال مسار العمل المحفوظ لا يتطابق مع مجال الورقة النشطة."
+                    .to_owned(),
+            });
+        }
+
+        let (score, mapping, added, missing_req, mut schema_notices) =
+            score_signature_compatibility(&candidate.signature, &incoming_sig);
+
+        if !added.is_empty() {
+            schema_notices.push(format!("New column(s) detected: {}", added.join(", ")));
+        }
+        if !missing_req.is_empty() {
+            schema_notices.push(format!(
+                "Missing required column(s): {}",
+                missing_req.join(", ")
+            ));
+        }
+        if let Some(obs_fmt) = observed_date_format {
+            for col_dec in &candidate.column_decisions {
+                if let Some(saved_fmt) = col_dec.date_format.as_deref()
+                    && !saved_fmt.is_empty()
+                    && !saved_fmt.eq_ignore_ascii_case(obs_fmt)
+                {
+                    schema_notices.push(format!(
+                        "Date format shift on '{}': previously {}, now {}",
+                        col_dec.header_name, saved_fmt, obs_fmt
+                    ));
+                }
+            }
+        }
+
+        let has_schema_shift =
+            !added.is_empty() || !missing_req.is_empty() || !schema_notices.is_empty();
+        let effective_confidence =
+            if has_schema_shift && score >= HIGH_CONFIDENCE_REPLAY_THRESHOLD_PCT {
+                76
+            } else {
+                score
+            };
+
+        let match_tier = if effective_confidence >= HIGH_CONFIDENCE_REPLAY_THRESHOLD_PCT
+            && missing_req.is_empty()
+            && !has_schema_shift
+        {
+            WorkflowMatchTier::High
+        } else if effective_confidence >= MEDIUM_CONFIDENCE_SUGGEST_THRESHOLD_PCT {
+            WorkflowMatchTier::Medium
+        } else {
+            WorkflowMatchTier::Low
+        };
+
+        let auto_replay_eligible = match_tier == WorkflowMatchTier::High;
+        let incoming_concepts: BTreeSet<&str> = incoming_sig
+            .canonical_concepts
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let mut reused_questions = Vec::new();
+        let mut suppressed_topics = Vec::new();
+        for q in &candidate.question_resolutions {
+            let concept_present = q.canonical_concept == "sheet_level"
+                || incoming_concepts.contains(q.canonical_concept.as_str());
+            let answered_confidently =
+                matches!(q.action.as_str(), "answered" | "custom" | "corrected");
+            let date_shifted = q.semantic_topic.contains("date")
+                && schema_notices
+                    .iter()
+                    .any(|n| n.starts_with("Date format shift"));
+            if concept_present && answered_confidently && !date_shifted {
+                reused_questions.push(q.clone());
+                if !suppressed_topics.contains(&q.semantic_topic) {
+                    suppressed_topics.push(q.semantic_topic.clone());
+                }
+            }
+        }
+
+        Ok(SheetWorkflowMatchReport {
+            matched_workflow_id: Some(candidate.workflow_id.clone()),
+            matched_workflow_name: Some(candidate.display_name.clone()),
+            matched_workflow_version: Some(candidate.workflow_version),
+            detected_domain: incoming_sig.business_domain,
+            confidence_pct: effective_confidence,
+            match_tier,
+            auto_replay_eligible,
+            column_mapping: mapping,
+            added_columns: added,
+            missing_required_columns: missing_req,
+            schema_change_notices: schema_notices,
+            reused_question_resolutions: reused_questions,
+            suppressed_question_topics: suppressed_topics,
+            learned_suggestions,
+            explanation_en: format!(
+                "Specific workflow '{}' evaluated at {}% ({:?}).",
+                candidate.display_name, effective_confidence, match_tier
+            ),
+            explanation_ar: format!(
+                "تم تقييم مسار العمل «{}» بنسبة {}% ({:?}).",
+                candidate.display_name, effective_confidence, match_tier
+            ),
+        })
+    }
+
     /// Records that a saved workflow was executed and committed atomically on a sheet.
     ///
     /// # Errors

@@ -399,8 +399,15 @@ export function DesktopStudio({
                 );
                 return;
               }
-            } catch {
-              // If preflight or atomic replay fails closed, keep original sheet untouched without crashing.
+            } catch (replayErr) {
+              if (!controller.signal.aborted) {
+                const reason = replayErr instanceof Error ? replayErr.message : String(replayErr);
+                setAutoReplayBanner(
+                  lang === "ar"
+                    ? `تم إيقاف التشغيل التلقائي لمسار العمل المحفوظ بأمان (${reason}) للحفاظ على بياناتك دون تعديل جزئي؛ يمكنك المراجعة والتطبيق يدويًا.`
+                    : `Automatic workflow replay was safely halted (${reason}) without modifying your sheet; you can review and apply steps manually.`
+                );
+              }
             }
           }
         }

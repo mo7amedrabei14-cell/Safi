@@ -78,10 +78,9 @@ body::-webkit-scrollbar {
 }
 
 /* ============================================================================
- * 1. Calm Daylight (Vision Glass Default), Dark Mode (Gemini Dark) & Legacy Apple Light
+ * 1. Dark Mode (Gemini Dark Default), Calm Daylight (Vision Glass) & Legacy Apple Light
  * ========================================================================== */
 
-:root,
 :root[data-theme="light"],
 :root[data-theme="vision-glass"] {
   --bg-canvas: #eaf0fb;
@@ -163,6 +162,7 @@ body::-webkit-scrollbar {
   color-scheme: light;
 }
 
+:root,
 :root[data-theme="dark"],
 :root[data-theme="google-gemini"] {
   --bg-canvas: #090b10;
@@ -196,6 +196,10 @@ body::-webkit-scrollbar {
   --shadow-card: 0 20px 50px -12px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
   --shadow-elevated: 0 32px 72px -14px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.16);
   --spotlight-glow: rgba(96, 165, 250, 0.1);
+
+  --safi-font-sans:
+    "IBM Plex Sans Arabic", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --safi-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   color-scheme: dark;
 }

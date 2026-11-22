@@ -68,25 +68,25 @@ describe("UI-Phase-4 floating glass dock", () => {
     const english = renderToString(
       createElement(FloatingGlassDock, { activeTab: "home", onSelect: () => undefined, lang: "en" })
     );
-    const arabic = renderToString(
+    const arabicLight = renderToString(
       createElement(FloatingGlassDock, {
         activeTab: "home",
         onSelect: () => undefined,
         lang: "ar",
-        theme: "google-gemini"
+        theme: "vision-glass"
       })
     );
 
-    expect(english).toContain('data-theme-current="vision-glass"');
+    expect(english).toContain('data-theme-current="google-gemini"');
     expect(english).toContain("Light Mode");
     expect(english).toContain("Dark Mode");
     expect(english).not.toContain("Vision Glass");
     expect(english).not.toContain("Gemini Dark");
     expect(english).not.toContain("Apple Light");
 
-    expect(arabic).toContain('data-theme-current="google-gemini"');
-    expect(arabic).toContain("الوضع الفاتح");
-    expect(arabic).toContain("الوضع الداكن");
+    expect(arabicLight).toContain('data-theme-current="vision-glass"');
+    expect(arabicLight).toContain("الوضع الفاتح");
+    expect(arabicLight).toContain("الوضع الداكن");
   });
 
   it("keeps every dock control at the 44px touch target", () => {

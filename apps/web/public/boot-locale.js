@@ -4,7 +4,7 @@
   const LOCALE_STORAGE_KEY = "safi.locale";
   const THEME_STORAGE_KEY = "safi.theme";
   let locale = "en";
-  let theme = "vision-glass";
+  let theme = "google-gemini";
 
   try {
     const storedLocale = window.localStorage.getItem(LOCALE_STORAGE_KEY);
@@ -23,7 +23,7 @@
       theme = "vision-glass";
     }
   } catch {
-    // Vision Glass is the safe first-run Light Mode default when storage is unavailable.
+    // Gemini Dark is the safe first-run Dark Mode default when storage is unavailable.
   }
 
   const root = document.documentElement;

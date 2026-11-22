@@ -4,7 +4,7 @@ import type { SafiLang } from "./locale";
 export type SafiPrimaryThemeId = "vision-glass" | "google-gemini";
 export type SafiThemeId = SafiPrimaryThemeId | "apple-light";
 
-export const SAFI_DEFAULT_THEME: SafiThemeId = "vision-glass";
+export const SAFI_DEFAULT_THEME: SafiThemeId = "google-gemini";
 export const SAFI_PRIMARY_THEMES: readonly SafiPrimaryThemeId[] = ["vision-glass", "google-gemini"];
 export const SAFI_THEME_STORAGE_KEY = "safi.theme";
 

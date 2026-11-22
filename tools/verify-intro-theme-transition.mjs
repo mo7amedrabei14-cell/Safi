@@ -57,15 +57,23 @@ const server = spawn(viteCommand[0], viteCommand[1], {
 
 const CASES = [
   {
-    name: "default-light-vision-glass-en",
+    name: "default-dark-google-gemini-en",
     storedTheme: null,
+    storedLocale: "en",
+    expectedThemeAttr: "google-gemini",
+    expectedColorScheme: "dark",
+    expectedBgRgb: "rgb(9, 11, 16)"
+  },
+  {
+    name: "saved-light-vision-glass-en",
+    storedTheme: "vision-glass",
     storedLocale: "en",
     expectedThemeAttr: "vision-glass",
     expectedColorScheme: "light",
     expectedBgRgb: "rgb(234, 240, 251)"
   },
   {
-    name: "default-light-vision-glass-ar",
+    name: "saved-light-vision-glass-ar",
     storedTheme: "vision-glass",
     storedLocale: "ar",
     expectedThemeAttr: "vision-glass",
@@ -81,9 +89,9 @@ const CASES = [
     expectedBgRgb: "rgb(245, 245, 247)"
   },
   {
-    name: "saved-dark-google-gemini-en",
+    name: "saved-dark-google-gemini-ar",
     storedTheme: "google-gemini",
-    storedLocale: "en",
+    storedLocale: "ar",
     expectedThemeAttr: "google-gemini",
     expectedColorScheme: "dark",
     expectedBgRgb: "rgb(9, 11, 16)"

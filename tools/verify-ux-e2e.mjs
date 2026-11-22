@@ -618,7 +618,7 @@ try {
 
     await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 20_000 });
-    assert.equal(await page.getAttribute("html", "data-theme"), "vision-glass");
+    assert.equal(await page.getAttribute("html", "data-theme"), "google-gemini");
     await signIn(page);
     await delay(450);
 

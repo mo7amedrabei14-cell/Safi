@@ -51,17 +51,19 @@ export interface BentoCommandCenterProps {
 }
 
 const ROTATING_WORDS_AR = [
-  "ينقّي الجداول تلقائيًا",
-  "يوحّد النصوص بجميع اللغات",
-  "يفحص الهويات والأكواد فورًا",
-  "يصنع تقارير PDF ذكية"
+  "ينظّف بياناتك ويفهمها تلقائيًا",
+  "ينشئ لوحات معلومات تفاعلية",
+  "ينشئ 21 نوعًا من الرسوم البيانية",
+  "يصمّم عروض PowerPoint تقديمية",
+  "يُصدر تقارير تنفيذية Word وPDF"
 ] as const;
 
 const ROTATING_WORDS_EN = [
-  "Cleans Sheets Automatically",
-  "Unifies Multilingual Text",
-  "Validates IDs & Records",
-  "Builds Instant PDF Reports"
+  "Cleans & Understands Your Data",
+  "Builds Interactive Dashboards",
+  "Creates 21 Chart Types",
+  "Creates PowerPoint Presentations",
+  "Generates Executive Word & PDF Reports"
 ] as const;
 
 const LIVE_DEMO_ROWS = [
@@ -1468,7 +1470,7 @@ export function BentoCommandCenter({
                             ? "1px solid var(--accent-soft)"
                             : "1px solid var(--border-subtle)",
                           background: active ? "var(--accent-primary)" : "var(--bg-elevated)",
-                          color: active ? "#FFFFFF" : "var(--text-primary)",
+                          color: active ? "var(--text-inverse)" : "var(--text-primary)",
                           transition: "all 0.25s ease"
                         }}
                       >
@@ -1841,7 +1843,7 @@ export function BentoCommandCenter({
                             justifyContent: "space-between",
                             gap: "12px",
                             background: active ? "var(--accent-primary)" : "var(--bg-elevated)",
-                            color: active ? "#FFFFFF" : "var(--text-primary)",
+                            color: active ? "var(--text-inverse)" : "var(--text-primary)",
                             border: active
                               ? "1px solid var(--accent-soft)"
                               : "1px solid var(--border-subtle)",

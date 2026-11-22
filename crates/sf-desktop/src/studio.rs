@@ -3582,17 +3582,21 @@ impl StudioStore {
                 .get_sheet_workflow(workflow_id)
                 .cloned()
                 .ok_or_else(|| "SF-SYS-001".to_owned())?;
-            let rep = store.match_incoming_sheet_with_table(
+            let rep = store.match_specific_workflow_with_table(
+                workflow_id,
                 &active_sheet_name,
                 &current_headers,
                 None,
                 Some(staged_graph.working()),
-            );
+            )?;
             (wf, rep)
         };
 
-        // Fail closed if confidence is Low, required columns are missing, or content types drifted.
-        if match_report.match_tier == crate::workflow_memory::WorkflowMatchTier::Low
+        // Strictly enforce at the Rust boundary: full workflow replay is allowed ONLY for High
+        // confidence when `auto_replay_eligible` is true, with zero missing required columns and
+        // zero content-type drift. Medium (partial/shifted schema) and Low MUST fail closed (`SF-RCP-001`).
+        if match_report.match_tier != crate::workflow_memory::WorkflowMatchTier::High
+            || !match_report.auto_replay_eligible
             || !match_report.missing_required_columns.is_empty()
             || match_report
                 .schema_change_notices
@@ -6072,6 +6076,124 @@ mod tests {
         assert_eq!(
             page_after_good["rows"][0]["cells"][1]["visible"],
             serde_json::json!("Cairo")
+        );
+    }
+
+    #[test]
+    fn workflow_replay_ipc_enforces_high_only_confidence_and_rejects_medium_and_low() {
+        let dir = test_result(tempfile::tempdir());
+        let storage = dir.path().join("replay-confidence-storage");
+        let store = authenticated_store_with_dir(storage);
+
+        // 1. Open baseline Sales CSV and save a High-confidence workflow.
+        let sales_base = dir.path().join("sales_base.csv");
+        test_result(fs::write(
+            &sales_base,
+            "sale_date,region,customer,amount\n2026-11-01,  Cairo  ,ACME,100\n2026-11-02,Giza,Beta,250\n",
+        ));
+        test_result(store.open_file("p_base", &sales_base, 1_000));
+        let saved_resp = json(&test_result(store.desktop_workflow_memory_save_sheet(
+            r#"{
+                "workflowId": "wfm_sales_strict_high",
+                "displayName": "Monthly Sales Strict High",
+                "projectId": "p_base",
+                "sheetName": "Sales_Base",
+                "tableId": "tbl_sales",
+                "headers": ["sale_date", "region", "customer", "amount"],
+                "cleaningOperations": [
+                    {"stepId": "s1", "kind": "trim_column", "targetColumn": "region"}
+                ],
+                "metrics": [
+                    {"id": "total_sales", "name": "Total Sales", "unit": "USD", "formula": "SUM(amount)"}
+                ]
+            }"#,
+            1_100,
+        )));
+        let wf_id = saved_resp["saved"]["workflowId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        assert_eq!(wf_id, "wfm_sales_strict_high");
+
+        // 2. Medium-confidence incoming sheet (same 4 columns + 1 extra column `discount_code`):
+        //    match_sheet must classify as Medium / autoReplayEligible=false AND direct IPC replay MUST fail closed!
+        let sales_medium = dir.path().join("sales_medium_extra_col.csv");
+        test_result(fs::write(
+            &sales_medium,
+            "sale_date,region,customer,amount,discount_code\n2026-12-01,  Alex  ,Gamma,300,PROMO10\n",
+        ));
+        test_result(store.open_file("p_medium", &sales_medium, 1_200));
+        test_result(store.set_cell("p_medium", 0, "region", "  Alex  ", 1_250));
+        let medium_match = json(&test_result(store.desktop_workflow_memory_match_sheet(
+            r#"{"projectId":"p_medium","sheetName":"Sales_Dec","headers":["sale_date","region","customer","amount","discount_code"]}"#,
+        )));
+        assert_eq!(
+            medium_match["report"]["matchTier"],
+            serde_json::json!("medium")
+        );
+        assert_eq!(
+            medium_match["report"]["autoReplayEligible"],
+            serde_json::json!(false)
+        );
+        // Direct IPC attempt to force replay on Medium confidence MUST be rejected with SF-RCP-001.
+        let medium_replay = store.desktop_workflow_memory_apply_replay("p_medium", &wf_id, 1_300);
+        assert_eq!(medium_replay, Err("SF-RCP-001".to_owned()));
+        // Verify p_medium table was NOT mutated at all.
+        let medium_page = json(&test_result(store.rows_page("p_medium", "{}")));
+        assert_eq!(
+            medium_page["rows"][0]["cells"][1]["visible"],
+            serde_json::json!("  Alex  ")
+        );
+
+        // 3. Low-confidence incoming sheet (completely different HR domain & headers):
+        //    Direct IPC replay MUST fail closed with SF-RCP-001 and leave HR sheet untouched.
+        let hr_low = dir.path().join("hr_payroll.csv");
+        test_result(fs::write(
+            &hr_low,
+            "employee_id,department,base_salary,bonus\nE-01,  Engineering  ,5000,750\n",
+        ));
+        test_result(store.open_file("p_low", &hr_low, 1_400));
+        test_result(store.set_cell("p_low", 0, "department", "  Engineering  ", 1_450));
+        let low_match = json(&test_result(store.desktop_workflow_memory_match_sheet(
+            r#"{"projectId":"p_low","sheetName":"HR_Payroll","headers":["employee_id","department","base_salary","bonus"]}"#,
+        )));
+        assert_eq!(low_match["report"]["matchTier"], serde_json::json!("low"));
+        assert_eq!(
+            low_match["report"]["autoReplayEligible"],
+            serde_json::json!(false)
+        );
+        let low_replay = store.desktop_workflow_memory_apply_replay("p_low", &wf_id, 1_500);
+        assert_eq!(low_replay, Err("SF-RCP-001".to_owned()));
+        let low_page = json(&test_result(store.rows_page("p_low", "{}")));
+        assert_eq!(
+            low_page["rows"][0]["cells"][1]["visible"],
+            serde_json::json!("  Engineering  ")
+        );
+
+        // 4. Exact High-confidence incoming sheet replays cleanly and atomically.
+        let sales_high = dir.path().join("sales_dec_high.csv");
+        test_result(fs::write(
+            &sales_high,
+            "sale_date,region,customer,amount\n2026-12-05,  Luxor  ,Delta,420\n",
+        ));
+        test_result(store.open_file("p_high", &sales_high, 1_600));
+        test_result(store.set_cell("p_high", 0, "region", "  Luxor  ", 1_650));
+        let high_match = json(&test_result(store.desktop_workflow_memory_match_sheet(
+            r#"{"projectId":"p_high","sheetName":"Sales_Dec","headers":["sale_date","region","customer","amount"]}"#,
+        )));
+        assert_eq!(high_match["report"]["matchTier"], serde_json::json!("high"));
+        assert_eq!(
+            high_match["report"]["autoReplayEligible"],
+            serde_json::json!(true)
+        );
+        let high_state = json(&test_result(
+            store.desktop_workflow_memory_apply_replay("p_high", &wf_id, 1_700),
+        ));
+        assert_eq!(high_state["metrics"][0]["value"], serde_json::json!("420"));
+        let high_page = json(&test_result(store.rows_page("p_high", "{}")));
+        assert_eq!(
+            high_page["rows"][0]["cells"][1]["visible"],
+            serde_json::json!("Luxor")
         );
     }
 }

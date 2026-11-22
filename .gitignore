@@ -50,3 +50,10 @@ apps/web/public/downloads/*.msi
 apps/web/public/downloads/*.dmg
 apps/web/public/downloads/*.AppImage
 apps/web/public/downloads/*.deb
+
+# Generated E2E runtime outputs (encrypted bundles, local keystores, test exports)
+artifacts/real-e2e-full-journey/
+artifacts/intro-visual/studio-e2e/bundles/.keystore/
+artifacts/intro-visual/studio-e2e/bundles/*.safi.enc
+artifacts/intro-visual/studio-e2e/bundles/*.tmp
+artifacts/**/prior_auth.marker

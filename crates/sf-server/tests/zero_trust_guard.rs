@@ -369,18 +369,37 @@ async fn owner_mfa_control_plane_email_change_and_billing_http_flow() {
     let now = unix_now();
     let wh_body = serde_json::to_vec(&json!({
         "event_id": "evt_http_001",
-        "event_type": "subscription.activated",
-        "occurred_at_unix": now,
-        "order_id": created_order_id,
-        "transaction_id": created_txn_id,
-        "currency_code": "USD",
-        "price_id": "pri_zt_monthly",
-        "workspace_id": new_old_email_ws,
-        "user_id": new_old_email_user,
-        "product": "individual_monthly",
-        "period_end_unix": now + 30 * 86400,
-        "amount_minor": 2000,
-        "invoice_id": "inv_http_001"
+        "event_type": "transaction.completed",
+        "occurred_at": "2026-11-23T12:00:00.000000Z",
+        "notification_id": "ntf_zt_001",
+        "data": {
+            "id": created_txn_id,
+            "status": "completed",
+            "origin": "web",
+            "currency_code": "USD",
+            "subscription_id": "sub_zt_001",
+            "invoice_id": "inv_http_001",
+            "custom_data": {
+                "safi_order_id": created_order_id,
+                "workspace_id": new_old_email_ws,
+                "user_id": new_old_email_user,
+                "product": "individual_monthly"
+            },
+            "billing_period": {
+                "starts_at": "2026-11-23T12:00:00Z",
+                "ends_at": "2026-12-23T12:00:00Z"
+            },
+            "items": [{
+                "quantity": 1,
+                "price": { "id": "pri_zt_monthly" }
+            }],
+            "details": {
+                "totals": {
+                    "total": "2000",
+                    "currency_code": "USD"
+                }
+            }
+        }
     }))
     .expect("json");
     let sig = sign_paddle_payload("pdl_whsec_test_secret", now, &wh_body).expect("sign");

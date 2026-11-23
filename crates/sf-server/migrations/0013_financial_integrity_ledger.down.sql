@@ -1,6 +1,17 @@
--- Rollback Migration 0013: remove financial integrity ledger tables and restore migration 0010 billing_invoices policy/constraints.
+-- Rollback Migration 0013: remove financial integrity ledger tables and restore migration 0010 billing_invoices policy/constraints safely (refusing silent data loss).
 
 BEGIN;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM billing_invoices
+        WHERE status IN ('partially_refunded', 'refund_pending')
+    ) THEN
+        RAISE EXCEPTION 'Cannot roll back migration 0013 while partially_refunded or refund_pending invoice rows exist; archive or settle them first.';
+    END IF;
+END
+$$;
 
 DROP INDEX IF EXISTS billing_webhook_events_order_idx;
 ALTER TABLE billing_webhook_events

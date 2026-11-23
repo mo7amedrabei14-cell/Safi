@@ -1,0 +1,41 @@
+{
+  "event_id": "evt_01j9safi_initial_completed",
+  "event_type": "transaction.completed",
+  "occurred_at": "2026-11-23T12:00:00.000000Z",
+  "notification_id": "ntf_01j9safi_initial_001",
+  "data": {
+    "id": "txn_01j9safi_initial_001",
+    "status": "completed",
+    "origin": "web",
+    "currency_code": "USD",
+    "subscription_id": "sub_01j9safi_monthly_001",
+    "invoice_id": "inv_01j9safi_initial_001",
+    "custom_data": {
+      "safi_order_id": "__SAFI_ORDER_ID__"
+    },
+    "billing_period": {
+      "starts_at": "2026-11-23T12:00:00Z",
+      "ends_at": "2026-12-23T12:00:00Z"
+    },
+    "items": [
+      {
+        "quantity": 1,
+        "price": {
+          "id": "pri_pro_monthly",
+          "unit_price": {
+            "amount": "2000",
+            "currency_code": "USD"
+          }
+        }
+      }
+    ],
+    "details": {
+      "totals": {
+        "subtotal": "2000",
+        "tax": "0",
+        "total": "2000",
+        "currency_code": "USD"
+      }
+    }
+  }
+}

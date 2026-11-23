@@ -50,6 +50,7 @@ pub enum AuthError {
     ChargebackRevoked,
     IdempotencyConflict,
     PaymentReconciliationRequired,
+    WebhookPayloadHashConflict,
     SyncEnvelopeInvalid,
     SyncVersionConflict,
     ShareLinkInvalid,
@@ -102,6 +103,7 @@ impl AuthError {
             Self::ChargebackRevoked => "SF-PAY-006",
             Self::IdempotencyConflict => "SF-PAY-007",
             Self::PaymentReconciliationRequired => "SF-PAY-008",
+            Self::WebhookPayloadHashConflict => "SF-PAY-009",
             Self::SyncEnvelopeInvalid => "SF-SYN-001",
             Self::SyncVersionConflict => "SF-SYN-002",
             Self::ShareLinkInvalid => "SF-SYN-003",
@@ -154,7 +156,8 @@ impl AuthError {
             Self::DuplicateAccount
             | Self::OwnerBootstrapSealed
             | Self::SyncVersionConflict
-            | Self::IdempotencyConflict => StatusCode::CONFLICT,
+            | Self::IdempotencyConflict
+            | Self::WebhookPayloadHashConflict => StatusCode::CONFLICT,
             Self::RateLimited
             | Self::OwnerMfaLocked
             | Self::QuotaExceeded
@@ -216,6 +219,7 @@ impl AuthError {
             Self::PaymentReconciliationRequired => {
                 "يتطلب طلب الدفع مطابقة الحالة مع مزود الدفع قبل إعادة المحاولة"
             }
+            Self::WebhookPayloadHashConflict => "رُصد تعارض في بصمة حمولة إشعار الدفع لنفس المعرّف",
             Self::SyncEnvelopeInvalid => "حزمة المزامنة المشفرة غير صالحة أو تعرضت للتعديل",
             Self::SyncVersionConflict => "تعارض في إصدار المزامنة",
             Self::ShareLinkInvalid => "رابط المشاركة المشفر منتهي الصلاحية أو ملغى",

@@ -943,21 +943,40 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
     let order_id = winning_order_id.expect("winning order id");
     let txn_id = winning_txn_id.expect("winning txn id");
 
-    // 4. Signed Paddle activation webhook correlated to the real created order -> Bob becomes IndividualMonthly & AI call succeeds!
+    // 4. Signed official Paddle `transaction.completed` webhook correlated to the real created order -> Bob becomes IndividualMonthly & AI call succeeds!
     let act_body = serde_json::to_vec(&json!({
         "event_id": "evt_bob_act_1",
-        "event_type": "subscription.activated",
-        "occurred_at_unix": now,
-        "order_id": order_id,
-        "transaction_id": txn_id,
-        "currency_code": "USD",
-        "price_id": "pri_ind_monthly_test",
-        "workspace_id": bob_ws,
-        "user_id": bob_uid,
-        "product": "individual_monthly",
-        "period_end_unix": now + 30 * 86400,
-        "amount_minor": 1500,
-        "invoice_id": "inv_bob_001"
+        "event_type": "transaction.completed",
+        "occurred_at": "2026-11-23T12:00:00.000000Z",
+        "notification_id": "ntf_bob_act_1",
+        "data": {
+            "id": txn_id,
+            "status": "completed",
+            "origin": "web",
+            "currency_code": "USD",
+            "subscription_id": "sub_bob_001",
+            "invoice_id": "inv_bob_001",
+            "custom_data": {
+                "safi_order_id": order_id,
+                "workspace_id": bob_ws,
+                "user_id": bob_uid,
+                "product": "individual_monthly"
+            },
+            "billing_period": {
+                "starts_at": "2026-11-23T12:00:00Z",
+                "ends_at": "2026-12-23T12:00:00Z"
+            },
+            "items": [{
+                "quantity": 1,
+                "price": { "id": "pri_ind_monthly_test" }
+            }],
+            "details": {
+                "totals": {
+                    "total": "1500",
+                    "currency_code": "USD"
+                }
+            }
+        }
     }))
     .expect("json");
     let act_sig = sign_paddle_payload("pdl_whsec_test_999", now, &act_body).expect("sig");
@@ -997,18 +1016,25 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
     .await;
     assert_eq!(st_ai_paid, StatusCode::OK);
 
-    // 5. Paddle Chargeback webhook -> invoice marked "chargeback" & paid access IMMEDIATELY revoked!
+    // 5. Official Paddle Chargeback adjustment webhook -> invoice marked "chargeback" & paid access IMMEDIATELY revoked!
     let cb_body = serde_json::to_vec(&json!({
         "event_id": "evt_bob_cb_2",
-        "event_type": "adjustment.chargeback",
-        "occurred_at_unix": now + 5,
-        "order_id": order_id,
-        "transaction_id": txn_id,
-        "workspace_id": bob_ws,
-        "user_id": bob_uid,
-        "product": "individual_monthly",
-        "amount_minor": 1500,
-        "invoice_id": "inv_bob_001"
+        "event_type": "adjustment.created",
+        "occurred_at": "2026-11-23T12:00:05.000000Z",
+        "notification_id": "ntf_bob_cb_2",
+        "data": {
+            "id": "adj_bob_cb_2",
+            "action": "chargeback",
+            "type": "full",
+            "status": "approved",
+            "transaction_id": txn_id,
+            "subscription_id": "sub_bob_001",
+            "currency_code": "USD",
+            "totals": {
+                "total": "1500",
+                "currency_code": "USD"
+            }
+        }
     }))
     .expect("json");
     let cb_sig = sign_paddle_payload("pdl_whsec_test_999", now + 5, &cb_body).expect("sig");

@@ -243,6 +243,19 @@ impl EntitlementService {
         guard.workspaces.insert(record.workspace_id, record);
     }
 
+    /// Read a snapshot of the current workspace entitlement record if present.
+    pub async fn snapshot_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> Option<WorkspaceEntitlementRecord> {
+        self.store
+            .read()
+            .await
+            .workspaces
+            .get(&workspace_id)
+            .cloned()
+    }
+
     /// Claim a one-time 7-day Trial enforcing verified email + phone and anti-abuse across
     /// normalized email hash, phone hash, and device fingerprint hash.
     pub async fn claim_trial_at(

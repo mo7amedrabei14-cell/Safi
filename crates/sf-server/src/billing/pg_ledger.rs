@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::billing::provider_http::CheckoutMode;
 use crate::billing::{
     BillingCurrency, BillingEventRecord, BillingOrderRecord, BillingProvider,
     BillingRevenueSummary, CheckoutProduct, InvoiceRecord, PaymentOrderState, RefundRecord,
@@ -47,18 +48,23 @@ pub struct VerifiedWebhookTransition {
     pub order_id_hint: Option<Uuid>,
     pub provider_order_ref: Option<String>,
     pub provider_transaction_id: Option<String>,
+    /// Separate persisted provider subscription identifier (Section 5 recurring renewals).
+    pub provider_subscription_id: Option<String>,
     pub external_invoice_id: Option<String>,
     /// Amount reported by provider (minor units) to cross-check against `order.expected_amount_minor`.
     pub reported_amount_minor: Option<u64>,
     pub reported_currency: Option<BillingCurrency>,
     pub reported_integration_id: Option<u64>,
+    pub period_start_unix: Option<i64>,
     pub period_end_unix: Option<i64>,
+    /// True when the event explicitly represents a recurring billing cycle renewal rather than initial checkout.
+    pub is_renewal_hint: bool,
     pub kind: VerifiedWebhookKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifiedWebhookKind {
-    /// Final verified captured payment -> grants subscription / credits / pay-per-file ONCE.
+    /// Final verified captured payment -> grants subscription / renewal / credits / pay-per-file ONCE.
     Paid,
     /// Non-final payment state (checkout opened, authorized not captured, pending) -> NO entitlement!
     PendingNoGrant,
@@ -68,9 +74,14 @@ pub enum VerifiedWebhookKind {
     PastDue,
     /// Subscription canceled -> canceled state.
     Canceled,
-    /// Confirmed refund (full or partial).
+    /// Confirmed refund (full, delta partial, or cumulative Paymob `refunded_amount_cents`).
     Refunded {
+        /// Newly confirmed refund delta (e.g. Paddle partial adjustment); `None` means full remaining when `cumulative_refunded_minor` is `None`.
         partial_amount_minor: Option<u64>,
+        /// Cumulative total refunded amount reported by provider (official Paymob `obj.refunded_amount_cents`).
+        cumulative_refunded_minor: Option<u64>,
+        /// Provider-side refund/adjustment identifier for idempotent delta deduplication.
+        provider_refund_id: Option<String>,
         mandatory_legal_override: bool,
     },
     /// Confirmed chargeback/dispute -> immediately revoke paid access.
@@ -216,6 +227,11 @@ fn row_to_order(row: &sqlx::postgres::PgRow) -> Result<BillingOrderRecord, AuthE
             .and_then(|v| u64::try_from(v).ok()),
         provider_order_ref: row.try_get("provider_order_ref").ok().flatten(),
         provider_intention_id: row.try_get("provider_intention_id").ok().flatten(),
+        provider_subscription_id: row.try_get("provider_subscription_id").ok().flatten(),
+        checkout_mode: row
+            .try_get::<String, _>("checkout_mode")
+            .map(|s| CheckoutMode::from_str_code(&s))
+            .unwrap_or_default(),
         checkout_url: row.try_get("checkout_url").ok().flatten(),
         provider_transaction_id: row.try_get("provider_transaction_id").ok().flatten(),
         state: PaymentOrderState::from_str_code(&state_str).unwrap_or(PaymentOrderState::Created),
@@ -231,8 +247,8 @@ const ORDER_SELECT_COLS: &str = r"
     id, workspace_id, user_id, idempotency_key, request_fingerprint, provider, product_code,
     provider_price_id, seats, currency, original_amount_minor, discount_amount_minor,
     expected_amount_minor, coupon_code, coupon_reservation_id, expected_integration_id,
-    provider_order_ref, provider_intention_id, checkout_url, provider_transaction_id,
-    state, last_error_code,
+    provider_order_ref, provider_intention_id, provider_subscription_id, checkout_mode,
+    checkout_url, provider_transaction_id, state, last_error_code,
     EXTRACT(EPOCH FROM created_at)::BIGINT AS created_at_secs,
     EXTRACT(EPOCH FROM expires_at)::BIGINT AS expires_at_secs,
     EXTRACT(EPOCH FROM updated_at)::BIGINT AS updated_at_secs,
@@ -360,15 +376,17 @@ impl PgControlPlaneStore {
         let sql = format!(
             r"
             UPDATE billing_orders
-            SET provider_order_ref = $2,
-                provider_intention_id = $3,
-                checkout_url = $4,
-                state = $5,
-                last_error_code = $6,
-                coupon_code = $7,
-                coupon_reservation_id = $8,
-                discount_amount_minor = $9,
-                expected_amount_minor = $10,
+            SET provider_order_ref = COALESCE(provider_order_ref, $2),
+                provider_intention_id = COALESCE(provider_intention_id, $3),
+                provider_subscription_id = COALESCE($4, provider_subscription_id),
+                checkout_mode = $5,
+                checkout_url = COALESCE(checkout_url, $6),
+                state = $7,
+                last_error_code = $8,
+                coupon_code = $9,
+                coupon_reservation_id = $10,
+                discount_amount_minor = $11,
+                expected_amount_minor = $12,
                 updated_at = now()
             WHERE id = $1
             RETURNING {ORDER_SELECT_COLS}
@@ -378,6 +396,8 @@ impl PgControlPlaneStore {
             .bind(order.id)
             .bind(&order.provider_order_ref)
             .bind(&order.provider_intention_id)
+            .bind(&order.provider_subscription_id)
+            .bind(order.checkout_mode.as_str())
             .bind(&order.checkout_url)
             .bind(order.state.as_str())
             .bind(&order.last_error_code)
@@ -393,6 +413,39 @@ impl PgControlPlaneStore {
             .await
             .map_err(|_| AuthError::BackendUnavailable)?;
         Ok(updated)
+    }
+
+    /// Look up an internal order by `(provider, provider_subscription_id)` directly in PostgreSQL.
+    pub async fn find_billing_order_by_subscription_id_pg(
+        &self,
+        provider: BillingProvider,
+        provider_subscription_id: &str,
+    ) -> Result<Option<BillingOrderRecord>, AuthError> {
+        let mut tx = self
+            .pool()
+            .begin()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        sqlx::query("SELECT set_config('app.owner_override', 'true', true)")
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        let sql = format!(
+            "SELECT {ORDER_SELECT_COLS} FROM billing_orders WHERE provider = $1 AND provider_subscription_id = $2"
+        );
+        let row = sqlx::query(&sql)
+            .bind(provider_to_str(provider))
+            .bind(provider_subscription_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        tx.commit()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        match row {
+            Some(r) => Ok(Some(row_to_order(&r)?)),
+            None => Ok(None),
+        }
     }
 
     /// Fetch an order by internal ID directly from PostgreSQL.
@@ -506,7 +559,44 @@ impl PgControlPlaneStore {
         .map_err(|_| AuthError::BackendUnavailable)?;
 
         let Some(webhook_row_id) = claimed_id else {
-            // Concurrent or sequential duplicate delivery -> ZERO side effects!
+            // Section 3.3 & 7.3: Compare stored payload hash for repeated `(provider, provider_event_id)`!
+            let existing_hash: Option<Vec<u8>> = sqlx::query_scalar(
+                "SELECT payload_hash FROM billing_webhook_events WHERE provider = $1 AND provider_event_id = $2",
+            )
+            .bind(provider_str)
+            .bind(&t.provider_event_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+
+            if let Some(stored) = existing_hash {
+                if stored.as_slice() != t.raw_payload_hash.as_slice() {
+                    // Security/integrity anomaly: same event_id with DIFFERENT payload!
+                    // Record anomaly cleanly while leaving original billing_webhook_events row intact.
+                    sqlx::query(
+                        r"
+                        INSERT INTO billing_security_anomalies (
+                            provider, provider_event_id, anomaly_kind,
+                            original_payload_hash, conflicting_payload_hash
+                        )
+                        VALUES ($1, $2, 'webhook_event_id_payload_hash_mismatch', $3, $4)
+                        ",
+                    )
+                    .bind(provider_str)
+                    .bind(&t.provider_event_id)
+                    .bind(stored.as_slice())
+                    .bind(t.raw_payload_hash.as_slice())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|_| AuthError::BackendUnavailable)?;
+                    tx.commit()
+                        .await
+                        .map_err(|_| AuthError::BackendUnavailable)?;
+                    return Err(AuthError::WebhookPayloadHashConflict);
+                }
+            }
+
+            // Concurrent or sequential identical duplicate delivery -> ZERO side effects!
             tx.commit()
                 .await
                 .map_err(|_| AuthError::BackendUnavailable)?;
@@ -526,7 +616,8 @@ impl PgControlPlaneStore {
             ));
         };
 
-        // Step 2: Locate and lock (`FOR UPDATE`) the trusted server-created internal `billing_orders` row!
+        // Step 2: Locate and lock (`FOR UPDATE`) the trusted server-created internal `billing_orders` row
+        // via order_id, provider_order_ref, provider_transaction_id, OR persisted provider_subscription_id!
         let order_row = if let Some(oid) = t.order_id_hint {
             let sql = format!(
                 "SELECT {ORDER_SELECT_COLS} FROM billing_orders WHERE id = $1 AND provider = $2 FOR UPDATE"
@@ -541,9 +632,34 @@ impl PgControlPlaneStore {
             let sql = format!(
                 "SELECT {ORDER_SELECT_COLS} FROM billing_orders WHERE provider = $1 AND (provider_order_ref = $2 OR provider_transaction_id = $2) FOR UPDATE"
             );
-            sqlx::query(&sql)
+            let found = sqlx::query(&sql)
                 .bind(provider_str)
                 .bind(pref)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+            if found.is_some() {
+                found
+            } else if let Some(ref psub) = t.provider_subscription_id {
+                let sub_sql = format!(
+                    "SELECT {ORDER_SELECT_COLS} FROM billing_orders WHERE provider = $1 AND provider_subscription_id = $2 FOR UPDATE"
+                );
+                sqlx::query(&sub_sql)
+                    .bind(provider_str)
+                    .bind(psub)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(|_| AuthError::BackendUnavailable)?
+            } else {
+                None
+            }
+        } else if let Some(ref psub) = t.provider_subscription_id {
+            let sub_sql = format!(
+                "SELECT {ORDER_SELECT_COLS} FROM billing_orders WHERE provider = $1 AND provider_subscription_id = $2 FOR UPDATE"
+            );
+            sqlx::query(&sub_sql)
+                .bind(provider_str)
+                .bind(psub)
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(|_| AuthError::BackendUnavailable)?
@@ -771,52 +887,103 @@ impl PgControlPlaneStore {
                     .or(order.provider_order_ref.as_deref())
                     .filter(|s| !s.trim().is_empty())
                     .ok_or(AuthError::BillingOperationFailed)?;
-                let (grant_kind, qty, plan_code_opt) = match order.product {
-                    CheckoutProduct::CreditPack25 => ("credit_pack_25", 25_i32, None),
-                    CheckoutProduct::PayPerFile => ("pay_per_file", 1_i32, None),
-                    CheckoutProduct::IndividualMonthly => {
-                        ("subscription", 1_i32, Some("individual_monthly"))
+
+                let effective_sub_id = t
+                    .provider_subscription_id
+                    .as_deref()
+                    .or(order.provider_subscription_id.as_deref());
+
+                // Section 5: Separate recurring subscription renewal from initial checkout purchase!
+                let is_subscription_product = matches!(
+                    order.product,
+                    CheckoutProduct::IndividualMonthly
+                        | CheckoutProduct::IndividualAnnual
+                        | CheckoutProduct::OrganizationSeatAnnual
+                );
+                let is_renewal = is_subscription_product
+                    && order.state == PaymentOrderState::Paid
+                    && effective_sub_id.is_some()
+                    && (t.is_renewal_hint
+                        || order
+                            .provider_transaction_id
+                            .as_deref()
+                            .is_some_and(|orig_tx| orig_tx != provider_tx_id));
+
+                let (grant_kind, qty, plan_code_opt) = if is_renewal {
+                    let (qty_val, plan_code) = match order.product {
+                        CheckoutProduct::IndividualMonthly => (1_i32, Some("individual_monthly")),
+                        CheckoutProduct::IndividualAnnual => (1_i32, Some("individual_annual")),
+                        CheckoutProduct::OrganizationSeatAnnual => (
+                            i32::try_from(order.seats.max(1)).unwrap_or(3),
+                            Some("organization_seat"),
+                        ),
+                        CheckoutProduct::CreditPack25 | CheckoutProduct::PayPerFile => {
+                            return Err(AuthError::BillingOperationFailed);
+                        }
+                    };
+                    ("subscription_renewal", qty_val, plan_code)
+                } else {
+                    match order.product {
+                        CheckoutProduct::CreditPack25 => ("credit_pack_25", 25_i32, None),
+                        CheckoutProduct::PayPerFile => ("pay_per_file", 1_i32, None),
+                        CheckoutProduct::IndividualMonthly => {
+                            ("subscription", 1_i32, Some("individual_monthly"))
+                        }
+                        CheckoutProduct::IndividualAnnual => {
+                            ("subscription", 1_i32, Some("individual_annual"))
+                        }
+                        CheckoutProduct::OrganizationSeatAnnual => (
+                            "subscription",
+                            i32::try_from(order.seats.max(1)).unwrap_or(3),
+                            Some("organization_seat"),
+                        ),
                     }
-                    CheckoutProduct::IndividualAnnual => {
-                        ("subscription", 1_i32, Some("individual_annual"))
-                    }
-                    CheckoutProduct::OrganizationSeatAnnual => (
-                        "subscription",
-                        i32::try_from(order.seats.max(1)).unwrap_or(3),
-                        Some("organization_seat"),
-                    ),
                 };
 
+                let base_period_start = if is_renewal {
+                    t.period_start_unix
+                        .or(ent.current_period_end)
+                        .unwrap_or(t.now_secs)
+                } else {
+                    t.period_start_unix.unwrap_or(t.now_secs)
+                };
                 let period_end = t.period_end_unix.or_else(|| match order.product {
-                    CheckoutProduct::IndividualMonthly => Some(t.now_secs + 30 * 86_400),
+                    CheckoutProduct::IndividualMonthly => Some(base_period_start + 30 * 86_400),
                     CheckoutProduct::IndividualAnnual | CheckoutProduct::OrganizationSeatAnnual => {
-                        Some(t.now_secs + 365 * 86_400)
+                        Some(base_period_start + 365 * 86_400)
                     }
                     CheckoutProduct::CreditPack25 | CheckoutProduct::PayPerFile => None,
                 });
 
                 // Step 5: Insert UNIQUE financial grant row!
-                // Even if the same provider transaction arrives under a NEW webhook event_id,
-                // `UNIQUE (provider, provider_transaction_id)` & `UNIQUE (order_id, grant_kind)` block double grants!
+                // - Initial purchases: UNIQUE (provider, provider_transaction_id) AND partial UNIQUE (order_id, grant_kind)
+                // - Recurring renewals: UNIQUE (provider, provider_transaction_id) AND partial UNIQUE (provider, provider_subscription_id, period_end)
                 let inserted_grant: Option<Uuid> = sqlx::query_scalar(
                     r"
                     INSERT INTO billing_entitlement_grants (
                         order_id, workspace_id, user_id, provider, provider_transaction_id,
-                        grant_kind, quantity, plan_code, period_end
+                        provider_subscription_id, grant_kind, quantity, plan_code,
+                        period_start, period_end
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $9::BIGINT IS NOT NULL THEN to_timestamp($9::BIGINT) ELSE NULL END)
+                    VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                        CASE WHEN $10::BIGINT IS NOT NULL THEN to_timestamp($10::BIGINT) ELSE NULL END,
+                        CASE WHEN $11::BIGINT IS NOT NULL THEN to_timestamp($11::BIGINT) ELSE NULL END
+                    )
                     ON CONFLICT DO NOTHING
                     RETURNING id
                     ",
                 )
-                .bind(order.id)
+                .bind(if is_renewal { None } else { Some(order.id) })
                 .bind(order.workspace_id)
                 .bind(order.user_id)
                 .bind(provider_str)
                 .bind(provider_tx_id)
+                .bind(effective_sub_id)
                 .bind(grant_kind)
                 .bind(qty)
                 .bind(plan_code_opt)
+                .bind(if is_subscription_product { Some(base_period_start) } else { None })
                 .bind(period_end)
                 .fetch_optional(&mut *tx)
                 .await
@@ -861,59 +1028,77 @@ impl PgControlPlaneStore {
                     ));
                 }
 
-                // Record invoice uniquely bound to order + provider transaction.
+                // Record invoice uniquely bound to order/subscription + provider transaction.
                 let ext_inv = t
                     .external_invoice_id
                     .clone()
                     .unwrap_or_else(|| format!("inv_{}_{}", provider_str, provider_tx_id));
+                let invoice_amt = t
+                    .reported_amount_minor
+                    .unwrap_or(order.expected_amount_minor);
                 sqlx::query(
                     r"
                     INSERT INTO billing_invoices (
                         workspace_id, provider, external_invoice_id, amount_minor, currency,
-                        status, order_id, provider_transaction_id
+                        status, order_id, provider_transaction_id, provider_subscription_id
                     )
-                    VALUES ($1, $2, $3, $4, $5, 'paid', $6, $7)
+                    VALUES ($1, $2, $3, $4, $5, 'paid', $6, $7, $8)
                     ON CONFLICT DO NOTHING
                     ",
                 )
                 .bind(order.workspace_id)
                 .bind(provider_str)
                 .bind(&ext_inv)
-                .bind(i64::try_from(order.expected_amount_minor).unwrap_or(0))
+                .bind(i64::try_from(invoice_amt).unwrap_or(0))
                 .bind(currency_to_str(order.currency))
                 .bind(order.id)
                 .bind(provider_tx_id)
+                .bind(effective_sub_id)
                 .execute(&mut *tx)
                 .await
                 .map_err(|_| AuthError::BackendUnavailable)?;
 
-                // Update internal order state -> `paid`.
-                sqlx::query(
-                    r"
-                    UPDATE billing_orders
-                    SET state = 'paid',
-                        provider_transaction_id = $2,
-                        paid_at = to_timestamp($3),
-                        updated_at = now()
-                    WHERE id = $1
-                    ",
-                )
-                .bind(order.id)
-                .bind(provider_tx_id)
-                .bind(t.now_secs)
-                .execute(&mut *tx)
-                .await
-                .map_err(|_| AuthError::BackendUnavailable)?;
-
-                // Commit coupon reservation if attached to this order.
-                if let Some(res_id) = order.coupon_reservation_id {
-                    let _ = sqlx::query(
-                        "UPDATE coupon_reservations SET status = 'committed', updated_at = now() WHERE id = $1 AND status = 'reserved'",
+                if !is_renewal {
+                    // Initial purchase: transition internal order -> `paid` and persist subscription binding.
+                    sqlx::query(
+                        r"
+                        UPDATE billing_orders
+                        SET state = 'paid',
+                            provider_transaction_id = $2,
+                            provider_subscription_id = COALESCE($3, provider_subscription_id),
+                            paid_at = to_timestamp($4),
+                            updated_at = now()
+                        WHERE id = $1
+                        ",
                     )
-                    .bind(res_id)
+                    .bind(order.id)
+                    .bind(provider_tx_id)
+                    .bind(effective_sub_id)
+                    .bind(t.now_secs)
                     .execute(&mut *tx)
-                    .await;
-                    committed_coupon_res = Some(res_id);
+                    .await
+                    .map_err(|_| AuthError::BackendUnavailable)?;
+
+                    // Section 7.1: NEVER swallow coupon reservation commit failure — abort tx on DB error!
+                    if let Some(res_id) = order.coupon_reservation_id {
+                        sqlx::query(
+                            "UPDATE coupon_reservations SET status = 'committed', updated_at = now() WHERE id = $1 AND status = 'reserved'",
+                        )
+                        .bind(res_id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|_| AuthError::BackendUnavailable)?;
+                        committed_coupon_res = Some(res_id);
+                    }
+                } else if let Some(sub_id) = effective_sub_id {
+                    sqlx::query(
+                        "UPDATE billing_orders SET provider_subscription_id = COALESCE(provider_subscription_id, $2), updated_at = now() WHERE id = $1",
+                    )
+                    .bind(order.id)
+                    .bind(sub_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|_| AuthError::BackendUnavailable)?;
                 }
 
                 // Apply entitlement transition atomically inside the SAME DB transaction!
@@ -938,9 +1123,14 @@ impl PgControlPlaneStore {
                         ent.plan = PlanTier::IndividualMonthly;
                         ent.state = SubscriptionState::Active;
                         ent.seats = 1;
-                        ent.current_period_end = period_end;
+                        ent.current_period_end = match (ent.current_period_end, period_end) {
+                            (Some(prev), Some(next)) => Some(prev.max(next)),
+                            (prev, next) => next.or(prev),
+                        };
                         ent.past_due_since = None;
-                        outcome = if t.provider == BillingProvider::Paymob {
+                        outcome = if is_renewal {
+                            "subscription_renewed".to_owned()
+                        } else if t.provider == BillingProvider::Paymob {
                             "paymob_subscription_active".to_owned()
                         } else {
                             "subscription_active".to_owned()
@@ -950,9 +1140,14 @@ impl PgControlPlaneStore {
                         ent.plan = PlanTier::IndividualAnnual;
                         ent.state = SubscriptionState::Active;
                         ent.seats = 1;
-                        ent.current_period_end = period_end;
+                        ent.current_period_end = match (ent.current_period_end, period_end) {
+                            (Some(prev), Some(next)) => Some(prev.max(next)),
+                            (prev, next) => next.or(prev),
+                        };
                         ent.past_due_since = None;
-                        outcome = if t.provider == BillingProvider::Paymob {
+                        outcome = if is_renewal {
+                            "subscription_renewed".to_owned()
+                        } else if t.provider == BillingProvider::Paymob {
                             "paymob_subscription_active".to_owned()
                         } else {
                             "subscription_active".to_owned()
@@ -962,9 +1157,14 @@ impl PgControlPlaneStore {
                         ent.plan = PlanTier::OrganizationSeat;
                         ent.state = SubscriptionState::Active;
                         ent.seats = order.seats.max(3);
-                        ent.current_period_end = period_end;
+                        ent.current_period_end = match (ent.current_period_end, period_end) {
+                            (Some(prev), Some(next)) => Some(prev.max(next)),
+                            (prev, next) => next.or(prev),
+                        };
                         ent.past_due_since = None;
-                        outcome = if t.provider == BillingProvider::Paymob {
+                        outcome = if is_renewal {
+                            "subscription_renewed".to_owned()
+                        } else if t.provider == BillingProvider::Paymob {
                             "paymob_subscription_active".to_owned()
                         } else {
                             "subscription_active".to_owned()
@@ -1025,15 +1225,204 @@ impl PgControlPlaneStore {
             }
             VerifiedWebhookKind::Refunded {
                 partial_amount_minor,
-                ..
+                cumulative_refunded_minor,
+                provider_refund_id,
+                mandatory_legal_override,
             } => {
-                let is_partial = partial_amount_minor
-                    .is_some_and(|amt| amt > 0 && amt < order.expected_amount_minor);
+                // Lock the correlated invoice row `FOR UPDATE` to compute exact delta / cumulative refund safely.
+                let inv_row = sqlx::query(
+                    r"
+                    SELECT id, external_invoice_id, amount_minor, refunded_amount_minor
+                    FROM billing_invoices
+                    WHERE order_id = $1 OR ($2 <> '' AND external_invoice_id = $2)
+                    ORDER BY issued_at DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    ",
+                )
+                .bind(order.id)
+                .bind(t.external_invoice_id.as_deref().unwrap_or(""))
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+
+                let (inv_ext_id, captured_amount_minor, already_refunded_minor) =
+                    if let Some(ref r) = inv_row {
+                        (
+                            r.try_get::<String, _>("external_invoice_id")
+                                .unwrap_or_default(),
+                            u64::try_from(r.try_get::<i64, _>("amount_minor").unwrap_or(0))
+                                .unwrap_or(order.expected_amount_minor),
+                            u64::try_from(
+                                r.try_get::<i64, _>("refunded_amount_minor").unwrap_or(0),
+                            )
+                            .unwrap_or(0),
+                        )
+                    } else {
+                        (
+                            t.external_invoice_id
+                                .clone()
+                                .unwrap_or_else(|| format!("inv_{}_{}", provider_str, order.id)),
+                            order.expected_amount_minor,
+                            0_u64,
+                        )
+                    };
+
+                // Section 2.3 & Section 8: Compute exact confirmed refund delta cleanly for both
+                // cumulative (Paymob `obj.refunded_amount_cents`) and delta (Paddle adjustment) webhooks!
+                let (delta_minor, new_total_refunded) = if let Some(cum) =
+                    *cumulative_refunded_minor
+                {
+                    // Cumulative refunded amount MUST NEVER exceed the captured amount!
+                    if cum > captured_amount_minor {
+                        return Err(AuthError::BillingOperationFailed);
+                    }
+                    if cum <= already_refunded_minor {
+                        // Out-of-order or repeated cumulative callback -> ZERO side effects!
+                        sqlx::query(
+                            r"
+                            UPDATE billing_webhook_events
+                            SET processing_status = 'ignored',
+                                processed_at = now(),
+                                order_id = $2,
+                                provider_transaction_id = $3,
+                                workspace_id = $4,
+                                outcome = 'cumulative_refund_duplicate_or_stale_ignored'
+                            WHERE id = $1
+                            ",
+                        )
+                        .bind(webhook_row_id)
+                        .bind(order.id)
+                        .bind(t.provider_transaction_id.as_deref())
+                        .bind(order.workspace_id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|_| AuthError::BackendUnavailable)?;
+                        tx.commit()
+                            .await
+                            .map_err(|_| AuthError::BackendUnavailable)?;
+                        return Ok((
+                            BillingEventRecord {
+                                id: webhook_row_id,
+                                provider: t.provider,
+                                external_event_id: t.provider_event_id.clone(),
+                                event_type: t.event_type.clone(),
+                                workspace_id: Some(order.workspace_id),
+                                occurred_at: t.occurred_at_unix,
+                                processed_at: t.now_secs,
+                                outcome: "cumulative_refund_duplicate_or_stale_ignored".to_owned(),
+                            },
+                            None,
+                            None,
+                        ));
+                    }
+                    (cum - already_refunded_minor, cum)
+                } else {
+                    // Delta refund (e.g. Paddle adjustment or full Paymob void/refund):
+                    // Deduplicate by `provider_refund_id` when supplied so retries NEVER double-count!
+                    if let Some(ref pref_id) = provider_refund_id {
+                        let exists: Option<Uuid> = sqlx::query_scalar(
+                            "SELECT id FROM billing_refunds WHERE provider = $1 AND provider_refund_id = $2 AND status = 'confirmed'",
+                        )
+                        .bind(provider_str)
+                        .bind(pref_id)
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .map_err(|_| AuthError::BackendUnavailable)?;
+                        if exists.is_some() {
+                            sqlx::query(
+                                r"
+                                UPDATE billing_webhook_events
+                                SET processing_status = 'ignored',
+                                    processed_at = now(),
+                                    order_id = $2,
+                                    provider_transaction_id = $3,
+                                    workspace_id = $4,
+                                    outcome = 'duplicate_provider_refund_ignored'
+                                WHERE id = $1
+                                ",
+                            )
+                            .bind(webhook_row_id)
+                            .bind(order.id)
+                            .bind(t.provider_transaction_id.as_deref())
+                            .bind(order.workspace_id)
+                            .execute(&mut *tx)
+                            .await
+                            .map_err(|_| AuthError::BackendUnavailable)?;
+                            tx.commit()
+                                .await
+                                .map_err(|_| AuthError::BackendUnavailable)?;
+                            return Ok((
+                                BillingEventRecord {
+                                    id: webhook_row_id,
+                                    provider: t.provider,
+                                    external_event_id: t.provider_event_id.clone(),
+                                    event_type: t.event_type.clone(),
+                                    workspace_id: Some(order.workspace_id),
+                                    occurred_at: t.occurred_at_unix,
+                                    processed_at: t.now_secs,
+                                    outcome: "duplicate_provider_refund_ignored".to_owned(),
+                                },
+                                None,
+                                None,
+                            ));
+                        }
+                    }
+                    let remaining = captured_amount_minor.saturating_sub(already_refunded_minor);
+                    let delta = partial_amount_minor.unwrap_or(remaining);
+                    if delta == 0
+                        || already_refunded_minor.saturating_add(delta) > captured_amount_minor
+                    {
+                        return Err(AuthError::BillingOperationFailed);
+                    }
+                    (delta, already_refunded_minor + delta)
+                };
+
+                let is_partial = new_total_refunded < captured_amount_minor;
                 let new_order_state = if is_partial {
                     "partially_refunded"
                 } else {
                     "refunded"
                 };
+
+                // Persist every confirmed refund transition durably in `billing_refunds`.
+                let req_key = if let Some(ref pref_id) = provider_refund_id {
+                    format!("webhook:{provider_str}:ref:{pref_id}")
+                } else {
+                    format!(
+                        "webhook:{provider_str}:{}:cum:{}",
+                        t.provider_transaction_id
+                            .as_deref()
+                            .unwrap_or(&order.id.to_string()),
+                        new_total_refunded
+                    )
+                };
+                sqlx::query(
+                    r"
+                    INSERT INTO billing_refunds (
+                        order_id, workspace_id, provider, external_invoice_id,
+                        refund_request_key, provider_refund_id, amount_minor, currency,
+                        kind, status, mandatory_legal_override, reason, confirmed_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'confirmed', $10, 'provider_webhook_confirmed', to_timestamp($11))
+                    ON CONFLICT (workspace_id, refund_request_key) DO NOTHING
+                    ",
+                )
+                .bind(order.id)
+                .bind(order.workspace_id)
+                .bind(provider_str)
+                .bind(&inv_ext_id)
+                .bind(&req_key)
+                .bind(provider_refund_id.as_deref())
+                .bind(i64::try_from(delta_minor).unwrap_or(0))
+                .bind(currency_to_str(order.currency))
+                .bind(if is_partial { "partial_refund" } else { "refund" })
+                .bind(*mandatory_legal_override)
+                .bind(t.now_secs)
+                .execute(&mut *tx)
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+
                 sqlx::query(
                     "UPDATE billing_orders SET state = $2, updated_at = now() WHERE id = $1",
                 )
@@ -1042,21 +1431,20 @@ impl PgControlPlaneStore {
                 .execute(&mut *tx)
                 .await
                 .map_err(|_| AuthError::BackendUnavailable)?;
-                let refunded_amt = partial_amount_minor.unwrap_or(order.expected_amount_minor);
+
                 sqlx::query(
                     r"
                     UPDATE billing_invoices
                     SET status = $2,
-                        refunded_amount_minor = LEAST(amount_minor, refunded_amount_minor + $3),
+                        refunded_amount_minor = $3,
                         refunded_at = to_timestamp($4)
-                    WHERE order_id = $1 OR external_invoice_id = $5
+                    WHERE external_invoice_id = $1
                     ",
                 )
-                .bind(order.id)
+                .bind(&inv_ext_id)
                 .bind(new_order_state)
-                .bind(i64::try_from(refunded_amt).unwrap_or(0))
+                .bind(i64::try_from(new_total_refunded).unwrap_or(0))
                 .bind(t.now_secs)
-                .bind(t.external_invoice_id.as_deref().unwrap_or(""))
                 .execute(&mut *tx)
                 .await
                 .map_err(|_| AuthError::BackendUnavailable)?;
@@ -1134,6 +1522,10 @@ impl PgControlPlaneStore {
         }
 
         if let Some(ref updated) = updated_entitlement {
+            let sub_id_for_ent = t
+                .provider_subscription_id
+                .as_deref()
+                .or(order.provider_subscription_id.as_deref());
             sqlx::query(
                 r"
                 UPDATE workspace_entitlement_state
@@ -1145,6 +1537,8 @@ impl PgControlPlaneStore {
                     past_due_since = $7,
                     operation_credits = $8,
                     pay_per_file_tokens = $9,
+                    provider = COALESCE($10, provider),
+                    provider_subscription_id = COALESCE($11, provider_subscription_id),
                     updated_at = now()
                 WHERE workspace_id = $1
                 ",
@@ -1158,6 +1552,12 @@ impl PgControlPlaneStore {
             .bind(updated.past_due_since)
             .bind(i32::try_from(updated.operation_credits).unwrap_or(0))
             .bind(i32::try_from(updated.pay_per_file_tokens).unwrap_or(0))
+            .bind(if sub_id_for_ent.is_some() {
+                Some(provider_str)
+            } else {
+                None
+            })
+            .bind(sub_id_for_ent)
             .execute(&mut *tx)
             .await
             .map_err(|_| AuthError::BackendUnavailable)?;
@@ -1501,6 +1901,35 @@ impl PgControlPlaneStore {
         Ok(summary)
     }
 
+    /// Check whether a `(workspace_id, refund_request_key)` slot has already been claimed.
+    pub async fn has_refund_request_key_pg(
+        &self,
+        workspace_id: Uuid,
+        refund_request_key: &str,
+    ) -> Result<bool, AuthError> {
+        let mut tx = self
+            .pool()
+            .begin()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        sqlx::query("SELECT set_config('app.owner_override', 'true', true)")
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM billing_refunds WHERE workspace_id = $1 AND refund_request_key = $2)",
+        )
+        .bind(workspace_id)
+        .bind(refund_request_key)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+        tx.commit()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(exists)
+    }
+
     /// Atomically claim a refund request slot in PostgreSQL (`UNIQUE (workspace_id, refund_request_key)`).
     /// Prevents duplicate refund clicks from submitting a second external provider refund!
     pub async fn claim_refund_request_pg(
@@ -1569,7 +1998,9 @@ impl PgControlPlaneStore {
     }
 
     /// Finalize a refund request after external provider response (`confirmed = true` -> revokes
-    /// entitlements atomically; `confirmed = false` -> keeps `refund_pending` until webhook confirms!).
+    /// entitlements atomically; `confirmed = false` -> keeps `refund_pending` until webhook confirms;
+    /// `reconciliation_required = true` -> marks `reconciliation_required` and keeps `refund_pending`
+    /// without allowing blind duplicate provider refunds!).
     #[allow(clippy::too_many_arguments)]
     pub async fn finalize_refund_request_pg(
         &self,
@@ -1580,6 +2011,7 @@ impl PgControlPlaneStore {
         confirmed: bool,
         partial_amount_minor: Option<u64>,
         failed: bool,
+        reconciliation_required: bool,
         now_secs: i64,
     ) -> Result<(InvoiceRecord, Option<WorkspaceEntitlementRecord>), AuthError> {
         let mut tx = self
@@ -1591,6 +2023,20 @@ impl PgControlPlaneStore {
             .execute(&mut *tx)
             .await
             .map_err(|_| AuthError::BackendUnavailable)?;
+
+        if reconciliation_required {
+            sqlx::query(
+                "UPDATE billing_refunds SET status = 'reconciliation_required', updated_at = now() WHERE id = $1",
+            )
+            .bind(refund_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+            tx.commit()
+                .await
+                .map_err(|_| AuthError::BackendUnavailable)?;
+            return Err(AuthError::PaymentReconciliationRequired);
+        }
 
         if failed {
             sqlx::query(
@@ -1653,19 +2099,20 @@ impl PgControlPlaneStore {
 
         let mut updated_ent = None;
         if confirmed {
-            let is_partial =
-                partial_amount_minor.is_some_and(|amt| amt > 0 && amt < inv.amount_minor);
+            let add_refund = partial_amount_minor
+                .unwrap_or_else(|| inv.amount_minor.saturating_sub(inv.refunded_amount_minor));
+            let new_total = inv.refunded_amount_minor.saturating_add(add_refund);
+            if new_total > inv.amount_minor {
+                return Err(AuthError::BillingOperationFailed);
+            }
+            let is_partial = new_total < inv.amount_minor;
             let new_status = if is_partial {
                 "partially_refunded"
             } else {
                 "refunded"
             };
-            let add_refund = partial_amount_minor.unwrap_or(inv.amount_minor);
             inv.status = new_status.to_owned();
-            inv.refunded_amount_minor = inv
-                .refunded_amount_minor
-                .saturating_add(add_refund)
-                .min(inv.amount_minor);
+            inv.refunded_amount_minor = new_total;
             inv.refunded_at = Some(now_secs);
 
             sqlx::query(
@@ -1697,7 +2144,7 @@ impl PgControlPlaneStore {
             }
 
             if !is_partial {
-                sqlx::query(
+                let ent_row = sqlx::query(
                     r"
                     UPDATE workspace_entitlement_state
                     SET plan_tier = 'free',
@@ -1707,28 +2154,46 @@ impl PgControlPlaneStore {
                         past_due_since = NULL,
                         updated_at = now()
                     WHERE workspace_id = $1
+                    RETURNING
+                        workspace_id, user_id, plan_tier, subscription_state, seats,
+                        trial_expires_at, current_period_end, past_due_since,
+                        friend_vip_active, friend_vip_granted_by,
+                        operation_credits, pay_per_file_tokens, trial_ai_used
                     ",
                 )
                 .bind(workspace_id)
                 .bind(now_secs)
-                .execute(&mut *tx)
+                .fetch_optional(&mut *tx)
                 .await
                 .map_err(|_| AuthError::BackendUnavailable)?;
-                updated_ent = Some(WorkspaceEntitlementRecord {
-                    workspace_id,
-                    user_id: Uuid::nil(),
-                    plan: PlanTier::Free,
-                    state: SubscriptionState::Canceled,
-                    seats: 1,
-                    trial_expires_at: None,
-                    current_period_end: Some(now_secs),
-                    past_due_since: None,
-                    friend_vip_active: false,
-                    friend_vip_granted_by: None,
-                    operation_credits: 0,
-                    pay_per_file_tokens: 0,
-                    trial_ai_used: 0,
-                });
+                if let Some(er) = ent_row {
+                    updated_ent = Some(WorkspaceEntitlementRecord {
+                        workspace_id,
+                        user_id: er
+                            .try_get("user_id")
+                            .map_err(|_| AuthError::BackendUnavailable)?,
+                        plan: PlanTier::Free,
+                        state: SubscriptionState::Canceled,
+                        seats: 1,
+                        trial_expires_at: er.try_get("trial_expires_at").ok().flatten(),
+                        current_period_end: Some(now_secs),
+                        past_due_since: None,
+                        friend_vip_active: er.try_get("friend_vip_active").unwrap_or(false),
+                        friend_vip_granted_by: er.try_get("friend_vip_granted_by").ok().flatten(),
+                        operation_credits: u32::try_from(
+                            er.try_get::<i32, _>("operation_credits").unwrap_or(0),
+                        )
+                        .unwrap_or(0),
+                        pay_per_file_tokens: u32::try_from(
+                            er.try_get::<i32, _>("pay_per_file_tokens").unwrap_or(0),
+                        )
+                        .unwrap_or(0),
+                        trial_ai_used: u32::try_from(
+                            er.try_get::<i32, _>("trial_ai_used").unwrap_or(0),
+                        )
+                        .unwrap_or(0),
+                    });
+                }
             }
         } else {
             inv.status = "refund_pending".to_owned();
@@ -1738,6 +2203,39 @@ impl PgControlPlaneStore {
             .await
             .map_err(|_| AuthError::BackendUnavailable)?;
         Ok((inv, updated_ent))
+    }
+
+    /// Count recorded webhook security/integrity anomalies for verification & owner auditing.
+    pub async fn count_security_anomalies_pg(&self) -> Result<i64, AuthError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM billing_security_anomalies")
+            .fetch_one(self.pool())
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(count)
+    }
+
+    /// Count financial entitlement grants for a workspace (used to verify recurring renewal history).
+    pub async fn count_workspace_grants_pg(&self, workspace_id: Uuid) -> Result<i64, AuthError> {
+        let mut tx = self
+            .pool()
+            .begin()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        sqlx::query("SELECT set_config('app.owner_override', 'true', true)")
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM billing_entitlement_grants WHERE workspace_id = $1",
+        )
+        .bind(workspace_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+        tx.commit()
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        Ok(count)
     }
 
     /// Record a manual Owner chargeback atomically in PostgreSQL 18.

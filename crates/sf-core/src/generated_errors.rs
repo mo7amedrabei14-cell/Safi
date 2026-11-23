@@ -342,6 +342,21 @@ impl ErrorCode {
         domain: ErrorDomain::Pay,
         number: 6,
     };
+    /// Registered error code `SF-PAY-007`.
+    pub const SF_PAY_007: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 7,
+    };
+    /// Registered error code `SF-PAY-008`.
+    pub const SF_PAY_008: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 8,
+    };
+    /// Registered error code `SF-PAY-009`.
+    pub const SF_PAY_009: Self = Self {
+        domain: ErrorDomain::Pay,
+        number: 9,
+    };
     /// Registered error code `SF-PRF-001`.
     pub const SF_PRF_001: Self = Self {
         domain: ErrorDomain::Prf,
@@ -655,6 +670,9 @@ impl ErrorCode {
         Self::SF_PAY_004,
         Self::SF_PAY_005,
         Self::SF_PAY_006,
+        Self::SF_PAY_007,
+        Self::SF_PAY_008,
+        Self::SF_PAY_009,
         Self::SF_PRF_001,
         Self::SF_PRF_002,
         Self::SF_RCP_001,
@@ -1378,6 +1396,36 @@ pub const OFFICIAL_ERROR_CATALOG: &[ErrorCatalogEntry] = &[
         title_en: "Payment chargeback recorded and subscription revoked",
         action_en: "Contact support to resolve the billing dispute before reactivating.",
         owner_note: "Verified payment provider chargeback webhook revoked paid entitlements immediately.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_007,
+        code_str: "SF-PAY-007",
+        severity: ErrorSeverity::Error,
+        title_ar: "تعارض في مفتاح عدم التكرار لطلب الدفع",
+        action_ar: "استخدم مفتاح عدم تكرار جديدًا لعملية شراء مختلفة، أو أعد نفس تفاصيل الطلب الأصلي.",
+        title_en: "Checkout idempotency key conflict",
+        action_en: "Use a new idempotency key for a different purchase, or retry with the exact original request.",
+        owner_note: "Same (workspace_id, idempotency_key) submitted with a different request fingerprint; rejected with 409 Conflict.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_008,
+        code_str: "SF-PAY-008",
+        severity: ErrorSeverity::Error,
+        title_ar: "يتطلب طلب الدفع مطابقة الحالة مع مزود الدفع قبل إعادة المحاولة",
+        action_ar: "انتظر لحظات ثم أعد التحقق من الطلب الحالي لتجنب الخصم المزدوج.",
+        title_en: "Payment order requires provider reconciliation before retrying",
+        action_en: "Wait briefly and reconcile the existing order state to prevent a duplicate charge.",
+        owner_note: "Uncertain provider timeout occurred during checkout creation; server refuses to blindly issue a second charge.",
+    },
+    ErrorCatalogEntry {
+        code: ErrorCode::SF_PAY_009,
+        code_str: "SF-PAY-009",
+        severity: ErrorSeverity::Error,
+        title_ar: "رُصد تعارض في بصمة حمولة إشعار الدفع لنفس المعرّف",
+        action_ar: "تم رفض الإشعار وحماية سجل الدفع الأصلي وتسجيل تنبيه أمني للمراجعة.",
+        title_en: "Webhook event ID payload hash mismatch detected",
+        action_en: "The conflicting webhook delivery was rejected, the original payment event was preserved, and a security anomaly was recorded.",
+        owner_note: "Same (provider, provider_event_id) arrived with a different raw payload hash; treated as a security/integrity anomaly (409 Conflict).",
     },
     ErrorCatalogEntry {
         code: ErrorCode::SF_PRF_001,

@@ -898,6 +898,14 @@ title_en = "Payment order requires provider reconciliation before retrying"
 action_en = "Wait briefly and reconcile the existing order state to prevent a duplicate charge."
 owner_note = "Uncertain provider timeout occurred during checkout creation; server refuses to blindly issue a second charge."
 
+[SF-PAY-009]
+severity = "error"
+title_ar = "رُصد تعارض في بصمة حمولة إشعار الدفع لنفس المعرّف"
+action_ar = "تم رفض الإشعار وحماية سجل الدفع الأصلي وتسجيل تنبيه أمني للمراجعة."
+title_en = "Webhook event ID payload hash mismatch detected"
+action_en = "The conflicting webhook delivery was rejected, the original payment event was preserved, and a security anomaly was recorded."
+owner_note = "Same (provider, provider_event_id) arrived with a different raw payload hash; treated as a security/integrity anomaly (409 Conflict)."
+
 [SF-AUTH-023]
 severity = "error"
 title_ar = "رمز تفويض سطح المكتب غير صالح أو منتهي الصلاحية أو مستخدم مسبقًا"

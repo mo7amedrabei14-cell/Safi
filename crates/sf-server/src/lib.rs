@@ -320,6 +320,16 @@ impl AppState {
             .insert(record.user_id, record);
         self.persist_durable_state().await;
     }
+
+    /// Look up a managed account record by user ID (used for verified customer billing defaults).
+    pub async fn get_managed_account(&self, user_id: uuid::Uuid) -> Option<ManagedAccountRecord> {
+        self.control_plane
+            .read()
+            .await
+            .managed_accounts
+            .get(&user_id)
+            .cloned()
+    }
 }
 
 /// SafiData server version reported by `/health`.

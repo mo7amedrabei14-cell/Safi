@@ -67,6 +67,9 @@ export type SafiErrorCode =
   | "SF-PAY-004"
   | "SF-PAY-005"
   | "SF-PAY-006"
+  | "SF-PAY-007"
+  | "SF-PAY-008"
+  | "SF-PAY-009"
   | "SF-PRF-001"
   | "SF-PRF-002"
   | "SF-RCP-001"
@@ -248,6 +251,12 @@ export type SafiErrorTranslationKey =
   | "error.SF-PAY-005.action"
   | "error.SF-PAY-006.title"
   | "error.SF-PAY-006.action"
+  | "error.SF-PAY-007.title"
+  | "error.SF-PAY-007.action"
+  | "error.SF-PAY-008.title"
+  | "error.SF-PAY-008.action"
+  | "error.SF-PAY-009.title"
+  | "error.SF-PAY-009.action"
   | "error.SF-PRF-001.title"
   | "error.SF-PRF-001.action"
   | "error.SF-PRF-002.title"
@@ -423,6 +432,9 @@ export const SAFI_ERROR_CODES: readonly SafiErrorCode[] = [
   "SF-PAY-004",
   "SF-PAY-005",
   "SF-PAY-006",
+  "SF-PAY-007",
+  "SF-PAY-008",
+  "SF-PAY-009",
   "SF-PRF-001",
   "SF-PRF-002",
   "SF-RCP-001",
@@ -1082,6 +1094,38 @@ export const SAFI_ERROR_CATALOG: Record<SafiErrorCode, SafiErrorCatalogEntry> = 
     actionEn: "Contact support to resolve the billing dispute before reactivating.",
     ownerNote: "Verified payment provider chargeback webhook revoked paid entitlements immediately."
   },
+  "SF-PAY-007": {
+    code: "SF-PAY-007",
+    severity: "error",
+    titleAr: "تعارض في مفتاح عدم التكرار لطلب الدفع",
+    actionAr: "استخدم مفتاح عدم تكرار جديدًا لعملية شراء مختلفة، أو أعد نفس تفاصيل الطلب الأصلي.",
+    titleEn: "Checkout idempotency key conflict",
+    actionEn:
+      "Use a new idempotency key for a different purchase, or retry with the exact original request.",
+    ownerNote:
+      "Same (workspace_id, idempotency_key) submitted with a different request fingerprint; rejected with 409 Conflict."
+  },
+  "SF-PAY-008": {
+    code: "SF-PAY-008",
+    severity: "error",
+    titleAr: "يتطلب طلب الدفع مطابقة الحالة مع مزود الدفع قبل إعادة المحاولة",
+    actionAr: "انتظر لحظات ثم أعد التحقق من الطلب الحالي لتجنب الخصم المزدوج.",
+    titleEn: "Payment order requires provider reconciliation before retrying",
+    actionEn: "Wait briefly and reconcile the existing order state to prevent a duplicate charge.",
+    ownerNote:
+      "Uncertain provider timeout occurred during checkout creation; server refuses to blindly issue a second charge."
+  },
+  "SF-PAY-009": {
+    code: "SF-PAY-009",
+    severity: "error",
+    titleAr: "رُصد تعارض في بصمة حمولة إشعار الدفع لنفس المعرّف",
+    actionAr: "تم رفض الإشعار وحماية سجل الدفع الأصلي وتسجيل تنبيه أمني للمراجعة.",
+    titleEn: "Webhook event ID payload hash mismatch detected",
+    actionEn:
+      "The conflicting webhook delivery was rejected, the original payment event was preserved, and a security anomaly was recorded.",
+    ownerNote:
+      "Same (provider, provider_event_id) arrived with a different raw payload hash; treated as a security/integrity anomaly (409 Conflict)."
+  },
   "SF-PRF-001": {
     code: "SF-PRF-001",
     severity: "info",
@@ -1684,6 +1728,13 @@ export const SAFI_ERROR_MESSAGES_AR: Record<string, string> = {
   "error.SF-PAY-005.action": "تحقق من شروط الكوبون والخطط المؤهلة والحد الأقصى للاستخدام.",
   "error.SF-PAY-006.title": "تم تسجيل نزاع دفع (Chargeback) وإيقاف الاشتراك",
   "error.SF-PAY-006.action": "تواصل مع الدعم لحل نزاع الفوترة وإعادة تفعيل الاشتراك.",
+  "error.SF-PAY-007.title": "تعارض في مفتاح عدم التكرار لطلب الدفع",
+  "error.SF-PAY-007.action":
+    "استخدم مفتاح عدم تكرار جديدًا لعملية شراء مختلفة، أو أعد نفس تفاصيل الطلب الأصلي.",
+  "error.SF-PAY-008.title": "يتطلب طلب الدفع مطابقة الحالة مع مزود الدفع قبل إعادة المحاولة",
+  "error.SF-PAY-008.action": "انتظر لحظات ثم أعد التحقق من الطلب الحالي لتجنب الخصم المزدوج.",
+  "error.SF-PAY-009.title": "رُصد تعارض في بصمة حمولة إشعار الدفع لنفس المعرّف",
+  "error.SF-PAY-009.action": "تم رفض الإشعار وحماية سجل الدفع الأصلي وتسجيل تنبيه أمني للمراجعة.",
   "error.SF-PRF-001.title": "لسنا متأكدين من نوع هذا العمود",
   "error.SF-PRF-001.action": "راجع الاقتراح أو اشرح لنا معنى العمود.",
   "error.SF-PRF-002.title": "قيمة درجة الثقة غير صالحة",
@@ -1946,6 +1997,15 @@ export const SAFI_ERROR_MESSAGES_EN: Record<string, string> = {
   "error.SF-PAY-005.action": "Check the promotion rules, eligible plans, and redemption limits.",
   "error.SF-PAY-006.title": "Payment chargeback recorded and subscription revoked",
   "error.SF-PAY-006.action": "Contact support to resolve the billing dispute before reactivating.",
+  "error.SF-PAY-007.title": "Checkout idempotency key conflict",
+  "error.SF-PAY-007.action":
+    "Use a new idempotency key for a different purchase, or retry with the exact original request.",
+  "error.SF-PAY-008.title": "Payment order requires provider reconciliation before retrying",
+  "error.SF-PAY-008.action":
+    "Wait briefly and reconcile the existing order state to prevent a duplicate charge.",
+  "error.SF-PAY-009.title": "Webhook event ID payload hash mismatch detected",
+  "error.SF-PAY-009.action":
+    "The conflicting webhook delivery was rejected, the original payment event was preserved, and a security anomaly was recorded.",
   "error.SF-PRF-001.title": "We are not sure about this column's type",
   "error.SF-PRF-001.action": "Review the suggestion or tell us what this column represents.",
   "error.SF-PRF-002.title": "Invalid confidence score value",

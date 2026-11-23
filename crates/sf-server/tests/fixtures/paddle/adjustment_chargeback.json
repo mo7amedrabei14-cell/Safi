@@ -1,0 +1,22 @@
+{
+  "event_id": "evt_01j9safi_adj_cb_001",
+  "event_type": "adjustment.created",
+  "occurred_at": "2026-11-23T12:20:00.000000Z",
+  "notification_id": "ntf_01j9safi_cb_001",
+  "data": {
+    "id": "adj_01j9safi_cb_001",
+    "action": "chargeback",
+    "type": "full",
+    "status": "approved",
+    "transaction_id": "txn_01j9safi_initial_001",
+    "subscription_id": "sub_01j9safi_monthly_001",
+    "currency_code": "USD",
+    "reason": "fraudulent",
+    "totals": {
+      "subtotal": "2000",
+      "tax": "0",
+      "total": "2000",
+      "currency_code": "USD"
+    }
+  }
+}

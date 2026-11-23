@@ -33,7 +33,7 @@ use crate::auth::session::{parse_session_token, token_hash, SessionView};
 use crate::auth::{unix_now, AuthMethod, AuthenticatedSession, Principal, Scope};
 use crate::billing::{
     resolve_provider_and_price, BillingEventRecord, BillingRevenueSummary, CheckoutRequest,
-    CheckoutResponse, InvoiceRecord, PaymobTransactionObj,
+    CheckoutResponse, InvoiceRecord,
 };
 use crate::config::ReadinessReport;
 use crate::coupons::{
@@ -3066,6 +3066,14 @@ pub async fn billing_checkout(
             .filter(|s| !s.is_empty());
     }
 
+    if let Some(ref mut bd) = body.billing_data {
+        if bd.email.trim().is_empty() {
+            if let Some(acct) = state.get_managed_account(session.principal.user_id).await {
+                bd.email = acct.email;
+            }
+        }
+    }
+
     let resp = state.billing.create_checkout(&body).await?;
     state.persist_durable_state().await;
     Ok(Json(resp))
@@ -3104,18 +3112,29 @@ pub async fn paddle_webhook(
 
 #[derive(Debug, Deserialize)]
 pub struct PaymobWebhookQuery {
-    pub hmac: String,
+    pub hmac: Option<String>,
 }
 
-/// `POST /v1/billing/webhooks/paymob` — Paymob HMAC-SHA512 verified webhook endpoint.
+/// `POST /v1/billing/webhooks/paymob` — Official Paymob Transaction Processed Callback
+/// (`{"type":"TRANSACTION","obj":{...}}`) with HMAC-SHA512 query parameter verification.
 pub async fn paymob_webhook(
     State(state): State<AppState>,
     Query(query): Query<PaymobWebhookQuery>,
-    Json(tx): Json<PaymobTransactionObj>,
+    headers: HeaderMap,
+    raw_body: Bytes,
 ) -> Result<Json<BillingEventRecord>, AuthError> {
+    let hmac = query
+        .hmac
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or(AuthError::InvalidWebhookSignature)?;
+    let delivery_id = headers
+        .get("x-paymob-delivery-id")
+        .and_then(|v| v.to_str().ok());
     let rec = state
         .billing
-        .process_paymob_webhook(&query.hmac, &tx, unix_now())
+        .process_paymob_webhook_raw(hmac, &raw_body, delivery_id, unix_now())
         .await?;
     state.persist_durable_state().await;
     Ok(Json(rec))

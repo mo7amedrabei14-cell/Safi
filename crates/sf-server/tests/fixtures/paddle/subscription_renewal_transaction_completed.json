@@ -1,0 +1,38 @@
+{
+  "event_id": "evt_01j9safi_renewal_m2",
+  "event_type": "transaction.completed",
+  "occurred_at": "2026-12-23T12:00:05.000000Z",
+  "notification_id": "ntf_01j9safi_renewal_002",
+  "data": {
+    "id": "txn_01j9safi_renewal_002",
+    "status": "completed",
+    "origin": "subscription_recurring",
+    "currency_code": "USD",
+    "subscription_id": "sub_01j9safi_monthly_001",
+    "invoice_id": "inv_01j9safi_renewal_002",
+    "billing_period": {
+      "starts_at": "2026-12-23T12:00:00Z",
+      "ends_at": "2027-01-23T12:00:00Z"
+    },
+    "items": [
+      {
+        "quantity": 1,
+        "price": {
+          "id": "pri_pro_monthly",
+          "unit_price": {
+            "amount": "2000",
+            "currency_code": "USD"
+          }
+        }
+      }
+    ],
+    "details": {
+      "totals": {
+        "subtotal": "2000",
+        "tax": "0",
+        "total": "2000",
+        "currency_code": "USD"
+      }
+    }
+  }
+}

@@ -40,7 +40,8 @@ use uuid::Uuid;
 use crate::auth::unix_now;
 use crate::billing::pg_ledger::{PgCheckoutClaim, VerifiedWebhookKind, VerifiedWebhookTransition};
 use crate::billing::provider_http::{
-    PaddleApiAdapter, PaymobApiAdapter, ProviderCallError, DEFAULT_PROVIDER_TIMEOUT_MS,
+    CheckoutMode, CustomerBillingData, PaddleApiAdapter, PaddleCustomerContext, PaymobApiAdapter,
+    ProviderCallError, DEFAULT_PROVIDER_TIMEOUT_MS,
 };
 use crate::config::{IntegrationStatus, ServerConfig};
 use crate::coupons::CouponService;
@@ -91,6 +92,7 @@ pub enum CheckoutProduct {
     IndividualAnnual,
     OrganizationSeatAnnual,
     PayPerFile,
+    #[serde(rename = "credit_pack_25")]
     CreditPack25,
 }
 
@@ -197,6 +199,10 @@ pub struct BillingOrderRecord {
     pub expected_integration_id: Option<u64>,
     pub provider_order_ref: Option<String>,
     pub provider_intention_id: Option<String>,
+    #[serde(default)]
+    pub provider_subscription_id: Option<String>,
+    #[serde(default)]
+    pub checkout_mode: CheckoutMode,
     pub checkout_url: Option<String>,
     pub provider_transaction_id: Option<String>,
     pub state: PaymentOrderState,
@@ -211,13 +217,19 @@ pub struct BillingOrderRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntitlementGrantRecord {
     pub id: Uuid,
-    pub order_id: Uuid,
+    pub order_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub provider: BillingProvider,
     pub provider_transaction_id: String,
+    #[serde(default)]
+    pub provider_subscription_id: Option<String>,
     pub grant_kind: String,
     pub quantity: u32,
+    #[serde(default)]
+    pub period_start: Option<i64>,
+    #[serde(default)]
+    pub period_end: Option<i64>,
     pub revoked_at: Option<i64>,
     pub created_at: i64,
 }
@@ -257,6 +269,13 @@ pub struct CheckoutRequest {
     /// Client-provided idempotency key for one intentional purchase action (also accepted via `Idempotency-Key` header).
     #[serde(default)]
     pub idempotency_key: Option<String>,
+    /// Verified real customer billing details REQUIRED for Paymob EGP checkout (zero fake personal data).
+    #[serde(default)]
+    pub billing_data: Option<CustomerBillingData>,
+    /// Optional Paddle customer & billing address IDs for `ready` transactions; when omitted, Paddle
+    /// returns a `draft` transaction for official Paddle.js Checkout overlay handoff.
+    #[serde(default)]
+    pub paddle_customer: Option<PaddleCustomerContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +293,8 @@ pub struct CheckoutResponse {
     pub provider_status: IntegrationStatus,
     pub provider_order_ref: Option<String>,
     pub checkout_session_id: Option<String>,
+    #[serde(default)]
+    pub checkout_mode: CheckoutMode,
     pub checkout_url: Option<String>,
 }
 
@@ -338,89 +359,154 @@ pub struct InvoiceRecord {
     pub refunded_at: Option<i64>,
 }
 
-/// Verified Paddle webhook payload (supports official Paddle transaction/subscription webhook fields
-/// and explicit correlation to internal `safi_order_id` / `transaction_id`).
-#[derive(Debug, Clone, Deserialize)]
-pub struct PaddleWebhookEvent {
-    pub event_id: String,
-    pub event_type: String,
-    pub occurred_at_unix: i64,
-    #[serde(default)]
-    pub order_id: Option<Uuid>,
-    #[serde(default)]
-    pub transaction_id: Option<String>,
-    #[serde(default)]
-    pub subscription_id: Option<String>,
-    #[serde(default)]
-    pub price_id: Option<String>,
-    #[serde(default)]
-    pub currency_code: Option<String>,
-    #[serde(default)]
-    pub workspace_id: Option<Uuid>,
-    #[serde(default)]
-    pub user_id: Option<Uuid>,
-    #[serde(default)]
-    pub product: Option<CheckoutProduct>,
-    #[serde(default)]
-    pub seats: Option<u32>,
-    #[serde(default)]
-    pub period_end_unix: Option<i64>,
-    #[serde(default)]
-    pub amount_minor: Option<u64>,
-    #[serde(default)]
-    pub refund_amount_minor: Option<u64>,
-    #[serde(default)]
-    pub invoice_id: Option<String>,
-    #[serde(default)]
-    pub mandatory_legal_refund: bool,
-    #[serde(default)]
-    pub custom_data: Option<Value>,
+/// Parse an RFC 3339 / ISO-8601 UTC/offset timestamp (e.g. `2026-11-23T12:00:00.123456Z`,
+/// `2026-11-23T14:00:00+02:00`, or Paymob's `2026-11-23T12:00:00.123456`) into Unix epoch seconds.
+#[must_use]
+pub fn parse_rfc3339_to_unix_secs(raw: &str) -> Option<i64> {
+    let s = raw.trim();
+    if s.len() < 19 {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    if bytes[4] != b'-' || bytes[7] != b'-' || (bytes[10] != b'T' && bytes[10] != b' ') {
+        return None;
+    }
+    if bytes[13] != b':' || bytes[16] != b':' {
+        return None;
+    }
+    let year: i64 = s[0..4].parse().ok()?;
+    let month: u32 = s[5..7].parse().ok()?;
+    let day: u32 = s[8..10].parse().ok()?;
+    let hour: u32 = s[11..13].parse().ok()?;
+    let minute: u32 = s[14..16].parse().ok()?;
+    let second: u32 = s[17..19].parse().ok()?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+
+    let mut rest = &s[19..];
+    if let Some(after_dot) = rest.strip_prefix('.') {
+        let frac_len = after_dot.bytes().take_while(|b| b.is_ascii_digit()).count();
+        rest = &after_dot[frac_len..];
+    }
+
+    let offset_secs: i64 = if rest.is_empty() || rest == "Z" || rest == "z" {
+        0
+    } else if rest.len() == 6 && (rest.starts_with('+') || rest.starts_with('-')) {
+        let sign: i64 = if rest.starts_with('+') { 1 } else { -1 };
+        let off_h: i64 = rest[1..3].parse().ok()?;
+        let off_m: i64 = rest[4..6].parse().ok()?;
+        if rest.as_bytes()[3] != b':' || off_h > 23 || off_m > 59 {
+            return None;
+        }
+        sign * (off_h * 3600 + off_m * 60)
+    } else {
+        return None;
+    };
+
+    // Howard Hinnant's exact civil-to-days algorithm (Gregorian calendar, 1970-01-01 = 0).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let m = u64::from(month);
+    let d = u64::from(day);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + (doe as i64) - 719_468;
+    let local_secs =
+        days * 86_400 + i64::from(hour) * 3600 + i64::from(minute) * 60 + i64::from(second);
+    Some(local_secs - offset_secs)
 }
 
-/// Official Paymob transaction callback object for HMAC-SHA512 verification.
-///
-/// SECURITY: The 20 official fields are covered by Paymob's HMAC-SHA512 signature.
-/// Optional unsigned fields (`workspace_id`, `user_id`, `product`, `seats`, `occurred_at_unix`)
-/// are NEVER trusted for beneficiary/entitlement decisions — authoritative fields are ALWAYS
-/// derived from the server-created `billing_orders` row correlated by the signed `order_id`.
-/// If any unsigned field is supplied and conflicts with the stored order, the callback is REJECTED!
-#[derive(Debug, Clone, Deserialize)]
-pub struct PaymobTransactionObj {
+/// Official Paddle Billing Webhook Envelope (`developer.paddle.com/webhooks/about/how-webhooks-work/`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaddleWebhookEnvelope {
+    pub event_id: String,
+    pub event_type: String,
+    /// RFC 3339 timestamp (e.g. `"2026-11-23T12:00:00.000000Z"`).
+    pub occurred_at: String,
+    #[serde(default)]
+    pub notification_id: Option<String>,
+    /// Official entity snapshot (`transaction`, `subscription`, `adjustment`, etc.).
+    pub data: Value,
+}
+
+/// Official Paymob nested `obj.order` object inside a Transaction Processed Callback.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymobOfficialOrder {
     pub id: u64,
+    #[serde(default)]
+    pub merchant_order_id: Option<String>,
+    #[serde(default)]
+    pub amount_cents: Option<u64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub data: Option<Value>,
+}
+
+/// Official Paymob nested `obj.source_data` object inside a Transaction Processed Callback.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymobOfficialSourceData {
+    pub pan: String,
+    pub sub_type: String,
+    #[serde(rename = "type")]
+    pub source_type: String,
+}
+
+/// Official Paymob Transaction Processed Callback `obj` payload
+/// (`developers.paymob.com/paymob-docs/developers/webhook-callbacks-and-hmac/transaction-callbacks`).
+///
+/// SECURITY: The 20 official nested fields are covered by Paymob's HMAC-SHA512 signature.
+/// Beneficiary (`workspace_id`, `user_id`, `product`, `seats`) is ALWAYS derived from the
+/// trusted server-created `billing_orders` row correlated by the HMAC-signed `obj.order.id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymobOfficialTransactionObj {
+    pub id: u64,
+    pub pending: bool,
     pub amount_cents: u64,
-    pub created_at: String,
-    pub currency: String,
-    pub error_occured: bool,
-    pub has_parent_transaction: bool,
-    pub integration_id: u64,
-    pub is_3d_secure: bool,
+    pub success: bool,
     pub is_auth: bool,
     pub is_capture: bool,
-    pub is_refunded: bool,
-    #[serde(default)]
-    pub is_chargeback: bool,
     pub is_standalone_payment: bool,
     pub is_voided: bool,
-    pub order_id: u64,
+    pub is_refunded: bool,
+    /// Official Paymob cumulative refunded amount in minor units (piastres).
+    #[serde(default)]
+    pub refunded_amount_cents: u64,
+    pub is_3d_secure: bool,
+    pub integration_id: u64,
+    #[serde(default)]
+    pub profile_id: Option<u64>,
+    pub has_parent_transaction: bool,
+    pub order: PaymobOfficialOrder,
+    pub created_at: String,
+    pub currency: String,
+    pub source_data: PaymobOfficialSourceData,
+    pub error_occured: bool,
     pub owner: u64,
-    pub pending: bool,
-    pub source_data_pan: String,
-    pub source_data_sub_type: String,
-    pub source_data_type: String,
-    pub success: bool,
     #[serde(default)]
-    pub workspace_id: Option<Uuid>,
+    pub is_chargeback: bool,
+    /// Optional unsigned provider `data` / `extras` bag — NEVER trusted; conflicting fields are rejected!
     #[serde(default)]
-    pub user_id: Option<Uuid>,
+    pub data: Option<Value>,
+}
+
+/// Official Paymob Transaction Processed Callback JSON Envelope.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymobCallbackEnvelope {
+    #[serde(rename = "type")]
+    pub callback_type: String,
+    pub obj: PaymobOfficialTransactionObj,
     #[serde(default)]
-    pub product: Option<CheckoutProduct>,
+    pub issuer_bank: Option<Value>,
     #[serde(default)]
-    pub seats: Option<u32>,
-    #[serde(default)]
-    pub occurred_at_unix: Option<i64>,
-    /// Optional distinct webhook delivery event ID (to test same transaction with new event IDs).
-    #[serde(default)]
-    pub webhook_event_id: Option<String>,
+    pub transaction_processed_callback_responses: Option<Value>,
 }
 
 /// Compute deterministic 32-byte SHA-256 fingerprint for checkout idempotency conflict detection.
@@ -513,9 +599,10 @@ pub fn sign_paddle_payload(secret: &str, ts: i64, raw_body: &[u8]) -> Result<Str
     Ok(format!("ts={ts};h1={digest}"))
 }
 
-/// Build the official Paymob HMAC-SHA512 concatenation string (20 sorted keys).
+/// Build the official Paymob HMAC-SHA512 concatenation string (20 sorted nested fields per
+/// `developers.paymob.com/paymob-docs/developers/webhook-callbacks-and-hmac/hmac`).
 #[must_use]
-pub fn paymob_hmac_concat_string(tx: &PaymobTransactionObj) -> String {
+pub fn paymob_hmac_concat_string(tx: &PaymobOfficialTransactionObj) -> String {
     format!(
         "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
         tx.amount_cents,
@@ -531,21 +618,21 @@ pub fn paymob_hmac_concat_string(tx: &PaymobTransactionObj) -> String {
         tx.is_refunded,
         tx.is_standalone_payment,
         tx.is_voided,
-        tx.order_id,
+        tx.order.id,
         tx.owner,
         tx.pending,
-        tx.source_data_pan,
-        tx.source_data_sub_type,
-        tx.source_data_type,
+        tx.source_data.pan,
+        tx.source_data.sub_type,
+        tx.source_data.source_type,
         tx.success,
     )
 }
 
-/// Verify Paymob's HMAC-SHA512 signature in constant time.
+/// Verify Paymob's HMAC-SHA512 signature in constant time against the official nested `obj`.
 pub fn verify_paymob_hmac(
     hmac_secret: &str,
     presented_hmac_hex: &str,
-    tx: &PaymobTransactionObj,
+    tx: &PaymobOfficialTransactionObj,
 ) -> Result<(), AuthError> {
     if hmac_secret.trim().is_empty() {
         return Err(AuthError::BillingNotConfigured);
@@ -569,10 +656,10 @@ pub fn verify_paymob_hmac(
     Ok(())
 }
 
-/// Compute a genuine Paymob HMAC-SHA512 hex digest (used by contract/simulator tests).
+/// Compute a genuine Paymob HMAC-SHA512 hex digest over the official nested `obj`.
 pub fn sign_paymob_transaction(
     hmac_secret: &str,
-    tx: &PaymobTransactionObj,
+    tx: &PaymobOfficialTransactionObj,
 ) -> Result<String, AuthError> {
     let concat = paymob_hmac_concat_string(tx);
     let mut mac = HmacSha512::new_from_slice(hmac_secret.as_bytes())
@@ -635,14 +722,19 @@ impl PaddlePriceCatalog {
 #[derive(Default)]
 struct BillingStore {
     processed_events: HashSet<(String, String)>,
+    processed_event_hashes: HashMap<(String, String), [u8; 32]>,
+    security_anomalies: Vec<String>,
     last_event_ts_by_workspace: HashMap<Uuid, i64>,
     events: Vec<BillingEventRecord>,
     invoices: HashMap<String, InvoiceRecord>,
     orders: HashMap<Uuid, BillingOrderRecord>,
     orders_by_idempotency: HashMap<(Uuid, String), Uuid>,
     orders_by_provider_ref: HashMap<(BillingProvider, String), Uuid>,
+    orders_by_subscription: HashMap<(BillingProvider, String), Uuid>,
     grants_by_provider_tx: HashSet<(BillingProvider, String)>,
     grants_by_order_kind: HashSet<(Uuid, String)>,
+    grants_by_renewal_period: HashSet<(BillingProvider, String, i64)>,
+    confirmed_provider_refund_ids: HashSet<(BillingProvider, String)>,
     grants: Vec<EntitlementGrantRecord>,
     refunds: HashMap<(Uuid, String), RefundRecord>,
 }
@@ -858,6 +950,14 @@ impl BillingService {
             .await;
         let _key_guard = key_lock.lock().await;
 
+        // Section 6: Paymob EGP checkout REQUIRES real validated customer billing details (zero fake PII!).
+        if provider == BillingProvider::Paymob {
+            let billing_data = req.billing_data.as_ref().ok_or(AuthError::InvalidRequest)?;
+            billing_data
+                .validate()
+                .map_err(|_| AuthError::InvalidRequest)?;
+        }
+
         let candidate_order_id = Uuid::now_v7();
         let candidate = BillingOrderRecord {
             id: candidate_order_id,
@@ -882,6 +982,8 @@ impl BillingService {
             expected_integration_id,
             provider_order_ref: None,
             provider_intention_id: None,
+            provider_subscription_id: None,
+            checkout_mode: CheckoutMode::RedirectUrl,
             checkout_url: None,
             provider_transaction_id: None,
             state: PaymentOrderState::Created,
@@ -893,9 +995,35 @@ impl BillingService {
         };
 
         // Step 1: Atomically claim or load existing order by `(workspace_id, idempotency_key)`.
+        // Across multiple server instances sharing PostgreSQL 18, ONLY the leader instance that
+        // receives `PgCheckoutClaim::Created` may invoke the external payment provider API.
+        // Any concurrent follower seeing `state == Created` waits for the leader's persisted result!
         let mut order = match self.claim_or_load_order(&candidate).await? {
             PgCheckoutClaim::Created(new_order) => new_order,
-            PgCheckoutClaim::Existing(existing) => {
+            PgCheckoutClaim::Existing(mut existing) => {
+                if existing.state == PaymentOrderState::Created {
+                    let wait_budget = std::time::Duration::from_millis(
+                        self.paddle_adapter
+                            .as_ref()
+                            .map(|a| a.timeout_ms)
+                            .or_else(|| self.paymob_adapter.as_ref().map(|a| a.timeout_ms))
+                            .unwrap_or(DEFAULT_PROVIDER_TIMEOUT_MS)
+                            .clamp(500, 15_000),
+                    );
+                    let deadline = tokio::time::Instant::now() + wait_budget;
+                    while existing.state == PaymentOrderState::Created
+                        && tokio::time::Instant::now() < deadline
+                    {
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                        if let Some(refreshed) = self.get_order(existing.id).await? {
+                            existing = refreshed;
+                        }
+                    }
+                    if existing.state == PaymentOrderState::Created {
+                        // Leader is still in-flight or crashed -> NEVER issue a blind second provider call!
+                        return Err(AuthError::PaymentReconciliationRequired);
+                    }
+                }
                 // Already created successfully -> return exact stored order without contacting provider again!
                 if matches!(
                     existing.state,
@@ -949,7 +1077,7 @@ impl BillingService {
                         order.state = PaymentOrderState::Failed;
                         order.last_error_code = Some(err.code().to_owned());
                         order.updated_at = now_secs;
-                        let _ = self.persist_order(&order).await;
+                        self.persist_order(&order).await?;
                         return Err(err);
                     }
                 }
@@ -978,47 +1106,41 @@ impl BillingService {
                         qty,
                         order.expected_amount_minor,
                         &order.idempotency_key,
+                        req.paddle_customer.as_ref(),
                     )
                     .await
                     .map(|created| {
-                        // Validate returned Paddle total when present against expected server amount.
-                        if let Some(ret_total) = created.returned_total_minor {
-                            if ret_total != order.expected_amount_minor {
-                                return Err(ProviderCallError::DefinitiveFailure {
-                                    status: 422,
-                                    reason: format!(
-                                        "paddle_amount_mismatch:expected={},got={}",
-                                        order.expected_amount_minor, ret_total
-                                    ),
-                                });
-                            }
-                        }
-                        Ok((
+                        (
                             created.transaction_id.clone(),
                             Some(created.transaction_id),
+                            created.checkout_mode,
                             created.checkout_url,
-                        ))
+                        )
                     })
-                    .and_then(|inner| inner)
             }
             BillingProvider::Paymob => {
                 let adapter = self
                     .paymob_adapter
                     .as_ref()
                     .ok_or(AuthError::BillingNotConfigured)?;
+                let billing_data = req.billing_data.as_ref().ok_or(AuthError::InvalidRequest)?;
                 adapter
                     .create_intention(
                         order.id,
                         order.product,
                         order.seats,
                         order.expected_amount_minor,
+                        billing_data,
+                        None,
+                        None,
                     )
                     .await
                     .map(|created| {
                         (
                             created.intention_order_id.to_string(),
                             Some(created.intention_id),
-                            created.checkout_url,
+                            CheckoutMode::RedirectUrl,
+                            Some(created.checkout_url),
                         )
                     })
             }
@@ -1028,12 +1150,13 @@ impl BillingService {
             }),
         };
 
-        // Step 4: Persist outcome BEFORE returning to client!
+        // Step 4: Persist outcome BEFORE returning to client (ZERO swallowed persistence errors!).
         match provider_result {
-            Ok((provider_order_ref, provider_intention_id, checkout_url)) => {
+            Ok((provider_order_ref, provider_intention_id, checkout_mode, checkout_url)) => {
                 order.provider_order_ref = Some(provider_order_ref);
                 order.provider_intention_id = provider_intention_id;
-                order.checkout_url = Some(checkout_url);
+                order.checkout_mode = checkout_mode;
+                order.checkout_url = checkout_url;
                 order.state = PaymentOrderState::CheckoutPending;
                 order.last_error_code = None;
                 order.updated_at = now_secs;
@@ -1048,7 +1171,7 @@ impl BillingService {
                 order.coupon_reservation_id = None;
                 order.last_error_code = Some(AuthError::BillingNotConfigured.code().to_owned());
                 order.updated_at = now_secs;
-                let _ = self.persist_order(&order).await;
+                self.persist_order(&order).await?;
                 Err(AuthError::BillingNotConfigured)
             }
             Err(ProviderCallError::DefinitiveFailure { .. }) => {
@@ -1060,17 +1183,17 @@ impl BillingService {
                 order.coupon_reservation_id = None;
                 order.last_error_code = Some(AuthError::BillingOperationFailed.code().to_owned());
                 order.updated_at = now_secs;
-                let _ = self.persist_order(&order).await;
+                self.persist_order(&order).await?;
                 Err(AuthError::BillingOperationFailed)
             }
-            Err(ProviderCallError::UncertainTimeout(_)) => {
-                // CRITICAL: Provider MAY have created the transaction! Mark `reconciliation_required`
-                // and refuse to blindly retry creation (retry will query provider reconciliation first).
+            Err(ProviderCallError::UncertainOutcome(_)) => {
+                // CRITICAL: Provider MAY have created the transaction! Mark `reconciliation_required`,
+                // KEEP coupon reservation held, and refuse to blindly retry creation.
                 order.state = PaymentOrderState::ReconciliationRequired;
                 order.last_error_code =
                     Some(AuthError::PaymentReconciliationRequired.code().to_owned());
                 order.updated_at = now_secs;
-                let _ = self.persist_order(&order).await;
+                self.persist_order(&order).await?;
                 Err(AuthError::PaymentReconciliationRequired)
             }
         }
@@ -1087,11 +1210,19 @@ impl BillingService {
                     .paddle_adapter
                     .as_ref()
                     .ok_or(AuthError::BillingNotConfigured)?;
-                match adapter.reconcile_transaction_by_order_id(order.id).await {
+                match adapter
+                    .reconcile_transaction_by_order_id(
+                        order.id,
+                        &order.provider_price_id,
+                        order.expected_amount_minor,
+                    )
+                    .await
+                {
                     Ok(Some(found)) => {
                         order.provider_order_ref = Some(found.transaction_id.clone());
                         order.provider_intention_id = Some(found.transaction_id);
-                        order.checkout_url = Some(found.checkout_url);
+                        order.checkout_mode = found.checkout_mode;
+                        order.checkout_url = found.checkout_url;
                         order.state = PaymentOrderState::CheckoutPending;
                         order.last_error_code = None;
                         order.updated_at = now_secs;
@@ -1113,6 +1244,7 @@ impl BillingService {
                     Ok(Some(found)) => {
                         order.provider_order_ref = Some(found.intention_order_id.to_string());
                         order.provider_intention_id = Some(found.intention_id);
+                        order.checkout_mode = CheckoutMode::RedirectUrl;
                         order.checkout_url = Some(found.checkout_url);
                         order.state = PaymentOrderState::CheckoutPending;
                         order.last_error_code = None;
@@ -1162,6 +1294,11 @@ impl BillingService {
                 .orders_by_provider_ref
                 .insert((order.provider, pref.clone()), order.id);
         }
+        if let Some(ref psub) = order.provider_subscription_id {
+            guard
+                .orders_by_subscription
+                .insert((order.provider, psub.clone()), order.id);
+        }
         guard.orders.insert(order.id, order.clone());
         Ok(order.clone())
     }
@@ -1174,8 +1311,18 @@ impl BillingService {
         Ok(self.store.lock().await.orders.get(&order_id).cloned())
     }
 
-    /// Process a Paddle webhook after verifying HMAC-SHA256 signature, replay window,
-    /// order correlation, currency/amount/price validation, atomic deduplication, and state transitions.
+    /// Count recorded security/integrity anomalies (e.g. webhook event_id payload-hash mismatch).
+    pub async fn count_security_anomalies(&self) -> Result<usize, AuthError> {
+        if let Some(ref pg) = self.pg_store {
+            let n = pg.count_security_anomalies_pg().await?;
+            return Ok(usize::try_from(n).unwrap_or(0));
+        }
+        Ok(self.store.lock().await.security_anomalies.len())
+    }
+
+    /// Process an official Paddle Billing webhook envelope (`event_id`, `event_type`, RFC 3339 `occurred_at`,
+    /// `notification_id`, nested `data`) after verifying HMAC-SHA256 signature, replay window,
+    /// order/subscription correlation, currency/amount/price validation, payload-hash integrity, and atomic commit.
     pub async fn process_paddle_webhook(
         &self,
         signature_header: &str,
@@ -1188,106 +1335,260 @@ impl BillingService {
             .ok_or(AuthError::BillingNotConfigured)?;
         verify_paddle_signature(secret, signature_header, raw_body, now_secs)?;
 
-        let event: PaddleWebhookEvent =
+        let envelope: PaddleWebhookEnvelope =
             serde_json::from_slice(raw_body).map_err(|_| AuthError::InvalidRequest)?;
+        if envelope.event_id.trim().is_empty() || envelope.event_type.trim().is_empty() {
+            return Err(AuthError::InvalidRequest);
+        }
+        let occurred_at_unix =
+            parse_rfc3339_to_unix_secs(&envelope.occurred_at).ok_or(AuthError::InvalidRequest)?;
 
-        // Extract `safi_order_id` from `order_id` or `custom_data.safi_order_id`.
-        let order_id_hint = event.order_id.or_else(|| {
-            event
-                .custom_data
-                .as_ref()
-                .and_then(|c| c.get("safi_order_id"))
-                .and_then(Value::as_str)
-                .and_then(|s| Uuid::parse_str(s).ok())
-        });
+        let data = &envelope.data;
+        let data_id = data
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let data_status = data
+            .get("status")
+            .and_then(Value::as_str)
+            .map(|s| s.trim().to_ascii_lowercase());
+        let custom_data = data.get("custom_data");
 
-        // Validate reported currency if supplied (Paddle is strictly USD).
-        let reported_currency = match event.currency_code.as_deref() {
+        let order_id_hint = custom_data
+            .and_then(|c| c.get("safi_order_id"))
+            .and_then(Value::as_str)
+            .and_then(|s| Uuid::parse_str(s).ok());
+
+        // Validate reported currency strictly (NEVER assume missing currency is USD on transactions/adjustments!).
+        let raw_currency = data.get("currency_code").and_then(Value::as_str);
+        let reported_currency = match raw_currency {
             Some(c) if c.trim().eq_ignore_ascii_case("USD") => Some(BillingCurrency::Usd),
             Some(c) if c.trim().eq_ignore_ascii_case("EGP") => Some(BillingCurrency::Egp),
             Some(_) => return Err(AuthError::BillingOperationFailed),
-            None => Some(BillingCurrency::Usd),
+            None => {
+                if envelope.event_type.starts_with("transaction.")
+                    || envelope.event_type.starts_with("adjustment.")
+                {
+                    return Err(AuthError::InvalidRequest);
+                }
+                None
+            }
         };
 
-        let kind = match event.event_type.as_str() {
+        let is_subscription_event = envelope.event_type.starts_with("subscription.");
+        let is_adjustment_event = envelope.event_type.starts_with("adjustment.");
+
+        let subscription_id = if is_subscription_event {
+            data_id.clone()
+        } else {
+            data.get("subscription_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+
+        let transaction_id = if is_adjustment_event {
+            data.get("transaction_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        } else if envelope.event_type.starts_with("transaction.") {
+            data_id.clone()
+        } else {
+            data.get("transaction_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+
+        let invoice_id = data
+            .get("invoice_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
+        let parse_minor = |v: &Value| -> Option<u64> {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
+        };
+        let reported_amount_minor = data
+            .get("details")
+            .and_then(|d| d.get("totals"))
+            .and_then(|t| t.get("total"))
+            .and_then(parse_minor)
+            .or_else(|| {
+                data.get("totals")
+                    .and_then(|t| t.get("total"))
+                    .and_then(parse_minor)
+            });
+
+        let period_obj = data
+            .get("billing_period")
+            .or_else(|| data.get("current_billing_period"));
+        let period_start_unix = period_obj
+            .and_then(|p| p.get("starts_at"))
+            .and_then(Value::as_str)
+            .and_then(parse_rfc3339_to_unix_secs);
+        let period_end_unix = period_obj
+            .and_then(|p| p.get("ends_at"))
+            .and_then(Value::as_str)
+            .and_then(parse_rfc3339_to_unix_secs);
+
+        let origin = data
+            .get("origin")
+            .and_then(Value::as_str)
+            .map(|s| s.trim().to_ascii_lowercase());
+        let is_renewal_hint = matches!(
+            origin.as_deref(),
+            Some("subscription_recurring" | "subscription_payment_method_change")
+        );
+
+        let kind = match envelope.event_type.as_str() {
             // Non-final events MUST NEVER activate paid entitlements!
             "checkout.opened"
             | "transaction.created"
             | "transaction.ready"
             | "transaction.billed" => VerifiedWebhookKind::PendingNoGrant,
-            "transaction.completed"
-            | "subscription.created"
-            | "subscription.activated"
-            | "subscription.renewed" => VerifiedWebhookKind::Paid,
-            "transaction.payment_failed" => VerifiedWebhookKind::Failed,
-            "subscription.past_due" => VerifiedWebhookKind::PastDue,
-            "subscription.canceled" => VerifiedWebhookKind::Canceled,
-            "adjustment.refunded" | "adjustment.updated" => VerifiedWebhookKind::Refunded {
-                partial_amount_minor: event.refund_amount_minor,
-                mandatory_legal_override: event.mandatory_legal_refund,
+            "transaction.completed" => {
+                // Only a verified `completed` transaction activates an entitlement!
+                if data_status.as_deref() != Some("completed") {
+                    VerifiedWebhookKind::PendingNoGrant
+                } else {
+                    VerifiedWebhookKind::Paid
+                }
+            }
+            "transaction.updated" => match data_status.as_deref() {
+                Some("past_due") => VerifiedWebhookKind::PastDue,
+                Some("canceled") => VerifiedWebhookKind::Canceled,
+                _ => VerifiedWebhookKind::PendingNoGrant,
             },
-            "adjustment.chargeback" | "chargeback.created" => VerifiedWebhookKind::Chargeback,
+            "transaction.payment_failed" => VerifiedWebhookKind::Failed,
+            "transaction.past_due" | "subscription.past_due" => VerifiedWebhookKind::PastDue,
+            "subscription.created" => {
+                // Subscription metadata creation/binding: never grant twice; entitlement is activated
+                // by `transaction.completed` (or status transitions).
+                VerifiedWebhookKind::PendingNoGrant
+            }
+            "subscription.updated" => match data_status.as_deref() {
+                Some("past_due") => VerifiedWebhookKind::PastDue,
+                Some("canceled") => VerifiedWebhookKind::Canceled,
+                _ => VerifiedWebhookKind::PendingNoGrant,
+            },
+            "subscription.canceled" => VerifiedWebhookKind::Canceled,
+            "adjustment.created" | "adjustment.updated" => {
+                let action = data
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(|s| s.trim().to_ascii_lowercase())
+                    .unwrap_or_default();
+                let adj_status = data_status.as_deref().unwrap_or("pending_approval");
+                match action.as_str() {
+                    "chargeback" => VerifiedWebhookKind::Chargeback,
+                    "refund" => {
+                        // NEVER revoke entitlements on `pending_approval` or `rejected`!
+                        if adj_status == "approved" {
+                            let adj_type = data
+                                .get("type")
+                                .and_then(Value::as_str)
+                                .map(|s| s.trim().to_ascii_lowercase());
+                            let partial_minor = if adj_type.as_deref() == Some("partial") {
+                                reported_amount_minor
+                            } else {
+                                None
+                            };
+                            VerifiedWebhookKind::Refunded {
+                                partial_amount_minor: partial_minor,
+                                cumulative_refunded_minor: None,
+                                provider_refund_id: data_id.clone(),
+                                mandatory_legal_override: true,
+                            }
+                        } else {
+                            VerifiedWebhookKind::PendingNoGrant
+                        }
+                    }
+                    _ => VerifiedWebhookKind::PendingNoGrant,
+                }
+            }
             _ => VerifiedWebhookKind::PendingNoGrant,
         };
-
-        let provider_tx_id = event
-            .transaction_id
-            .clone()
-            .or_else(|| event.invoice_id.clone())
-            .or_else(|| event.subscription_id.clone());
 
         let mut payload_hash = [0u8; 32];
         payload_hash.copy_from_slice(&Sha256::digest(raw_body));
 
         let transition = VerifiedWebhookTransition {
             provider: BillingProvider::Paddle,
-            provider_event_id: event.event_id.clone(),
-            event_type: event.event_type.clone(),
+            provider_event_id: envelope.event_id.clone(),
+            event_type: envelope.event_type.clone(),
             raw_payload_hash: payload_hash,
-            occurred_at_unix: event.occurred_at_unix,
+            occurred_at_unix,
             now_secs,
             order_id_hint,
-            provider_order_ref: event
-                .transaction_id
-                .clone()
-                .or_else(|| event.subscription_id.clone()),
-            provider_transaction_id: provider_tx_id,
-            external_invoice_id: event.invoice_id.clone(),
-            reported_amount_minor: event.amount_minor,
+            provider_order_ref: transaction_id.clone(),
+            provider_transaction_id: transaction_id.clone(),
+            provider_subscription_id: subscription_id.clone(),
+            external_invoice_id: invoice_id.clone(),
+            reported_amount_minor,
             reported_currency,
             reported_integration_id: None,
-            period_end_unix: event.period_end_unix,
+            period_start_unix,
+            period_end_unix,
+            is_renewal_hint,
             kind,
         };
 
-        // Cross-check optional supplied metadata against the stored order BEFORE executing atomic commit.
+        // Cross-check nested `items[].price.id` and `custom_data` against the trusted stored order
+        // BEFORE executing the atomic database commit!
         if let Some(ref order) = self
             .resolve_stored_order_for_check(
                 BillingProvider::Paddle,
                 transition.order_id_hint,
                 transition.provider_order_ref.as_deref(),
                 transition.provider_transaction_id.as_deref(),
+                transition.provider_subscription_id.as_deref(),
             )
             .await?
         {
-            if let Some(ref pid) = event.price_id {
-                if pid != &order.provider_price_id {
-                    return Err(AuthError::BillingOperationFailed);
+            if let Some(items) = data.get("items").and_then(Value::as_array) {
+                if !items.is_empty() {
+                    let any_match = items.iter().any(|item| {
+                        item.get("price")
+                            .and_then(|p| p.get("id"))
+                            .and_then(Value::as_str)
+                            .or_else(|| item.get("price_id").and_then(Value::as_str))
+                            == Some(order.provider_price_id.as_str())
+                    });
+                    if !any_match {
+                        return Err(AuthError::BillingOperationFailed);
+                    }
                 }
             }
-            if let Some(ws) = event.workspace_id {
-                if ws != order.workspace_id {
-                    return Err(AuthError::BillingOperationFailed);
+            if let Some(cd) = custom_data {
+                if let Some(ws_str) = cd.get("workspace_id").and_then(Value::as_str) {
+                    let ws =
+                        Uuid::parse_str(ws_str).map_err(|_| AuthError::BillingOperationFailed)?;
+                    if ws != order.workspace_id {
+                        return Err(AuthError::BillingOperationFailed);
+                    }
                 }
-            }
-            if let Some(uid) = event.user_id {
-                if uid != order.user_id {
-                    return Err(AuthError::BillingOperationFailed);
+                if let Some(uid_str) = cd.get("user_id").and_then(Value::as_str) {
+                    let uid =
+                        Uuid::parse_str(uid_str).map_err(|_| AuthError::BillingOperationFailed)?;
+                    if uid != order.user_id {
+                        return Err(AuthError::BillingOperationFailed);
+                    }
                 }
-            }
-            if let Some(prod) = event.product {
-                if prod != order.product {
-                    return Err(AuthError::BillingOperationFailed);
+                if let Some(prod_str) = cd.get("product").and_then(Value::as_str) {
+                    let prod = CheckoutProduct::from_str_code(prod_str)
+                        .ok_or(AuthError::BillingOperationFailed)?;
+                    if prod != order.product {
+                        return Err(AuthError::BillingOperationFailed);
+                    }
                 }
             }
         }
@@ -1295,23 +1596,44 @@ impl BillingService {
         self.execute_verified_webhook_atomic(&transition).await
     }
 
-    /// Process a Paymob webhook callback after constant-time HMAC-SHA512 verification.
+    /// Process an official Paymob Transaction Processed Callback raw JSON envelope
+    /// (`{"type":"TRANSACTION","obj":{...}}`) after constant-time HMAC-SHA512 verification.
     ///
-    /// CRITICAL TRUST-BOUNDARY ENFORCEMENT (Section 1.6):
-    /// - Correlates strictly by the HMAC-signed `tx.order_id` against `billing_orders`.
-    /// - Verifies `tx.integration_id`, `tx.currency`, `tx.amount_cents`, and capture lifecycle.
-    /// - NEVER trusts unsigned `workspace_id`, `user_id`, `product`, or `seats` from JSON.
-    ///   Any unsigned field that contradicts the trusted stored order is REJECTED (`SF-PAY-004`).
-    pub async fn process_paymob_webhook(
+    /// CRITICAL TRUST-BOUNDARY ENFORCEMENT (Section 2):
+    /// - Enforces `type == "TRANSACTION"`.
+    /// - Verifies HMAC-SHA512 over the exact 20 official nested `obj` fields (`obj.order.id`, `obj.source_data.*`, etc.).
+    /// - Correlates strictly by the HMAC-signed `obj.order.id` (`provider_order_ref`) against `billing_orders`
+    ///   (NEVER confuses `obj.id` with `obj.order.id`!).
+    /// - Verifies `obj.integration_id`, `obj.currency`, `obj.amount_cents`, and capture lifecycle.
+    /// - Uses official `obj.refunded_amount_cents` for cumulative partial/full refund accounting.
+    /// - NEVER trusts unsigned metadata (`obj.data` / `obj.order.data`) for beneficiary decisions;
+    ///   any conflicting unsigned field is REJECTED (`SF-PAY-004`).
+    pub async fn process_paymob_webhook_raw(
         &self,
         presented_hmac: &str,
-        tx: &PaymobTransactionObj,
+        raw_body: &[u8],
+        delivery_event_id: Option<&str>,
         now_secs: i64,
     ) -> Result<BillingEventRecord, AuthError> {
         let secret = self
             .paymob_hmac_secret
             .as_deref()
             .ok_or(AuthError::BillingNotConfigured)?;
+        if presented_hmac.trim().is_empty() {
+            return Err(AuthError::InvalidWebhookSignature);
+        }
+
+        let envelope: PaymobCallbackEnvelope =
+            serde_json::from_slice(raw_body).map_err(|_| AuthError::InvalidRequest)?;
+        if !envelope
+            .callback_type
+            .trim()
+            .eq_ignore_ascii_case("TRANSACTION")
+        {
+            return Err(AuthError::InvalidRequest);
+        }
+
+        let tx = &envelope.obj;
         verify_paymob_hmac(secret, presented_hmac, tx)?;
 
         let expected_int = self
@@ -1331,48 +1653,71 @@ impl BillingService {
             return Err(AuthError::BillingOperationFailed);
         };
 
-        let provider_order_ref = tx.order_id.to_string();
+        // Strictly correlate via HMAC-signed `obj.order.id` (NOT `obj.id`!).
+        let provider_order_ref = tx.order.id.to_string();
         let stored_order = self
             .resolve_stored_order_for_check(
                 BillingProvider::Paymob,
                 None,
                 Some(&provider_order_ref),
                 None,
+                None,
             )
             .await?
             .ok_or(AuthError::BillingOperationFailed)?;
 
-        // Reject tampered unsigned metadata if present and mismatched with trusted stored order!
-        if let Some(ws) = tx.workspace_id {
-            if ws != stored_order.workspace_id {
-                return Err(AuthError::BillingOperationFailed);
+        // Reject tampered unsigned beneficiary metadata if present in `obj.data` or `obj.order.data`!
+        for unsigned_bag in [tx.data.as_ref(), tx.order.data.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(ws_str) = unsigned_bag.get("workspace_id").and_then(Value::as_str) {
+                let ws = Uuid::parse_str(ws_str).map_err(|_| AuthError::BillingOperationFailed)?;
+                if ws != stored_order.workspace_id {
+                    return Err(AuthError::BillingOperationFailed);
+                }
             }
-        }
-        if let Some(uid) = tx.user_id {
-            if uid != stored_order.user_id {
-                return Err(AuthError::BillingOperationFailed);
+            if let Some(uid_str) = unsigned_bag.get("user_id").and_then(Value::as_str) {
+                let uid =
+                    Uuid::parse_str(uid_str).map_err(|_| AuthError::BillingOperationFailed)?;
+                if uid != stored_order.user_id {
+                    return Err(AuthError::BillingOperationFailed);
+                }
             }
-        }
-        if let Some(prod) = tx.product {
-            if prod != stored_order.product {
-                return Err(AuthError::BillingOperationFailed);
+            if let Some(prod_str) = unsigned_bag.get("product").and_then(Value::as_str) {
+                let prod = CheckoutProduct::from_str_code(prod_str)
+                    .ok_or(AuthError::BillingOperationFailed)?;
+                if prod != stored_order.product {
+                    return Err(AuthError::BillingOperationFailed);
+                }
             }
-        }
-        if let Some(s) = tx.seats {
-            if s != stored_order.seats {
-                return Err(AuthError::BillingOperationFailed);
+            if let Some(seats_val) = unsigned_bag.get("seats").and_then(Value::as_u64) {
+                if u64::from(stored_order.seats) != seats_val {
+                    return Err(AuthError::BillingOperationFailed);
+                }
             }
         }
 
-        // Strict Paymob payment lifecycle validation:
-        // - Auth-only without capture (`is_auth && !is_capture && !is_standalone_payment`) is PendingNoGrant!
-        // - `pending == true` is PendingNoGrant!
-        // - Only verified non-pending, non-error, captured/standalone `success == true` activates paid access!
+        // Strict Paymob payment & cumulative partial refund lifecycle:
+        // - Chargeback -> Chargeback
+        // - Cumulative `refunded_amount_cents > 0` -> cumulative Refunded (partial or full)
+        // - `is_voided` or `is_refunded` (with `refunded_amount_cents == 0`) -> full cumulative Refunded (`tx.amount_cents`)
+        // - `pending` or auth-only without capture (`is_auth && !is_capture && !is_standalone_payment`) -> PendingNoGrant
+        // - `success && !error_occured` (captured or standalone) -> Paid
         let kind = if tx.is_chargeback {
             VerifiedWebhookKind::Chargeback
+        } else if tx.refunded_amount_cents > 0 {
+            VerifiedWebhookKind::Refunded {
+                partial_amount_minor: None,
+                cumulative_refunded_minor: Some(tx.refunded_amount_cents),
+                provider_refund_id: None,
+                mandatory_legal_override: true,
+            }
         } else if tx.is_refunded || tx.is_voided {
             VerifiedWebhookKind::Refunded {
                 partial_amount_minor: None,
+                cumulative_refunded_minor: Some(tx.amount_cents),
+                provider_refund_id: None,
                 mandatory_legal_override: true,
             }
         } else if tx.pending || (tx.is_auth && !tx.is_capture && !tx.is_standalone_payment) {
@@ -1384,30 +1729,47 @@ impl BillingService {
         };
 
         let provider_tx_id = tx.id.to_string();
-        let event_id = tx
-            .webhook_event_id
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| format!("paymob_tx_{}", tx.id));
-        let concat_bytes = paymob_hmac_concat_string(tx);
+        let event_id = delivery_event_id
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                if tx.refunded_amount_cents > 0 || tx.is_refunded || tx.is_voided {
+                    format!(
+                        "paymob_tx_{}_ref_{}_{}_{}",
+                        tx.id, tx.refunded_amount_cents, tx.is_refunded, tx.is_voided
+                    )
+                } else {
+                    format!(
+                        "paymob_tx_{}_{}_{}_{}",
+                        tx.id, tx.pending, tx.is_capture, tx.success
+                    )
+                }
+            });
+
         let mut payload_hash = [0u8; 32];
-        payload_hash.copy_from_slice(&Sha256::digest(concat_bytes.as_bytes()));
+        payload_hash.copy_from_slice(&Sha256::digest(raw_body));
+
+        let occurred_at_unix = parse_rfc3339_to_unix_secs(&tx.created_at).unwrap_or(now_secs);
 
         let transition = VerifiedWebhookTransition {
             provider: BillingProvider::Paymob,
             provider_event_id: event_id,
             event_type: "paymob.transaction".to_owned(),
             raw_payload_hash: payload_hash,
-            occurred_at_unix: tx.occurred_at_unix.unwrap_or(now_secs),
+            occurred_at_unix,
             now_secs,
             order_id_hint: Some(stored_order.id),
             provider_order_ref: Some(provider_order_ref),
             provider_transaction_id: Some(provider_tx_id.clone()),
+            provider_subscription_id: None,
             external_invoice_id: Some(format!("inv_paymob_{provider_tx_id}")),
             reported_amount_minor: Some(tx.amount_cents),
             reported_currency: Some(reported_currency),
             reported_integration_id: Some(tx.integration_id),
+            period_start_unix: None,
             period_end_unix: None,
+            is_renewal_hint: false,
             kind,
         };
 
@@ -1420,6 +1782,7 @@ impl BillingService {
         order_id_hint: Option<Uuid>,
         provider_order_ref: Option<&str>,
         provider_tx_id: Option<&str>,
+        provider_subscription_id: Option<&str>,
     ) -> Result<Option<BillingOrderRecord>, AuthError> {
         if let Some(ref pg) = self.pg_store {
             if let Some(oid) = order_id_hint {
@@ -1432,6 +1795,14 @@ impl BillingService {
             if let Some(pref) = provider_order_ref {
                 if let Some(o) = pg
                     .find_billing_order_by_provider_ref_pg(provider, pref)
+                    .await?
+                {
+                    return Ok(Some(o));
+                }
+            }
+            if let Some(psub) = provider_subscription_id {
+                if let Some(o) = pg
+                    .find_billing_order_by_subscription_id_pg(provider, psub)
                     .await?
                 {
                     return Ok(Some(o));
@@ -1463,6 +1834,14 @@ impl BillingService {
                 return Ok(guard.orders.get(&oid).cloned());
             }
         }
+        if let Some(psub) = provider_subscription_id {
+            if let Some(&oid) = guard
+                .orders_by_subscription
+                .get(&(provider, psub.to_owned()))
+            {
+                return Ok(guard.orders.get(&oid).cloned());
+            }
+        }
         if let Some(ptx) = provider_tx_id {
             if let Some(&oid) = guard
                 .orders_by_provider_ref
@@ -1490,7 +1869,7 @@ impl BillingService {
                 self.entitlements.sync_workspace_record(ent_rec).await;
             }
             if let (Some(coupons), Some(res_id)) = (&self.coupons, committed_coupon) {
-                let _ = coupons.commit_reservation(res_id, t.now_secs).await;
+                coupons.commit_reservation(res_id, t.now_secs).await;
             }
             return Ok(rec);
         }
@@ -1499,6 +1878,16 @@ impl BillingService {
         let mut guard = self.store.lock().await;
         let event_key = (t.provider.as_str().to_owned(), t.provider_event_id.clone());
         if guard.processed_events.contains(&event_key) {
+            if let Some(existing_hash) = guard.processed_event_hashes.get(&event_key) {
+                if existing_hash != &t.raw_payload_hash {
+                    guard.security_anomalies.push(format!(
+                        "webhook_event_id_payload_hash_mismatch:{}:{}",
+                        t.provider.as_str(),
+                        t.provider_event_id
+                    ));
+                    return Err(AuthError::WebhookPayloadHashConflict);
+                }
+            }
             return Ok(BillingEventRecord {
                 id: Uuid::now_v7(),
                 provider: t.provider,
@@ -1511,7 +1900,7 @@ impl BillingService {
             });
         }
 
-        // Locate correlated stored order strictly.
+        // Locate correlated stored order strictly (order_id, provider_order_ref, subscription_id, or tx_id).
         let order_id = t
             .order_id_hint
             .filter(|oid| {
@@ -1525,6 +1914,14 @@ impl BillingService {
                     guard
                         .orders_by_provider_ref
                         .get(&(t.provider, pref.clone()))
+                        .copied()
+                })
+            })
+            .or_else(|| {
+                t.provider_subscription_id.as_ref().and_then(|psub| {
+                    guard
+                        .orders_by_subscription
+                        .get(&(t.provider, psub.clone()))
                         .copied()
                 })
             })
@@ -1570,7 +1967,10 @@ impl BillingService {
         // Out-of-order monotonic watermark check.
         if let Some(&last_ts) = guard.last_event_ts_by_workspace.get(&order.workspace_id) {
             if t.occurred_at_unix < last_ts {
-                guard.processed_events.insert(event_key);
+                guard.processed_events.insert(event_key.clone());
+                guard
+                    .processed_event_hashes
+                    .insert(event_key, t.raw_payload_hash);
                 let rec = BillingEventRecord {
                     id: Uuid::now_v7(),
                     provider: t.provider,
@@ -1594,7 +1994,10 @@ impl BillingService {
             t.kind,
             VerifiedWebhookKind::Refunded { .. } | VerifiedWebhookKind::Chargeback
         ) {
-            guard.processed_events.insert(event_key);
+            guard.processed_events.insert(event_key.clone());
+            guard
+                .processed_event_hashes
+                .insert(event_key, t.raw_payload_hash);
             let rec = BillingEventRecord {
                 id: Uuid::now_v7(),
                 provider: t.provider,
@@ -1619,24 +2022,83 @@ impl BillingService {
                     .filter(|s| !s.trim().is_empty())
                     .ok_or(AuthError::BillingOperationFailed)?
                     .to_owned();
-                let (grant_kind, qty) = match order.product {
-                    CheckoutProduct::CreditPack25 => ("credit_pack_25", 25u32),
-                    CheckoutProduct::PayPerFile => ("pay_per_file", 1u32),
-                    CheckoutProduct::OrganizationSeatAnnual => {
-                        ("subscription", order.seats.max(ORG_MIN_SEATS))
+                let effective_sub_id = t
+                    .provider_subscription_id
+                    .clone()
+                    .or_else(|| order.provider_subscription_id.clone());
+                let is_subscription_product = matches!(
+                    order.product,
+                    CheckoutProduct::IndividualMonthly
+                        | CheckoutProduct::IndividualAnnual
+                        | CheckoutProduct::OrganizationSeatAnnual
+                );
+                let is_renewal = is_subscription_product
+                    && order.state == PaymentOrderState::Paid
+                    && effective_sub_id.is_some()
+                    && (t.is_renewal_hint
+                        || order
+                            .provider_transaction_id
+                            .as_deref()
+                            .is_some_and(|orig_tx| orig_tx != provider_tx_id));
+
+                let (grant_kind, qty) = if is_renewal {
+                    let q = match order.product {
+                        CheckoutProduct::OrganizationSeatAnnual => order.seats.max(ORG_MIN_SEATS),
+                        _ => 1u32,
+                    };
+                    ("subscription_renewal", q)
+                } else {
+                    match order.product {
+                        CheckoutProduct::CreditPack25 => ("credit_pack_25", 25u32),
+                        CheckoutProduct::PayPerFile => ("pay_per_file", 1u32),
+                        CheckoutProduct::OrganizationSeatAnnual => {
+                            ("subscription", order.seats.max(ORG_MIN_SEATS))
+                        }
+                        _ => ("subscription", 1u32),
                     }
-                    _ => ("subscription", 1u32),
                 };
 
-                // Transaction-level & order-level deduplication even if webhook event_id changed!
-                if guard
+                let existing_ent = self
+                    .entitlements
+                    .snapshot_workspace(order.workspace_id)
+                    .await;
+                let base_period_start = if is_renewal {
+                    t.period_start_unix
+                        .or_else(|| existing_ent.as_ref().and_then(|e| e.current_period_end))
+                        .unwrap_or(t.now_secs)
+                } else {
+                    t.period_start_unix.unwrap_or(t.now_secs)
+                };
+                let period_end = t.period_end_unix.or_else(|| match order.product {
+                    CheckoutProduct::IndividualMonthly => Some(base_period_start + 30 * 86_400),
+                    CheckoutProduct::IndividualAnnual | CheckoutProduct::OrganizationSeatAnnual => {
+                        Some(base_period_start + 365 * 86_400)
+                    }
+                    CheckoutProduct::CreditPack25 | CheckoutProduct::PayPerFile => None,
+                });
+
+                let duplicate_tx = guard
                     .grants_by_provider_tx
-                    .contains(&(t.provider, provider_tx_id.clone()))
-                    || guard
+                    .contains(&(t.provider, provider_tx_id.clone()));
+                let duplicate_initial = !is_renewal
+                    && guard
                         .grants_by_order_kind
-                        .contains(&(order.id, grant_kind.to_owned()))
-                {
-                    guard.processed_events.insert(event_key);
+                        .contains(&(order.id, grant_kind.to_owned()));
+                let duplicate_renewal_period = is_renewal
+                    && effective_sub_id
+                        .as_ref()
+                        .zip(period_end)
+                        .is_some_and(|(sub, pe)| {
+                            guard
+                                .grants_by_renewal_period
+                                .contains(&(t.provider, sub.clone(), pe))
+                        });
+
+                if duplicate_tx || duplicate_initial || duplicate_renewal_period {
+                    guard.processed_events.insert(event_key.clone());
+                    guard
+                        .processed_event_hashes
+                        .insert(event_key, t.raw_payload_hash);
                     let rec = BillingEventRecord {
                         id: Uuid::now_v7(),
                         provider: t.provider,
@@ -1651,14 +2113,16 @@ impl BillingService {
                     return Ok(rec);
                 }
 
-                // Apply entitlement transition first; only commit ledger marks if it succeeds!
-                let period_end = t.period_end_unix.or_else(|| match order.product {
-                    CheckoutProduct::IndividualMonthly => Some(t.now_secs + 30 * 86_400),
-                    CheckoutProduct::IndividualAnnual | CheckoutProduct::OrganizationSeatAnnual => {
-                        Some(t.now_secs + 365 * 86_400)
+                // Commit coupon reservation on initial purchase.
+                if !is_renewal {
+                    if let (Some(coupons), Some(res_id)) =
+                        (&self.coupons, order.coupon_reservation_id)
+                    {
+                        coupons.commit_reservation(res_id, t.now_secs).await;
                     }
-                    CheckoutProduct::CreditPack25 | CheckoutProduct::PayPerFile => None,
-                });
+                }
+
+                // Apply entitlement transition first; only commit ledger marks if it succeeds!
                 match order.product {
                     CheckoutProduct::CreditPack25 => {
                         self.entitlements
@@ -1682,6 +2146,13 @@ impl BillingService {
                     }
                     other => {
                         let tier = product_to_plan(other)?;
+                        let next_period_end = match (
+                            existing_ent.as_ref().and_then(|e| e.current_period_end),
+                            period_end,
+                        ) {
+                            (Some(prev), Some(next)) if is_renewal => Some(prev.max(next)),
+                            (_, next) => next,
+                        };
                         self.entitlements
                             .apply_subscription_update(
                                 order.workspace_id,
@@ -1689,11 +2160,13 @@ impl BillingService {
                                 tier,
                                 SubscriptionState::Active,
                                 order.seats.max(1),
-                                period_end,
+                                next_period_end,
                                 t.now_secs,
                             )
                             .await?;
-                        outcome = if t.provider == BillingProvider::Paymob {
+                        outcome = if is_renewal {
+                            "subscription_renewed".to_owned()
+                        } else if t.provider == BillingProvider::Paymob {
                             "paymob_subscription_active".to_owned()
                         } else {
                             "subscription_active".to_owned()
@@ -1704,18 +2177,31 @@ impl BillingService {
                 guard
                     .grants_by_provider_tx
                     .insert((t.provider, provider_tx_id.clone()));
-                guard
-                    .grants_by_order_kind
-                    .insert((order.id, grant_kind.to_owned()));
+                if !is_renewal {
+                    guard
+                        .grants_by_order_kind
+                        .insert((order.id, grant_kind.to_owned()));
+                } else if let (Some(sub), Some(pe)) = (effective_sub_id.as_ref(), period_end) {
+                    guard
+                        .grants_by_renewal_period
+                        .insert((t.provider, sub.clone(), pe));
+                }
                 guard.grants.push(EntitlementGrantRecord {
                     id: Uuid::now_v7(),
-                    order_id: order.id,
+                    order_id: if is_renewal { None } else { Some(order.id) },
                     workspace_id: order.workspace_id,
                     user_id: order.user_id,
                     provider: t.provider,
                     provider_transaction_id: provider_tx_id.clone(),
+                    provider_subscription_id: effective_sub_id.clone(),
                     grant_kind: grant_kind.to_owned(),
                     quantity: qty,
+                    period_start: if is_subscription_product {
+                        Some(base_period_start)
+                    } else {
+                        None
+                    },
+                    period_end,
                     revoked_at: None,
                     created_at: t.now_secs,
                 });
@@ -1724,6 +2210,9 @@ impl BillingService {
                     .external_invoice_id
                     .clone()
                     .unwrap_or_else(|| format!("inv_{}_{}", t.provider.as_str(), provider_tx_id));
+                let inv_amt = t
+                    .reported_amount_minor
+                    .unwrap_or(order.expected_amount_minor);
                 guard.invoices.insert(
                     ext_inv.clone(),
                     InvoiceRecord {
@@ -1733,7 +2222,7 @@ impl BillingService {
                         external_invoice_id: ext_inv,
                         order_id: Some(order.id),
                         provider_transaction_id: Some(provider_tx_id.clone()),
-                        amount_minor: order.expected_amount_minor,
+                        amount_minor: inv_amt,
                         refunded_amount_minor: 0,
                         currency: order.currency,
                         status: "paid".to_owned(),
@@ -1742,19 +2231,33 @@ impl BillingService {
                     },
                 );
 
-                if let Some(o_mut) = guard.orders.get_mut(&order.id) {
-                    o_mut.state = PaymentOrderState::Paid;
-                    o_mut.provider_transaction_id = Some(provider_tx_id);
-                    o_mut.paid_at = Some(t.now_secs);
-                    o_mut.updated_at = t.now_secs;
+                if let Some(ref sub_id) = effective_sub_id {
+                    guard
+                        .orders_by_subscription
+                        .insert((t.provider, sub_id.clone()), order.id);
                 }
-                if let (Some(coupons), Some(res_id)) = (&self.coupons, order.coupon_reservation_id)
-                {
-                    let _ = coupons.commit_reservation(res_id, t.now_secs).await;
+                if let Some(o_mut) = guard.orders.get_mut(&order.id) {
+                    if !is_renewal {
+                        o_mut.state = PaymentOrderState::Paid;
+                        o_mut.provider_transaction_id = Some(provider_tx_id);
+                        o_mut.paid_at = Some(t.now_secs);
+                    }
+                    if o_mut.provider_subscription_id.is_none() {
+                        o_mut.provider_subscription_id = effective_sub_id;
+                    }
+                    o_mut.updated_at = t.now_secs;
                 }
             }
             VerifiedWebhookKind::PendingNoGrant => {
+                if let Some(ref sub_id) = t.provider_subscription_id {
+                    guard
+                        .orders_by_subscription
+                        .insert((t.provider, sub_id.clone()), order.id);
+                }
                 if let Some(o_mut) = guard.orders.get_mut(&order.id) {
+                    if o_mut.provider_subscription_id.is_none() {
+                        o_mut.provider_subscription_id = t.provider_subscription_id.clone();
+                    }
                     if matches!(
                         o_mut.state,
                         PaymentOrderState::Created | PaymentOrderState::CheckoutPending
@@ -1812,10 +2315,10 @@ impl BillingService {
             }
             VerifiedWebhookKind::Refunded {
                 partial_amount_minor,
+                cumulative_refunded_minor,
+                provider_refund_id,
                 mandatory_legal_override,
             } => {
-                let is_partial = partial_amount_minor
-                    .is_some_and(|amt| amt > 0 && amt < order.expected_amount_minor);
                 let target_inv_key = guard
                     .invoices
                     .values()
@@ -1826,18 +2329,82 @@ impl BillingService {
                                 .is_some_and(|id| i.external_invoice_id == id)
                     })
                     .map(|i| i.external_invoice_id.clone());
+
+                let (captured_amt, already_ref, issued_at) = target_inv_key
+                    .as_ref()
+                    .and_then(|k| guard.invoices.get(k))
+                    .map(|inv| (inv.amount_minor, inv.refunded_amount_minor, inv.issued_at))
+                    .unwrap_or((order.expected_amount_minor, 0, t.now_secs));
+
+                if !*mandatory_legal_override && t.now_secs - issued_at > REFUND_WINDOW_SECS {
+                    return Err(AuthError::BillingOperationFailed);
+                }
+
+                let new_total = if let Some(cum) = *cumulative_refunded_minor {
+                    if cum > captured_amt {
+                        return Err(AuthError::BillingOperationFailed);
+                    }
+                    if cum <= already_ref {
+                        guard.processed_events.insert(event_key.clone());
+                        guard
+                            .processed_event_hashes
+                            .insert(event_key, t.raw_payload_hash);
+                        let rec = BillingEventRecord {
+                            id: Uuid::now_v7(),
+                            provider: t.provider,
+                            external_event_id: t.provider_event_id.clone(),
+                            event_type: t.event_type.clone(),
+                            workspace_id: Some(order.workspace_id),
+                            occurred_at: t.occurred_at_unix,
+                            processed_at: t.now_secs,
+                            outcome: "cumulative_refund_duplicate_or_stale_ignored".to_owned(),
+                        };
+                        guard.events.push(rec.clone());
+                        return Ok(rec);
+                    }
+                    cum
+                } else {
+                    if let Some(ref pref_id) = provider_refund_id {
+                        if guard
+                            .confirmed_provider_refund_ids
+                            .contains(&(t.provider, pref_id.clone()))
+                        {
+                            guard.processed_events.insert(event_key.clone());
+                            guard
+                                .processed_event_hashes
+                                .insert(event_key, t.raw_payload_hash);
+                            let rec = BillingEventRecord {
+                                id: Uuid::now_v7(),
+                                provider: t.provider,
+                                external_event_id: t.provider_event_id.clone(),
+                                event_type: t.event_type.clone(),
+                                workspace_id: Some(order.workspace_id),
+                                occurred_at: t.occurred_at_unix,
+                                processed_at: t.now_secs,
+                                outcome: "duplicate_provider_refund_ignored".to_owned(),
+                            };
+                            guard.events.push(rec.clone());
+                            return Ok(rec);
+                        }
+                    }
+                    let rem = captured_amt.saturating_sub(already_ref);
+                    let delta = partial_amount_minor.unwrap_or(rem);
+                    if delta == 0 || already_ref.saturating_add(delta) > captured_amt {
+                        return Err(AuthError::BillingOperationFailed);
+                    }
+                    already_ref + delta
+                };
+
+                if let Some(ref pref_id) = provider_refund_id {
+                    guard
+                        .confirmed_provider_refund_ids
+                        .insert((t.provider, pref_id.clone()));
+                }
+
+                let is_partial = new_total < captured_amt;
                 if let Some(ref inv_key) = target_inv_key {
                     if let Some(inv) = guard.invoices.get_mut(inv_key) {
-                        if !*mandatory_legal_override
-                            && t.now_secs - inv.issued_at > REFUND_WINDOW_SECS
-                        {
-                            return Err(AuthError::BillingOperationFailed);
-                        }
-                        let add = partial_amount_minor.unwrap_or(inv.amount_minor);
-                        inv.refunded_amount_minor = inv
-                            .refunded_amount_minor
-                            .saturating_add(add)
-                            .min(inv.amount_minor);
+                        inv.refunded_amount_minor = new_total;
                         inv.status = if is_partial {
                             "partially_refunded".to_owned()
                         } else {
@@ -1856,7 +2423,7 @@ impl BillingService {
                 }
                 if !is_partial {
                     for g in &mut guard.grants {
-                        if g.order_id == order.id && g.revoked_at.is_none() {
+                        if g.order_id == Some(order.id) && g.revoked_at.is_none() {
                             g.revoked_at = Some(t.now_secs);
                         }
                     }
@@ -1918,7 +2485,7 @@ impl BillingService {
                     o_mut.updated_at = t.now_secs;
                 }
                 for g in &mut guard.grants {
-                    if g.order_id == order.id && g.revoked_at.is_none() {
+                    if g.order_id == Some(order.id) && g.revoked_at.is_none() {
                         g.revoked_at = Some(t.now_secs);
                     }
                 }
@@ -1947,7 +2514,10 @@ impl BillingService {
             processed_at: t.now_secs,
             outcome,
         };
-        guard.processed_events.insert(event_key);
+        guard.processed_events.insert(event_key.clone());
+        guard
+            .processed_event_hashes
+            .insert(event_key, t.raw_payload_hash);
         let prev = guard
             .last_event_ts_by_workspace
             .get(&order.workspace_id)
@@ -2015,6 +2585,23 @@ impl BillingService {
                 .cloned()
                 .ok_or(AuthError::BillingOperationFailed)?
         };
+
+        // Idempotent retry check: if this EXACT `(workspace_id, refund_request_key)` was already
+        // claimed (e.g. `refund_pending` / `reconciliation_required` / `confirmed`), return the
+        // existing invoice state without ever firing a second external provider refund!
+        let already_claimed = if let Some(ref pg) = self.pg_store {
+            pg.has_refund_request_key_pg(invoice.workspace_id, req_key)
+                .await?
+        } else {
+            self.store
+                .lock()
+                .await
+                .refunds
+                .contains_key(&(invoice.workspace_id, req_key.to_owned()))
+        };
+        if already_claimed {
+            return Ok(invoice);
+        }
 
         if matches!(
             invoice.status.as_str(),
@@ -2144,9 +2731,10 @@ impl BillingService {
             }),
         };
 
-        let (provider_ref_id, confirmed, failed) = match provider_outcome {
-            Ok(out) => (Some(out.provider_refund_id), out.confirmed, false),
-            Err(_) => (None, false, true),
+        let (provider_ref_id, confirmed, failed, reconciliation_required) = match provider_outcome {
+            Ok(out) => (Some(out.provider_refund_id), out.confirmed, false, false),
+            Err(ProviderCallError::UncertainOutcome(_)) => (None, false, false, true),
+            Err(_) => (None, false, true, false),
         };
 
         if let Some(ref pg) = self.pg_store {
@@ -2163,6 +2751,7 @@ impl BillingService {
                         None
                     },
                     failed,
+                    reconciliation_required,
                     now_secs,
                 )
                 .await?;
@@ -2174,6 +2763,15 @@ impl BillingService {
 
         // In-memory finalization.
         let mut guard = self.store.lock().await;
+        if reconciliation_required {
+            if let Some(r) = guard
+                .refunds
+                .get_mut(&(invoice.workspace_id, req_key.to_owned()))
+            {
+                r.status = "reconciliation_required".to_owned();
+            }
+            return Err(AuthError::PaymentReconciliationRequired);
+        }
         if failed {
             if let Some(r) = guard
                 .refunds
@@ -2450,6 +3048,7 @@ impl BillingService {
         guard.orders.clear();
         guard.orders_by_idempotency.clear();
         guard.orders_by_provider_ref.clear();
+        guard.orders_by_subscription.clear();
         for o in snap.orders {
             guard
                 .orders_by_idempotency
@@ -2459,17 +3058,31 @@ impl BillingService {
                     .orders_by_provider_ref
                     .insert((o.provider, pref.clone()), o.id);
             }
+            if let Some(ref psub) = o.provider_subscription_id {
+                guard
+                    .orders_by_subscription
+                    .insert((o.provider, psub.clone()), o.id);
+            }
             guard.orders.insert(o.id, o);
         }
         guard.grants_by_provider_tx.clear();
         guard.grants_by_order_kind.clear();
+        guard.grants_by_renewal_period.clear();
         for g in &snap.grants {
             guard
                 .grants_by_provider_tx
                 .insert((g.provider, g.provider_transaction_id.clone()));
-            guard
-                .grants_by_order_kind
-                .insert((g.order_id, g.grant_kind.clone()));
+            if g.grant_kind != "subscription_renewal" {
+                if let Some(oid) = g.order_id {
+                    guard
+                        .grants_by_order_kind
+                        .insert((oid, g.grant_kind.clone()));
+                }
+            } else if let (Some(ref sub), Some(pe)) = (&g.provider_subscription_id, g.period_end) {
+                guard
+                    .grants_by_renewal_period
+                    .insert((g.provider, sub.clone(), pe));
+            }
         }
         guard.grants = snap.grants;
         guard.refunds = snap
@@ -2507,6 +3120,7 @@ fn order_to_checkout_response(
             .provider_intention_id
             .clone()
             .or_else(|| order.provider_order_ref.clone()),
+        checkout_mode: order.checkout_mode,
         checkout_url: order.checkout_url.clone(),
     }
 }
@@ -2526,6 +3140,53 @@ fn product_to_plan(product: CheckoutProduct) -> Result<PlanTier, AuthError> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn checkout_product_credit_pack_25_serializes_and_deserializes_consistently() {
+        let serialized = serde_json::to_string(&CheckoutProduct::CreditPack25).expect("ser");
+        assert_eq!(serialized, "\"credit_pack_25\"");
+        let parsed: CheckoutProduct = serde_json::from_str("\"credit_pack_25\"").expect("de");
+        assert_eq!(parsed, CheckoutProduct::CreditPack25);
+        assert_eq!(parsed.as_str(), "credit_pack_25");
+    }
+
+    #[test]
+    fn rfc3339_parser_handles_utc_fractional_and_offsets() {
+        assert_eq!(parse_rfc3339_to_unix_secs("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            parse_rfc3339_to_unix_secs("2026-11-23T12:00:00.123456Z"),
+            parse_rfc3339_to_unix_secs("2026-11-23T14:00:00+02:00")
+        );
+        assert_eq!(
+            parse_rfc3339_to_unix_secs("2026-11-23T12:00:00.000000"),
+            parse_rfc3339_to_unix_secs("2026-11-23T12:00:00Z")
+        );
+        assert_eq!(parse_rfc3339_to_unix_secs("not-a-timestamp"), None);
+    }
+
+    #[test]
+    fn paymob_customer_billing_data_rejects_invalid_and_accepts_real_details() {
+        let good = CustomerBillingData {
+            first_name: "Nadia".to_owned(),
+            last_name: "Hassan".to_owned(),
+            email: "nadia.hassan@example.org".to_owned(),
+            phone_number: "+201023456789".to_owned(),
+            country: "EG".to_owned(),
+        };
+        assert!(good.validate().is_ok());
+
+        let mut bad_email = good.clone();
+        bad_email.email = "not-an-email".to_owned();
+        assert!(bad_email.validate().is_err());
+
+        let mut bad_phone = good.clone();
+        bad_phone.phone_number = "123".to_owned();
+        assert!(bad_phone.validate().is_err());
+
+        let mut bad_country = good;
+        bad_country.country = "EGYPT".to_owned();
+        assert!(bad_country.validate().is_err());
+    }
+
     #[tokio::test]
     async fn unconfigured_providers_fail_closed_with_sf_pay_001() {
         let ent = EntitlementService::new();
@@ -2541,6 +3202,8 @@ mod tests {
                 seats: None,
                 coupon_code: None,
                 idempotency_key: Some("idem-unconf-1".to_owned()),
+                billing_data: None,
+                paddle_customer: None,
             })
             .await
             .unwrap_err();
@@ -2572,6 +3235,8 @@ mod tests {
                     seats: None,
                     coupon_code: None,
                     idempotency_key: None,
+                    billing_data: None,
+                    paddle_customer: None,
                 })
                 .await
                 .unwrap_err(),
@@ -2588,6 +3253,8 @@ mod tests {
                     seats: Some(2),
                     coupon_code: None,
                     idempotency_key: Some("idem-org-2".to_owned()),
+                    billing_data: None,
+                    paddle_customer: None,
                 })
                 .await
                 .unwrap_err(),

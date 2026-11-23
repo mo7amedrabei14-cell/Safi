@@ -557,7 +557,7 @@ SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test acco
 echo "[test-migrations] exercising owner account administration and P0.3 subscription lifecycle under the restricted app role"
 SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test accounts_postgres -- --ignored --test-threads=1
 
-echo "[test-migrations] applying migrations 0007..0013 for multi-instance & financial PostgreSQL 18 verification"
+echo "[test-migrations] applying migrations 0007..0014 for multi-instance & financial PostgreSQL 18 verification"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0007_owner_mfa_and_audit.up.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
@@ -572,12 +572,40 @@ echo "[test-migrations] applying migrations 0007..0013 for multi-instance & fina
     -f "$MIGRATIONS/0012_multi_instance_security_durability.up.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0013_financial_integrity_ledger.up.sql" >/dev/null
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0014_recurring_subscriptions_and_integrity.up.sql" >/dev/null
 
 echo "[test-migrations] exercising multi-instance & restart PostgreSQL 18 source-of-truth E2E"
 SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test postgres_multi_instance_e2e -- --ignored --test-threads=1
 
-echo "[test-migrations] exercising P0 financial integrity multi-instance & concurrency PostgreSQL 18 E2E"
+echo "[test-migrations] exercising P0 financial integrity multi-instance, concurrency, official envelopes & renewals PostgreSQL 18 E2E"
 SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test financial_integrity_e2e -- --ignored --test-threads=1
+
+echo "[test-migrations] verifying 0014 rollback refuses to silently destroy recurring renewal grants"
+if "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0014_recurring_subscriptions_and_integrity.down.sql" >/dev/null 2>&1; then
+    echo "ERROR: 0014 rollback must fail explicitly when recurring subscription_renewal rows exist." >&2
+    exit 1
+fi
+echo "[test-migrations] confirmed: 0014 rollback blocked data loss on recurring renewal rows; cleaning disposable E2E rows"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+DELETE FROM billing_entitlement_grants WHERE grant_kind = 'subscription_renewal' OR order_id IS NULL;
+SQL
+
+echo "[test-migrations] rolling back 0014"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0014_recurring_subscriptions_and_integrity.down.sql" >/dev/null
+
+echo "[test-migrations] verifying 0013 rollback refuses to silently destroy partially_refunded invoices"
+if "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0013_financial_integrity_ledger.down.sql" >/dev/null 2>&1; then
+    echo "ERROR: 0013 rollback must fail explicitly when partially_refunded or refund_pending invoice rows exist." >&2
+    exit 1
+fi
+echo "[test-migrations] confirmed: 0013 rollback blocked data loss on partially_refunded invoice rows; cleaning disposable E2E rows"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+DELETE FROM billing_invoices WHERE status IN ('partially_refunded', 'refund_pending');
+SQL
 
 echo "[test-migrations] rolling back 0013..0009 in reverse order"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
@@ -594,16 +622,17 @@ echo "[test-migrations] rolling back 0013..0009 in reverse order"
 echo "[test-migrations] verifying 0008 rollback refuses to silently destroy Paddle payment history"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO billing_webhook_events (provider, provider_event_id, payload_hash, processing_status)
-VALUES ('paddle', 'ci_rollback_guard_probe', decode(repeat('1', 64), 'hex'), 'processed');
+VALUES ('paddle', 'ci_rollback_guard_probe', decode(repeat('1', 64), 'hex'), 'processed')
+ON CONFLICT (provider, provider_event_id) DO NOTHING;
 SQL
 if "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0008_auth_entitlements_and_billing.down.sql" >/dev/null 2>&1; then
     echo "ERROR: 0008 rollback must fail explicitly when incompatible Paddle billing rows exist." >&2
     exit 1
 fi
-echo "[test-migrations] confirmed: 0008 rollback blocked data loss on Paddle rows; removing synthetic CI probe row"
+echo "[test-migrations] confirmed: 0008 rollback blocked data loss on Paddle rows; cleaning disposable E2E Paddle probe rows"
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-DELETE FROM billing_webhook_events WHERE provider = 'paddle' AND provider_event_id = 'ci_rollback_guard_probe';
+DELETE FROM billing_webhook_events WHERE provider IN ('paddle', 'manual');
 SQL
 
 echo "[test-migrations] rolling back 0008..0007 in reverse order"

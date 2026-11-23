@@ -1,0 +1,22 @@
+{
+  "event_id": "evt_01j9safi_adj_refund_001",
+  "event_type": "adjustment.updated",
+  "occurred_at": "2026-11-23T12:10:00.000000Z",
+  "notification_id": "ntf_01j9safi_adj_001",
+  "data": {
+    "id": "adj_01j9safi_refund_001",
+    "action": "refund",
+    "type": "partial",
+    "status": "approved",
+    "transaction_id": "txn_01j9safi_initial_001",
+    "subscription_id": "sub_01j9safi_monthly_001",
+    "currency_code": "USD",
+    "reason": "owner_authorized_partial_refund",
+    "totals": {
+      "subtotal": "500",
+      "tax": "0",
+      "total": "500",
+      "currency_code": "USD"
+    }
+  }
+}

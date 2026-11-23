@@ -110,10 +110,30 @@ pub struct CouponPreviewResponse {
     pub final_amount_minor: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CouponReservationRecord {
+    pub id: Uuid,
+    pub coupon_id: Uuid,
+    pub code: String,
+    pub user_id: Uuid,
+    pub workspace_id: Uuid,
+    pub order_id: Uuid,
+    pub product: CheckoutProduct,
+    pub original_amount_minor: u64,
+    pub discount_amount_minor: u64,
+    pub final_amount_minor: u64,
+    pub currency: BillingCurrency,
+    pub reserved_at: i64,
+    pub expires_at: i64,
+    pub committed: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CouponSnapshot {
     pub coupons: Vec<CouponRecord>,
     pub redemptions: Vec<CouponRedemptionRecord>,
+    #[serde(default)]
+    pub reservations: Vec<CouponReservationRecord>,
 }
 
 #[derive(Debug, Default)]
@@ -121,6 +141,7 @@ struct CouponStore {
     by_code: HashMap<String, CouponRecord>,
     redemptions: Vec<CouponRedemptionRecord>,
     redeemed_pairs: HashSet<(Uuid, Uuid)>, // (coupon_id, user_id)
+    reservations: HashMap<Uuid, CouponReservationRecord>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -153,6 +174,7 @@ impl CouponService {
         CouponSnapshot {
             coupons: guard.by_code.values().cloned().collect(),
             redemptions: guard.redemptions.clone(),
+            reservations: guard.reservations.values().cloned().collect(),
         }
     }
 
@@ -162,12 +184,16 @@ impl CouponService {
         guard.by_code.clear();
         guard.redemptions.clear();
         guard.redeemed_pairs.clear();
+        guard.reservations.clear();
         for c in snap.coupons {
             guard.by_code.insert(c.code.clone(), c);
         }
         for r in snap.redemptions {
             guard.redeemed_pairs.insert((r.coupon_id, r.user_id));
             guard.redemptions.push(r);
+        }
+        for res in snap.reservations {
+            guard.reservations.insert(res.id, res);
         }
     }
 
@@ -450,6 +476,196 @@ impl CouponService {
         };
         guard.redemptions.push(redemption.clone());
         Ok(redemption)
+    }
+
+    /// Atomically reserve a coupon slot for a specific checkout `order_id` BEFORE calling the
+    /// payment provider. If provider checkout creation fails, call [`release_reservation`] so
+    /// the customer's one-time coupon is never lost. Call [`commit_reservation`] upon verified payment.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn reserve_at(
+        &self,
+        raw_code: &str,
+        user_id: Uuid,
+        workspace_id: Uuid,
+        order_id: Uuid,
+        product: CheckoutProduct,
+        original_amount_minor: u64,
+        currency: BillingCurrency,
+        is_new_customer: bool,
+        now_secs: i64,
+        ttl_secs: i64,
+    ) -> Result<CouponReservationRecord, AuthError> {
+        let code = normalize_code(raw_code).map_err(|_| AuthError::CouponInvalid)?;
+        let mut guard = self.store.write().await;
+
+        // Prune expired uncommitted reservations before evaluating limits.
+        guard
+            .reservations
+            .retain(|_, r| r.committed || r.expires_at > now_secs);
+
+        // Idempotent hit: if this exact order already reserved this coupon, return it.
+        if let Some(existing) = guard
+            .reservations
+            .values()
+            .find(|r| r.order_id == order_id && r.code == code)
+            .cloned()
+        {
+            return Ok(existing);
+        }
+
+        let coupon_snapshot = guard
+            .by_code
+            .get(&code)
+            .cloned()
+            .ok_or(AuthError::CouponInvalid)?;
+
+        if !coupon_snapshot.enabled || coupon_snapshot.archived {
+            return Err(AuthError::CouponInvalid);
+        }
+        if let Some(starts_at) = coupon_snapshot.starts_at {
+            if now_secs < starts_at {
+                return Err(AuthError::CouponInvalid);
+            }
+        }
+        if let Some(expires_at) = coupon_snapshot.expires_at {
+            if now_secs >= expires_at {
+                return Err(AuthError::CouponInvalid);
+            }
+        }
+        let active_reservations_for_coupon = guard
+            .reservations
+            .values()
+            .filter(|r| {
+                r.coupon_id == coupon_snapshot.id && !r.committed && r.expires_at > now_secs
+            })
+            .count();
+        if let Some(max_r) = coupon_snapshot.max_redemptions {
+            let used_plus_reserved = u64::from(coupon_snapshot.redemptions_count)
+                + active_reservations_for_coupon as u64;
+            if used_plus_reserved >= u64::from(max_r) {
+                return Err(AuthError::CouponInvalid);
+            }
+        }
+        if guard
+            .redeemed_pairs
+            .contains(&(coupon_snapshot.id, user_id))
+            || guard.reservations.values().any(|r| {
+                r.coupon_id == coupon_snapshot.id
+                    && r.user_id == user_id
+                    && (r.committed || r.expires_at > now_secs)
+            })
+        {
+            return Err(AuthError::CouponInvalid);
+        }
+        if coupon_snapshot.new_customers_only && !is_new_customer {
+            return Err(AuthError::CouponInvalid);
+        }
+        if coupon_snapshot.org_only && product != CheckoutProduct::OrganizationSeatAnnual {
+            return Err(AuthError::CouponInvalid);
+        }
+        if !coupon_snapshot.eligible_plans.is_empty()
+            && !coupon_snapshot.eligible_plans.contains(&product)
+        {
+            return Err(AuthError::CouponInvalid);
+        }
+        if !coupon_snapshot.eligible_user_ids.is_empty()
+            && !coupon_snapshot.eligible_user_ids.contains(&user_id)
+        {
+            return Err(AuthError::CouponInvalid);
+        }
+        if original_amount_minor < coupon_snapshot.min_purchase_minor {
+            return Err(AuthError::CouponInvalid);
+        }
+
+        let discount_amount = match (coupon_snapshot.discount_kind, currency) {
+            (DiscountKind::Percent, _) => {
+                (original_amount_minor.saturating_mul(coupon_snapshot.discount_value)) / 100
+            }
+            (DiscountKind::FixedUsd, BillingCurrency::Usd)
+            | (DiscountKind::FixedEgp, BillingCurrency::Egp) => {
+                coupon_snapshot.discount_value.min(original_amount_minor)
+            }
+            _ => return Err(AuthError::CouponInvalid),
+        };
+        let final_amount = original_amount_minor.saturating_sub(discount_amount);
+
+        let reservation = CouponReservationRecord {
+            id: Uuid::now_v7(),
+            coupon_id: coupon_snapshot.id,
+            code,
+            user_id,
+            workspace_id,
+            order_id,
+            product,
+            original_amount_minor,
+            discount_amount_minor: discount_amount,
+            final_amount_minor: final_amount,
+            currency,
+            reserved_at: now_secs,
+            expires_at: now_secs + ttl_secs.max(60),
+            committed: false,
+        };
+        guard
+            .reservations
+            .insert(reservation.id, reservation.clone());
+        Ok(reservation)
+    }
+
+    /// Release an uncommitted coupon reservation when provider checkout creation fails or expires.
+    pub async fn release_reservation(&self, reservation_id: Uuid) {
+        let mut guard = self.store.write().await;
+        if let Some(existing) = guard.reservations.get(&reservation_id) {
+            if !existing.committed {
+                guard.reservations.remove(&reservation_id);
+            }
+        }
+    }
+
+    /// Permanently commit a previously reserved coupon once payment is confirmed (idempotent).
+    pub async fn commit_reservation(
+        &self,
+        reservation_id: Uuid,
+        now_secs: i64,
+    ) -> Option<CouponRedemptionRecord> {
+        let mut guard = self.store.write().await;
+        let (already_committed, coupon_id, user_id) = {
+            let res = guard.reservations.get(&reservation_id)?;
+            (res.committed, res.coupon_id, res.user_id)
+        };
+        if already_committed {
+            return guard
+                .redemptions
+                .iter()
+                .find(|r| r.coupon_id == coupon_id && r.user_id == user_id)
+                .cloned();
+        }
+        let snapshot = {
+            let res = guard.reservations.get_mut(&reservation_id)?;
+            res.committed = true;
+            res.clone()
+        };
+        if let Some(live) = guard.by_code.get_mut(&snapshot.code) {
+            live.redemptions_count = live.redemptions_count.saturating_add(1);
+            live.updated_at = now_secs;
+        }
+        guard
+            .redeemed_pairs
+            .insert((snapshot.coupon_id, snapshot.user_id));
+        let redemption = CouponRedemptionRecord {
+            id: Uuid::now_v7(),
+            coupon_id: snapshot.coupon_id,
+            code: snapshot.code,
+            user_id: snapshot.user_id,
+            workspace_id: snapshot.workspace_id,
+            product: snapshot.product,
+            original_amount_minor: snapshot.original_amount_minor,
+            discount_amount_minor: snapshot.discount_amount_minor,
+            final_amount_minor: snapshot.final_amount_minor,
+            currency: snapshot.currency,
+            redeemed_at: now_secs,
+        };
+        guard.redemptions.push(redemption.clone());
+        Some(redemption)
     }
 }
 

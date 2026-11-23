@@ -90,12 +90,74 @@ export type AiInterpretationResult =
       readonly suggestedSummary: string;
       readonly command: StudioDslCommand;
       readonly dslJson: string;
+      readonly redactedPromptPiiKinds?: ReadonlyArray<string>;
     }
   | {
       readonly ok: false;
       readonly code: "SF-AIX-001" | "SF-AIX-002";
       readonly blockerDetail: string;
     };
+
+const UNSAFE_FORMULA_OR_INJECTION_PATTERNS: ReadonlyArray<RegExp> = [
+  /=\s*(?:cmd|powershell|system|webservice|importxml|importhtml|importrange|importdata|hyperlink)\s*[|(]/i,
+  /<script\b/i,
+  /javascript:/i,
+  /\b(?:__proto__|constructor|prototype)\b/i
+];
+
+function containsUnsafeInjection(value: string): boolean {
+  return UNSAFE_FORMULA_OR_INJECTION_PATTERNS.some((re) => re.test(value));
+}
+
+export interface PromptPiiSanitizationResult {
+  readonly sanitizedPrompt: string;
+  readonly redactedKinds: ReadonlyArray<string>;
+}
+
+/**
+ * Redacts PII or secrets accidentally pasted by a user into their natural-language prompt
+ * BEFORE sending the prompt + schema metadata to the local Ollama endpoint.
+ */
+export function sanitizePromptPii(rawPrompt: string): PromptPiiSanitizationResult {
+  let text = rawPrompt.trim();
+  const kinds = new Set<string>();
+
+  const replaceWith = (pattern: RegExp, token: string, kind: string): void => {
+    const next = text.replace(pattern, () => {
+      kinds.add(kind);
+      return token;
+    });
+    text = next;
+  };
+
+  // Secrets / API keys / session tokens
+  replaceWith(
+    /\b(?:sk-[A-Za-z0-9_-]{12,}|pdl_[A-Za-z0-9_-]{8,}|egy_(?:sk|pk|csk)_[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{16,}|sf[sw]_[A-Za-z0-9_-]{10,})\b/g,
+    "[REDACTED_SECRET]",
+    "secret_token"
+  );
+  // Email addresses
+  replaceWith(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[REDACTED_EMAIL]", "email");
+  // IBANs (e.g. EG.., SA.., AE.., GB.., DE..)
+  replaceWith(/\b(?:EG|SA|AE|GB|DE|FR|US)[0-9]{2}[A-Z0-9]{11,28}\b/gi, "[REDACTED_IBAN]", "iban");
+  // 14-digit National IDs & 15-16 digit card numbers (with optional separators)
+  replaceWith(
+    /\b(?:\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{3,4}|[23]\d{13})\b/g,
+    "[REDACTED_ID_OR_CARD]",
+    "national_id_or_card"
+  );
+  // Egyptian & international phone numbers
+  replaceWith(
+    /(?:\+\d{1,3}[\s-]?(?:\(\d{1,4}\)[\s-]?)?(?:\d[\s-]?){7,12}\d|\b01[0125]\d{8}\b)/g,
+    "[REDACTED_PHONE]",
+    "phone"
+  );
+
+  return {
+    sanitizedPrompt: text,
+    redactedKinds: Array.from(kinds)
+  };
+}
 
 const ALLOWED_OPS = new Set<StudioDslCommand["op"]>([
   "define_metric",
@@ -139,6 +201,15 @@ export function validateUntrustedDslPayload(
       code: "SF-AIX-002",
       reason: `Unsupported DSL operation '${parsed.op}'.`
     };
+  }
+  for (const val of Object.values(parsed)) {
+    if (typeof val === "string" && containsUnsafeInjection(val)) {
+      return {
+        ok: false,
+        code: "SF-AIX-002",
+        reason: "Rejected unsafe formula or script/prototype injection in AI DSL output."
+      };
+    }
   }
   const op = parsed.op as StudioDslCommand["op"];
 
@@ -300,8 +371,9 @@ export function buildOutboundAiPayload(
   prompt: string,
   schema: AiSchemaContext
 ): OutboundAiUserPayload {
+  const { sanitizedPrompt } = sanitizePromptPii(prompt);
   return {
-    request: prompt.trim(),
+    request: sanitizedPrompt,
     schema: {
       columns: schema.columns.map((c) => ({ name: c.name, type: c.type })),
       metrics: [...schema.metricIds],
@@ -319,7 +391,8 @@ export function buildOutboundAiPayload(
  * dedicated cloud-AI phase with explicit CSP & key-management policies.
  */
 export function validateAiEndpointUrl(
-  rawUrl: string
+  rawUrl: string,
+  allowAnyLoopbackPortForTest = false
 ):
   | { readonly ok: true; readonly normalizedUrl: string }
   | { readonly ok: false; readonly reason: string } {
@@ -343,11 +416,27 @@ export function validateAiEndpointUrl(
     );
     return { ok: true, normalizedUrl: normalized.toString() };
   }
+  if (
+    allowAnyLoopbackPortForTest &&
+    parsed.protocol === "http:" &&
+    (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") &&
+    parsed.port !== ""
+  ) {
+    const normalized = new URL(
+      parsed.pathname + parsed.search + parsed.hash,
+      `http://127.0.0.1:${parsed.port}`
+    );
+    return { ok: true, normalizedUrl: normalized.toString() };
+  }
   return {
     ok: false,
     reason:
       "Desktop CSP in this phase permits ONLY the local Ollama loopback origin (http://127.0.0.1:11434). Optional remote cloud AI is deferred to a separate phase."
   };
+}
+
+export interface InterpretAiOptions {
+  readonly allowAnyLoopbackPortForTest?: boolean;
 }
 
 /**
@@ -359,7 +448,8 @@ export async function interpretPromptWithRealAi(
   prompt: string,
   schema: AiSchemaContext,
   provider: AiProviderConfig,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: InterpretAiOptions
 ): Promise<AiInterpretationResult> {
   const trimmed = prompt.trim();
   if (!trimmed) {
@@ -383,7 +473,10 @@ export async function interpretPromptWithRealAi(
     };
   }
 
-  const endpointCheck = validateAiEndpointUrl(provider.endpointUrl);
+  const endpointCheck = validateAiEndpointUrl(
+    provider.endpointUrl,
+    options?.allowAnyLoopbackPortForTest === true
+  );
   if (!endpointCheck.ok) {
     return {
       ok: false,
@@ -401,7 +494,8 @@ export async function interpretPromptWithRealAi(
     };
   }
 
-  // Send ONLY prompt + schema identifiers — zero raw rows, cell values, or file paths.
+  // Send ONLY PII-redacted prompt + schema identifiers — zero raw rows, cell values, or file paths.
+  const sanitization = sanitizePromptPii(trimmed);
   const outboundUserPayload = buildOutboundAiPayload(trimmed, schema);
 
   try {
@@ -441,8 +535,10 @@ export async function interpretPromptWithRealAi(
 
     const body = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
+      message?: { content?: string };
     };
-    const rawContent = body.choices?.[0]?.message?.content?.trim() ?? "";
+    const rawContent =
+      body.choices?.[0]?.message?.content?.trim() ?? body.message?.content?.trim() ?? "";
     const validated = validateUntrustedDslPayload(rawContent);
     if (!validated.ok) {
       return {
@@ -457,7 +553,8 @@ export async function interpretPromptWithRealAi(
       model: provider.modelName,
       suggestedSummary: previewDslCommand(validated.command, "en"),
       command: validated.command,
-      dslJson: JSON.stringify(validated.command, null, 2)
+      dslJson: JSON.stringify(validated.command, null, 2),
+      redactedPromptPiiKinds: sanitization.redactedKinds
     };
   } catch (err) {
     return {

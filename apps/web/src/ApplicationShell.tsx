@@ -168,6 +168,7 @@ export function renderStudio(
 export interface ApplicationShellProps {
   readonly onReady?: (() => void) | undefined;
   readonly introComplete?: boolean | undefined;
+  readonly showcaseUnderlayReady?: boolean | undefined;
   readonly initialVerificationToken?: string | null;
   readonly initialResetToken?: string | null;
 }
@@ -175,6 +176,7 @@ export interface ApplicationShellProps {
 export function ApplicationShell({
   onReady,
   introComplete = true,
+  showcaseUnderlayReady = introComplete,
   initialVerificationToken = null,
   initialResetToken = null
 }: ApplicationShellProps): ReactNode {
@@ -597,7 +599,7 @@ export function ApplicationShell({
     />
   );
 
-  if (!introComplete) {
+  if (authenticationRequired ? !introComplete : !showcaseUnderlayReady) {
     return null;
   }
 

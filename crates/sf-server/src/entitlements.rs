@@ -237,6 +237,12 @@ impl EntitlementService {
             .or_insert_with(|| WorkspaceEntitlementRecord::new_free(workspace_id, user_id));
     }
 
+    /// Synchronize the authoritative workspace entitlement record committed in PostgreSQL 18.
+    pub async fn sync_workspace_record(&self, record: WorkspaceEntitlementRecord) {
+        let mut guard = self.store.write().await;
+        guard.workspaces.insert(record.workspace_id, record);
+    }
+
     /// Claim a one-time 7-day Trial enforcing verified email + phone and anti-abuse across
     /// normalized email hash, phone hash, and device fingerprint hash.
     pub async fn claim_trial_at(

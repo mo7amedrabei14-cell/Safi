@@ -837,6 +837,32 @@ impl StudioStore {
         }
     }
 
+    /// Ensures the local `VaultKey` is loaded, initialized, or migrated (`SFK1 -> SFK2`)
+    /// using the native OS keystore (`Windows Credential Manager`, `macOS Keychain`, or `Linux Secret Service`).
+    ///
+    /// # Errors
+    /// Returns `"SF-SYS-024"` if the OS keystore is unavailable/locked or verification fails.
+    pub fn ensure_local_vault_key_with_os_keystore(
+        &self,
+        os_keystore: &dyn crate::vault::OsKeystoreProvider,
+    ) -> Result<VaultKey, String> {
+        let explicitly_disabled = self
+            .vault_key_explicitly_disabled
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(false);
+        if explicitly_disabled {
+            return Err("SF-SYS-024".to_string());
+        }
+        let dir = self.resolve_storage_dir()?;
+        let loaded = VaultKey::load_or_init_with_os_keystore(&dir, os_keystore)
+            .map_err(|_| "SF-SYS-024".to_string())?;
+        if let Ok(mut guard) = self.vault_key.lock() {
+            *guard = Some(loaded.clone());
+        }
+        Ok(loaded)
+    }
+
     /// Ensures the local `VaultKey` is loaded or initialized from the storage keystore,
     /// failing closed with `SF-SYS-024` if the key is missing or explicitly disabled.
     pub fn ensure_local_vault_key(&self) -> Result<VaultKey, String> {

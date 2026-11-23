@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Deployment environment classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -39,7 +39,7 @@ impl AppEnvironment {
 }
 
 /// Readiness state of an external integration or cryptographic capability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum IntegrationStatus {
     Configured,
@@ -78,8 +78,17 @@ pub struct ServerConfig {
     pub oauth_github_configured: bool,
     pub paddle_api_key: Option<String>,
     pub paddle_webhook_secret: Option<String>,
+    pub paddle_api_base_url: String,
+    pub paddle_price_individual_monthly: Option<String>,
+    pub paddle_price_individual_annual: Option<String>,
+    pub paddle_price_org_seat_annual: Option<String>,
+    pub paddle_price_pay_per_file: Option<String>,
+    pub paddle_price_credit_pack_25: Option<String>,
     pub paymob_api_key: Option<String>,
+    pub paymob_public_key: Option<String>,
     pub paymob_hmac_secret: Option<String>,
+    pub paymob_integration_id: Option<u64>,
+    pub paymob_api_base_url: String,
     pub ai_provider_url: Option<String>,
     pub ai_api_key: Option<String>,
     pub ai_model: Option<String>,
@@ -202,8 +211,25 @@ impl ServerConfig {
 
         let paddle_api_key = non_empty_var(&lookup, "SAFI_PADDLE_API_KEY");
         let paddle_webhook_secret = non_empty_var(&lookup, "SAFI_PADDLE_WEBHOOK_SECRET");
+        let paddle_api_base_url = non_empty_var(&lookup, "SAFI_PADDLE_API_BASE_URL")
+            .unwrap_or_else(|| "https://api.paddle.com".to_owned());
+        let paddle_price_individual_monthly =
+            non_empty_var(&lookup, "SAFI_PADDLE_PRICE_INDIVIDUAL_MONTHLY");
+        let paddle_price_individual_annual =
+            non_empty_var(&lookup, "SAFI_PADDLE_PRICE_INDIVIDUAL_ANNUAL");
+        let paddle_price_org_seat_annual =
+            non_empty_var(&lookup, "SAFI_PADDLE_PRICE_ORG_SEAT_ANNUAL");
+        let paddle_price_pay_per_file = non_empty_var(&lookup, "SAFI_PADDLE_PRICE_PAY_PER_FILE");
+        let paddle_price_credit_pack_25 =
+            non_empty_var(&lookup, "SAFI_PADDLE_PRICE_CREDIT_PACK_25");
         let paymob_api_key = non_empty_var(&lookup, "SAFI_PAYMOB_API_KEY");
+        let paymob_public_key = non_empty_var(&lookup, "SAFI_PAYMOB_PUBLIC_KEY");
         let paymob_hmac_secret = non_empty_var(&lookup, "SAFI_PAYMOB_HMAC_SECRET");
+        let paymob_integration_id = non_empty_var(&lookup, "SAFI_PAYMOB_INTEGRATION_ID")
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v > 0);
+        let paymob_api_base_url = non_empty_var(&lookup, "SAFI_PAYMOB_API_BASE_URL")
+            .unwrap_or_else(|| "https://accept.paymob.com".to_owned());
 
         let ai_provider_url = non_empty_var(&lookup, "SAFI_AI_PROVIDER_URL");
         let ai_api_key = non_empty_var(&lookup, "SAFI_AI_API_KEY");
@@ -232,8 +258,17 @@ impl ServerConfig {
             oauth_github_configured,
             paddle_api_key,
             paddle_webhook_secret,
+            paddle_api_base_url,
+            paddle_price_individual_monthly,
+            paddle_price_individual_annual,
+            paddle_price_org_seat_annual,
+            paddle_price_pay_per_file,
+            paddle_price_credit_pack_25,
             paymob_api_key,
+            paymob_public_key,
             paymob_hmac_secret,
+            paymob_integration_id,
+            paymob_api_base_url,
             ai_provider_url,
             ai_api_key,
             ai_model,
@@ -249,7 +284,10 @@ impl ServerConfig {
 
     #[must_use]
     pub fn paymob_configured(&self) -> bool {
-        self.paymob_api_key.is_some() && self.paymob_hmac_secret.is_some()
+        self.paymob_api_key.is_some()
+            && self.paymob_public_key.is_some()
+            && self.paymob_hmac_secret.is_some()
+            && self.paymob_integration_id.is_some()
     }
 
     #[must_use]
@@ -373,8 +411,17 @@ impl ServerConfig {
             oauth_github_configured: false,
             paddle_api_key: None,
             paddle_webhook_secret: None,
+            paddle_api_base_url: "https://api.paddle.com".to_owned(),
+            paddle_price_individual_monthly: None,
+            paddle_price_individual_annual: None,
+            paddle_price_org_seat_annual: None,
+            paddle_price_pay_per_file: None,
+            paddle_price_credit_pack_25: None,
             paymob_api_key: None,
+            paymob_public_key: None,
             paymob_hmac_secret: None,
+            paymob_integration_id: None,
+            paymob_api_base_url: "https://accept.paymob.com".to_owned(),
             ai_provider_url: None,
             ai_api_key: None,
             ai_model: None,

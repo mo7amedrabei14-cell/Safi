@@ -882,6 +882,22 @@ title_en = "Payment chargeback recorded and subscription revoked"
 action_en = "Contact support to resolve the billing dispute before reactivating."
 owner_note = "Verified payment provider chargeback webhook revoked paid entitlements immediately."
 
+[SF-PAY-007]
+severity = "error"
+title_ar = "تعارض في مفتاح عدم التكرار لطلب الدفع"
+action_ar = "استخدم مفتاح عدم تكرار جديدًا لعملية شراء مختلفة، أو أعد نفس تفاصيل الطلب الأصلي."
+title_en = "Checkout idempotency key conflict"
+action_en = "Use a new idempotency key for a different purchase, or retry with the exact original request."
+owner_note = "Same (workspace_id, idempotency_key) submitted with a different request fingerprint; rejected with 409 Conflict."
+
+[SF-PAY-008]
+severity = "error"
+title_ar = "يتطلب طلب الدفع مطابقة الحالة مع مزود الدفع قبل إعادة المحاولة"
+action_ar = "انتظر لحظات ثم أعد التحقق من الطلب الحالي لتجنب الخصم المزدوج."
+title_en = "Payment order requires provider reconciliation before retrying"
+action_en = "Wait briefly and reconcile the existing order state to prevent a duplicate charge."
+owner_note = "Uncertain provider timeout occurred during checkout creation; server refuses to blindly issue a second charge."
+
 [SF-AUTH-023]
 severity = "error"
 title_ar = "رمز تفويض سطح المكتب غير صالح أو منتهي الصلاحية أو مستخدم مسبقًا"

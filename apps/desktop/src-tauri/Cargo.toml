@@ -23,6 +23,15 @@ tauri-plugin-dialog = "=2.2.0"
 tauri-plugin-single-instance = "=2.2.0"
 webpki-roots = "=1.0.11"
 
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "=3.6.3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "=3.6.3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "=3.6.3", features = ["sync-secret-service", "crypto-rust"] }
+
 [dev-dependencies]
 axum = "=0.8.4"
 ring = "=0.17.14"

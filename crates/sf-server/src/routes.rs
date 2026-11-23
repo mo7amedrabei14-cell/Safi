@@ -1370,23 +1370,41 @@ pub async fn owner_cancel_subscription(
 pub struct IssueRefundRequest {
     pub external_invoice_id: String,
     #[serde(default)]
+    pub refund_request_key: Option<String>,
+    #[serde(default)]
+    pub partial_amount_minor: Option<u64>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
     pub mandatory_legal_override: bool,
 }
 
-/// `POST /v1/owner/billing/refund` — issues refund enforcing the 3-day policy window (step-up TOTP).
+/// `POST /v1/owner/billing/refund` — issues idempotent provider-backed refund enforcing the 3-day policy window (step-up TOTP).
 pub async fn owner_issue_refund(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
     Json(body): Json<IssueRefundRequest>,
 ) -> Result<Json<InvoiceRecord>, AuthError> {
+    let req_key = body
+        .refund_request_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("refund:{}:full", body.external_invoice_id));
     let invoice = state
         .billing
-        .issue_owner_refund(
+        .issue_owner_refund_idempotent(
             &body.external_invoice_id,
+            &req_key,
+            body.partial_amount_minor,
             body.mandatory_legal_override,
+            body.reason.as_deref().unwrap_or("owner_authorized_refund"),
+            Some(session.principal.user_id),
             unix_now(),
         )
         .await?;
+    state.persist_durable_state().await;
     state
         .log_center
         .record(
@@ -1396,7 +1414,12 @@ pub async fn owner_issue_refund(
             body.external_invoice_id,
             AuditOutcome::Allowed,
             None,
-            Some(json!({ "status": invoice.status, "amount_minor": invoice.amount_minor })),
+            Some(json!({
+                "status": invoice.status,
+                "amount_minor": invoice.amount_minor,
+                "refunded_amount_minor": invoice.refunded_amount_minor,
+                "refund_request_key": req_key
+            })),
         )
         .await;
     Ok(Json(invoice))
@@ -2885,6 +2908,14 @@ pub async fn get_my_entitlements(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
 ) -> Json<EffectiveEntitlements> {
+    if let Some(ref pg) = state.pg_store {
+        if let Ok(Some(pg_ent)) = pg
+            .load_workspace_entitlement_pg(session.principal.workspace_id)
+            .await
+        {
+            state.entitlements.sync_workspace_record(pg_ent).await;
+        }
+    }
     let is_owner = state
         .owner_mfa
         .is_owner_user(session.principal.user_id)
@@ -2908,6 +2939,14 @@ pub async fn consume_entitlement(
     Extension(session): Extension<AuthenticatedSession>,
     Json(body): Json<ConsumeUsageRequest>,
 ) -> Result<Json<ConsumeUsageResult>, AuthError> {
+    if let Some(ref pg) = state.pg_store {
+        if let Ok(Some(pg_ent)) = pg
+            .load_workspace_entitlement_pg(session.principal.workspace_id)
+            .await
+        {
+            state.entitlements.sync_workspace_record(pg_ent).await;
+        }
+    }
     let is_owner = state
         .owner_mfa
         .is_owner_user(session.principal.user_id)
@@ -3002,51 +3041,33 @@ pub async fn billing_preview_coupon(
     Ok(Json(preview))
 }
 
-/// `POST /v1/billing/checkout` — create Paddle (USD) or Paymob (EGP) checkout session
-/// with optional server-authoritative coupon validation & atomic redemption.
+/// `POST /v1/billing/checkout` — create real Paddle (USD) or Paymob (EGP) checkout session
+/// with durable server-side idempotency (`Idempotency-Key` header or body `idempotency_key`)
+/// and safe coupon reservation (released automatically if provider creation fails).
 pub async fn billing_checkout(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Json(mut body): Json<CheckoutRequest>,
 ) -> Result<Json<CheckoutResponse>, AuthError> {
     body.workspace_id = session.principal.workspace_id;
     body.user_id = session.principal.user_id;
+    if body
+        .idempotency_key
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        body.idempotency_key = headers
+            .get("idempotency-key")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+    }
 
-    let (discount_minor, applied_code) = if let Some(ref code) = body.coupon_code {
-        let seats = body.seats.unwrap_or(1);
-        let (_provider, currency, original_minor) =
-            resolve_provider_and_price(&body.billing_country_iso2, body.product, seats);
-        let has_prior_invoices = !state
-            .billing
-            .list_invoices(body.workspace_id)
-            .await
-            .is_empty();
-        let redemption = state
-            .coupons
-            .redeem_at(
-                code,
-                body.user_id,
-                body.workspace_id,
-                body.product,
-                original_minor,
-                currency,
-                !has_prior_invoices,
-                unix_now(),
-            )
-            .await?;
-        if let Some(pg) = &state.pg_store {
-            pg.insert_coupon_redemption(&redemption).await?;
-        }
-        state.persist_durable_state().await;
-        (redemption.discount_amount_minor, Some(redemption.code))
-    } else {
-        (0, None)
-    };
-
-    let resp = state
-        .billing
-        .create_checkout_with_discount(&body, discount_minor, applied_code)
-        .await?;
+    let resp = state.billing.create_checkout(&body).await?;
+    state.persist_durable_state().await;
     Ok(Json(resp))
 }
 
@@ -3266,6 +3287,14 @@ pub async fn ai_route(
     }
     if !state.config.ai_configured() {
         return Err(AuthError::AiProviderNotConfigured);
+    }
+    if let Some(ref pg) = state.pg_store {
+        if let Ok(Some(pg_ent)) = pg
+            .load_workspace_entitlement_pg(session.principal.workspace_id)
+            .await
+        {
+            state.entitlements.sync_workspace_record(pg_ent).await;
+        }
     }
     let is_owner = state
         .owner_mfa

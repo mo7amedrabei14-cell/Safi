@@ -25,9 +25,37 @@ async fn make_state_with_users() -> (AppState, String, Uuid, Uuid, String, Uuid,
     let cache = Arc::new(InMemoryAuthCache::new());
     let auth = AuthService::new(api_keys, sessions, cache);
 
+    let mock_paddle_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock paddle");
+    let mock_paddle_addr = mock_paddle_listener.local_addr().expect("addr");
+    let mock_paddle_app = axum::Router::new().route(
+        "/transactions",
+        axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+            let txn_id = format!("txn_{}", Uuid::now_v7().simple());
+            let total = body["custom_data"]["expected_amount_minor"]
+                .as_u64()
+                .unwrap_or(2000);
+            axum::Json(json!({
+                "data": {
+                    "id": txn_id,
+                    "status": "ready",
+                    "currency_code": "USD",
+                    "checkout": { "url": format!("https://checkout.paddle.test/pay/{txn_id}") },
+                    "details": { "totals": { "total": total.to_string() } }
+                }
+            }))
+        }),
+    );
+    tokio::spawn(async move {
+        let _ = axum::serve(mock_paddle_listener, mock_paddle_app).await;
+    });
+
     let mut cfg = ServerConfig::for_tests();
     cfg.paddle_api_key = Some("pdl_test_key".to_owned());
     cfg.paddle_webhook_secret = Some("pdl_whsec_test_secret".to_owned());
+    cfg.paddle_api_base_url = format!("http://{mock_paddle_addr}");
+    cfg.paddle_price_individual_monthly = Some("pri_zt_monthly".to_owned());
 
     let state = AppState::with_config(auth, cfg);
 
@@ -321,12 +349,32 @@ async fn owner_mfa_control_plane_email_change_and_billing_http_flow() {
     assert_eq!(st, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "SF-AUTH-013");
 
-    // 10. Real Paddle HMAC-SHA256 webhook updates entitlements and appears in Owner billing events.
+    // 10. Real Paddle checkout + HMAC-SHA256 correlated webhook updates entitlements and appears in Owner billing events.
+    let (chk_st, chk_body) = send_json(
+        &router,
+        Method::POST,
+        "/v1/billing/checkout",
+        Some(&hijacker_session.token),
+        Some(json!({
+            "product": "individual_monthly",
+            "billing_country_iso2": "US",
+            "idempotency_key": "zt-paddle-order-1"
+        })),
+    )
+    .await;
+    assert_eq!(chk_st, StatusCode::OK, "checkout: {chk_body}");
+    let created_order_id = chk_body["order_id"].as_str().expect("order_id");
+    let created_txn_id = chk_body["provider_order_ref"].as_str().expect("txn_id");
+
     let now = unix_now();
     let wh_body = serde_json::to_vec(&json!({
         "event_id": "evt_http_001",
         "event_type": "subscription.activated",
         "occurred_at_unix": now,
+        "order_id": created_order_id,
+        "transaction_id": created_txn_id,
+        "currency_code": "USD",
+        "price_id": "pri_zt_monthly",
         "workspace_id": new_old_email_ws,
         "user_id": new_old_email_user,
         "product": "individual_monthly",

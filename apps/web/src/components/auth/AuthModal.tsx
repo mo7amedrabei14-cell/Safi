@@ -897,14 +897,14 @@ export function AuthModal({
                 data-desktop-pkce-panel="true"
                 style={{
                   display: "grid",
-                  gap: "10px",
-                  padding: "12px",
-                  marginBottom: "14px",
+                  gap: "6px",
+                  padding: "8px 10px",
+                  marginBottom: "10px",
                   borderRadius: "12px",
                   border: "1px solid var(--border-subtle, rgba(148,163,184,0.28))"
                 }}
               >
-                <div style={{ fontSize: "12px", fontWeight: 700 }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, lineHeight: 1.3 }}>
                   {isAr
                     ? "تسجيل الدخول الموصى به عبر متصفح النظام (PKCE S256)"
                     : "Recommended System-Browser Sign-In (PKCE S256)"}
@@ -944,25 +944,27 @@ export function AuthModal({
                     </button>
                   </div>
                 ) : (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                     <button
                       type="button"
                       className="safi-btn safi-btn-primary"
+                      style={{ padding: "6px 10px", fontSize: "12px", minHeight: "34px" }}
                       onClick={() => void onStartDesktopPkce("signin")}
                       disabled={busy}
                       data-desktop-pkce-signin="true"
                     >
-                      <ShieldCheck size={15} aria-hidden="true" />
+                      <ShieldCheck size={14} aria-hidden="true" />
                       <span>{isAr ? "تسجيل الدخول عبر المتصفح" : "Sign In in Browser"}</span>
                     </button>
                     <button
                       type="button"
                       className="safi-btn safi-btn-ghost"
+                      style={{ padding: "6px 10px", fontSize: "12px", minHeight: "34px" }}
                       onClick={() => void onStartDesktopPkce("signup")}
                       disabled={busy}
                       data-desktop-pkce-signup="true"
                     >
-                      <UserPlus size={15} aria-hidden="true" />
+                      <UserPlus size={14} aria-hidden="true" />
                       <span>{isAr ? "إنشاء حساب عبر المتصفح" : "Sign Up in Browser"}</span>
                     </button>
                   </div>

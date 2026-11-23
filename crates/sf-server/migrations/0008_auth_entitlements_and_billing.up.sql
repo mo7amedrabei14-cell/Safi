@@ -39,14 +39,17 @@ CREATE INDEX idx_oauth_identities_user
     ON oauth_identities(user_id);
 
 -- Extend billing provider checks to support Paddle alongside Paymob and manual overrides.
+-- Migration 0003 named these constraints `subscriptions_provider_valid` and `billing_webhook_provider_valid`.
+ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_provider_valid;
 ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_provider_check;
 ALTER TABLE subscriptions
-    ADD CONSTRAINT subscriptions_provider_check
+    ADD CONSTRAINT subscriptions_provider_valid
     CHECK (provider IN ('paddle', 'paymob', 'manual', 'lemon_squeezy'));
 
+ALTER TABLE billing_webhook_events DROP CONSTRAINT IF EXISTS billing_webhook_provider_valid;
 ALTER TABLE billing_webhook_events DROP CONSTRAINT IF EXISTS billing_webhook_events_provider_check;
 ALTER TABLE billing_webhook_events
-    ADD CONSTRAINT billing_webhook_events_provider_check
+    ADD CONSTRAINT billing_webhook_provider_valid
     CHECK (provider IN ('paddle', 'paymob', 'manual', 'lemon_squeezy'));
 
 CREATE TABLE trial_claims (

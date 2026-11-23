@@ -94,7 +94,8 @@ export function App(): ReactNode {
       <Suspense fallback={null}>
         <ApplicationShell
           onReady={markApplicationReady}
-          introComplete={!introMounted || applicationReady}
+          introComplete={!introMounted}
+          showcaseUnderlayReady={!introMounted || applicationReady}
           initialVerificationToken={verificationToken}
           initialResetToken={resetToken}
         />

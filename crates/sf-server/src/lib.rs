@@ -180,7 +180,9 @@ impl AppState {
     #[must_use]
     pub fn with_config(auth: AuthService, config: ServerConfig) -> Self {
         let entitlements = EntitlementService::new();
-        let billing = BillingService::from_config(&config, entitlements.clone());
+        let coupons = CouponService::new();
+        let billing = BillingService::from_config(&config, entitlements.clone())
+            .with_coupons(coupons.clone());
         let owner_mfa = OwnerMfaService::new(
             config.totp_encryption_key,
             config.totp_key_version,
@@ -196,7 +198,7 @@ impl AppState {
             owner_mfa,
             entitlements,
             billing,
-            coupons: CouponService::new(),
+            coupons,
             desktop_auth: DesktopAuthService::new(),
             device_authority,
             templates_hub: TemplatesHubService::new(),
@@ -211,9 +213,11 @@ impl AppState {
         }
     }
 
-    /// Attach the PostgreSQL 18 SQLx control-plane repository (migrations `0007..0010`).
+    /// Attach the PostgreSQL 18 SQLx control-plane repository (migrations `0007..0013`)
+    /// and wire PostgreSQL directly into the financial billing ledger.
     #[must_use]
     pub fn with_pg_store(mut self, pg_store: PgControlPlaneStore) -> Self {
+        self.billing = self.billing.with_pg_store(pg_store.clone());
         self.pg_store = Some(pg_store);
         self
     }

@@ -2153,6 +2153,8 @@ dependencies = [
  "rand",
  "redis",
  "ring",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha1",
@@ -2161,10 +2163,12 @@ dependencies = [
  "subtle",
  "time",
  "tokio",
+ "tokio-rustls",
  "tower",
  "tracing",
  "url",
  "uuid",
+ "webpki-roots",
  "zeroize",
 ]
 

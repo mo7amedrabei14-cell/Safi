@@ -88,8 +88,30 @@ async function mockAuthRoute(page) {
   });
 }
 
+async function injectDesktopAuthMode(target) {
+  await target.addInitScript(() => {
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd) => {
+        if (cmd === "desktop_auth_status") {
+          return JSON.stringify({
+            mode: "unauthenticated",
+            canExecuteProtectedOps: false,
+            hasPreviouslyAuthenticated: false
+          });
+        }
+        return null;
+      }
+    };
+  });
+}
+
 async function signIn(page) {
-  await page.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 15_000 });
+  const modalVisible = await page.locator(".safi-auth-modal").isVisible().catch(() => false);
+  if (!modalVisible) {
+    // Public Showcase website does not force login modal on anonymous visitors.
+    await page.waitForSelector(".safi-shell", { state: "visible", timeout: 15_000 });
+    return;
+  }
   await page.fill('input[name="email"]', "tester@safidata.dev");
   await page.fill('input[name="password"]', "VerifyPass123!");
   await page.click('.safi-auth-modal button[type="submit"]');
@@ -390,10 +412,11 @@ try {
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 
   // =========================================================================
-  // 0. Single Auth Entrance Lifecycle Verification (EN, EN Reload, AR RTL, Reduced Motion, Tauri Desktop)
+  // 0. Single Auth Entrance Lifecycle Verification in Desktop Mode (EN, EN Reload, AR RTL, Reduced Motion)
   // =========================================================================
   {
     const enCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await injectDesktopAuthMode(enCtx);
     const { initial: enFirst, reload: enReload } = await runSingleEntranceProbe(enCtx, baseUrl, {
       testTabSwitch: true,
       testReload: true
@@ -406,6 +429,7 @@ try {
     await enCtx.close();
 
     const arCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await injectDesktopAuthMode(arCtx);
     await arCtx.addInitScript(() => {
       localStorage.setItem("safi.locale", "ar");
     });
@@ -425,6 +449,7 @@ try {
       viewport: { width: 1440, height: 900 },
       reducedMotion: "reduce"
     });
+    await injectDesktopAuthMode(rmSingleCtx);
     const rmSingle = await runSingleEntranceProbe(rmSingleCtx, baseUrl, {
       reducedMotion: true,
       testTabSwitch: true
@@ -432,11 +457,7 @@ try {
     await rmSingleCtx.close();
 
     const tauriCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    await tauriCtx.addInitScript(() => {
-      window.__TAURI_INTERNALS__ = {
-        invoke: async () => null
-      };
-    });
+    await injectDesktopAuthMode(tauriCtx);
     const tauriDesktop = await runSingleEntranceProbe(tauriCtx, baseUrl, { testTabSwitch: true });
     await tauriCtx.close();
 
@@ -448,6 +469,7 @@ try {
   // =========================================================================
   {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await injectDesktopAuthMode(ctx);
     const page = await ctx.newPage();
     const errors = [];
     page.on("pageerror", (err) => errors.push(err.message));
@@ -719,6 +741,7 @@ try {
   // =========================================================================
   {
     const rtlCtx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+    await injectDesktopAuthMode(rtlCtx);
     const rtlPage = await rtlCtx.newPage();
     await rtlPage.addInitScript(() => {
       localStorage.setItem("safi.locale", "ar");
@@ -756,17 +779,8 @@ try {
     await mockAuthRoute(mPage);
     await mPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await mPage.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 20_000 });
-    await mPage.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 10_000 });
-    await delay(350);
-    await mPage.locator('.safi-auth-tabs [role="tab"]:nth-child(2)').tap();
-    await delay(420);
-    await shot(mPage, "08-auth-mobile-390x844.png");
-    await mPage.locator('.safi-auth-tabs [role="tab"]:nth-child(1)').tap();
-    await delay(400);
-    await mPage.fill('input[name="email"]', "mobile@safidata.dev");
-    await mPage.fill('input[name="password"]', "MobilePass123!");
-    await mPage.locator('.safi-auth-modal button[type="submit"]').tap();
     await mPage.waitForSelector(".safi-shell", { state: "visible", timeout: 15_000 });
+    await delay(350);
     await mPage.locator('[data-safi-custom-scrollbar="true"] [data-scrollbar-arrow="down"]').tap();
     await delay(350);
     const mobileY = await mPage.evaluate(() => ({
@@ -809,6 +823,7 @@ try {
 
   {
     const rmCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+    await injectDesktopAuthMode(rmCtx);
     const rmPage = await rmCtx.newPage();
     await rmPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await rmPage.waitForSelector(".safi-auth-modal", { state: "visible", timeout: 15_000 });
@@ -849,6 +864,7 @@ try {
         hasTouch: vp.width < 500,
         isMobile: vp.width < 500
       });
+      await injectDesktopAuthMode(vpCtx);
       const vpPage = await vpCtx.newPage();
       if (vp.dir === "rtl") {
         await vpPage.addInitScript(() => localStorage.setItem("safi.locale", "ar"));

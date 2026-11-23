@@ -669,6 +669,37 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
         Uuid::now_v7().simple()
     ));
 
+    // Spin up a real local HTTP mock Paddle server so /v1/billing/checkout exercises real HTTP creation!
+    let mock_paddle_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock paddle");
+    let mock_paddle_addr = mock_paddle_listener.local_addr().expect("addr");
+    let mock_paddle_app = axum::Router::new().route(
+        "/transactions",
+        axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+            let txn_id = format!("txn_{}", Uuid::now_v7().simple());
+            let total = body["custom_data"]["expected_amount_minor"]
+                .as_u64()
+                .unwrap_or(2000);
+            axum::Json(json!({
+                "data": {
+                    "id": txn_id,
+                    "status": "ready",
+                    "currency_code": "USD",
+                    "checkout": { "url": format!("https://checkout.paddle.test/pay/{txn_id}") },
+                    "details": { "totals": { "total": total.to_string() } }
+                }
+            }))
+        }),
+    );
+    tokio::spawn(async move {
+        let _ = axum::serve(mock_paddle_listener, mock_paddle_app).await;
+    });
+
+    let mut cfg = test_config();
+    cfg.paddle_api_base_url = format!("http://{mock_paddle_addr}");
+    cfg.paddle_price_individual_monthly = Some("pri_ind_monthly_test".to_owned());
+
     let accounts_repo = Arc::new(TestAccountRepo::default());
     let mailer = Arc::new(TestEmailSender::default());
     let sessions_repo = Arc::new(InMemorySessionRepository::new());
@@ -677,7 +708,7 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
         sessions_repo.clone(),
         Arc::new(InMemoryAuthCache::new()),
     );
-    let state = AppState::with_config(auth, test_config())
+    let state = AppState::with_config(auth, cfg)
         .with_durable_journal(&journal_path, Some(sessions_repo.clone()))
         .await
         .expect("journal");
@@ -867,9 +898,9 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
     assert_eq!(prev_ok["discount_amount_minor"], json!(500));
     assert_eq!(prev_ok["final_amount_minor"], json!(1500));
 
-    // 3. 10-way concurrent coupon redemption race for max_redemptions=1 -> strictly 1 succeeds!
+    // 3. 10-way concurrent coupon redemption race (10 distinct idempotency keys) for max_redemptions=1 -> strictly 1 succeeds!
     let mut race = Vec::new();
-    for _ in 0..10 {
+    for i in 0..10 {
         let r = router.clone();
         let tok = bob_token.clone();
         race.push(tokio::spawn(async move {
@@ -884,7 +915,8 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
                     "user_id": Uuid::nil(),
                     "product": "individual_monthly",
                     "billing_country_iso2": "US",
-                    "coupon_code": "LAUNCH25"
+                    "coupon_code": "LAUNCH25",
+                    "idempotency_key": format!("bob-coupon-race-{i}")
                 })),
             )
             .await
@@ -892,11 +924,15 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
     }
     let mut succeeded = 0usize;
     let mut rejected_coupon = 0usize;
+    let mut winning_order_id: Option<String> = None;
+    let mut winning_txn_id: Option<String> = None;
     for h in race {
         let (st, val) = h.await.expect("join");
         if st == StatusCode::OK {
             assert_eq!(val["amount_minor"], json!(1500));
             assert_eq!(val["discount_amount_minor"], json!(500));
+            winning_order_id = val["order_id"].as_str().map(str::to_owned);
+            winning_txn_id = val["provider_order_ref"].as_str().map(str::to_owned);
             succeeded += 1;
         } else if val["code"] == json!("SF-PAY-005") {
             rejected_coupon += 1;
@@ -904,12 +940,18 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
     }
     assert_eq!(succeeded, 1);
     assert_eq!(rejected_coupon, 9);
+    let order_id = winning_order_id.expect("winning order id");
+    let txn_id = winning_txn_id.expect("winning txn id");
 
-    // 4. Signed Paddle activation webhook -> Bob becomes IndividualMonthly & AI call succeeds!
+    // 4. Signed Paddle activation webhook correlated to the real created order -> Bob becomes IndividualMonthly & AI call succeeds!
     let act_body = serde_json::to_vec(&json!({
         "event_id": "evt_bob_act_1",
         "event_type": "subscription.activated",
         "occurred_at_unix": now,
+        "order_id": order_id,
+        "transaction_id": txn_id,
+        "currency_code": "USD",
+        "price_id": "pri_ind_monthly_test",
         "workspace_id": bob_ws,
         "user_id": bob_uid,
         "product": "individual_monthly",
@@ -960,6 +1002,8 @@ async fn subscription_chargeback_coupons_concurrency_control_center_and_restart_
         "event_id": "evt_bob_cb_2",
         "event_type": "adjustment.chargeback",
         "occurred_at_unix": now + 5,
+        "order_id": order_id,
+        "transaction_id": txn_id,
         "workspace_id": bob_ws,
         "user_id": bob_uid,
         "product": "individual_monthly",

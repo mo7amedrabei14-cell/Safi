@@ -1443,7 +1443,7 @@ fn main() {
             let store =
                 StudioStore::with_storage_dir_and_verifier(storage_dir, authority, verifier);
             store
-                .ensure_local_vault_key()
+                .ensure_local_vault_key_with_os_keystore(&NativeOsKeystore)
                 .map_err(std::io::Error::other)?;
             app.manage(store);
             tauri::WebviewWindowBuilder::new(
@@ -1468,6 +1468,72 @@ fn main() {
     if result.is_err() {
         // A graphical app has no console to report to; exit without a window.
         std::process::exit(1);
+    }
+}
+
+/// Platform OS-backed secret store for Desktop Vault Key custody (`SFK2`).
+///
+/// - Windows: Windows Credential Manager (DPAPI-protected under current OS user credential).
+/// - macOS: Apple Keychain Services.
+/// - Linux: Secret Service (`org.freedesktop.secrets`, pure-Rust crypto).
+#[derive(Debug, Default)]
+struct NativeOsKeystore;
+
+impl sf_desktop::vault::OsKeystoreProvider for NativeOsKeystore {
+    fn backend_name(&self) -> &'static str {
+        #[cfg(windows)]
+        {
+            "windows_credential_manager"
+        }
+        #[cfg(target_os = "macos")]
+        {
+            "macos_keychain"
+        }
+        #[cfg(target_os = "linux")]
+        {
+            "linux_secret_service"
+        }
+        #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+        {
+            "unsupported_os_keystore"
+        }
+    }
+
+    fn store_secret(
+        &self,
+        key_id: &str,
+        secret_hex: &str,
+    ) -> Result<(), sf_desktop::vault::OsKeystoreError> {
+        let entry = keyring::Entry::new("com.safidata.desktop.vault", key_id)
+            .map_err(|_| sf_desktop::vault::OsKeystoreError::Unavailable)?;
+        entry.set_password(secret_hex).map_err(|err| match err {
+            keyring::Error::NoStorageAccess(_) => sf_desktop::vault::OsKeystoreError::Locked,
+            keyring::Error::PlatformFailure(_) => sf_desktop::vault::OsKeystoreError::Unavailable,
+            _ => sf_desktop::vault::OsKeystoreError::BackendError,
+        })
+    }
+
+    fn load_secret(&self, key_id: &str) -> Result<String, sf_desktop::vault::OsKeystoreError> {
+        let entry = keyring::Entry::new("com.safidata.desktop.vault", key_id)
+            .map_err(|_| sf_desktop::vault::OsKeystoreError::Unavailable)?;
+        entry.get_password().map_err(|err| match err {
+            keyring::Error::NoEntry => sf_desktop::vault::OsKeystoreError::NotFound,
+            keyring::Error::NoStorageAccess(_) => sf_desktop::vault::OsKeystoreError::Locked,
+            keyring::Error::PlatformFailure(_) => sf_desktop::vault::OsKeystoreError::Unavailable,
+            _ => sf_desktop::vault::OsKeystoreError::BackendError,
+        })
+    }
+
+    fn delete_secret(&self, key_id: &str) -> Result<(), sf_desktop::vault::OsKeystoreError> {
+        let entry = keyring::Entry::new("com.safidata.desktop.vault", key_id)
+            .map_err(|_| sf_desktop::vault::OsKeystoreError::Unavailable)?;
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(keyring::Error::NoStorageAccess(_)) => {
+                Err(sf_desktop::vault::OsKeystoreError::Locked)
+            }
+            Err(_) => Err(sf_desktop::vault::OsKeystoreError::BackendError),
+        }
     }
 }
 
@@ -2331,5 +2397,57 @@ mod tests {
         );
         assert_eq!(drop_res, Err(AUTH_BACKEND_UNAVAILABLE_CODE.to_owned()));
         assert_eq!(post_drop_res, Err(AUTH_REQUIRED_CODE.to_owned()));
+    }
+
+    #[test]
+    fn native_os_keystore_sfk1_to_sfk2_migration_and_zero_secret_on_disk() {
+        use sf_desktop::vault::{
+            read_encrypted_or_migrate_legacy, write_encrypted_mandatory, OsKeystoreProvider,
+            VaultKey,
+        };
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let storage = dir.path().join("native-vault-test");
+
+        // 1. Seed a legacy SFK1 vault and encrypt a real project file.
+        let legacy_key =
+            VaultKey::load_or_init_for_storage_dir(&storage).expect("init legacy SFK1");
+        let enc_path = storage.join("q4_native.safi.enc");
+        let payload = br#"{"project":"NativeOSVaultProof","rows":42}"#;
+        write_encrypted_mandatory(&enc_path, None, Some(&legacy_key), payload)
+            .expect("encrypt with SFK1");
+
+        // 2. Migrate SFK1 -> SFK2 using the REAL native OS keystore (Windows Credential Manager on Windows).
+        let native_ks = super::NativeOsKeystore;
+        let migrated_key = VaultKey::load_or_init_with_os_keystore(&storage, &native_ks)
+            .expect("migrate SFK1 -> SFK2 in native OS keystore");
+        assert_eq!(migrated_key.as_bytes(), legacy_key.as_bytes());
+
+        // 3. Verify vault.master.key is now SFK2 and does NOT contain the raw secret!
+        let key_file = storage.join(".keystore").join("vault.master.key");
+        let on_disk = std::fs::read(&key_file).expect("read SFK2");
+        assert_eq!(&on_disk[0..4], b"SFK2");
+        let id_len = usize::from(u16::from_be_bytes([on_disk[20], on_disk[21]]));
+        let key_id = std::str::from_utf8(&on_disk[22..22 + id_len])
+            .expect("utf8 key_id")
+            .to_owned();
+        let stored_hex = native_ks
+            .load_secret(&key_id)
+            .expect("load secret from real OS keystore");
+        assert!(!String::from_utf8_lossy(&on_disk).contains(&stored_hex));
+
+        // 4. Reload key directly from SFK2 + real OS keystore and decrypt original .safi.enc file!
+        let reloaded_key = VaultKey::load_or_init_with_os_keystore(&storage, &native_ks)
+            .expect("reload SFK2 from real OS keystore");
+        assert_eq!(reloaded_key.as_bytes(), legacy_key.as_bytes());
+        let decrypted = read_encrypted_or_migrate_legacy(&enc_path, None, Some(&reloaded_key))
+            .expect("decrypt")
+            .expect("bytes");
+        assert_eq!(decrypted.as_slice(), payload);
+
+        // Clean up temporary test entry from the OS Credential Manager.
+        native_ks
+            .delete_secret(&key_id)
+            .expect("cleanup OS keystore test entry");
     }
 }

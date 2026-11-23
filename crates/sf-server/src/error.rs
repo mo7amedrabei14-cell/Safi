@@ -48,6 +48,8 @@ pub enum AuthError {
     BillingOperationFailed,
     CouponInvalid,
     ChargebackRevoked,
+    IdempotencyConflict,
+    PaymentReconciliationRequired,
     SyncEnvelopeInvalid,
     SyncVersionConflict,
     ShareLinkInvalid,
@@ -98,6 +100,8 @@ impl AuthError {
             Self::BillingOperationFailed => "SF-PAY-004",
             Self::CouponInvalid => "SF-PAY-005",
             Self::ChargebackRevoked => "SF-PAY-006",
+            Self::IdempotencyConflict => "SF-PAY-007",
+            Self::PaymentReconciliationRequired => "SF-PAY-008",
             Self::SyncEnvelopeInvalid => "SF-SYN-001",
             Self::SyncVersionConflict => "SF-SYN-002",
             Self::ShareLinkInvalid => "SF-SYN-003",
@@ -134,6 +138,7 @@ impl AuthError {
             | Self::OwnerTotpKeyMissing
             | Self::OfflineReadOnlyRequired
             | Self::BillingNotConfigured
+            | Self::PaymentReconciliationRequired
             | Self::OrgSsoNotConfigured
             | Self::AiProviderNotConfigured => StatusCode::SERVICE_UNAVAILABLE,
             Self::InvalidRequest
@@ -146,9 +151,10 @@ impl AuthError {
             | Self::SyncEnvelopeInvalid
             | Self::OrgMinSeatsRequired
             | Self::DatasetLimitExceeded => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::DuplicateAccount | Self::OwnerBootstrapSealed | Self::SyncVersionConflict => {
-                StatusCode::CONFLICT
-            }
+            Self::DuplicateAccount
+            | Self::OwnerBootstrapSealed
+            | Self::SyncVersionConflict
+            | Self::IdempotencyConflict => StatusCode::CONFLICT,
             Self::RateLimited
             | Self::OwnerMfaLocked
             | Self::QuotaExceeded
@@ -206,6 +212,10 @@ impl AuthError {
             Self::BillingOperationFailed => "تعذّر تنفيذ عملية الفوترة المطلوبة",
             Self::CouponInvalid => "رمز الخصم غير صالح أو منتهي الصلاحية أو غير مؤهل",
             Self::ChargebackRevoked => "تم تسجيل نزاع دفع (Chargeback) وإيقاف الاشتراك",
+            Self::IdempotencyConflict => "تعارض في مفتاح عدم التكرار لطلب الدفع",
+            Self::PaymentReconciliationRequired => {
+                "يتطلب طلب الدفع مطابقة الحالة مع مزود الدفع قبل إعادة المحاولة"
+            }
             Self::SyncEnvelopeInvalid => "حزمة المزامنة المشفرة غير صالحة أو تعرضت للتعديل",
             Self::SyncVersionConflict => "تعارض في إصدار المزامنة",
             Self::ShareLinkInvalid => "رابط المشاركة المشفر منتهي الصلاحية أو ملغى",

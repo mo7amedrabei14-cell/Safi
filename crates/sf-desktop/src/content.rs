@@ -172,6 +172,84 @@ pub fn validate_desktop_auth_external_url(
     }
 }
 
+/// Validates a Desktop-to-Website billing handoff URL before the Tauri shell opens it in the
+/// user's default OS browser.
+///
+/// Only permits exact-origin `/billing?handoff=sfbh_...&state=...` URLs matching `allowed_origin`
+/// (either the compiled HTTPS `SAFI_API_BASE_URL` or a loopback dev/test origin when explicitly
+/// passed). Strictly rejects any access token, session token, extra query param, fragment, or
+/// arbitrary host (`SF-SYS-009`).
+///
+/// # Errors
+/// Returns [`DesktopErrorCode::ExternalLinkBlocked`] (`SF-SYS-009`) on any violation.
+pub fn validate_desktop_billing_external_url(
+    raw: &str,
+    allowed_origin: &str,
+) -> Result<(), DesktopError> {
+    let code = DesktopErrorCode::ExternalLinkBlocked;
+    validate_shape(raw, code)?;
+    let lower = raw.to_ascii_lowercase();
+    if contains_any(&lower, &FORBIDDEN_SCHEMES, &FORBIDDEN_SEQUENCES) {
+        return Err(deny(code));
+    }
+    let origin = allowed_origin.trim().trim_end_matches('/');
+    if origin.is_empty() {
+        return Err(deny(code));
+    }
+    let is_https = origin.starts_with("https://");
+    let is_loopback_http =
+        origin.starts_with("http://127.0.0.1:") || origin.starts_with("http://localhost:");
+    if !is_https && !is_loopback_http {
+        return Err(deny(code));
+    }
+    let prefix = format!("{origin}/billing?");
+    let Some(query) = raw.strip_prefix(&prefix) else {
+        return Err(deny(code));
+    };
+    if query.contains('#') {
+        return Err(deny(code));
+    }
+
+    let mut handoff_ok = false;
+    let mut state_ok = false;
+    let is_token_chars = |s: &str| {
+        s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    };
+
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            return Err(deny(code));
+        };
+        match key {
+            "handoff" => {
+                if handoff_ok
+                    || !value.starts_with("sfbh_")
+                    || !(24..=160).contains(&value.len())
+                    || !is_token_chars(value)
+                {
+                    return Err(deny(code));
+                }
+                handoff_ok = true;
+            }
+            "state" => {
+                if state_ok || !(16..=256).contains(&value.len()) || !is_token_chars(value) {
+                    return Err(deny(code));
+                }
+                state_ok = true;
+            }
+            // Reject any token, session, redirect, or unexpected query parameter in URLs.
+            _ => return Err(deny(code)),
+        }
+    }
+
+    if handoff_ok && state_ok {
+        Ok(())
+    } else {
+        Err(deny(code))
+    }
+}
+
 fn validate_shape(raw: &str, code: DesktopErrorCode) -> Result<(), DesktopError> {
     if raw.is_empty() || raw.len() > MAX_URL_LEN || raw != raw.trim() {
         return Err(deny(code));
@@ -328,6 +406,37 @@ mod tests {
                     .map_err(DesktopError::code),
                 Err(DesktopErrorCode::ExternalLinkBlocked),
                 "expected invalid desktop auth URL to be blocked: {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn validates_desktop_billing_handoff_external_urls_strictly() {
+        assert!(validate_desktop_billing_external_url(
+            "https://safidata.app/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_1234567890abcdef",
+            "https://safidata.app"
+        )
+        .is_ok());
+        assert!(validate_desktop_billing_external_url(
+            "http://127.0.0.1:4173/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_1234567890abcdef",
+            "http://127.0.0.1:4173"
+        )
+        .is_ok());
+
+        for bad in [
+            "https://evil.example/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_1234567890abcdef",
+            "https://safidata.app/billing?handoff=sfs_leaked_session_token_1234567890&state=state_1234567890abcdef",
+            "https://safidata.app/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_1234567890abcdef&token=sfs_bad",
+            "https://safidata.app/?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_1234567890abcdef",
+            "https://safidata.app/billing?handoff=sfbh_short&state=state_1234567890abcdef",
+            "https://safidata.app/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=short",
+            "https://safidata.app/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_1234567890abcdef#frag",
+        ] {
+            assert_eq!(
+                validate_desktop_billing_external_url(bad, "https://safidata.app")
+                    .map_err(DesktopError::code),
+                Err(DesktopErrorCode::ExternalLinkBlocked),
+                "expected invalid desktop billing URL to be blocked: {bad}"
             );
         }
     }

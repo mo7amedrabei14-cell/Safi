@@ -991,6 +991,7 @@ export interface DesktopDeepLinkAction {
   readonly state?: string;
   readonly token?: string;
   readonly id?: string;
+  readonly order_id?: string | null;
   readonly tab?: string;
 }
 
@@ -1017,6 +1018,14 @@ export async function openDesktopExternalAuthUrl(
   url: string
 ): Promise<{ readonly opened: boolean }> {
   const raw = await call("desktop_open_external_auth_url", { url });
+  return JSON.parse(raw) as { readonly opened: boolean };
+}
+
+/** Launches the OS default external browser strictly for a validated `/billing?handoff=...&state=...` URL. */
+export async function openDesktopExternalBillingUrl(
+  url: string
+): Promise<{ readonly opened: boolean }> {
+  const raw = await call("desktop_open_external_billing_url", { url });
   return JSON.parse(raw) as { readonly opened: boolean };
 }
 

@@ -22,6 +22,7 @@
 //!   with idempotent `refund_request_key`, honoring the 3-day window + statutory override, and only
 //!   revoking entitlements once the provider confirms the refund.
 
+pub mod handoff;
 pub mod pg_ledger;
 pub mod provider_http;
 

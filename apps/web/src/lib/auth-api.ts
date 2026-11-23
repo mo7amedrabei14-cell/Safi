@@ -104,6 +104,10 @@ function authApiBaseUrl(): string {
   return resolvedBase;
 }
 
+export function getDefaultAuthApiBaseUrl(): string {
+  return authApiBaseUrl();
+}
+
 export class SafiAuthApiError extends Error {
   readonly status: number;
   readonly code: string | null;

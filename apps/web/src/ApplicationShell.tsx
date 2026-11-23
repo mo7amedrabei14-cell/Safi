@@ -52,6 +52,7 @@ import {
 import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { OwnerWebPortal } from "./pages/OwnerWebPortal";
 import { DesktopBrowserAuthPage } from "./pages/DesktopBrowserAuthPage";
+import { BillingPortalPage } from "./pages/BillingPortalPage";
 import { canAnimate } from "./components/ui/motion-preference";
 import { postSafiHeartbeat, SafiAuthApiError } from "./lib/auth-api";
 import { getSafiDeviceIdentity } from "./lib/device-identity";
@@ -69,6 +70,7 @@ export function renderStudio(
     readonly sessionToken?: string | null;
     readonly isOwner?: boolean;
     readonly readOnlyOffline?: boolean;
+    readonly entitlementRefreshNonce?: number;
     readonly onRevalidateOnline?: () => void;
   }
 ): ReactNode {
@@ -122,6 +124,7 @@ export function renderStudio(
           lang={lang}
           sessionToken={sessionToken}
           readOnlyOffline={readOnlyOffline}
+          entitlementRefreshNonce={options?.entitlementRefreshNonce ?? 0}
           onRevalidateOnline={options?.onRevalidateOnline}
         />
       ) : (
@@ -196,13 +199,17 @@ export function ApplicationShell({
   const [revocationNotice, setRevocationNotice] = useState<string | null>(null);
   const [pkcePending, setPkcePending] = useState<PendingDesktopPkceFlow | null>(null);
   const [pkceError, setPkceError] = useState<string | null>(null);
-  const [browserRoute, setBrowserRoute] = useState<"showcase" | "owner" | "desktop-auth">(() => {
+  const [entitlementRefreshNonce, setEntitlementRefreshNonce] = useState(0);
+  const [browserRoute, setBrowserRoute] = useState<
+    "showcase" | "owner" | "desktop-auth" | "billing"
+  >(() => {
     if (typeof window === "undefined" || isDesktopRuntime()) {
       return "showcase";
     }
     const path = window.location.pathname.replace(/\/+$/, "").toLowerCase();
     if (path === "/owner") return "owner";
     if (path === "/auth/desktop") return "desktop-auth";
+    if (path === "/billing") return "billing";
     return "showcase";
   });
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -561,6 +568,34 @@ export function ApplicationShell({
     };
   }, [desktopRuntime, pkcePending, bindSessionAndUnlock, lang]);
 
+  // Poll `take_pending_deep_link` while authenticated in Desktop for `safi://billing` return
+  // notifications, then independently refetch authoritative entitlements via `GET /v1/entitlements/me`
+  // (NEVER trusting the deep link as proof of payment!).
+  useEffect(() => {
+    if (!desktopRuntime || !hasActiveSession || pkcePending !== null) return;
+    let active = true;
+    const pollBillingReturn = async (): Promise<void> => {
+      if (!active) return;
+      try {
+        const link = await takePendingDeepLink();
+        if (!active || link === null) return;
+        if (link.action === "billing_return") {
+          setEntitlementRefreshNonce((prev) => prev + 1);
+          void revalidateOnlineAccess();
+        }
+      } catch {
+        // Ignore transient poll errors.
+      }
+    };
+    const timer = window.setInterval(() => {
+      void pollBillingReturn();
+    }, 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [desktopRuntime, hasActiveSession, pkcePending, revalidateOnlineAccess]);
+
   const authPortal = (
     <AuthModal
       open={authModalOpen}
@@ -640,6 +675,31 @@ export function ApplicationShell({
         >
           <main id="safi-main" className="safi-container safi-stage">
             <DesktopBrowserAuthPage lang={lang} />
+          </main>
+        </div>
+      </>
+    );
+  }
+
+  if (!desktopRuntime && browserRoute === "billing") {
+    return (
+      <>
+        <AmbientBackground />
+        <div
+          className="safi-shell"
+          dir={lang === "ar" ? "rtl" : "ltr"}
+          data-runtime="billing-web-portal"
+        >
+          <main id="safi-main" className="safi-container safi-stage">
+            <BillingPortalPage
+              lang={lang}
+              onBackToShowcase={() => {
+                if (typeof window !== "undefined") {
+                  window.history.pushState({}, "", "/");
+                }
+                setBrowserRoute("showcase");
+              }}
+            />
           </main>
         </div>
       </>
@@ -735,6 +795,7 @@ export function ApplicationShell({
                 sessionToken,
                 isOwner: ownerAccount,
                 readOnlyOffline: offlineReadOnly,
+                entitlementRefreshNonce,
                 onRevalidateOnline: () => void revalidateOnlineAccess()
               })}
             </div>

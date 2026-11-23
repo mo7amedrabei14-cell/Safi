@@ -15,6 +15,7 @@ import {
   Ban,
   BarChart3,
   BrainCircuit,
+  Crown,
   Download,
   FileSpreadsheet,
   FileText,
@@ -111,6 +112,7 @@ import { DashboardChartsView } from "./components/DashboardChartsView";
 import { DesktopDecisionEnginePanel } from "./components/DesktopDecisionEnginePanel";
 import { DesktopLocalSearchPanel } from "./components/DesktopLocalSearchPanel";
 import { DesktopRecipeLibraryPanel } from "./components/DesktopRecipeLibraryPanel";
+import { DesktopUpgradeModal } from "./DesktopUpgradeModal";
 import { DesktopWorkflowMemoryPanel } from "./components/DesktopWorkflowMemoryPanel";
 import {
   DeliverableExportModal,
@@ -179,6 +181,7 @@ export interface DesktopStudioProps {
   readonly lang?: SafiLang;
   readonly sessionToken?: string | null;
   readonly readOnlyOffline?: boolean;
+  readonly entitlementRefreshNonce?: number;
   readonly onRevalidateOnline?: (() => void) | undefined;
 }
 
@@ -186,10 +189,12 @@ export function DesktopStudio({
   lang = "en",
   sessionToken = null,
   readOnlyOffline = false,
+  entitlementRefreshNonce = 0,
   onRevalidateOnline
 }: DesktopStudioProps): ReactNode {
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const desktop = isDesktopRuntime();
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [activeDesktopUtility, setActiveDesktopUtility] = useState<
     "none" | "local-search" | "recipe-library" | "workflow-memory" | "decision-engine"
   >("none");
@@ -948,6 +953,14 @@ export function DesktopStudio({
           <ShieldCheck size={16} aria-hidden="true" />{" "}
           {L("محرك القرار الأمثل", "Optimal Decision Engine")}
         </button>
+        <button
+          type="button"
+          onClick={() => setUpgradeModalOpen(true)}
+          disabled={readOnlyOffline}
+          data-testid="desktop-open-upgrade-modal"
+        >
+          <Crown size={16} aria-hidden="true" /> {L("الخطة والترقية", "Plan & Upgrade")}
+        </button>
         {analysisProgress ? (
           <button
             type="button"
@@ -984,6 +997,14 @@ export function DesktopStudio({
         lastStatus={exportStatus}
         onClose={() => setExportModalOpen(false)}
         onExportFormat={handleExportDeliverable}
+      />
+
+      <DesktopUpgradeModal
+        open={upgradeModalOpen}
+        lang={lang}
+        sessionToken={sessionToken}
+        refreshNonce={entitlementRefreshNonce}
+        onClose={() => setUpgradeModalOpen(false)}
       />
 
       {recalculating ? (

@@ -40,6 +40,13 @@ pub enum DeepLinkAction {
         /// Cryptographically random state echoed by the browser flow.
         state: String,
     },
+    /// Notification that the user returned from the Website Billing Portal (`safi://billing` or
+    /// `safi://billing?order_id=<uuid>`). NEVER treated as proof of payment — Desktop MUST
+    /// independently refetch authoritative entitlements via `GET /v1/entitlements/me`.
+    BillingReturn {
+        /// Optional internal order UUID for correlation only.
+        order_id: Option<String>,
+    },
 }
 
 /// Settings sections a deep link may target.
@@ -117,8 +124,43 @@ pub fn parse(raw: &str) -> Result<DeepLinkAction, DesktopError> {
             let (code, state) = auth_callback_params(query)?;
             Ok(DeepLinkAction::AuthCallback { code, state })
         }
+        "billing" => {
+            let order_id = billing_return_params(query)?;
+            Ok(DeepLinkAction::BillingReturn { order_id })
+        }
         _ => Err(action_denied()),
     }
+}
+
+fn billing_return_params(query: Option<&str>) -> Result<Option<String>, DesktopError> {
+    let Some(query) = query else {
+        return Ok(None);
+    };
+    if query.is_empty() {
+        return Err(parameter_denied());
+    }
+    let mut order_id: Option<String> = None;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').ok_or_else(parameter_denied)?;
+        if value.is_empty() || value.len() > 64 {
+            return Err(parameter_denied());
+        }
+        let decoded = percent_decode(value)?;
+        match key {
+            "order_id" if order_id.is_none() => {
+                // Canonical UUID format only (`36` chars: hex + hyphens).
+                if decoded.len() != 36
+                    || !decoded.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+                {
+                    return Err(parameter_denied());
+                }
+                order_id = Some(decoded);
+            }
+            // Reject spoofed `status=paid`, `token=...`, or any unexpected parameter!
+            _ => return Err(parameter_denied()),
+        }
+    }
+    Ok(order_id)
 }
 
 fn auth_callback_params(query: Option<&str>) -> Result<(String, String), DesktopError> {
@@ -378,6 +420,32 @@ mod tests {
             assert!(
                 parse(raw).is_err(),
                 "expected malformed deep link to be rejected: {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_billing_return_deep_link_and_rejects_spoofed_status_params() {
+        assert_eq!(
+            parse("safi://billing"),
+            Ok(DeepLinkAction::BillingReturn { order_id: None })
+        );
+        assert_eq!(
+            parse("safi://billing?order_id=019a0000-0000-7000-8000-000000000001"),
+            Ok(DeepLinkAction::BillingReturn {
+                order_id: Some("019a0000-0000-7000-8000-000000000001".to_owned())
+            })
+        );
+        for bad in [
+            "safi://billing?status=paid",
+            "safi://billing?token=sfs_secret",
+            "safi://billing?order_id=019a0000-0000-7000-8000-000000000001&paid=true",
+            "safi://billing?order_id=not-a-uuid",
+        ] {
+            assert_eq!(
+                parse(bad).map_err(DesktopError::code),
+                Err(DesktopErrorCode::DeepLinkParameterDenied),
+                "expected spoofed billing deep link to be rejected: {bad}"
             );
         }
     }

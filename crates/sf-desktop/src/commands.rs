@@ -20,10 +20,11 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 82] = [
+pub const ALLOWED_COMMANDS: [&str; 83] = [
     "app_info",
     "take_pending_deep_link",
     "desktop_open_external_auth_url",
+    "desktop_open_external_billing_url",
     "pick_input_file",
     "pick_output_file",
     "pick_capsule_output_file",

@@ -384,6 +384,40 @@ fn desktop_open_external_auth_url(url: String) -> Result<serde_json::Value, Stri
     Ok(serde_json::json!({ "opened": true }))
 }
 
+/// Launches the OS default external browser strictly for a validated SafiData Desktop-to-Website
+/// billing handoff URL (`/billing?handoff=sfbh_...&state=...`).
+///
+/// Desktop NEVER processes card payments internally. Rejects any URL whose origin does not match
+/// `SAFI_API_BASE_URL` (or loopback dev origin in debug builds), whose path is not `/billing`,
+/// or whose query params contain tokens or anything outside `handoff` and `state` (`SF-SYS-009`).
+#[tauri::command]
+fn desktop_open_external_billing_url(url: String) -> Result<serde_json::Value, String> {
+    enforce_ipc_command(
+        "desktop_open_external_billing_url",
+        sf_desktop::ipc_payload_len!(("url", &url)),
+    )?;
+    let configured_origin = option_env!("SAFI_API_BASE_URL")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            if cfg!(debug_assertions) {
+                if url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:") {
+                    url.find("/billing?").map(|idx| &url[..idx])
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| AUTH_CONFIG_MISSING_CODE.to_owned())?;
+    sf_desktop::content::validate_desktop_billing_external_url(&url, configured_origin)
+        .map_err(|err| err.code().as_str().to_owned())?;
+
+    launch_os_browser(&url).map_err(|_| "SF-SYS-009".to_owned())?;
+    Ok(serde_json::json!({ "opened": true }))
+}
+
 fn launch_os_browser(validated_url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -1319,6 +1353,7 @@ fn studio_generated_handler(
         app_info,
         take_pending_deep_link,
         desktop_open_external_auth_url,
+        desktop_open_external_billing_url,
         pick_input_file,
         pick_output_file,
         pick_capsule_output_file,

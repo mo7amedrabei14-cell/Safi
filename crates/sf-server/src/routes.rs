@@ -26,14 +26,19 @@ use crate::auth::account::{
 };
 use crate::auth::identity::normalize_phone;
 use crate::auth::middleware::{
-    require_any_credential, require_api_key, require_owner_session, require_session,
-    AnyCredentialGuard, ApiKeyGuard, OwnerSessionGuard, SessionGuard,
+    require_any_credential, require_api_key, require_billing_session, require_owner_session,
+    require_session, AnyCredentialGuard, ApiKeyGuard, BillingSessionGuard, OwnerSessionGuard,
+    SessionGuard,
 };
 use crate::auth::session::{parse_session_token, token_hash, SessionView};
 use crate::auth::{unix_now, AuthMethod, AuthenticatedSession, Principal, Scope};
+use crate::billing::handoff::{
+    RedeemBillingHandoffRequest, RedeemedBillingHandoff, StartBillingHandoffRequest,
+    StartBillingHandoffResponse,
+};
 use crate::billing::{
-    resolve_provider_and_price, BillingEventRecord, BillingRevenueSummary, CheckoutRequest,
-    CheckoutResponse, InvoiceRecord,
+    resolve_provider_and_price, BillingEventRecord, BillingOrderRecord, BillingRevenueSummary,
+    CheckoutRequest, CheckoutResponse, InvoiceRecord,
 };
 use crate::config::ReadinessReport;
 use crate::coupons::{
@@ -3167,6 +3172,220 @@ pub async fn billing_invoices(
     )
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BillingWebLoginRequest {
+    pub email: String,
+    pub password: String,
+    #[serde(default)]
+    pub user_agent_hint: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BillingWebLoginResponse {
+    pub token: String,
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub workspace_id: Uuid,
+    pub email: String,
+    pub session_type: &'static str,
+    pub expires_at: i64,
+}
+
+/// `POST /v1/billing/web/login` — Website Billing Portal authentication (`sfb_*`).
+/// Authenticates email/password WITHOUT revoking or counting against the user's single active
+/// Desktop installation (`sfs_*`). The issued `sfb_*` token is strictly scoped to billing &
+/// entitlement-read endpoints and rejected by Desktop Studio / AI / Org / Sync / Owner routes.
+pub async fn billing_web_login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<BillingWebLoginRequest>,
+) -> Result<(StatusCode, Json<BillingWebLoginResponse>), AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "billing:web_login",
+        &headers,
+        Some(&body.email),
+        30,
+        15,
+    )
+    .await?;
+    let service: &AccountAuthService = state
+        .account_auth
+        .as_deref()
+        .ok_or(AuthError::BackendUnavailable)?;
+    let (user_id, workspace_id, email) = service
+        .verify_credentials_only(&body.email, &body.password)
+        .await?;
+    if state
+        .control_plane
+        .read()
+        .await
+        .managed_accounts
+        .get(&user_id)
+        .is_some_and(|a| a.suspended)
+    {
+        return Err(AuthError::AccountSuspended);
+    }
+    let now = unix_now();
+    let (token, session_id, expires_at) = state
+        .billing_handoff
+        .issue_billing_web_session_at(
+            user_id,
+            workspace_id,
+            body.user_agent_hint.as_deref().unwrap_or("billing-web"),
+            now,
+        )
+        .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(BillingWebLoginResponse {
+            token,
+            session_id,
+            user_id,
+            workspace_id,
+            email,
+            session_type: "billing_web",
+            expires_at,
+        }),
+    ))
+}
+
+/// `DELETE /v1/billing/web/session` — revoke the current Website Billing Portal `sfb_*` session.
+pub async fn billing_web_logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<StatusCode, AuthError> {
+    if let Some(tok) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+    {
+        state
+            .billing_handoff
+            .revoke_billing_web_session(tok)
+            .await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /v1/billing/handoff/start` — Authenticated Desktop (`sfs_*`) initiates a short-lived
+/// (180s), single-use Desktop-to-Website billing handoff returning `/billing?handoff=sfbh_...&state=...`.
+/// ZERO access tokens or reusable credentials ever appear in the returned URL.
+pub async fn billing_handoff_start(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(body): Json<StartBillingHandoffRequest>,
+) -> Result<(StatusCode, Json<StartBillingHandoffResponse>), AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "billing:handoff_start",
+        &headers,
+        Some(&session.principal.workspace_id.to_string()),
+        60,
+        30,
+    )
+    .await?;
+    let origin = state
+        .config
+        .api_base_url
+        .as_deref()
+        .unwrap_or("https://safidata.app");
+    let resp = state
+        .billing_handoff
+        .start_handoff_at(
+            session.principal.user_id,
+            session.principal.workspace_id,
+            &body,
+            origin,
+            unix_now(),
+        )
+        .await?;
+    Ok((StatusCode::CREATED, Json(resp)))
+}
+
+/// `POST /v1/billing/handoff/redeem` — Authenticated Website `/billing` page redeems the
+/// single-use Desktop handoff bound strictly to the matching `(user_id, workspace_id)` and
+/// receives the authoritative server-resolved plan, seats, currency, and price from `config/business.json`.
+pub async fn billing_handoff_redeem(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(body): Json<RedeemBillingHandoffRequest>,
+) -> Result<Json<RedeemedBillingHandoff>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "billing:handoff_redeem",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        60,
+        30,
+    )
+    .await?;
+    let redeemed = state
+        .billing_handoff
+        .redeem_handoff_at(
+            session.principal.user_id,
+            session.principal.workspace_id,
+            &body.handoff_code,
+            &body.state,
+            unix_now(),
+        )
+        .await?;
+    Ok(Json(redeemed))
+}
+
+#[derive(Debug, Serialize)]
+pub struct BillingOrderStatusResponse {
+    pub order_id: Uuid,
+    pub order_state: crate::billing::PaymentOrderState,
+    pub provider: crate::billing::BillingProvider,
+    pub product: crate::billing::CheckoutProduct,
+    pub seats: u32,
+    pub currency: crate::billing::BillingCurrency,
+    pub original_amount_minor: u64,
+    pub discount_amount_minor: u64,
+    pub expected_amount_minor: u64,
+    pub checkout_url: Option<String>,
+    pub paid_at: Option<i64>,
+    pub updated_at: i64,
+}
+
+impl From<BillingOrderRecord> for BillingOrderStatusResponse {
+    fn from(o: BillingOrderRecord) -> Self {
+        Self {
+            order_id: o.id,
+            order_state: o.state,
+            provider: o.provider,
+            product: o.product,
+            seats: o.seats,
+            currency: o.currency,
+            original_amount_minor: o.original_amount_minor,
+            discount_amount_minor: o.discount_amount_minor,
+            expected_amount_minor: o.expected_amount_minor,
+            checkout_url: o.checkout_url,
+            paid_at: o.paid_at,
+            updated_at: o.updated_at,
+        }
+    }
+}
+
+/// `GET /v1/billing/orders/{order_id}` — authoritative server-confirmed order status for the
+/// authenticated workspace ONLY (enforces strict tenant isolation; zero IDOR).
+pub async fn billing_get_order_status(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Path(order_id): Path<Uuid>,
+) -> Result<Json<BillingOrderStatusResponse>, AuthError> {
+    let Some(order) = state.billing.get_order(order_id).await? else {
+        return Err(AuthError::InvalidRequest);
+    };
+    if order.workspace_id != session.principal.workspace_id {
+        return Err(AuthError::InsufficientScope);
+    }
+    Ok(Json(BillingOrderStatusResponse::from(order)))
+}
+
 /// `POST /v1/billing/webhooks/paddle` — Paddle HMAC-SHA256 verified webhook endpoint.
 pub async fn paddle_webhook(
     State(state): State<AppState>,
@@ -3515,6 +3734,28 @@ pub fn build_router(state: AppState) -> Router {
             require_api_key,
         ));
 
+    let billing_handoff = state.billing_handoff.clone();
+
+    let billing_session_routes = Router::new()
+        .route("/v1/entitlements/me", get(get_my_entitlements))
+        .route("/v1/billing/handoff/redeem", post(billing_handoff_redeem))
+        .route("/v1/billing/coupons/preview", post(billing_preview_coupon))
+        .route("/v1/billing/checkout", post(billing_checkout))
+        .route(
+            "/v1/billing/orders/{order_id}",
+            get(billing_get_order_status),
+        )
+        .route("/v1/billing/invoices", get(billing_invoices))
+        .route("/v1/billing/web/session", delete(billing_web_logout))
+        .route_layer(from_fn_with_state(
+            BillingSessionGuard {
+                auth: auth.clone(),
+                billing_handoff,
+                required_scope: Scope::Read,
+            },
+            require_billing_session,
+        ));
+
     let session_only = Router::new()
         .route(
             "/v1/auth/sessions/current",
@@ -3523,13 +3764,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/auth/email/change", post(change_account_email))
         .route("/v1/auth/phone/request-otp", post(request_phone_otp))
         .route("/v1/auth/phone/verify-otp", post(verify_phone_otp))
-        // Entitlements & billing user endpoints
-        .route("/v1/entitlements/me", get(get_my_entitlements))
+        // Entitlements consumption, trial claim & Desktop-initiated billing handoff (sfs_* ONLY)
         .route("/v1/entitlements/consume", post(consume_entitlement))
         .route("/v1/entitlements/trial/claim", post(claim_trial))
-        .route("/v1/billing/coupons/preview", post(billing_preview_coupon))
-        .route("/v1/billing/checkout", post(billing_checkout))
-        .route("/v1/billing/invoices", get(billing_invoices))
+        .route("/v1/billing/handoff/start", post(billing_handoff_start))
         // Regular-user scoped central services (official templates, premium recipe check, community submission)
         .route("/v1/templates/official", get(list_official_templates_for_user))
         .route(
@@ -3740,12 +3978,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/auth/oauth/{provider}/start", get(oauth_start))
         .route("/v1/announcements/public", get(list_public_announcements))
         .route("/v1/billing/status", get(billing_status))
+        .route("/v1/billing/web/login", post(billing_web_login))
         .route("/v1/billing/webhooks/paddle", post(paddle_webhook))
         .route("/v1/billing/webhooks/paymob", post(paymob_webhook))
         .route("/v1/sync/share-links/{token}", get(sync_resolve_share_link))
         .route("/v1/updates/latest", get(get_latest_update))
         .merge(any_credential)
         .merge(api_key_only)
+        .merge(billing_session_routes)
         .merge(session_only)
         .merge(owner_mfa_routes)
         .merge(owner_elevated_routes)

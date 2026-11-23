@@ -44,6 +44,7 @@ use uuid::Uuid;
 use auth::account::AccountAuthService;
 use auth::repository::InMemorySessionRepository;
 use auth::service::AuthService;
+use billing::handoff::BillingHandoffService;
 use billing::BillingService;
 use config::ServerConfig;
 use coupons::CouponService;
@@ -158,6 +159,7 @@ pub struct AppState {
     pub owner_mfa: OwnerMfaService,
     pub entitlements: EntitlementService,
     pub billing: BillingService,
+    pub billing_handoff: BillingHandoffService,
     pub coupons: CouponService,
     pub desktop_auth: DesktopAuthService,
     pub device_authority: DeviceAuthorityService,
@@ -187,6 +189,8 @@ impl AppState {
         let coupons = CouponService::new();
         let billing = BillingService::from_config(&config, entitlements.clone())
             .with_coupons(coupons.clone());
+        let billing_handoff =
+            BillingHandoffService::new().with_require_durable_pg(config.environment.is_strict());
         let owner_mfa = OwnerMfaService::new(
             config.totp_encryption_key,
             config.totp_key_version,
@@ -202,6 +206,7 @@ impl AppState {
             owner_mfa,
             entitlements,
             billing,
+            billing_handoff,
             coupons,
             desktop_auth: DesktopAuthService::new(),
             device_authority,
@@ -217,12 +222,13 @@ impl AppState {
         }
     }
 
-    /// Attach the PostgreSQL 18 SQLx control-plane repository (migrations `0007..0015`)
-    /// and wire PostgreSQL directly into BOTH entitlements/usage accounting AND the financial billing ledger.
+    /// Attach the PostgreSQL 18 SQLx control-plane repository (migrations `0007..0016`)
+    /// and wire PostgreSQL directly into entitlements/usage accounting, billing handoffs, and the financial ledger.
     #[must_use]
     pub fn with_pg_store(mut self, pg_store: PgControlPlaneStore) -> Self {
         self.entitlements = self.entitlements.with_pg_store(pg_store.clone());
         self.billing = self.billing.with_pg_store(pg_store.clone());
+        self.billing_handoff = self.billing_handoff.with_pg_store(pg_store.clone());
         self.pg_store = Some(pg_store);
         self
     }

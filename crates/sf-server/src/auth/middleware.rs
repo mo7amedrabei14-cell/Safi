@@ -12,6 +12,7 @@ use super::api_key::API_KEY_PREFIX;
 use super::service::AuthService;
 use super::session::SESSION_TOKEN_PREFIX;
 use super::{unix_now, AuthenticatedSession, Principal, Scope};
+use crate::billing::handoff::{BillingHandoffService, BILLING_WEB_TOKEN_PREFIX};
 use crate::desktop_auth::DesktopAuthService;
 use crate::error::AuthError;
 use crate::pg_store::PgControlPlaneStore;
@@ -38,6 +39,15 @@ pub struct OwnerSessionGuard {
     pub auth: Arc<AuthService>,
     pub desktop_auth: DesktopAuthService,
     pub pg_store: Option<PgControlPlaneStore>,
+    pub required_scope: Scope,
+}
+
+/// State for Website Billing Portal & entitlement-read routes accepting EITHER a Desktop `sfs_*`
+/// session OR a scoped Website Billing Portal `sfb_*` session (never revoking Desktop device).
+#[derive(Clone)]
+pub struct BillingSessionGuard {
+    pub auth: Arc<AuthService>,
+    pub billing_handoff: BillingHandoffService,
     pub required_scope: Scope,
 }
 
@@ -129,6 +139,29 @@ pub async fn require_owner_session(
                 .authenticate_owner_web_session(token, unix_now())
                 .await?
         }
+    } else if token.starts_with(SESSION_TOKEN_PREFIX) {
+        guard.auth.authenticate_session(token).await?
+    } else {
+        return Err(AuthError::InvalidCredentials);
+    };
+    enforce_scope(&session.principal, guard.required_scope)?;
+    request.extensions_mut().insert(session);
+    Ok(next.run(request).await)
+}
+
+/// Authenticate either a Desktop `sfs_*` session or a scoped Website Billing `sfb_*` session.
+/// `sfb_*` tokens are strictly rejected on Desktop Studio, Sync, Org, AI, and Owner routes.
+pub async fn require_billing_session(
+    State(guard): State<BillingSessionGuard>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, AuthError> {
+    let token = bearer_token(&request).ok_or(AuthError::InvalidCredentials)?;
+    let session = if token.starts_with(BILLING_WEB_TOKEN_PREFIX) {
+        guard
+            .billing_handoff
+            .authenticate_billing_web_session_at(token, unix_now())
+            .await?
     } else if token.starts_with(SESSION_TOKEN_PREFIX) {
         guard.auth.authenticate_session(token).await?
     } else {

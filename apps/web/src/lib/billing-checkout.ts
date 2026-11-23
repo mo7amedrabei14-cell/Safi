@@ -117,6 +117,65 @@ export interface ServerEntitlementVerification {
   readonly confirmed_paid: boolean;
   readonly effective_plan: string;
   readonly state: string;
+  readonly watermark_required?: boolean;
+  readonly operations_limit_per_month?: number | null;
+  readonly operations_used_this_month?: number;
+  readonly max_rows_per_file?: number | null;
+  readonly max_columns_per_file?: number | null;
+  readonly ai_enabled?: boolean;
+  readonly ai_calls_limit?: number;
+  readonly ai_calls_used?: number;
+  readonly teams_enabled?: boolean;
+  readonly seats?: number;
+  readonly operation_credits?: number;
+  readonly pay_per_file_tokens?: number;
+}
+
+export interface BillingOrderStatusResponse {
+  readonly order_id: string;
+  readonly order_state: PaymentOrderState;
+  readonly provider: "paddle" | "paymob" | "manual";
+  readonly product: CheckoutProduct;
+  readonly seats: number;
+  readonly currency: "USD" | "EGP";
+  readonly original_amount_minor: number;
+  readonly discount_amount_minor: number;
+  readonly expected_amount_minor: number;
+  readonly checkout_url: string | null;
+  readonly paid_at: number | null;
+  readonly updated_at: number;
+}
+
+export interface BillingWebLoginResponse {
+  readonly token: string;
+  readonly session_id: string;
+  readonly user_id: string;
+  readonly workspace_id: string;
+  readonly email: string;
+  readonly session_type: "billing_web";
+  readonly expires_at: number;
+}
+
+export interface RedeemedBillingHandoffResponse {
+  readonly handoff_id: string;
+  readonly user_id: string;
+  readonly workspace_id: string;
+  readonly product: CheckoutProduct;
+  readonly seats: number;
+  readonly billing_country_iso2: string;
+  readonly coupon_code: string | null;
+  readonly provider: "paddle" | "paymob" | "manual";
+  readonly currency: "USD" | "EGP";
+  readonly original_amount_minor: number;
+  readonly billing_period: "monthly" | "annual" | "one_time";
+}
+
+export interface CouponPreviewApiResponse {
+  readonly code: string;
+  readonly original_amount_minor: number;
+  readonly discount_amount_minor: number;
+  readonly final_amount_minor: number;
+  readonly currency: "USD" | "EGP";
 }
 
 const STORAGE_PREFIX = "safi.checkout.attempt.v1:";
@@ -434,7 +493,182 @@ export class BillingCheckoutController {
     return {
       confirmed_paid: confirmedPaid,
       effective_plan: ent.effective_plan,
-      state: ent.state
+      state: ent.state,
+      ...(ent.operation_credits !== undefined ? { operation_credits: ent.operation_credits } : {}),
+      ...(ent.pay_per_file_tokens !== undefined
+        ? { pay_per_file_tokens: ent.pay_per_file_tokens }
+        : {})
     };
+  }
+
+  /** Fetch authoritative server order status (`GET /v1/billing/orders/{orderId}`). */
+  async fetchOrderStatus(
+    orderId: string,
+    bearerToken: string
+  ): Promise<BillingOrderStatusResponse> {
+    const response = await this.fetchImpl(
+      `${this.apiBaseUrl}/v1/billing/orders/${encodeURIComponent(orderId)}`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${bearerToken}`
+        }
+      }
+    );
+    if (!response.ok) {
+      let code = "SF-PAY-004";
+      try {
+        const parsed = (await response.json()) as { code?: string };
+        if (typeof parsed.code === "string") code = parsed.code;
+      } catch {
+        // Keep default code.
+      }
+      throw new CheckoutLifecycleError(
+        "Could not read order status from server.",
+        code,
+        response.status
+      );
+    }
+    return (await response.json()) as BillingOrderStatusResponse;
+  }
+
+  /** Fetch full authoritative entitlements (`GET /v1/entitlements/me`). */
+  async fetchEntitlements(bearerToken: string): Promise<ServerEntitlementVerification> {
+    const response = await this.fetchImpl(`${this.apiBaseUrl}/v1/entitlements/me`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${bearerToken}`
+      }
+    });
+    if (!response.ok) {
+      throw new CheckoutLifecycleError(
+        "Unable to fetch entitlements from server.",
+        "SF-AUTH-005",
+        response.status
+      );
+    }
+    const ent = (await response.json()) as Record<string, unknown>;
+    const effectivePlan = String(ent.effective_plan ?? "free");
+    const state = String(ent.state ?? "free");
+    return {
+      confirmed_paid: effectivePlan !== "free" && state === "active",
+      effective_plan: effectivePlan,
+      state,
+      watermark_required: Boolean(ent.watermark_required),
+      operations_limit_per_month:
+        typeof ent.operations_limit_per_month === "number" ? ent.operations_limit_per_month : null,
+      operations_used_this_month:
+        typeof ent.operations_used_this_month === "number" ? ent.operations_used_this_month : 0,
+      max_rows_per_file: typeof ent.max_rows_per_file === "number" ? ent.max_rows_per_file : null,
+      max_columns_per_file:
+        typeof ent.max_columns_per_file === "number" ? ent.max_columns_per_file : null,
+      ai_enabled: Boolean(ent.ai_enabled),
+      ai_calls_limit: typeof ent.ai_calls_limit === "number" ? ent.ai_calls_limit : 0,
+      ai_calls_used: typeof ent.ai_calls_used === "number" ? ent.ai_calls_used : 0,
+      teams_enabled: Boolean(ent.teams_enabled),
+      seats: typeof ent.seats === "number" ? ent.seats : 1,
+      operation_credits: typeof ent.operation_credits === "number" ? ent.operation_credits : 0,
+      pay_per_file_tokens: typeof ent.pay_per_file_tokens === "number" ? ent.pay_per_file_tokens : 0
+    };
+  }
+
+  /** Authenticate on the Website Billing Portal without revoking the user's active Desktop device. */
+  async loginBillingWeb(email: string, password: string): Promise<BillingWebLoginResponse> {
+    const response = await this.fetchImpl(`${this.apiBaseUrl}/v1/billing/web/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({
+        email: email.trim(),
+        password,
+        user_agent_hint: "safidata-web-billing"
+      })
+    });
+    if (!response.ok) {
+      let code = "SF-AUTH-001";
+      try {
+        const parsed = (await response.json()) as { code?: string };
+        if (typeof parsed.code === "string") code = parsed.code;
+      } catch {
+        // Keep default code.
+      }
+      throw new CheckoutLifecycleError(
+        "Website billing authentication failed.",
+        code,
+        response.status
+      );
+    }
+    return (await response.json()) as BillingWebLoginResponse;
+  }
+
+  /** Redeem a single-use Desktop-to-Website handoff code bound strictly to the authenticated user. */
+  async redeemDesktopHandoff(
+    handoffCode: string,
+    state: string,
+    bearerToken: string
+  ): Promise<RedeemedBillingHandoffResponse> {
+    const response = await this.fetchImpl(`${this.apiBaseUrl}/v1/billing/handoff/redeem`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${bearerToken}`
+      },
+      body: JSON.stringify({
+        handoff_code: handoffCode.trim(),
+        state: state.trim()
+      })
+    });
+    if (!response.ok) {
+      let code = "SF-AUTH-023";
+      try {
+        const parsed = (await response.json()) as { code?: string };
+        if (typeof parsed.code === "string") code = parsed.code;
+      } catch {
+        // Keep default code.
+      }
+      throw new CheckoutLifecycleError(
+        "Could not redeem Desktop billing handoff.",
+        code,
+        response.status
+      );
+    }
+    return (await response.json()) as RedeemedBillingHandoffResponse;
+  }
+
+  /** Preview a coupon code against the server's authoritative pricing engine. */
+  async previewCoupon(
+    intent: CheckoutIntent,
+    bearerToken: string
+  ): Promise<CouponPreviewApiResponse> {
+    const response = await this.fetchImpl(`${this.apiBaseUrl}/v1/billing/coupons/preview`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${bearerToken}`
+      },
+      body: JSON.stringify({
+        code: (intent.coupon_code ?? "").trim(),
+        product: intent.product,
+        billing_country_iso2: intent.billing_country_iso2.trim().toUpperCase(),
+        seats: intent.seats
+      })
+    });
+    if (!response.ok) {
+      let code = "SF-PAY-005";
+      try {
+        const parsed = (await response.json()) as { code?: string };
+        if (typeof parsed.code === "string") code = parsed.code;
+      } catch {
+        // Keep default code.
+      }
+      throw new CheckoutLifecycleError("Coupon is invalid or not eligible.", code, response.status);
+    }
+    return (await response.json()) as CouponPreviewApiResponse;
   }
 }

@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod auth;
 pub mod billing;
+pub mod business_rules;
 pub mod config;
 pub mod cors;
 pub mod coupons;
@@ -13,6 +14,7 @@ pub mod desktop_auth;
 pub mod device_authority;
 pub mod encrypted_sync;
 pub mod entitlements;
+pub mod entitlements_pg;
 pub mod error;
 pub mod log_center;
 pub mod organizations;
@@ -21,6 +23,7 @@ pub mod pg_source_of_truth;
 pub mod pg_store;
 pub mod routes;
 pub mod routes_updates;
+pub mod security_headers;
 pub mod templates_hub;
 pub mod updater;
 pub mod zero_trust;
@@ -179,7 +182,8 @@ impl AppState {
     /// Build application state using an explicit validated [`ServerConfig`].
     #[must_use]
     pub fn with_config(auth: AuthService, config: ServerConfig) -> Self {
-        let entitlements = EntitlementService::new();
+        let entitlements =
+            EntitlementService::new().with_require_durable_pg(config.environment.is_strict());
         let coupons = CouponService::new();
         let billing = BillingService::from_config(&config, entitlements.clone())
             .with_coupons(coupons.clone());
@@ -213,10 +217,11 @@ impl AppState {
         }
     }
 
-    /// Attach the PostgreSQL 18 SQLx control-plane repository (migrations `0007..0013`)
-    /// and wire PostgreSQL directly into the financial billing ledger.
+    /// Attach the PostgreSQL 18 SQLx control-plane repository (migrations `0007..0015`)
+    /// and wire PostgreSQL directly into BOTH entitlements/usage accounting AND the financial billing ledger.
     #[must_use]
     pub fn with_pg_store(mut self, pg_store: PgControlPlaneStore) -> Self {
+        self.entitlements = self.entitlements.with_pg_store(pg_store.clone());
         self.billing = self.billing.with_pg_store(pg_store.clone());
         self.pg_store = Some(pg_store);
         self
@@ -364,10 +369,13 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
     response
 }
 
-/// Build the full application with the request-id middleware applied outermost.
+/// Build the full application with security headers, anti-CSRF, strict CORS, and request-id middleware.
 pub fn app(state: AppState) -> Router {
     routes::build_router(state)
         .layer(middleware::from_fn(cors::cors_middleware))
+        .layer(middleware::from_fn(
+            security_headers::security_headers_and_csrf_middleware,
+        ))
         .layer(middleware::from_fn(request_id_middleware))
 }
 

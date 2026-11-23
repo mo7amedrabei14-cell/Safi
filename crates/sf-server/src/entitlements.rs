@@ -17,12 +17,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::auth::unix_now;
+use crate::business_rules::rules;
 use crate::error::AuthError;
+use crate::pg_store::PgControlPlaneStore;
 
 pub const FREE_OPS_PER_MONTH: u32 = 5;
 pub const FREE_MAX_ROWS: u64 = 5_000;
@@ -183,12 +186,49 @@ pub struct EntitlementAggregateStats {
     pub ai_calls_used_total: u64,
 }
 
+/// Stored fingerprinted idempotency outcome for one `(workspace_id, idempotency_key)`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredUsageIdempotency {
+    pub fingerprint: [u8; 32],
+    pub watermark_required: bool,
+}
+
+/// Compute a deterministic 32-byte SHA-256 fingerprint binding an idempotency key strictly to
+/// its workspace, usage kind (`DataOperation` vs `AiCall`), and operation attributes.
+#[must_use]
+pub fn compute_usage_request_fingerprint(
+    workspace_id: Uuid,
+    req: &ConsumeUsageRequest,
+) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"safidata.usage.v1:");
+    h.update(workspace_id.as_bytes());
+    let kind_tag: &[u8] = match req.kind {
+        UsageKind::DataOperation => b"data_operation",
+        UsageKind::AiCall => b"ai_call",
+    };
+    h.update(kind_tag);
+    h.update(b":");
+    h.update(req.row_count.to_be_bytes());
+    h.update(b":");
+    h.update(req.column_count.to_be_bytes());
+    h.update(b":");
+    h.update(req.pii_masked_count.to_be_bytes());
+    let digest = h.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    out
+}
+
 /// Serializable snapshot of entitlement & usage state for durable restart persistence.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EntitlementSnapshot {
     pub workspaces: Vec<WorkspaceEntitlementRecord>,
     pub monthly: Vec<((Uuid, String), MonthlyUsage)>,
+    #[serde(default)]
     pub idempotency: Vec<(Uuid, String)>,
+    #[serde(default)]
+    pub idempotency_fingerprints: Vec<((Uuid, String), StoredUsageIdempotency)>,
     pub claimed_trial_emails: Vec<String>,
     pub claimed_trial_phones: Vec<String>,
     pub claimed_trial_devices: Vec<String>,
@@ -198,21 +238,30 @@ pub struct EntitlementSnapshot {
 struct EntitlementStore {
     workspaces: HashMap<Uuid, WorkspaceEntitlementRecord>,
     monthly: HashMap<(Uuid, String), MonthlyUsage>,
-    idempotency: HashSet<(Uuid, String)>,
+    idempotency: HashMap<(Uuid, String), StoredUsageIdempotency>,
     claimed_trial_emails: HashSet<String>,
     claimed_trial_phones: HashSet<String>,
     claimed_trial_devices: HashSet<String>,
 }
 
 /// Thread-safe authoritative entitlement & usage service.
+///
+/// Whenever `pg_store` is attached, PostgreSQL 18 (Migration 0015) is the single authoritative
+/// source of truth for entitlements, monthly usage quotas, fingerprinted usage idempotency,
+/// and trial anti-abuse across restarts and multiple instances.
 #[derive(Clone, Default)]
 pub struct EntitlementService {
     store: Arc<RwLock<EntitlementStore>>,
+    pg_store: Option<PgControlPlaneStore>,
+    require_durable_pg: bool,
 }
 
 impl std::fmt::Debug for EntitlementService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EntitlementService").finish()
+        f.debug_struct("EntitlementService")
+            .field("pg_backed", &self.pg_store.is_some())
+            .field("require_durable_pg", &self.require_durable_pg)
+            .finish()
     }
 }
 
@@ -228,8 +277,40 @@ impl EntitlementService {
         Self::default()
     }
 
+    /// Attach PostgreSQL 18 durable storage so all entitlement mutations & quota checks execute atomically in PG.
+    #[must_use]
+    pub fn with_pg_store(mut self, pg_store: PgControlPlaneStore) -> Self {
+        self.pg_store = Some(pg_store);
+        self
+    }
+
+    /// Require PostgreSQL 18 durability (production/staging fail-closed guard; rejects in-memory fallback).
+    #[must_use]
+    pub fn with_require_durable_pg(mut self, required: bool) -> Self {
+        self.require_durable_pg = required;
+        self
+    }
+
+    #[must_use]
+    pub fn is_pg_backed(&self) -> bool {
+        self.pg_store.is_some()
+    }
+
+    fn ensure_backend_available(&self) -> Result<(), AuthError> {
+        if self.require_durable_pg && self.pg_store.is_none() {
+            return Err(AuthError::BackendUnavailable);
+        }
+        Ok(())
+    }
+
     /// Ensure a workspace has an entitlement record (defaults to Free).
     pub async fn ensure_workspace(&self, workspace_id: Uuid, user_id: Uuid) {
+        if let Some(ref pg) = self.pg_store {
+            let _ = pg
+                .effective_entitlements_pg(workspace_id, user_id, false, unix_now())
+                .await;
+            return;
+        }
         let mut guard = self.store.write().await;
         guard
             .workspaces
@@ -248,6 +329,13 @@ impl EntitlementService {
         &self,
         workspace_id: Uuid,
     ) -> Option<WorkspaceEntitlementRecord> {
+        if let Some(ref pg) = self.pg_store {
+            return pg
+                .load_workspace_entitlement_pg(workspace_id)
+                .await
+                .ok()
+                .flatten();
+        }
         self.store
             .read()
             .await
@@ -267,6 +355,19 @@ impl EntitlementService {
         device_hash: &str,
         now_secs: i64,
     ) -> Result<EffectiveEntitlements, AuthError> {
+        self.ensure_backend_available()?;
+        if let Some(ref pg) = self.pg_store {
+            return pg
+                .claim_trial_pg(
+                    workspace_id,
+                    user_id,
+                    email_hash,
+                    phone_hash,
+                    device_hash,
+                    now_secs,
+                )
+                .await;
+        }
         if email_hash.is_empty() || phone_hash.is_empty() || device_hash.is_empty() {
             return Err(AuthError::InvalidRequest);
         }
@@ -289,7 +390,7 @@ impl EntitlementService {
                 .or_insert_with(|| WorkspaceEntitlementRecord::new_free(workspace_id, user_id));
             rec.plan = PlanTier::Trial;
             rec.state = SubscriptionState::Trialing;
-            rec.trial_expires_at = Some(now_secs + TRIAL_DURATION_SECS);
+            rec.trial_expires_at = Some(now_secs + rules().trial_duration_secs);
             rec.trial_ai_used = 0;
             rec.clone()
         };
@@ -311,6 +412,12 @@ impl EntitlementService {
         extra_days: i64,
         now_secs: i64,
     ) -> Result<EffectiveEntitlements, AuthError> {
+        self.ensure_backend_available()?;
+        if let Some(ref pg) = self.pg_store {
+            return pg
+                .extend_trial_pg(workspace_id, user_id, extra_days, now_secs)
+                .await;
+        }
         if extra_days <= 0 || extra_days > 365 {
             return Err(AuthError::InvalidRequest);
         }
@@ -337,15 +444,21 @@ impl EntitlementService {
         Ok(compute_effective(&rec, &usage, false, now_secs))
     }
 
-    /// Grant or revoke Owner's Friend (VIP) role ($0, all paid features + 400 AI/mo).
-    pub async fn set_friend_vip(
+    /// Grant or revoke Owner's Friend (VIP) role ($0, all paid features + 400 AI/mo), failing closed if PG fails.
+    pub async fn set_friend_vip_checked(
         &self,
         workspace_id: Uuid,
         user_id: Uuid,
         granted_by: Uuid,
         active: bool,
-    ) -> EffectiveEntitlements {
+    ) -> Result<EffectiveEntitlements, AuthError> {
+        self.ensure_backend_available()?;
         let now = unix_now();
+        if let Some(ref pg) = self.pg_store {
+            return pg
+                .set_friend_vip_pg(workspace_id, user_id, granted_by, active, now)
+                .await;
+        }
         let mut guard = self.store.write().await;
         let rec = {
             let rec = guard
@@ -362,7 +475,26 @@ impl EntitlementService {
             .get(&(workspace_id, period))
             .cloned()
             .unwrap_or_default();
-        compute_effective(&rec, &usage, false, now)
+        Ok(compute_effective(&rec, &usage, false, now))
+    }
+
+    /// Grant or revoke Owner's Friend (VIP) role ($0, all paid features + 400 AI/mo).
+    pub async fn set_friend_vip(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        granted_by: Uuid,
+        active: bool,
+    ) -> EffectiveEntitlements {
+        if let Ok(ent) = self
+            .set_friend_vip_checked(workspace_id, user_id, granted_by, active)
+            .await
+        {
+            return ent;
+        }
+        let now = unix_now();
+        let rec = WorkspaceEntitlementRecord::new_free(workspace_id, user_id);
+        compute_effective(&rec, &MonthlyUsage::default(), false, now)
     }
 
     /// Activate or update a paid subscription (called by verified Paddle/Paymob billing webhooks).
@@ -377,7 +509,21 @@ impl EntitlementService {
         current_period_end: Option<i64>,
         now_secs: i64,
     ) -> Result<EffectiveEntitlements, AuthError> {
-        if plan == PlanTier::OrganizationSeat && seats < ORG_MIN_SEATS {
+        self.ensure_backend_available()?;
+        if let Some(ref pg) = self.pg_store {
+            return pg
+                .apply_subscription_update_pg(
+                    workspace_id,
+                    user_id,
+                    plan,
+                    state,
+                    seats,
+                    current_period_end,
+                    now_secs,
+                )
+                .await;
+        }
+        if plan == PlanTier::OrganizationSeat && seats < rules().org_min_seats {
             return Err(AuthError::OrgMinSeatsRequired);
         }
         let mut guard = self.store.write().await;
@@ -405,14 +551,25 @@ impl EntitlementService {
         Ok(compute_effective(&rec, &usage, false, now_secs))
     }
 
-    /// Add non-expiring Credit Pack operations (e.g., +25) or Pay-Per-File tokens.
-    pub async fn grant_micro_purchase(
+    /// Add non-expiring Credit Pack operations (e.g., +25) or Pay-Per-File tokens, failing closed on PG error.
+    pub async fn grant_micro_purchase_checked(
         &self,
         workspace_id: Uuid,
         user_id: Uuid,
         operation_credits_delta: u32,
         pay_per_file_delta: u32,
-    ) {
+    ) -> Result<(), AuthError> {
+        self.ensure_backend_available()?;
+        if let Some(ref pg) = self.pg_store {
+            return pg
+                .grant_micro_purchase_pg(
+                    workspace_id,
+                    user_id,
+                    operation_credits_delta,
+                    pay_per_file_delta,
+                )
+                .await;
+        }
         let mut guard = self.store.write().await;
         let rec = guard
             .workspaces
@@ -422,16 +579,41 @@ impl EntitlementService {
             .operation_credits
             .saturating_add(operation_credits_delta);
         rec.pay_per_file_tokens = rec.pay_per_file_tokens.saturating_add(pay_per_file_delta);
+        Ok(())
     }
 
-    /// Resolve effective entitlements at `now_secs` (auto-downgrading expired trials/past-due).
-    pub async fn effective_at(
+    /// Add non-expiring Credit Pack operations (e.g., +25) or Pay-Per-File tokens.
+    pub async fn grant_micro_purchase(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        operation_credits_delta: u32,
+        pay_per_file_delta: u32,
+    ) {
+        let _ = self
+            .grant_micro_purchase_checked(
+                workspace_id,
+                user_id,
+                operation_credits_delta,
+                pay_per_file_delta,
+            )
+            .await;
+    }
+
+    /// Resolve authoritative effective entitlements at `now_secs` (failing closed if PG is required/unavailable).
+    pub async fn effective_at_checked(
         &self,
         workspace_id: Uuid,
         user_id: Uuid,
         is_owner: bool,
         now_secs: i64,
-    ) -> EffectiveEntitlements {
+    ) -> Result<EffectiveEntitlements, AuthError> {
+        self.ensure_backend_available()?;
+        if let Some(ref pg) = self.pg_store {
+            return pg
+                .effective_entitlements_pg(workspace_id, user_id, is_owner, now_secs)
+                .await;
+        }
         let mut guard = self.store.write().await;
         let rec = {
             let rec = guard
@@ -447,10 +629,29 @@ impl EntitlementService {
             .get(&(workspace_id, period))
             .cloned()
             .unwrap_or_default();
-        compute_effective(&rec, &usage, is_owner, now_secs)
+        Ok(compute_effective(&rec, &usage, is_owner, now_secs))
     }
 
-    /// Atomically enforce plan limits and record usage with strict idempotency.
+    /// Resolve effective entitlements at `now_secs` (auto-downgrading expired trials/past-due).
+    pub async fn effective_at(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+        is_owner: bool,
+        now_secs: i64,
+    ) -> EffectiveEntitlements {
+        if let Ok(ent) = self
+            .effective_at_checked(workspace_id, user_id, is_owner, now_secs)
+            .await
+        {
+            return ent;
+        }
+        // Fail closed to strict Free plan if backend lookup unexpectedly failed.
+        let rec = WorkspaceEntitlementRecord::new_free(workspace_id, user_id);
+        compute_effective(&rec, &MonthlyUsage::default(), false, now_secs)
+    }
+
+    /// Atomically enforce plan limits and record usage with strict fingerprinted idempotency.
     pub async fn consume_at(
         &self,
         workspace_id: Uuid,
@@ -459,19 +660,42 @@ impl EntitlementService {
         req: &ConsumeUsageRequest,
         now_secs: i64,
     ) -> Result<ConsumeUsageResult, AuthError> {
+        self.ensure_backend_available()?;
         let idem_key = req.idempotency_key.trim();
         if idem_key.is_empty() || idem_key.len() > 128 {
             return Err(AuthError::InvalidRequest);
         }
 
+        let request_fingerprint = compute_usage_request_fingerprint(workspace_id, req);
+
+        if let Some(ref pg) = self.pg_store {
+            return pg
+                .consume_usage_atomic_pg(
+                    workspace_id,
+                    user_id,
+                    is_owner,
+                    req,
+                    request_fingerprint,
+                    now_secs,
+                )
+                .await;
+        }
+
         let mut guard = self.store.write().await;
         let period = period_ym_at(now_secs);
 
-        // Idempotent replay protection: never double-charge or double-count.
-        if guard
+        // Fingerprinted idempotent replay protection:
+        // - Identical key + identical kind/parameters -> safe idempotent replay (zero double-debit).
+        // - Identical key + DIFFERENT kind (`DataOperation` vs `AiCall`) or DIFFERENT parameters ->
+        //   409 Conflict (`SF-PAY-007`) — NEVER bypasses entitlement or quota enforcement!
+        if let Some(existing) = guard
             .idempotency
-            .contains(&(workspace_id, idem_key.to_owned()))
+            .get(&(workspace_id, idem_key.to_owned()))
+            .cloned()
         {
+            if existing.fingerprint != request_fingerprint {
+                return Err(AuthError::IdempotencyConflict);
+            }
             let rec = guard
                 .workspaces
                 .entry(workspace_id)
@@ -486,7 +710,7 @@ impl EntitlementService {
             return Ok(ConsumeUsageResult {
                 allowed: true,
                 duplicate_idempotency_hit: true,
-                watermark_required: ent.watermark_required,
+                watermark_required: existing.watermark_required,
                 debited_credit: false,
                 debited_pay_per_file: false,
                 entitlements: ent,
@@ -509,6 +733,7 @@ impl EntitlementService {
                 ..Default::default()
             });
 
+        let r = rules();
         let current = compute_effective(&rec, &usage, is_owner, now_secs);
         let mut debited_credit = false;
         let mut debited_pay_per_file = false;
@@ -532,15 +757,15 @@ impl EntitlementService {
             UsageKind::DataOperation => {
                 if current.effective_plan == PlanTier::Free {
                     let exceeds_free_shape =
-                        req.row_count > FREE_MAX_ROWS || req.column_count > FREE_MAX_COLS;
-                    let exceeds_free_ops = usage.operations_used >= FREE_OPS_PER_MONTH;
+                        req.row_count > r.free_max_rows || req.column_count > r.free_max_cols;
+                    let exceeds_free_ops = usage.operations_used >= r.free_ops_per_month;
 
                     if exceeds_free_shape {
                         // Pay-per-file unlocks up to 100k rows and removes watermark.
-                        if rec.pay_per_file_tokens > 0 && req.row_count <= PAY_PER_FILE_MAX_ROWS {
+                        if rec.pay_per_file_tokens > 0 && req.row_count <= r.pay_per_file_max_rows {
                             rec.pay_per_file_tokens -= 1;
                             debited_pay_per_file = true;
-                            watermark_required = false;
+                            watermark_required = !r.pay_per_file_removes_watermark;
                         } else {
                             return Err(AuthError::DatasetLimitExceeded);
                         }
@@ -549,16 +774,16 @@ impl EntitlementService {
                         if rec.operation_credits > 0 {
                             rec.operation_credits -= 1;
                             debited_credit = true;
-                            watermark_required = false;
+                            watermark_required = !r.credit_pack_25_removes_watermark;
                         } else if rec.pay_per_file_tokens > 0 {
                             rec.pay_per_file_tokens -= 1;
                             debited_pay_per_file = true;
-                            watermark_required = false;
+                            watermark_required = !r.pay_per_file_removes_watermark;
                         } else {
                             return Err(AuthError::QuotaExceeded);
                         }
-                    } else if rec.operation_credits > 0 {
-                        // Free user within 5 ops still uses free quota with watermark unless paying.
+                    } else {
+                        // Free user within 5 ops still uses free quota with mandatory watermark.
                         watermark_required = true;
                     }
                 }
@@ -568,9 +793,13 @@ impl EntitlementService {
             }
         }
 
-        guard
-            .idempotency
-            .insert((workspace_id, idem_key.to_owned()));
+        guard.idempotency.insert(
+            (workspace_id, idem_key.to_owned()),
+            StoredUsageIdempotency {
+                fingerprint: request_fingerprint,
+                watermark_required,
+            },
+        );
         guard.workspaces.insert(workspace_id, rec.clone());
         guard.monthly.insert((workspace_id, period), usage.clone());
 
@@ -587,6 +816,12 @@ impl EntitlementService {
 
     /// Compute real live aggregate metrics for the Owner Control Plane (zero fake numbers).
     pub async fn aggregate_stats(&self, now_secs: i64) -> EntitlementAggregateStats {
+        if let Some(ref pg) = self.pg_store {
+            if let Ok(stats) = pg.aggregate_stats_pg(now_secs).await {
+                return stats;
+            }
+        }
+        let r = rules();
         let guard = self.store.read().await;
         let mut stats = EntitlementAggregateStats {
             active_trials: 0,
@@ -626,25 +861,25 @@ impl EntitlementService {
                     SubscriptionState::Active | SubscriptionState::PastDue,
                 ) => {
                     stats.monthly_subscribers += 1;
-                    stats.mrr_usd += 20;
-                    stats.mrr_egp += 1000;
+                    stats.mrr_usd += r.individual_monthly_usd;
+                    stats.mrr_egp += r.individual_monthly_egp;
                 }
                 (
                     PlanTier::IndividualAnnual,
                     SubscriptionState::Active | SubscriptionState::PastDue,
                 ) => {
                     stats.annual_subscribers += 1;
-                    stats.mrr_usd += 14; // $168 / 12
-                    stats.mrr_egp += 700; // 8400 / 12
+                    stats.mrr_usd += r.individual_annual_usd / 12;
+                    stats.mrr_egp += r.individual_annual_egp / 12;
                 }
                 (
                     PlanTier::OrganizationSeat,
                     SubscriptionState::Active | SubscriptionState::PastDue,
                 ) => {
-                    let seats = u64::from(copy.seats.max(ORG_MIN_SEATS));
+                    let seats = u64::from(copy.seats.max(r.org_min_seats));
                     stats.organization_seats += seats;
-                    stats.mrr_usd += seats * 17;
-                    stats.mrr_egp += seats * 850;
+                    stats.mrr_usd += seats * r.org_seat_monthly_usd;
+                    stats.mrr_egp += seats * r.org_seat_monthly_egp;
                 }
                 _ => stats.free_users += 1,
             }
@@ -665,12 +900,7 @@ impl EntitlementService {
 
     /// Snapshot a workspace record if it exists (used by Owner inspection/audit before/after).
     pub async fn workspace_record(&self, workspace_id: Uuid) -> Option<WorkspaceEntitlementRecord> {
-        self.store
-            .read()
-            .await
-            .workspaces
-            .get(&workspace_id)
-            .cloned()
+        self.snapshot_workspace(workspace_id).await
     }
 
     /// Export full entitlement state for durable restart persistence.
@@ -683,7 +913,12 @@ impl EntitlementService {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
-            idempotency: guard.idempotency.iter().cloned().collect(),
+            idempotency: guard.idempotency.keys().cloned().collect(),
+            idempotency_fingerprints: guard
+                .idempotency
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             claimed_trial_emails: guard.claimed_trial_emails.iter().cloned().collect(),
             claimed_trial_phones: guard.claimed_trial_phones.iter().cloned().collect(),
             claimed_trial_devices: guard.claimed_trial_devices.iter().cloned().collect(),
@@ -699,14 +934,31 @@ impl EntitlementService {
             .map(|w| (w.workspace_id, w))
             .collect();
         guard.monthly = snap.monthly.into_iter().collect();
-        guard.idempotency = snap.idempotency.into_iter().collect();
+        if !snap.idempotency_fingerprints.is_empty() {
+            guard.idempotency = snap.idempotency_fingerprints.into_iter().collect();
+        } else {
+            guard.idempotency = snap
+                .idempotency
+                .into_iter()
+                .map(|k| {
+                    (
+                        k,
+                        StoredUsageIdempotency {
+                            fingerprint: [0u8; 32],
+                            watermark_required: true,
+                        },
+                    )
+                })
+                .collect();
+        }
         guard.claimed_trial_emails = snap.claimed_trial_emails.into_iter().collect();
         guard.claimed_trial_phones = snap.claimed_trial_phones.into_iter().collect();
         guard.claimed_trial_devices = snap.claimed_trial_devices.into_iter().collect();
     }
 }
 
-fn reconcile_expirations(rec: &mut WorkspaceEntitlementRecord, now_secs: i64) {
+pub(crate) fn reconcile_expirations(rec: &mut WorkspaceEntitlementRecord, now_secs: i64) {
+    let r = rules();
     if rec.plan == PlanTier::Trial {
         if let Some(exp) = rec.trial_expires_at {
             if now_secs >= exp {
@@ -717,7 +969,7 @@ fn reconcile_expirations(rec: &mut WorkspaceEntitlementRecord, now_secs: i64) {
     }
     if rec.state == SubscriptionState::PastDue {
         if let Some(since) = rec.past_due_since {
-            if now_secs >= since + BILLING_GRACE_PERIOD_SECS {
+            if now_secs >= since + r.billing_grace_period_secs {
                 rec.plan = PlanTier::Free;
                 rec.state = SubscriptionState::Expired;
             }
@@ -733,12 +985,13 @@ fn reconcile_expirations(rec: &mut WorkspaceEntitlementRecord, now_secs: i64) {
     }
 }
 
-fn compute_effective(
+pub(crate) fn compute_effective(
     rec: &WorkspaceEntitlementRecord,
     usage: &MonthlyUsage,
     is_owner: bool,
     now_secs: i64,
 ) -> EffectiveEntitlements {
+    let r = rules();
     if is_owner {
         return EffectiveEntitlements {
             workspace_id: rec.workspace_id,
@@ -780,7 +1033,7 @@ fn compute_effective(
             saved_recipes_read_only: false,
             premium_recipe_packs_enabled: true,
             ai_enabled: true,
-            ai_calls_limit: PAID_AI_CALLS_PER_MONTH,
+            ai_calls_limit: r.paid_ai_calls_per_month,
             ai_calls_used: usage.ai_calls_used,
             teams_enabled: true,
             seats: rec.seats.max(1),
@@ -811,7 +1064,7 @@ fn compute_effective(
                 saved_recipes_read_only: false,
                 premium_recipe_packs_enabled: true,
                 ai_enabled: true,
-                ai_calls_limit: TRIAL_AI_CALLS_CAP,
+                ai_calls_limit: r.trial_ai_calls_cap,
                 ai_calls_used: effective_rec.trial_ai_used,
                 teams_enabled: true,
                 seats: 1,
@@ -843,7 +1096,7 @@ fn compute_effective(
                 saved_recipes_read_only: false,
                 premium_recipe_packs_enabled: true,
                 ai_enabled: true,
-                ai_calls_limit: PAID_AI_CALLS_PER_MONTH,
+                ai_calls_limit: r.paid_ai_calls_per_month,
                 ai_calls_used: usage.ai_calls_used,
                 teams_enabled: false,
                 seats: 1,
@@ -861,7 +1114,7 @@ fn compute_effective(
                     | SubscriptionState::Canceled
             ) =>
         {
-            let seats = effective_rec.seats.max(ORG_MIN_SEATS);
+            let seats = effective_rec.seats.max(r.org_min_seats);
             EffectiveEntitlements {
                 workspace_id: effective_rec.workspace_id,
                 effective_plan: PlanTier::OrganizationSeat,
@@ -876,7 +1129,7 @@ fn compute_effective(
                 saved_recipes_read_only: false,
                 premium_recipe_packs_enabled: true,
                 ai_enabled: true,
-                ai_calls_limit: PAID_AI_CALLS_PER_MONTH.saturating_mul(seats),
+                ai_calls_limit: r.org_ai_calls_per_seat_per_month.saturating_mul(seats),
                 ai_calls_used: usage.ai_calls_used,
                 teams_enabled: true,
                 seats,
@@ -892,17 +1145,17 @@ fn compute_effective(
             state: effective_rec.state,
             watermark_required: true,
             watermark_text: Some(WATERMARK_TEXT.to_owned()),
-            operations_limit_per_month: Some(FREE_OPS_PER_MONTH),
+            operations_limit_per_month: Some(r.free_ops_per_month),
             operations_used_this_month: usage.operations_used,
-            max_rows_per_file: Some(FREE_MAX_ROWS),
-            max_columns_per_file: Some(FREE_MAX_COLS),
-            saved_recipes_write_enabled: false,
-            saved_recipes_read_only: true,
-            premium_recipe_packs_enabled: false,
-            ai_enabled: false,
+            max_rows_per_file: Some(r.free_max_rows),
+            max_columns_per_file: Some(r.free_max_cols),
+            saved_recipes_write_enabled: r.free_saved_recipes,
+            saved_recipes_read_only: !r.free_saved_recipes,
+            premium_recipe_packs_enabled: r.free_premium_recipe_packs,
+            ai_enabled: r.free_ai,
             ai_calls_limit: 0,
             ai_calls_used: usage.ai_calls_used,
-            teams_enabled: false,
+            teams_enabled: r.free_teams,
             seats: 1,
             operation_credits: effective_rec.operation_credits,
             pay_per_file_tokens: effective_rec.pay_per_file_tokens,
@@ -945,9 +1198,29 @@ mod tests {
             assert!(res.watermark_required);
         }
 
-        // Duplicate idempotency key does NOT consume extra op.
+        // Duplicate idempotency key with IDENTICAL parameters does NOT consume extra op.
         let dup = svc
             .consume_at(
+                ws,
+                user,
+                false,
+                &ConsumeUsageRequest {
+                    idempotency_key: "op-5".to_owned(),
+                    kind: UsageKind::DataOperation,
+                    row_count: 5000,
+                    column_count: 20,
+                    pii_masked_count: 0,
+                },
+                nov_2026,
+            )
+            .await
+            .expect("idempotent hit");
+        assert!(dup.duplicate_idempotency_hit);
+
+        // Reusing an existing DataOperation key for DIFFERENT parameters or an AiCall
+        // MUST fail closed with 409 IdempotencyConflict (`SF-PAY-007`) — never bypass limits!
+        assert_eq!(
+            svc.consume_at(
                 ws,
                 user,
                 false,
@@ -961,8 +1234,27 @@ mod tests {
                 nov_2026,
             )
             .await
-            .expect("idempotent hit");
-        assert!(dup.duplicate_idempotency_hit);
+            .unwrap_err(),
+            AuthError::IdempotencyConflict
+        );
+        assert_eq!(
+            svc.consume_at(
+                ws,
+                user,
+                false,
+                &ConsumeUsageRequest {
+                    idempotency_key: "op-5".to_owned(),
+                    kind: UsageKind::AiCall,
+                    row_count: 0,
+                    column_count: 0,
+                    pii_masked_count: 0,
+                },
+                nov_2026,
+            )
+            .await
+            .unwrap_err(),
+            AuthError::IdempotencyConflict
+        );
 
         // 6th operation rejected (`SF-LIC-005`).
         assert_eq!(

@@ -668,34 +668,15 @@ pub fn sign_paymob_transaction(
     Ok(hex::encode(mac.finalize().into_bytes()))
 }
 
-/// Choose provider & currency strictly per approved rules: Egypt -> Paymob EGP, RoW -> Paddle USD.
+/// Choose provider & currency strictly from the single source of truth (`config/business.json`):
+/// Egypt -> Paymob EGP, International -> Paddle USD.
 #[must_use]
 pub fn resolve_provider_and_price(
     country_iso2: &str,
     product: CheckoutProduct,
     seats: u32,
 ) -> (BillingProvider, BillingCurrency, u64) {
-    let is_egypt = country_iso2.trim().eq_ignore_ascii_case("EG");
-    let seat_count = u64::from(seats.max(ORG_MIN_SEATS));
-    if is_egypt {
-        let minor = match product {
-            CheckoutProduct::IndividualMonthly => 100_000, // 1,000 EGP
-            CheckoutProduct::IndividualAnnual => 840_000,  // 8,400 EGP
-            CheckoutProduct::OrganizationSeatAnnual => 1_020_000 * seat_count, // 10,200 EGP/seat/yr
-            CheckoutProduct::PayPerFile => 5_000,          // 50 EGP
-            CheckoutProduct::CreditPack25 => 25_000,       // 250 EGP
-        };
-        (BillingProvider::Paymob, BillingCurrency::Egp, minor)
-    } else {
-        let minor = match product {
-            CheckoutProduct::IndividualMonthly => 2_000, // $20
-            CheckoutProduct::IndividualAnnual => 16_800, // $168
-            CheckoutProduct::OrganizationSeatAnnual => 20_400 * seat_count, // $204/seat/yr
-            CheckoutProduct::PayPerFile => 200,          // $2
-            CheckoutProduct::CreditPack25 => 500,        // $5
-        };
-        (BillingProvider::Paddle, BillingCurrency::Usd, minor)
-    }
+    crate::business_rules::rules().resolve_provider_and_price(country_iso2, product, seats)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -748,6 +729,7 @@ pub struct BillingService {
     entitlements: EntitlementService,
     coupons: Option<CouponService>,
     pg_store: Option<PgControlPlaneStore>,
+    require_durable_pg: bool,
     paddle_adapter: Option<PaddleApiAdapter>,
     paddle_webhook_secret: Option<String>,
     paddle_prices: PaddlePriceCatalog,
@@ -765,6 +747,7 @@ impl fmt::Debug for BillingService {
             .field("paddle_configured", &self.paddle_configured())
             .field("paymob_configured", &self.paymob_configured())
             .field("pg_backed", &self.pg_store.is_some())
+            .field("require_durable_pg", &self.require_durable_pg)
             .finish()
     }
 }
@@ -795,6 +778,7 @@ impl BillingService {
             entitlements,
             coupons: None,
             pg_store: None,
+            require_durable_pg: config.environment.is_strict(),
             paddle_adapter,
             paddle_webhook_secret: config.paddle_webhook_secret.clone(),
             paddle_prices: PaddlePriceCatalog {
@@ -811,11 +795,26 @@ impl BillingService {
         }
     }
 
-    /// Attach authoritative PostgreSQL 18 financial ledger repository.
+    /// Attach authoritative PostgreSQL 18 financial ledger repository (and wire PG into entitlements).
     #[must_use]
     pub fn with_pg_store(mut self, pg_store: PgControlPlaneStore) -> Self {
+        self.entitlements = self.entitlements.with_pg_store(pg_store.clone());
         self.pg_store = Some(pg_store);
         self
+    }
+
+    /// Require PostgreSQL 18 durability (production/staging fail-closed guard).
+    #[must_use]
+    pub fn with_require_durable_pg(mut self, required: bool) -> Self {
+        self.require_durable_pg = required;
+        self
+    }
+
+    fn ensure_durable_ledger(&self) -> Result<(), AuthError> {
+        if self.require_durable_pg && self.pg_store.is_none() {
+            return Err(AuthError::BackendUnavailable);
+        }
+        Ok(())
     }
 
     /// Attach server-authoritative coupon service for reserve/commit/release lifecycle.
@@ -885,6 +884,7 @@ impl BillingService {
         req: &CheckoutRequest,
         now_secs: i64,
     ) -> Result<CheckoutResponse, AuthError> {
+        self.ensure_durable_ledger()?;
         let raw_key = req
             .idempotency_key
             .as_deref()
@@ -1263,6 +1263,7 @@ impl BillingService {
         &self,
         candidate: &BillingOrderRecord,
     ) -> Result<PgCheckoutClaim, AuthError> {
+        self.ensure_durable_ledger()?;
         if let Some(ref pg) = self.pg_store {
             return pg.claim_or_load_checkout_order_pg(candidate).await;
         }
@@ -1275,6 +1276,16 @@ impl BillingService {
                 }
                 return Ok(PgCheckoutClaim::Existing(existing));
             }
+        }
+        // Refuse creating a second charge with a different idempotency key while an earlier
+        // attempt for the SAME workspace + product is unresolved (`ReconciliationRequired`).
+        if guard.orders.values().any(|o| {
+            o.workspace_id == candidate.workspace_id
+                && o.product == candidate.product
+                && o.state == PaymentOrderState::ReconciliationRequired
+                && o.expires_at > candidate.created_at
+        }) {
+            return Err(AuthError::PaymentReconciliationRequired);
         }
         guard.orders_by_idempotency.insert(key, candidate.id);
         guard.orders.insert(candidate.id, candidate.clone());
@@ -1329,6 +1340,7 @@ impl BillingService {
         raw_body: &[u8],
         now_secs: i64,
     ) -> Result<BillingEventRecord, AuthError> {
+        self.ensure_durable_ledger()?;
         let secret = self
             .paddle_webhook_secret
             .as_deref()
@@ -1615,6 +1627,7 @@ impl BillingService {
         delivery_event_id: Option<&str>,
         now_secs: i64,
     ) -> Result<BillingEventRecord, AuthError> {
+        self.ensure_durable_ledger()?;
         let secret = self
             .paymob_hmac_secret
             .as_deref()

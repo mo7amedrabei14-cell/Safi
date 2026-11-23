@@ -87,6 +87,23 @@ describe("Chart Studio Spec & Deterministic Renderer (T3.01 / Section 17.1)", ()
       expect(contrastWithWhite(color)).toBeGreaterThanOrEqual(3);
     }
   });
+
+  it("escapes XSS payloads in chart titles and axis labels inside deterministic SVG output", () => {
+    const malicious: ChartSpec = {
+      version: "1.0",
+      type: "bar",
+      titleAr: '</text><image href="x" onerror="alert(1)"><text>',
+      xAxisKey: "category",
+      yAxisKey: "value",
+      data: [{ category: "<script>alert('xss')</script>", value: 42 }]
+    };
+
+    const svg = generateDeterministicSvg(malicious);
+    expect(svg).not.toContain("<image");
+    expect(svg).not.toContain("<script>");
+    expect(svg).toContain("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;");
+    expect(svg).toContain("&lt;/text&gt;&lt;image");
+  });
 });
 
 function contrastWithWhite(hex: string): number {

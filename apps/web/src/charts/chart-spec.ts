@@ -23,6 +23,20 @@ export interface ValidationResult {
 
 const CHART_COLORS = ["#0B7C8C", "#1D4ED8", "#047857", "#B45309", "#BE185D", "#6D28D9"];
 
+function escapeSvgText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function clampDimension(raw: number | undefined, fallback: number): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return fallback;
+  return Math.min(Math.max(Math.round(raw), 100), 4096);
+}
+
 export function validateChartSpec(spec: ChartSpec): ValidationResult {
   const errors: string[] = [];
   if (!spec.version) errors.push("SF-CHT-001: إصدار مواصفة المخطط مفقود");
@@ -44,13 +58,13 @@ export function generateDeterministicSvg(spec: ChartSpec, lang: "ar" | "en" = "a
     throw new Error(`Invalid ChartSpec: ${validation.errors.join(", ")}`);
   }
 
-  const width = spec.width ?? 600;
-  const height = spec.height ?? 400;
+  const width = clampDimension(spec.width, 600);
+  const height = clampDimension(spec.height, 400);
 
-  // Deterministic SVG rendering
+  // Deterministic SVG rendering (all dynamic text is strictly XML-escaped against SVG XSS)
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
   svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
-  const chartTitle = lang === "ar" ? spec.titleAr : (spec.titleEn ?? spec.titleAr);
+  const chartTitle = escapeSvgText(lang === "ar" ? spec.titleAr : (spec.titleEn ?? spec.titleAr));
   svg += `<text x="20" y="30" font-family="${lang === "ar" ? "IBM Plex Sans Arabic" : "Inter"}, sans-serif" font-size="18" font-weight="bold" fill="#111827">${chartTitle}</text>`;
 
   const count = spec.data.length;
@@ -64,7 +78,7 @@ export function generateDeterministicSvg(spec: ChartSpec, lang: "ar" | "en" = "a
         const value = Number(row[spec.yAxisKey]) || 0;
         const x = count === 1 ? width / 2 : 40 + (index * (width - 80)) / (count - 1);
         const y = height - 50 - ((value - minValue) / valueRange) * (height - 110);
-        return { x, y, label: row[spec.xAxisKey] };
+        return { x, y, label: escapeSvgText(row[spec.xAxisKey]) };
       });
       const pointList = points.map(({ x, y }) => `${x},${y}`).join(" ");
       svg += `<polyline points="${pointList}" fill="none" stroke="${CHART_COLORS[0]}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -98,7 +112,7 @@ export function generateDeterministicSvg(spec: ChartSpec, lang: "ar" | "en" = "a
         // WCAG 2.2 AA non-text contrast: 4.91:1 on the white chart canvas
         // (the previous #0ea5e9 measured 2.77:1 and failed the 3:1 graphic minimum).
         svg += `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" fill="${CHART_COLORS[0]}" rx="4"/>`;
-        svg += `<text x="${x + barWidth / 2}" y="${height - 30}" font-family="Cairo, sans-serif" font-size="12" text-anchor="middle" fill="#4b5563">${row[spec.xAxisKey]}</text>`;
+        svg += `<text x="${x + barWidth / 2}" y="${height - 30}" font-family="Cairo, sans-serif" font-size="12" text-anchor="middle" fill="#4b5563">${escapeSvgText(row[spec.xAxisKey])}</text>`;
       });
     }
   }

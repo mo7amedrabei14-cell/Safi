@@ -51,7 +51,7 @@ use crate::encrypted_sync::{
 };
 use crate::entitlements::{
     ConsumeUsageRequest, ConsumeUsageResult, EffectiveEntitlements, EntitlementAggregateStats,
-    PlanTier, SubscriptionState, UsageKind, ORG_MIN_SEATS,
+    PlanTier, SubscriptionState, UsageKind,
 };
 use crate::error::AuthError;
 use crate::log_center::{AuditLogEntry, AuditOutcome};
@@ -213,6 +213,18 @@ pub async fn whoami(
     }))
 }
 
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    for name in ["cf-connecting-ip", "x-forwarded-for", "x-real-ip"] {
+        if let Some(raw) = headers.get(name).and_then(|v| v.to_str().ok()) {
+            let first = raw.split(',').next().unwrap_or("").trim();
+            if !first.is_empty() && first.len() <= 64 {
+                return first.to_owned();
+            }
+        }
+    }
+    "direct".to_owned()
+}
+
 async fn check_rate_limit(
     state: &AppState,
     bucket_key: &str,
@@ -239,12 +251,39 @@ async fn check_rate_limit(
     Ok(())
 }
 
+async fn check_ip_and_account_rate_limit(
+    state: &AppState,
+    scope: &str,
+    headers: &HeaderMap,
+    account_key: Option<&str>,
+    max_ip_per_min: u32,
+    max_account_per_min: u32,
+) -> Result<(), AuthError> {
+    let ip = extract_client_ip(headers);
+    check_rate_limit(state, &format!("{scope}:ip:{ip}"), max_ip_per_min).await?;
+    if let Some(raw_acct) = account_key {
+        let acct = raw_acct.trim().to_ascii_lowercase();
+        if !acct.is_empty() {
+            let acct_hash = blake3::hash(acct.as_bytes()).to_hex();
+            check_rate_limit(
+                state,
+                &format!("{scope}:acct:{acct_hash}"),
+                max_account_per_min,
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 /// Public email/password registration.
 pub async fn register_account(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RegisterAccountRequest>,
 ) -> Result<(StatusCode, Json<AccountMessage>), AuthError> {
-    check_rate_limit(&state, "auth:register", 30).await?;
+    check_ip_and_account_rate_limit(&state, "auth:register", &headers, Some(&body.email), 30, 10)
+        .await?;
     let service: &AccountAuthService = state
         .account_auth
         .as_deref()
@@ -276,9 +315,11 @@ pub async fn verify_email(
 /// Reissue an email verification token without revealing account existence.
 pub async fn resend_verification(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<ResendVerificationRequest>,
 ) -> Result<(StatusCode, Json<AccountMessage>), AuthError> {
-    check_rate_limit(&state, "auth:resend", 15).await?;
+    check_ip_and_account_rate_limit(&state, "auth:resend", &headers, Some(&body.email), 15, 5)
+        .await?;
     let service: &AccountAuthService = state
         .account_auth
         .as_deref()
@@ -295,9 +336,11 @@ pub async fn resend_verification(
 /// Request a one-time password reset link without revealing account existence.
 pub async fn request_password_reset(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RequestPasswordResetRequest>,
 ) -> Result<(StatusCode, Json<AccountMessage>), AuthError> {
-    check_rate_limit(&state, "auth:forgot", 15).await?;
+    check_ip_and_account_rate_limit(&state, "auth:forgot", &headers, Some(&body.email), 15, 5)
+        .await?;
     let service: &AccountAuthService = state
         .account_auth
         .as_deref()
@@ -351,9 +394,18 @@ pub struct EnrichedLoginResponse {
 /// plus an initial 60-second Ed25519-signed Online Authorization Lease.
 pub async fn login_account(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<HttpLoginRequest>,
 ) -> Result<(StatusCode, Json<EnrichedLoginResponse>), AuthError> {
-    check_rate_limit(&state, "auth:login", 40).await?;
+    check_ip_and_account_rate_limit(
+        &state,
+        "auth:login",
+        &headers,
+        Some(&body.login.email),
+        40,
+        15,
+    )
+    .await?;
     let email_norm = body.login.email.trim().to_ascii_lowercase();
     let device_name_copy = body.login.device_name.clone();
     let installation_id = body.login.installation_id;
@@ -1163,13 +1215,13 @@ pub async fn owner_grant_friend_vip(
     let before = state.entitlements.workspace_record(body.workspace_id).await;
     let updated = state
         .entitlements
-        .set_friend_vip(
+        .set_friend_vip_checked(
             body.workspace_id,
             body.user_id,
             session.principal.user_id,
             true,
         )
-        .await;
+        .await?;
     state
         .log_center
         .record(
@@ -1194,13 +1246,13 @@ pub async fn owner_revoke_friend_vip(
     let before = state.entitlements.workspace_record(body.workspace_id).await;
     let updated = state
         .entitlements
-        .set_friend_vip(
+        .set_friend_vip_checked(
             body.workspace_id,
             body.user_id,
             session.principal.user_id,
             false,
         )
-        .await;
+        .await?;
     state
         .log_center
         .record(
@@ -1966,16 +2018,18 @@ pub async fn owner_create_announcement(
 /// `GET /v1/owner/product-config` — non-secret business & integration configuration (Section 9.12).
 pub async fn owner_product_config(State(state): State<AppState>) -> Json<Value> {
     let readiness = state.config.readiness_report();
+    let r = crate::business_rules::rules();
     Json(json!({
         "server_version": get_server_version(),
         "readiness": readiness,
         "online_lease_ttl_secs": crate::device_authority::ONLINE_LEASE_TTL_SECS,
         "online_heartbeat_secs": crate::device_authority::ONLINE_HEARTBEAT_SECS,
-        "refund_window_days": 3,
-        "trial_days": 7,
-        "free_plan_ops_per_month": crate::entitlements::FREE_OPS_PER_MONTH,
-        "free_plan_max_rows": crate::entitlements::FREE_MAX_ROWS,
-        "org_min_seats": ORG_MIN_SEATS,
+        "refund_window_days": r.refund_window_secs / 86_400,
+        "trial_days": r.trial_days,
+        "free_plan_ops_per_month": r.free_ops_per_month,
+        "free_plan_max_rows": r.free_max_rows,
+        "free_plan_max_cols": r.free_max_cols,
+        "org_min_seats": r.org_min_seats,
     }))
 }
 
@@ -2342,9 +2396,18 @@ pub struct OwnerWebLoginResponse {
 /// WITHOUT counting as a second Desktop installation or revoking the Owner's Desktop device.
 pub async fn owner_web_login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<OwnerWebLoginRequest>,
 ) -> Result<(StatusCode, Json<OwnerWebLoginResponse>), AuthError> {
-    check_rate_limit(&state, "owner:web_login", 20).await?;
+    check_ip_and_account_rate_limit(
+        &state,
+        "owner:web_login",
+        &headers,
+        Some(&body.email),
+        20,
+        10,
+    )
+    .await?;
     let service: &AccountAuthService = state
         .account_auth
         .as_deref()
@@ -2460,13 +2523,13 @@ pub async fn list_official_templates_for_user(
         .await;
     let ent = state
         .entitlements
-        .effective_at(
+        .effective_at_checked(
             session.principal.workspace_id,
             session.principal.user_id,
             is_owner,
             unix_now(),
         )
-        .await;
+        .await?;
     if let Some(pg) = &state.pg_store {
         let include_paid = plan_allows_premium_recipe_exchange(ent.effective_plan);
         let rows = pg.list_official_templates(false, include_paid).await?;
@@ -2496,13 +2559,13 @@ pub async fn check_premium_recipe_exchange_entitlement(
         .await;
     let ent = state
         .entitlements
-        .effective_at(
+        .effective_at_checked(
             session.principal.workspace_id,
             session.principal.user_id,
             is_owner,
             unix_now(),
         )
-        .await;
+        .await?;
     if !plan_allows_premium_recipe_exchange(ent.effective_plan) {
         return Err(AuthError::PremiumRecipeEntitlementRequired);
     }
@@ -2907,46 +2970,39 @@ pub async fn owner_publish_release(
 pub async fn get_my_entitlements(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
-) -> Json<EffectiveEntitlements> {
-    if let Some(ref pg) = state.pg_store {
-        if let Ok(Some(pg_ent)) = pg
-            .load_workspace_entitlement_pg(session.principal.workspace_id)
-            .await
-        {
-            state.entitlements.sync_workspace_record(pg_ent).await;
-        }
-    }
+) -> Result<Json<EffectiveEntitlements>, AuthError> {
     let is_owner = state
         .owner_mfa
         .is_owner_user(session.principal.user_id)
         .await;
-    Json(
-        state
-            .entitlements
-            .effective_at(
-                session.principal.workspace_id,
-                session.principal.user_id,
-                is_owner,
-                unix_now(),
-            )
-            .await,
-    )
+    let ent = state
+        .entitlements
+        .effective_at_checked(
+            session.principal.workspace_id,
+            session.principal.user_id,
+            is_owner,
+            unix_now(),
+        )
+        .await?;
+    Ok(Json(ent))
 }
 
 /// `POST /v1/entitlements/consume` — atomic, idempotent quota enforcement.
 pub async fn consume_entitlement(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Json(body): Json<ConsumeUsageRequest>,
 ) -> Result<Json<ConsumeUsageResult>, AuthError> {
-    if let Some(ref pg) = state.pg_store {
-        if let Ok(Some(pg_ent)) = pg
-            .load_workspace_entitlement_pg(session.principal.workspace_id)
-            .await
-        {
-            state.entitlements.sync_workspace_record(pg_ent).await;
-        }
-    }
+    check_ip_and_account_rate_limit(
+        &state,
+        "entitlements:consume",
+        &headers,
+        Some(&session.principal.workspace_id.to_string()),
+        180,
+        120,
+    )
+    .await?;
     let is_owner = state
         .owner_mfa
         .is_owner_user(session.principal.user_id)
@@ -2973,8 +3029,18 @@ pub struct ClaimTrialRequest {
 pub async fn claim_trial(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Json(body): Json<ClaimTrialRequest>,
 ) -> Result<Json<EffectiveEntitlements>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "entitlements:claim_trial",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        10,
+        5,
+    )
+    .await?;
     let user_id = session.principal.user_id;
     let (email, phone) = {
         let cp = state.control_plane.read().await;
@@ -3050,6 +3116,15 @@ pub async fn billing_checkout(
     headers: HeaderMap,
     Json(mut body): Json<CheckoutRequest>,
 ) -> Result<Json<CheckoutResponse>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "billing:checkout",
+        &headers,
+        Some(&session.principal.workspace_id.to_string()),
+        60,
+        30,
+    )
+    .await?;
     body.workspace_id = session.principal.workspace_id;
     body.user_id = session.principal.user_id;
     if body
@@ -3151,6 +3226,22 @@ pub async fn create_organization(
     Extension(session): Extension<AuthenticatedSession>,
     Json(body): Json<CreateOrgRequest>,
 ) -> Result<(StatusCode, Json<Organization>), AuthError> {
+    let is_owner = state
+        .owner_mfa
+        .is_owner_user(session.principal.user_id)
+        .await;
+    let ent = state
+        .entitlements
+        .effective_at_checked(
+            session.principal.workspace_id,
+            session.principal.user_id,
+            is_owner,
+            unix_now(),
+        )
+        .await?;
+    if !ent.teams_enabled {
+        return Err(AuthError::PaidPlanRequired);
+    }
     let org = state
         .organizations
         .create_org(
@@ -3175,6 +3266,22 @@ pub async fn invite_org_member(
     Path(org_id): Path<Uuid>,
     Json(body): Json<InviteOrgMemberRequest>,
 ) -> Result<(StatusCode, Json<Value>), AuthError> {
+    let is_owner = state
+        .owner_mfa
+        .is_owner_user(session.principal.user_id)
+        .await;
+    let ent = state
+        .entitlements
+        .effective_at_checked(
+            session.principal.workspace_id,
+            session.principal.user_id,
+            is_owner,
+            unix_now(),
+        )
+        .await?;
+    if !ent.teams_enabled {
+        return Err(AuthError::PaidPlanRequired);
+    }
     let (invite, token) = state
         .organizations
         .invite_member(org_id, session.principal.user_id, &body.email, body.role)
@@ -3206,9 +3313,21 @@ pub async fn accept_org_invite(
 
 pub async fn list_org_members(
     State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
     Path(org_id): Path<Uuid>,
-) -> Json<Vec<OrganizationMember>> {
-    Json(state.organizations.list_members(org_id).await)
+) -> Result<Json<Vec<OrganizationMember>>, AuthError> {
+    let is_owner = state
+        .owner_mfa
+        .is_owner_user(session.principal.user_id)
+        .await;
+    let members = state.organizations.list_members(org_id).await;
+    let is_member = members
+        .iter()
+        .any(|m| m.user_id == session.principal.user_id && m.removed_at.is_none());
+    if !is_owner && !is_member {
+        return Err(AuthError::OrgPermissionDenied);
+    }
+    Ok(Json(members))
 }
 
 pub async fn org_sso_status(State(state): State<AppState>) -> Result<Json<Value>, AuthError> {
@@ -3221,6 +3340,22 @@ pub async fn sync_push(
     Extension(session): Extension<AuthenticatedSession>,
     Json(body): Json<PushEncryptedSyncRequest>,
 ) -> Result<Json<EncryptedSyncRecord>, AuthError> {
+    let is_owner = state
+        .owner_mfa
+        .is_owner_user(session.principal.user_id)
+        .await;
+    let ent = state
+        .entitlements
+        .effective_at_checked(
+            session.principal.workspace_id,
+            session.principal.user_id,
+            is_owner,
+            unix_now(),
+        )
+        .await?;
+    if !ent.saved_recipes_write_enabled {
+        return Err(AuthError::PaidPlanRequired);
+    }
     let rec = state
         .encrypted_sync
         .push_envelope(
@@ -3292,7 +3427,8 @@ pub struct AiRouteRequest {
     pub masked_prompt: String,
 }
 
-/// `POST /v1/ai/route` — enforces explicit consent, local PII masking, AI quota, and honest provider readiness.
+/// `POST /v1/ai/route` — enforces explicit consent, local PII masking, Free-plan isolation,
+/// authoritative AI quota, and honest provider readiness.
 pub async fn ai_route(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
@@ -3304,21 +3440,32 @@ pub async fn ai_route(
     {
         return Err(AuthError::InvalidRequest);
     }
-    if !state.config.ai_configured() {
-        return Err(AuthError::AiProviderNotConfigured);
-    }
-    if let Some(ref pg) = state.pg_store {
-        if let Ok(Some(pg_ent)) = pg
-            .load_workspace_entitlement_pg(session.principal.workspace_id)
-            .await
-        {
-            state.entitlements.sync_workspace_record(pg_ent).await;
-        }
-    }
     let is_owner = state
         .owner_mfa
         .is_owner_user(session.principal.user_id)
         .await;
+    let now = unix_now();
+    // Enforce server-authoritative plan entitlement & AI quota BEFORE provider readiness so Free
+    // accounts ALWAYS receive 403 PaidPlanRequired (`SF-LIC-008`) even if AI keys are not set.
+    let current = state
+        .entitlements
+        .effective_at_checked(
+            session.principal.workspace_id,
+            session.principal.user_id,
+            is_owner,
+            now,
+        )
+        .await?;
+    if !current.ai_enabled {
+        return Err(AuthError::PaidPlanRequired);
+    }
+    if current.effective_plan != PlanTier::Owner && current.ai_calls_used >= current.ai_calls_limit
+    {
+        return Err(AuthError::AiQuotaExceeded);
+    }
+    if !state.config.ai_configured() {
+        return Err(AuthError::AiProviderNotConfigured);
+    }
     let consumed = state
         .entitlements
         .consume_at(
@@ -3332,7 +3479,7 @@ pub async fn ai_route(
                 column_count: 0,
                 pii_masked_count: 0,
             },
-            unix_now(),
+            now,
         )
         .await?;
     Ok(Json(json!({

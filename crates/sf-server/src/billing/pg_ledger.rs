@@ -275,11 +275,13 @@ impl PgControlPlaneStore {
             .await
             .map_err(|_| AuthError::BackendUnavailable)?;
 
-        // Advisory lock scoped to (workspace_id, idempotency_key) serializes simultaneous races cleanly.
+        // Advisory lock scoped to (workspace_id, product) prevents a second attempt with a new
+        // idempotency key from slipping past an unresolved `reconciliation_required` order.
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
             .bind(format!(
-                "billing_order:{}:{}",
-                candidate.workspace_id, candidate.idempotency_key
+                "billing_order_product:{}:{}",
+                candidate.workspace_id,
+                candidate.product.as_str()
             ))
             .execute(&mut *tx)
             .await
@@ -303,6 +305,29 @@ impl PgControlPlaneStore {
                 return Err(AuthError::IdempotencyConflict);
             }
             return Ok(PgCheckoutClaim::Existing(existing));
+        }
+
+        // Guard against duplicate provider charges when a different idempotency key is sent while
+        // an earlier attempt for the SAME workspace + product is still unresolved (`reconciliation_required`).
+        let unresolved_exists: Option<Uuid> = sqlx::query_scalar(
+            r"
+            SELECT id
+            FROM billing_orders
+            WHERE workspace_id = $1
+              AND product_code = $2
+              AND state = 'reconciliation_required'
+              AND expires_at > to_timestamp($3)
+            LIMIT 1
+            ",
+        )
+        .bind(candidate.workspace_id)
+        .bind(candidate.product.as_str())
+        .bind(candidate.created_at)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+        if unresolved_exists.is_some() {
+            return Err(AuthError::PaymentReconciliationRequired);
         }
 
         let insert_sql = format!(

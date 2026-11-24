@@ -294,7 +294,8 @@ async fn complete_desktop_to_website_billing_handoff_all_5_products_and_failure_
     let auth = AuthService::new(keys, sessions, cache);
 
     let mut cfg = ServerConfig::for_tests();
-    cfg.api_base_url = Some("https://safidata.app".to_owned());
+    cfg.api_base_url = Some("https://api.safidata.app".to_owned());
+    cfg.public_web_origin = Some("https://safidata.app".to_owned());
     cfg.paddle_api_base_url = mock_url;
     cfg.paddle_api_key = Some("pdl_test_api_key".to_owned());
     cfg.paddle_webhook_secret = Some("pdl_test_whsec_secret".to_owned());
@@ -741,6 +742,139 @@ async fn complete_desktop_to_website_billing_handoff_all_5_products_and_failure_
     assert_eq!(ent_after["effective_plan"], "individual_monthly");
     assert_eq!(ent_after["state"], "active");
     assert_eq!(ent_after["watermark_required"], false);
+
+    // 10. Direct Website Purchase WITHOUT any Desktop session or Desktop handoff,
+    //     testing separate Public Web Origin (`https://safidata.app`) calling API (`https://api.safidata.app`)!
+    let (st_evil, _) = send_req(
+        &router,
+        Method::POST,
+        "/v1/billing/web/login",
+        None,
+        &[
+            ("origin", "https://evil.example"),
+            ("host", "api.safidata.app"),
+        ],
+        Some(json!({
+            "email": "bob@example.test",
+            "password": "SafiStrongPassword!2"
+        })),
+    )
+    .await;
+    assert_eq!(
+        st_evil,
+        StatusCode::FORBIDDEN,
+        "foreign Origin must be rejected on cross-origin API billing login"
+    );
+
+    let (st, bob_login) = send_req(
+        &router,
+        Method::POST,
+        "/v1/billing/web/login",
+        None,
+        &[
+            ("origin", "https://safidata.app"),
+            ("host", "api.safidata.app"),
+        ],
+        Some(json!({
+            "email": "bob@example.test",
+            "password": "SafiStrongPassword!2",
+            "user_agent_hint": "direct-web-pricing-buyer"
+        })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+    let bob_web_tok = bob_login["token"]
+        .as_str()
+        .expect("bob sfb token")
+        .to_owned();
+    assert!(bob_web_tok.starts_with("sfb_"));
+
+    // Bob purchases Organization (5 seats = $1,020/yr) directly on the website — ZERO Desktop handoff!
+    let (st, bob_co) = send_req(
+        &router,
+        Method::POST,
+        "/v1/billing/checkout",
+        Some(&bob_web_tok),
+        &[
+            ("origin", "https://safidata.app"),
+            ("host", "api.safidata.app"),
+        ],
+        Some(json!({
+            "product": "organization_seat_annual",
+            "seats": 5,
+            "billing_country_iso2": "US",
+            "idempotency_key": "direct-web-bob-org-5-seats"
+        })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(bob_co["amount_minor"], 102000);
+    assert_eq!(bob_co["order_state"], "checkout_pending");
+    let bob_order_id = bob_co["order_id"].as_str().expect("bob order id");
+    let bob_txn_id = bob_co["provider_order_ref"].as_str().expect("bob txn id");
+
+    // Before webhook: Bob is STILL Free.
+    let (st, bob_ent_before) = send_req(
+        &router,
+        Method::GET,
+        "/v1/entitlements/me",
+        Some(&bob_web_tok),
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(bob_ent_before["effective_plan"], "free");
+
+    // Signed Paddle webhook completes Bob's direct website purchase.
+    let bob_wh = json!({
+        "event_id": "evt_direct_web_bob_org_001",
+        "event_type": "transaction.completed",
+        "occurred_at": "2026-11-24T10:00:00Z",
+        "data": {
+            "id": bob_txn_id,
+            "status": "completed",
+            "currency_code": "USD",
+            "subscription_id": "sub_direct_web_bob_1",
+            "invoice_id": "inv_direct_web_bob_1",
+            "items": [{ "price": { "id": "pri_org_usd" }, "quantity": 5 }],
+            "custom_data": {
+                "safi_order_id": bob_order_id,
+                "workspace_id": bob.workspace_id.unwrap().to_string(),
+                "user_id": bob.user_id.to_string(),
+                "product": "organization_seat_annual",
+                "seats": 5
+            },
+            "details": { "totals": { "total": "102000" } }
+        }
+    });
+    let bob_wh_bytes = serde_json::to_vec(&bob_wh).unwrap();
+    let bob_sig =
+        sign_paddle_payload("pdl_test_whsec_secret", unix_now(), &bob_wh_bytes).expect("sig");
+    let (wh_st, _) = send_raw(
+        &router,
+        Method::POST,
+        "/v1/billing/webhooks/paddle",
+        &[("paddle-signature", &bob_sig)],
+        bob_wh_bytes,
+    )
+    .await;
+    assert_eq!(wh_st, StatusCode::OK);
+
+    // Server confirms Bob's direct website purchase is now PAID & Organization (5 seats) active!
+    let (st, bob_ent_after) = send_req(
+        &router,
+        Method::GET,
+        "/v1/entitlements/me",
+        Some(&bob_web_tok),
+        &[],
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(bob_ent_after["effective_plan"], "organization_seat");
+    assert_eq!(bob_ent_after["state"], "active");
+    assert_eq!(bob_ent_after["teams_enabled"], true);
 }
 
 #[tokio::test]
@@ -769,7 +903,8 @@ async fn postgres_18_direct_http_free_isolation_desktop_handoff_multi_instance_a
         let cache = Arc::new(InMemoryAuthCache::new());
         let auth = AuthService::new(keys, sessions, cache);
         let mut cfg = ServerConfig::for_tests();
-        cfg.api_base_url = Some("https://safidata.app".to_owned());
+        cfg.api_base_url = Some("https://api.safidata.app".to_owned());
+        cfg.public_web_origin = Some("https://safidata.app".to_owned());
         let pg = PgControlPlaneStore::new(pool);
         let mut st = AppState::with_config(auth, cfg).with_pg_store(pg);
         st.entitlements = st.entitlements.with_require_durable_pg(true);

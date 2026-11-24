@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   ChevronDown,
+  CreditCard,
   Download,
   Globe,
   Home,
@@ -88,6 +89,9 @@ export interface FloatingGlassDockProps {
   readonly lang?: SafiLang;
   readonly onToggleLang?: () => void;
   readonly onOpenAccount?: () => void;
+  readonly onOpenPricing?: () => void;
+  readonly onOpenHomeSection?: (hash: string) => void;
+  readonly activeBrowserRoute?: "showcase" | "pricing" | "billing";
   readonly authenticated?: boolean;
   readonly ownerAccount?: boolean;
 }
@@ -96,11 +100,13 @@ const WEBSITE_SECTIONS: ReadonlyArray<{
   readonly href: string;
   readonly ar: string;
   readonly en: string;
+  readonly kind?: "pricing";
 }> = [
   { href: "#overview", ar: "نظرة عامة", en: "Overview" },
   { href: "#prompt-motion", ar: "الموشن التفاعلي", en: "Motion Studio" },
   { href: "#features", ar: "المميزات", en: "Features" },
   { href: "#compare", ar: "المقارنة", en: "Compare" },
+  { href: "/pricing", ar: "الأسعار والاشتراك", en: "Plans & Pricing", kind: "pricing" },
   { href: "#download", ar: "تحميل التطبيق", en: "Download" }
 ];
 
@@ -115,6 +121,9 @@ export function FloatingGlassDock({
   lang = "en",
   onToggleLang,
   onOpenAccount,
+  onOpenPricing,
+  onOpenHomeSection,
+  activeBrowserRoute = "showcase",
   authenticated = false,
   ownerAccount = false
 }: FloatingGlassDockProps): ReactNode {
@@ -195,14 +204,28 @@ export function FloatingGlassDock({
           {/* EXPANDED APPLE SEGMENTED BAR (Smoothly glides open horizontally on hover) */}
           <div className="safi-strip-expanded-content">
             {WEBSITE_SECTIONS.map((sec, idx) => {
-              const isHighlighted = idx === highlightedIdx;
+              const isPricing = sec.kind === "pricing";
+              const isHighlighted =
+                (isPricing && activeBrowserRoute === "pricing") || idx === highlightedIdx;
               return (
                 <a
                   key={sec.href}
                   href={sec.href}
+                  data-strip-nav={isPricing ? "pricing" : undefined}
                   onPointerEnter={() => setHoveredNavIdx(idx)}
-                  onClick={() => {
+                  onClick={(e) => {
                     setActiveNavIdx(idx);
+                    if (isPricing && onOpenPricing) {
+                      e.preventDefault();
+                      onOpenPricing();
+                    } else if (
+                      !isPricing &&
+                      onOpenHomeSection &&
+                      activeBrowserRoute !== "showcase"
+                    ) {
+                      e.preventDefault();
+                      onOpenHomeSection(sec.href);
+                    }
                   }}
                   className="safi-segmented-btn safi-strip-nav-item"
                   data-active={isHighlighted ? "true" : "false"}
@@ -216,6 +239,26 @@ export function FloatingGlassDock({
 
         {/* 3. Open Unpinned Right Actions (Scrolls naturally with the page) */}
         <div className="safi-topbar-actions">
+          {/* Directly visible Plans & Pricing entry for Desktop, Tablet & Mobile */}
+          <a
+            href="/pricing"
+            data-nav-pricing="true"
+            onClick={(e) => {
+              if (onOpenPricing) {
+                e.preventDefault();
+                onOpenPricing();
+              }
+            }}
+            className={
+              activeBrowserRoute === "pricing" ? "safi-btn safi-btn-primary" : "safi-topbar-btn"
+            }
+            aria-current={activeBrowserRoute === "pricing" ? "page" : undefined}
+            style={{ minHeight: "44px", height: "38px", textDecoration: "none" }}
+          >
+            <CreditCard size={15} aria-hidden="true" />
+            <span>{lang === "ar" ? "الأسعار والاشتراك" : "Plans & Pricing"}</span>
+          </a>
+
           <button
             type="button"
             onClick={onOpenAccount}

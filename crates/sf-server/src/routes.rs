@@ -2049,11 +2049,7 @@ pub async fn desktop_pkce_start(
     Json(body): Json<StartDesktopPkceRequest>,
 ) -> Result<(StatusCode, Json<StartDesktopPkceResponse>), AuthError> {
     check_rate_limit(&state, "auth:desktop_pkce_start", 40).await?;
-    let origin = state
-        .config
-        .api_base_url
-        .as_deref()
-        .unwrap_or("https://safidata.app");
+    let origin = state.config.resolved_public_web_origin()?;
     let now = unix_now();
     if let Some(pg) = &state.pg_store {
         let state_trimmed = body.state.trim();
@@ -3286,11 +3282,7 @@ pub async fn billing_handoff_start(
         30,
     )
     .await?;
-    let origin = state
-        .config
-        .api_base_url
-        .as_deref()
-        .unwrap_or("https://safidata.app");
+    let origin = state.config.resolved_public_web_origin()?;
     let resp = state
         .billing_handoff
         .start_handoff_at(

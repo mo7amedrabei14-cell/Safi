@@ -14,13 +14,13 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Crown, ExternalLink, RefreshCw, ShieldCheck, X } from "lucide-react";
 import type { SafiLang } from "../components/layout/FloatingGlassDock";
-import rawBusinessConfig from "../../../../config/business.json";
 import { getDefaultAuthApiBaseUrl } from "../lib/auth-api";
 import {
   BillingCheckoutController,
   type CheckoutProduct,
   type ServerEntitlementVerification
 } from "../lib/billing-checkout";
+import { BUSINESS_PRICING, normalizeOrganizationSeats } from "../lib/business-pricing";
 import { launchDesktopWebsiteBilling } from "../lib/desktop-billing-handoff";
 
 export interface DesktopUpgradeModalProps {
@@ -34,20 +34,7 @@ export interface DesktopUpgradeModalProps {
   readonly openExternalUrl?: (url: string) => Promise<{ readonly opened: boolean }>;
 }
 
-const BUSINESS_CFG = rawBusinessConfig as {
-  readonly plans: ReadonlyArray<{
-    readonly id: string;
-    readonly price?: { readonly USD: number; readonly EGP: number };
-    readonly min_seats?: number;
-    readonly price_per_seat_per_year?: { readonly USD: number; readonly EGP: number };
-  }>;
-  readonly micro_purchases: {
-    readonly pay_per_file: { readonly price: { readonly USD: number; readonly EGP: number } };
-    readonly credit_pack_25: { readonly price: { readonly USD: number; readonly EGP: number } };
-  };
-};
-
-const ORG_MIN_SEATS = BUSINESS_CFG.plans.find((p) => p.id === "organization_seat")?.min_seats ?? 3;
+const ORG_MIN_SEATS = BUSINESS_PRICING.organizationSeat.minSeats;
 
 export function DesktopUpgradeModal({
   open,
@@ -111,11 +98,12 @@ export function DesktopUpgradeModal({
 
   if (!open) return null;
 
-  const indM = BUSINESS_CFG.plans.find((p) => p.id === "individual_monthly")?.price;
-  const indA = BUSINESS_CFG.plans.find((p) => p.id === "individual_annual")?.price;
-  const org = BUSINESS_CFG.plans.find((p) => p.id === "organization_seat")?.price_per_seat_per_year;
-  const cp25 = BUSINESS_CFG.micro_purchases.credit_pack_25.price;
-  const ppf = BUSINESS_CFG.micro_purchases.pay_per_file.price;
+  const indM = BUSINESS_PRICING.individualMonthly.price;
+  const indA = BUSINESS_PRICING.individualAnnual.price;
+  const org = BUSINESS_PRICING.organizationSeat.pricePerSeatPerYear;
+  const cp25 = BUSINESS_PRICING.creditPack25.price;
+  const ppf = BUSINESS_PRICING.payPerFile.price;
+  const safeSeats = normalizeOrganizationSeats(orgSeats);
 
   const handleLaunch = async (product: CheckoutProduct): Promise<void> => {
     if (!sessionToken) {
@@ -130,9 +118,7 @@ export function DesktopUpgradeModal({
         sessionToken,
         {
           product,
-          ...(product === "organization_seat_annual"
-            ? { seats: Math.max(ORG_MIN_SEATS, orgSeats) }
-            : {}),
+          ...(product === "organization_seat_annual" ? { seats: safeSeats } : {}),
           billing_country_iso2: countryIso2
         },
         {
@@ -169,36 +155,45 @@ export function DesktopUpgradeModal({
     {
       product: "individual_monthly",
       title: L("فردي شهري", "Individual Monthly"),
-      price: countryIso2 === "EG" ? `${indM?.EGP ?? 1000} EGP / شهر` : `$${indM?.USD ?? 20} / mo`,
+      price:
+        countryIso2 === "EG"
+          ? `${indM.EGP.toLocaleString("en-US")} EGP / شهر`
+          : `$${indM.USD} / mo`,
       cta: L("اشترك عبر الموقع", "Subscribe on Website")
     },
     {
       product: "individual_annual",
       title: L("فردي سنوي (وفر 30%)", "Individual Annual (Save 30%)"),
-      price: countryIso2 === "EG" ? `${indA?.EGP ?? 8400} EGP / سنة` : `$${indA?.USD ?? 168} / yr`,
+      price:
+        countryIso2 === "EG"
+          ? `${indA.EGP.toLocaleString("en-US")} EGP / سنة`
+          : `$${indA.USD} / yr`,
       cta: L("اشترك عبر الموقع", "Subscribe on Website")
     },
     {
       product: "organization_seat_annual",
-      title: L(
-        `المؤسسات (${Math.max(ORG_MIN_SEATS, orgSeats)} مقاعد)`,
-        `Organization (${Math.max(ORG_MIN_SEATS, orgSeats)} seats)`
-      ),
+      title: L(`المؤسسات (${safeSeats} مقاعد)`, `Organization (${safeSeats} seats)`),
       price:
         countryIso2 === "EG"
-          ? `${((org?.EGP ?? 10200) * Math.max(ORG_MIN_SEATS, orgSeats)).toLocaleString("en-US")} EGP / سنة`
-          : `$${((org?.USD ?? 204) * Math.max(ORG_MIN_SEATS, orgSeats)).toLocaleString("en-US")} / yr`,
+          ? `${(org.EGP * safeSeats).toLocaleString("en-US")} EGP / سنة`
+          : `$${(org.USD * safeSeats).toLocaleString("en-US")} / yr`,
       cta: L("اشترك للمؤسسة عبر الموقع", "Buy Team Plan on Website")
     },
     {
       product: "credit_pack_25",
-      title: L("حزمة 25 عملية (لا تنتهي)", "Credit Pack 25 (Never Expires)"),
+      title: L(
+        `حزمة ${BUSINESS_PRICING.creditPack25.operations} عملية (لا تنتهي)`,
+        `Credit Pack ${BUSINESS_PRICING.creditPack25.operations} (Never Expires)`
+      ),
       price: countryIso2 === "EG" ? `${cp25.EGP} EGP` : `$${cp25.USD}`,
       cta: L("شراء عبر الموقع", "Buy on Website")
     },
     {
       product: "pay_per_file",
-      title: L("الدفع لكل ملف (حتى 100 ألف صف)", "Pay-Per-File (Up to 100k rows)"),
+      title: L(
+        `الدفع لكل ملف (حتى ${BUSINESS_PRICING.payPerFile.maxRows.toLocaleString("en-US")} صف)`,
+        `Pay-Per-File (Up to ${BUSINESS_PRICING.payPerFile.maxRows.toLocaleString("en-US")} rows)`
+      ),
       price: countryIso2 === "EG" ? `${ppf.EGP} EGP` : `$${ppf.USD}`,
       cta: L("شراء عبر الموقع", "Buy on Website")
     }

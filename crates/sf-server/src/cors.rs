@@ -5,7 +5,7 @@
 //! authenticated route never sees them. No wildcard and no credentials are
 //! ever sent.
 
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -25,8 +25,18 @@ const ALLOWED_METHODS_HEADER: &str = "GET, POST, DELETE, OPTIONS";
 const ALLOWED_HEADERS_HEADER: &str = "accept, authorization, content-type";
 const PREFLIGHT_MAX_AGE_SECONDS: &str = "600";
 
-/// Apply the allowlist to account API requests.
+/// Apply the static allowlist to account API requests.
 pub async fn cors_middleware(request: Request, next: Next) -> Response {
+    cors_middleware_with_origin(State(None), request, next).await
+}
+
+/// Apply the allowlist plus the configured `SAFI_PUBLIC_WEB_ORIGIN` (when API and public website
+/// are served from distinct origins, e.g. `https://api.safidata.app` vs `https://safidata.app`).
+pub async fn cors_middleware_with_origin(
+    State(public_web_origin): State<Option<String>>,
+    request: Request,
+    next: Next,
+) -> Response {
     let origin = request
         .headers()
         .get(header::ORIGIN)
@@ -36,7 +46,10 @@ pub async fn cors_middleware(request: Request, next: Next) -> Response {
         return next.run(request).await;
     };
 
-    let trusted = ALLOWED_ORIGINS.contains(&origin.as_str());
+    let trusted = ALLOWED_ORIGINS.contains(&origin.as_str())
+        || public_web_origin
+            .as_deref()
+            .is_some_and(|allowed| allowed == origin.as_str());
     if request.method() == Method::OPTIONS {
         if !trusted || !preflight_allowed(&request) {
             return StatusCode::FORBIDDEN.into_response();

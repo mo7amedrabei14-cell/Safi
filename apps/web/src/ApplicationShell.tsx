@@ -53,6 +53,8 @@ import { OwnerDashboard } from "./pages/OwnerDashboard";
 import { OwnerWebPortal } from "./pages/OwnerWebPortal";
 import { DesktopBrowserAuthPage } from "./pages/DesktopBrowserAuthPage";
 import { BillingPortalPage } from "./pages/BillingPortalPage";
+import { PricingPage } from "./pages/PricingPage";
+import { buildBillingUrlFromIntent, loadPendingWebPurchaseIntent } from "./lib/business-pricing";
 import { canAnimate } from "./components/ui/motion-preference";
 import { postSafiHeartbeat, SafiAuthApiError } from "./lib/auth-api";
 import { getSafiDeviceIdentity } from "./lib/device-identity";
@@ -72,12 +74,14 @@ export function renderStudio(
     readonly readOnlyOffline?: boolean;
     readonly entitlementRefreshNonce?: number;
     readonly onRevalidateOnline?: () => void;
+    readonly onOpenPricing?: () => void;
   }
 ): ReactNode {
   const desktopRuntime = options?.desktopRuntime ?? false;
   const sessionToken = options?.sessionToken ?? null;
   const isOwner = options?.isOwner ?? false;
   const readOnlyOffline = options?.readOnlyOffline ?? false;
+  const onOpenPricing = options?.onOpenPricing;
 
   switch (tab) {
     case "home":
@@ -86,6 +90,7 @@ export function renderStudio(
           lang={lang}
           onStart={() => onSelectTab("cleaning")}
           onOpenLibrary={() => onSelectTab("library")}
+          {...(onOpenPricing !== undefined ? { onOpenPricing } : {})}
         />
       );
     case "cleaning":
@@ -201,7 +206,7 @@ export function ApplicationShell({
   const [pkceError, setPkceError] = useState<string | null>(null);
   const [entitlementRefreshNonce, setEntitlementRefreshNonce] = useState(0);
   const [browserRoute, setBrowserRoute] = useState<
-    "showcase" | "owner" | "desktop-auth" | "billing"
+    "showcase" | "pricing" | "owner" | "desktop-auth" | "billing"
   >(() => {
     if (typeof window === "undefined" || isDesktopRuntime()) {
       return "showcase";
@@ -210,8 +215,74 @@ export function ApplicationShell({
     if (path === "/owner") return "owner";
     if (path === "/auth/desktop") return "desktop-auth";
     if (path === "/billing") return "billing";
+    if (path === "/pricing") return "pricing";
+    // Preserve direct website purchase flow across email-verification link navigation:
+    // if the customer clicked a verification link while holding a pending web purchase intent,
+    // resume directly in `/billing` with their selected plan, currency, and seat count intact!
+    if (initialVerificationToken !== null && loadPendingWebPurchaseIntent() !== null) {
+      return "billing";
+    }
     return "showcase";
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || desktopRuntime) return;
+    const onPopState = (): void => {
+      const path = window.location.pathname.replace(/\/+$/, "").toLowerCase();
+      if (path === "/owner") setBrowserRoute("owner");
+      else if (path === "/auth/desktop") setBrowserRoute("desktop-auth");
+      else if (path === "/billing") setBrowserRoute("billing");
+      else if (path === "/pricing") setBrowserRoute("pricing");
+      else setBrowserRoute("showcase");
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [desktopRuntime]);
+
+  const navigateToPricing = useCallback((): void => {
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", "/pricing");
+      window.scrollTo?.({ top: 0, behavior: "auto" });
+    }
+    setBrowserRoute("pricing");
+  }, []);
+
+  const navigateToShowcase = useCallback((hash?: string): void => {
+    if (typeof window !== "undefined") {
+      const target = hash && hash.startsWith("#") ? `/${hash}` : "/";
+      window.history.pushState({}, "", target);
+      if (hash && hash.startsWith("#")) {
+        window.setTimeout(() => {
+          document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: "smooth" });
+        }, 40);
+      } else {
+        window.scrollTo?.({ top: 0, behavior: "auto" });
+      }
+    }
+    setBrowserRoute("showcase");
+  }, []);
+
+  const navigateToBillingWithIntent = useCallback(
+    (intent: {
+      readonly product:
+        | "individual_monthly"
+        | "individual_annual"
+        | "organization_seat_annual"
+        | "credit_pack_25"
+        | "pay_per_file";
+      readonly billing_country_iso2: "US" | "EG";
+      readonly seats: number;
+    }): void => {
+      if (typeof window !== "undefined") {
+        window.history.pushState({}, "", buildBillingUrlFromIntent(intent));
+        window.scrollTo?.({ top: 0, behavior: "auto" });
+      }
+      setBrowserRoute("billing");
+    },
+    []
+  );
   const stageRef = useRef<HTMLDivElement | null>(null);
   const initialStageMountRef = useRef(true);
 
@@ -681,6 +752,48 @@ export function ApplicationShell({
     );
   }
 
+  if (!desktopRuntime && browserRoute === "pricing") {
+    return (
+      <>
+        <AmbientBackground />
+        <div
+          className="safi-shell"
+          dir={lang === "ar" ? "rtl" : "ltr"}
+          data-runtime="pricing-public"
+        >
+          <FloatingGlassDock
+            tabs={dockTabs}
+            activeTab={activeTab}
+            onSelect={selectTab}
+            onOpenCommandPalette={() => setPaletteOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            theme={theme}
+            onSelectTheme={selectTheme}
+            lang={lang}
+            onToggleLang={toggleLang}
+            onOpenAccount={() => setAccountOpen(true)}
+            onOpenPricing={navigateToPricing}
+            onOpenHomeSection={(hash) => navigateToShowcase(hash)}
+            activeBrowserRoute="pricing"
+            authenticated={hasActiveSession}
+            ownerAccount={false}
+          />
+          <main id="safi-main" className="safi-container safi-stage">
+            <PricingPage
+              lang={lang}
+              onSelectPurchase={navigateToBillingWithIntent}
+              onBackToShowcase={() => navigateToShowcase()}
+              onDownloadDesktop={() => navigateToShowcase("#download")}
+            />
+          </main>
+        </div>
+        {accountAccessPortal}
+        {authPortal}
+        {passwordResetPortal}
+      </>
+    );
+  }
+
   if (!desktopRuntime && browserRoute === "billing") {
     return (
       <>
@@ -693,12 +806,10 @@ export function ApplicationShell({
           <main id="safi-main" className="safi-container safi-stage">
             <BillingPortalPage
               lang={lang}
-              onBackToShowcase={() => {
-                if (typeof window !== "undefined") {
-                  window.history.pushState({}, "", "/");
-                }
-                setBrowserRoute("showcase");
-              }}
+              initialVerificationToken={initialVerificationToken}
+              onOpenPricing={navigateToPricing}
+              onBackToShowcase={() => navigateToShowcase()}
+              onDownloadDesktop={() => navigateToShowcase("#download")}
             />
           </main>
         </div>
@@ -781,6 +892,9 @@ export function ApplicationShell({
             lang={lang}
             onToggleLang={toggleLang}
             onOpenAccount={() => setAccountOpen(true)}
+            onOpenPricing={navigateToPricing}
+            onOpenHomeSection={(hash) => navigateToShowcase(hash)}
+            activeBrowserRoute="showcase"
             authenticated={hasActiveSession}
             ownerAccount={desktopRuntime && ownerAccount}
           />
@@ -796,7 +910,8 @@ export function ApplicationShell({
                 isOwner: ownerAccount,
                 readOnlyOffline: offlineReadOnly,
                 entitlementRefreshNonce,
-                onRevalidateOnline: () => void revalidateOnlineAccess()
+                onRevalidateOnline: () => void revalidateOnlineAccess(),
+                onOpenPricing: navigateToPricing
               })}
             </div>
           </main>

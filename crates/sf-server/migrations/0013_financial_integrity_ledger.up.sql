@@ -192,6 +192,20 @@ CREATE TABLE workspace_billing_watermarks (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE workspace_billing_watermarks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspace_billing_watermarks FORCE ROW LEVEL SECURITY;
+CREATE POLICY workspace_billing_watermarks_tenant_isolation ON workspace_billing_watermarks
+    USING (
+        current_setting('app.owner_override', true) = 'true'
+        OR workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uuid
+        OR workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid
+    )
+    WITH CHECK (
+        current_setting('app.owner_override', true) = 'true'
+        OR workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uuid
+        OR workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid
+    );
+
 CREATE TABLE workspace_entitlement_state (
     workspace_id UUID PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

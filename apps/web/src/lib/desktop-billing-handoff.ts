@@ -53,6 +53,7 @@ export async function launchDesktopWebsiteBilling(
   intent: DesktopBillingHandoffRequest,
   options?: {
     readonly apiBaseUrl?: string;
+    readonly expectedPublicWebOrigin?: string;
     readonly fetchImpl?: typeof fetch;
     readonly openExternalUrl?: (url: string) => Promise<{ readonly opened: boolean }>;
   }
@@ -91,11 +92,21 @@ export async function launchDesktopWebsiteBilling(
 
   const started = (await response.json()) as DesktopBillingHandoffResponse;
 
-  // Fail closed if the returned billing URL is malformed, mismatched, or smuggles tokens!
+  // Fail closed if the returned billing URL is malformed, points outside the approved public web
+  // origin, has mismatched state, or smuggles tokens!
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(started.billing_url);
   } catch {
+    throw new Error("SF-SYS-009");
+  }
+  const expectedPublicOrigin = (
+    options?.expectedPublicWebOrigin ??
+    (typeof __SAFI_PUBLIC_WEB_ORIGIN__ === "string" ? __SAFI_PUBLIC_WEB_ORIGIN__ : "")
+  )
+    .trim()
+    .replace(/\/+$/, "");
+  if (expectedPublicOrigin.length > 0 && parsedUrl.origin !== expectedPublicOrigin) {
     throw new Error("SF-SYS-009");
   }
   const returnedHandoff = parsedUrl.searchParams.get("handoff") ?? "";

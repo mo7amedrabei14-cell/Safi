@@ -6,10 +6,11 @@
 
 use std::path::Path;
 
-use sf_desktop::api_origin::{apply_csp_origin, ApiOrigin, API_ORIGIN_ENV};
+use sf_desktop::api_origin::{apply_csp_origin, ApiOrigin, API_ORIGIN_ENV, PUBLIC_WEB_ORIGIN_ENV};
 
 fn main() {
     println!("cargo:rerun-if-env-changed={API_ORIGIN_ENV}");
+    println!("cargo:rerun-if-env-changed={PUBLIC_WEB_ORIGIN_ENV}");
     println!("cargo:rerun-if-changed=tauri.conf.json");
 
     let profile = std::env::var("PROFILE").unwrap_or_default();
@@ -35,6 +36,36 @@ fn main() {
         }
         None => None,
     };
+
+    let configured_public_web = std::env::var(PUBLIC_WEB_ORIGIN_ENV)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+
+    let public_web_origin = match configured_public_web {
+        Some(value) if profile == "release" => Some(
+            ApiOrigin::parse_for_release(&value).unwrap_or_else(|error| {
+                panic!(
+                    "{PUBLIC_WEB_ORIGIN_ENV} is invalid for release builds: {}",
+                    error.message()
+                );
+            }),
+        ),
+        Some(value) => Some(ApiOrigin::parse(&value).unwrap_or_else(|error| {
+            panic!("{PUBLIC_WEB_ORIGIN_ENV} is invalid: {}", error.message());
+        })),
+        None if profile == "release" => {
+            panic!("{PUBLIC_WEB_ORIGIN_ENV} is required for release desktop builds");
+        }
+        None => None,
+    };
+
+    if let Some(web_origin) = public_web_origin {
+        println!(
+            "cargo:rustc-env={PUBLIC_WEB_ORIGIN_ENV}={}",
+            web_origin.as_str()
+        );
+    }
 
     if let Some(origin) = origin {
         let path = Path::new("tauri.conf.json");

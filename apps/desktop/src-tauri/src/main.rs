@@ -353,7 +353,7 @@ fn take_pending_deep_link(
 
 /// Launches the OS default browser strictly for a validated SafiData PKCE `/auth/desktop` URL.
 ///
-/// Rejects any URL whose origin does not match `SAFI_API_BASE_URL` (or loopback dev origin in
+/// Rejects any URL whose origin does not match `SAFI_PUBLIC_WEB_ORIGIN` (or loopback dev origin in
 /// debug builds), whose path is not `/auth/desktop`, or whose query params contain anything
 /// outside `flow`, `request_id`, and `state` (`SF-SYS-009`).
 #[tauri::command]
@@ -362,11 +362,26 @@ fn desktop_open_external_auth_url(url: String) -> Result<serde_json::Value, Stri
         "desktop_open_external_auth_url",
         sf_desktop::ipc_payload_len!(("url", &url)),
     )?;
-    let configured_origin = option_env!("SAFI_API_BASE_URL")
+    resolve_and_validate_external_auth_url(
+        &url,
+        option_env!("SAFI_PUBLIC_WEB_ORIGIN"),
+        cfg!(debug_assertions),
+    )?;
+
+    launch_os_browser(&url).map_err(|_| "SF-SYS-009".to_owned())?;
+    Ok(serde_json::json!({ "opened": true }))
+}
+
+fn resolve_and_validate_external_auth_url(
+    url: &str,
+    compiled_public_web_origin: Option<&str>,
+    debug_build: bool,
+) -> Result<(), String> {
+    let configured_origin = compiled_public_web_origin
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .or_else(|| {
-            if cfg!(debug_assertions) {
+            if debug_build {
                 if url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:") {
                     url.find("/auth/desktop?").map(|idx| &url[..idx])
                 } else {
@@ -377,30 +392,20 @@ fn desktop_open_external_auth_url(url: String) -> Result<serde_json::Value, Stri
             }
         })
         .ok_or_else(|| AUTH_CONFIG_MISSING_CODE.to_owned())?;
-    sf_desktop::content::validate_desktop_auth_external_url(&url, configured_origin)
-        .map_err(|err| err.code().as_str().to_owned())?;
-
-    launch_os_browser(&url).map_err(|_| "SF-SYS-009".to_owned())?;
-    Ok(serde_json::json!({ "opened": true }))
+    sf_desktop::content::validate_desktop_auth_external_url(url, configured_origin)
+        .map_err(|err| err.code().as_str().to_owned())
 }
 
-/// Launches the OS default external browser strictly for a validated SafiData Desktop-to-Website
-/// billing handoff URL (`/billing?handoff=sfbh_...&state=...`).
-///
-/// Desktop NEVER processes card payments internally. Rejects any URL whose origin does not match
-/// `SAFI_API_BASE_URL` (or loopback dev origin in debug builds), whose path is not `/billing`,
-/// or whose query params contain tokens or anything outside `handoff` and `state` (`SF-SYS-009`).
-#[tauri::command]
-fn desktop_open_external_billing_url(url: String) -> Result<serde_json::Value, String> {
-    enforce_ipc_command(
-        "desktop_open_external_billing_url",
-        sf_desktop::ipc_payload_len!(("url", &url)),
-    )?;
-    let configured_origin = option_env!("SAFI_API_BASE_URL")
+fn resolve_and_validate_external_billing_url(
+    url: &str,
+    compiled_public_web_origin: Option<&str>,
+    debug_build: bool,
+) -> Result<(), String> {
+    let configured_origin = compiled_public_web_origin
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .or_else(|| {
-            if cfg!(debug_assertions) {
+            if debug_build {
                 if url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:") {
                     url.find("/billing?").map(|idx| &url[..idx])
                 } else {
@@ -411,8 +416,27 @@ fn desktop_open_external_billing_url(url: String) -> Result<serde_json::Value, S
             }
         })
         .ok_or_else(|| AUTH_CONFIG_MISSING_CODE.to_owned())?;
-    sf_desktop::content::validate_desktop_billing_external_url(&url, configured_origin)
-        .map_err(|err| err.code().as_str().to_owned())?;
+    sf_desktop::content::validate_desktop_billing_external_url(url, configured_origin)
+        .map_err(|err| err.code().as_str().to_owned())
+}
+
+/// Launches the OS default external browser strictly for a validated SafiData Desktop-to-Website
+/// billing handoff URL (`/billing?handoff=sfbh_...&state=...`).
+///
+/// Desktop NEVER processes card payments internally. Validates strictly against
+/// `SAFI_PUBLIC_WEB_ORIGIN` (the official public website origin — separate from `SAFI_API_BASE_URL`!),
+/// rejecting any other host, API-only host, path outside `/billing`, or extra/token query params (`SF-SYS-009`).
+#[tauri::command]
+fn desktop_open_external_billing_url(url: String) -> Result<serde_json::Value, String> {
+    enforce_ipc_command(
+        "desktop_open_external_billing_url",
+        sf_desktop::ipc_payload_len!(("url", &url)),
+    )?;
+    resolve_and_validate_external_billing_url(
+        &url,
+        option_env!("SAFI_PUBLIC_WEB_ORIGIN"),
+        cfg!(debug_assertions),
+    )?;
 
     launch_os_browser(&url).map_err(|_| "SF-SYS-009".to_owned())?;
     Ok(serde_json::json!({ "opened": true }))
@@ -1439,7 +1463,8 @@ fn studio_generated_handler(
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--print-build-origin") {
         let payload = serde_json::json!({
-            "apiOrigin": option_env!("SAFI_API_BASE_URL").unwrap_or("")
+            "apiOrigin": option_env!("SAFI_API_BASE_URL").unwrap_or(""),
+            "publicWebOrigin": option_env!("SAFI_PUBLIC_WEB_ORIGIN").unwrap_or("")
         });
         println!("{payload}");
         return;
@@ -2484,5 +2509,65 @@ mod tests {
         native_ks
             .delete_secret(&key_id)
             .expect("cleanup OS keystore test entry");
+    }
+
+    #[test]
+    fn native_external_billing_origin_contract_separates_api_and_public_web_origins() {
+        let public_web_origin = "https://safidata.app";
+        let api_only_origin = "https://api.safidata.app";
+
+        // 1. Valid official public website billing handoff URL passes release-mode validation.
+        let valid_billing = format!(
+            "{public_web_origin}/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_0123456789abcdef"
+        );
+        assert!(super::resolve_and_validate_external_billing_url(
+            &valid_billing,
+            Some(public_web_origin),
+            false
+        )
+        .is_ok());
+
+        // 2. API-only origin is REJECTED by the Desktop external billing allowlist when
+        //    SAFI_PUBLIC_WEB_ORIGIN is distinct from SAFI_API_BASE_URL.
+        let api_billing = format!(
+            "{api_only_origin}/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_0123456789abcdef"
+        );
+        assert_eq!(
+            super::resolve_and_validate_external_billing_url(
+                &api_billing,
+                Some(public_web_origin),
+                false
+            ),
+            Err("SF-SYS-009".to_owned())
+        );
+
+        // 3. Arbitrary host, missing origin in release mode, or smuggled token param are REJECTED.
+        assert_eq!(
+            super::resolve_and_validate_external_billing_url(
+                "https://evil.example/billing?handoff=sfbh_0123456789abcdef0123456789abcdef&state=state_0123456789abcdef",
+                Some(public_web_origin),
+                false
+            ),
+            Err("SF-SYS-009".to_owned())
+        );
+        assert_eq!(
+            super::resolve_and_validate_external_billing_url(&valid_billing, None, false),
+            Err(AUTH_CONFIG_MISSING_CODE.to_owned())
+        );
+        assert_eq!(
+            super::resolve_and_validate_external_billing_url(
+                &format!("{valid_billing}&token=sfs_leaked_token"),
+                Some(public_web_origin),
+                false
+            ),
+            Err("SF-SYS-009".to_owned())
+        );
+
+        // 4. Native IPC allowlist enforces exact payload size and command name.
+        assert!(super::enforce_ipc_command(
+            "desktop_open_external_billing_url",
+            sf_desktop::ipc_payload_len!(("url", &valid_billing))
+        )
+        .is_ok());
     }
 }

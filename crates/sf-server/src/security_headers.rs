@@ -7,7 +7,7 @@
 //! - Origin / `Sec-Fetch-Site` CSRF defense on state-changing requests (`POST`, `PUT`, `PATCH`,
 //!   `DELETE`) for all non-webhook endpoints, rejecting cross-site browser origins with `403 Forbidden`.
 
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::http::{header, HeaderName, HeaderValue, Method};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -38,8 +38,15 @@ fn is_loopback_host(host: Option<&str>) -> bool {
     }
 }
 
-fn is_trusted_csrf_origin(origin: &str, request_host: Option<&str>) -> bool {
-    if ALLOWED_ORIGINS.contains(&origin) || PRODUCTION_WEB_ORIGINS.contains(&origin) {
+fn is_trusted_csrf_origin(
+    origin: &str,
+    request_host: Option<&str>,
+    configured_public_web_origin: Option<&str>,
+) -> bool {
+    if ALLOWED_ORIGINS.contains(&origin)
+        || PRODUCTION_WEB_ORIGINS.contains(&origin)
+        || configured_public_web_origin.is_some_and(|allowed| allowed == origin)
+    {
         return true;
     }
     if is_loopback_origin(origin) && is_loopback_host(request_host) {
@@ -56,6 +63,15 @@ fn is_trusted_csrf_origin(origin: &str, request_host: Option<&str>) -> bool {
 
 /// Apply anti-CSRF validation on state-changing browser requests and attach strict security headers.
 pub async fn security_headers_and_csrf_middleware(request: Request, next: Next) -> Response {
+    security_headers_and_csrf_middleware_with_origin(State(None), request, next).await
+}
+
+/// Apply anti-CSRF validation trusting exact configured `SAFI_PUBLIC_WEB_ORIGIN` alongside static origins.
+pub async fn security_headers_and_csrf_middleware_with_origin(
+    State(public_web_origin): State<Option<String>>,
+    request: Request,
+    next: Next,
+) -> Response {
     let is_state_changing = matches!(
         *request.method(),
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
@@ -78,7 +94,7 @@ pub async fn security_headers_and_csrf_middleware(request: Request, next: Next) 
             .and_then(|v| v.to_str().ok());
 
         if let Some(orig) = origin {
-            if !is_trusted_csrf_origin(orig, host) {
+            if !is_trusted_csrf_origin(orig, host, public_web_origin.as_deref()) {
                 let mut denied = AuthError::InsufficientScope.into_response();
                 apply_security_headers(&mut denied);
                 return denied;

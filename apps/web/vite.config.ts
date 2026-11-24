@@ -27,16 +27,16 @@ function isReservedReleaseHost(host: string): boolean {
   );
 }
 
-function validateReleaseApiOrigin(raw: string): string {
+function validateReleaseOrigin(envName: string, raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) {
-    throw new Error("SAFI_API_BASE_URL is required when SAFI_DESKTOP_RELEASE_BUILD=1");
+    throw new Error(`${envName} is required when SAFI_DESKTOP_RELEASE_BUILD=1`);
   }
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error(`SAFI_API_BASE_URL is invalid: ${trimmed}`);
+    throw new Error(`${envName} is invalid: ${trimmed}`);
   }
   if (
     parsed.protocol !== "https:" ||
@@ -46,7 +46,7 @@ function validateReleaseApiOrigin(raw: string): string {
     parsed.search ||
     parsed.hash
   ) {
-    throw new Error("SAFI_API_BASE_URL must be an https:// origin without path/query/credentials");
+    throw new Error(`${envName} must be an https:// origin without path/query/credentials`);
   }
   const host = parsed.hostname.toLowerCase();
   if (
@@ -56,7 +56,7 @@ function validateReleaseApiOrigin(raw: string): string {
     !host.includes(".") ||
     isReservedReleaseHost(host)
   ) {
-    throw new Error(`SAFI_API_BASE_URL host is disallowed for release desktop builds: ${host}`);
+    throw new Error(`${envName} host is disallowed for release desktop builds: ${host}`);
   }
   return parsed.origin;
 }
@@ -64,15 +64,25 @@ function validateReleaseApiOrigin(raw: string): string {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
   const rawApiBaseUrl = (process.env.SAFI_API_BASE_URL ?? env.SAFI_API_BASE_URL ?? "").trim();
+  const rawPublicWebOrigin = (
+    process.env.SAFI_PUBLIC_WEB_ORIGIN ??
+    env.SAFI_PUBLIC_WEB_ORIGIN ??
+    ""
+  ).trim();
   const apiBaseUrl =
     process.env.SAFI_DESKTOP_RELEASE_BUILD === "1"
-      ? validateReleaseApiOrigin(rawApiBaseUrl)
+      ? validateReleaseOrigin("SAFI_API_BASE_URL", rawApiBaseUrl)
       : rawApiBaseUrl;
+  const publicWebOrigin =
+    process.env.SAFI_DESKTOP_RELEASE_BUILD === "1"
+      ? validateReleaseOrigin("SAFI_PUBLIC_WEB_ORIGIN", rawPublicWebOrigin)
+      : rawPublicWebOrigin;
 
   return {
     plugins: [react()],
     define: {
-      __SAFI_API_BASE_URL__: JSON.stringify(apiBaseUrl)
+      __SAFI_API_BASE_URL__: JSON.stringify(apiBaseUrl),
+      __SAFI_PUBLIC_WEB_ORIGIN__: JSON.stringify(publicWebOrigin)
     },
     server: {
       host: true,

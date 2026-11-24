@@ -55,6 +55,7 @@ CREATE POLICY entitlement_usage_idempotency_tenant_isolation ON entitlement_usag
     );
 
 CREATE TABLE IF NOT EXISTS trial_anti_abuse_claims (
+    id UUID NOT NULL DEFAULT uuidv7(),
     claim_kind TEXT NOT NULL CHECK (claim_kind IN ('email', 'phone', 'device')),
     claim_hash TEXT NOT NULL CHECK (length(btrim(claim_hash)) > 0),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -62,5 +63,19 @@ CREATE TABLE IF NOT EXISTS trial_anti_abuse_claims (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (claim_kind, claim_hash)
 );
+
+ALTER TABLE trial_anti_abuse_claims ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trial_anti_abuse_claims FORCE ROW LEVEL SECURITY;
+CREATE POLICY trial_anti_abuse_claims_tenant_isolation ON trial_anti_abuse_claims
+    USING (
+        current_setting('app.owner_override', true) = 'true'
+        OR workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uuid
+        OR workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid
+    )
+    WITH CHECK (
+        current_setting('app.owner_override', true) = 'true'
+        OR workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uuid
+        OR workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid
+    );
 
 COMMIT;

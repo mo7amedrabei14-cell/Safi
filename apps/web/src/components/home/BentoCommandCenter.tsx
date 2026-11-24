@@ -18,6 +18,7 @@ import {
   ArrowLeftRight,
   BarChart3,
   CheckCircle2,
+  CreditCard,
   Download,
   FileSpreadsheet,
   Lock,
@@ -47,6 +48,7 @@ import {
 export interface BentoCommandCenterProps {
   readonly onStart?: () => void;
   readonly onOpenLibrary?: () => void;
+  readonly onOpenPricing?: () => void;
   readonly lang?: SafiLang;
 }
 
@@ -501,6 +503,7 @@ const COMPARISON_ROWS = [
 export function BentoCommandCenter({
   onStart,
   onOpenLibrary: _onOpenLibrary,
+  onOpenPricing,
   lang = "en"
 }: BentoCommandCenterProps): ReactNode {
   const isAr = lang === "ar";
@@ -733,6 +736,23 @@ export function BentoCommandCenter({
             >
               <Download size={16} aria-hidden="true" />
               <span>{isAr ? "حمّل تطبيق سطح المكتب مجانًا" : "Download Desktop App"}</span>
+            </MagneticButton>
+
+            <MagneticButton
+              variant="secondary"
+              ariaLabel={isAr ? "الأسعار والاشتراك" : "Plans & Pricing"}
+              onClick={() => {
+                if (onOpenPricing) {
+                  onOpenPricing();
+                } else if (typeof window !== "undefined") {
+                  window.location.assign("/pricing");
+                }
+              }}
+            >
+              <CreditCard size={16} aria-hidden="true" />
+              <span data-hero-pricing-cta="true">
+                {isAr ? "الأسعار والاشتراك" : "Plans & Pricing"}
+              </span>
             </MagneticButton>
 
             <MagneticButton

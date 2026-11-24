@@ -377,10 +377,15 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
 
 /// Build the full application with security headers, anti-CSRF, strict CORS, and request-id middleware.
 pub fn app(state: AppState) -> Router {
+    let public_web_origin = state.config.public_web_origin.clone();
     routes::build_router(state)
-        .layer(middleware::from_fn(cors::cors_middleware))
-        .layer(middleware::from_fn(
-            security_headers::security_headers_and_csrf_middleware,
+        .layer(middleware::from_fn_with_state(
+            public_web_origin.clone(),
+            cors::cors_middleware_with_origin,
+        ))
+        .layer(middleware::from_fn_with_state(
+            public_web_origin,
+            security_headers::security_headers_and_csrf_middleware_with_origin,
         ))
         .layer(middleware::from_fn(request_id_middleware))
 }

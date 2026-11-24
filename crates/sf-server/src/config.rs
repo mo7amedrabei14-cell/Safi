@@ -62,6 +62,7 @@ pub struct ServerConfig {
     pub environment: AppEnvironment,
     pub bind_addr: String,
     pub api_base_url: Option<String>,
+    pub public_web_origin: Option<String>,
     pub database_url: Option<String>,
     pub valkey_url: Option<String>,
     pub totp_encryption_key: Option<[u8; 32]>,
@@ -101,6 +102,8 @@ impl fmt::Debug for ServerConfig {
         f.debug_struct("ServerConfig")
             .field("environment", &self.environment)
             .field("bind_addr", &self.bind_addr)
+            .field("api_base_url", &self.api_base_url)
+            .field("public_web_origin", &self.public_web_origin)
             .field("database_configured", &self.database_url.is_some())
             .field("valkey_configured", &self.valkey_url.is_some())
             .field("totp_key_configured", &self.totp_encryption_key.is_some())
@@ -138,6 +141,140 @@ pub fn parse_hex_32(raw: &str) -> Result<[u8; 32], &'static str> {
     Ok(out)
 }
 
+fn is_reserved_public_host(host: &str) -> bool {
+    matches!(
+        host,
+        "invalid"
+            | "test"
+            | "example"
+            | "local"
+            | "internal"
+            | "example.com"
+            | "example.org"
+            | "example.net"
+    ) || host.ends_with(".invalid")
+        || host.ends_with(".test")
+        || host.ends_with(".example")
+        || host.ends_with(".local")
+        || host.ends_with(".internal")
+        || host.ends_with(".arpa")
+        || host.ends_with(".example.com")
+        || host.ends_with(".example.org")
+        || host.ends_with(".example.net")
+}
+
+/// Strictly validate `SAFI_PUBLIC_WEB_ORIGIN` (e.g. `https://safidata.app`).
+///
+/// - Rejects any path, query string, fragment, or user-info (`@`).
+/// - In strict (`staging` / `production`) environments: requires `https://`, a multi-label valid
+///   DNS host, non-localhost, non-IP literal, and non-reserved placeholder domain.
+/// - In `development` / `test`: permits valid `https://` origins OR explicit loopback `http://127.0.0.1:<port>`
+///   / `http://localhost:<port>`.
+pub fn validate_public_web_origin(raw: &str, strict: bool) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN must not be empty".to_owned());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let (scheme, rest) = if let Some(r) = lower.strip_prefix("https://") {
+        ("https", r)
+    } else if !strict {
+        if let Some(r) = lower.strip_prefix("http://") {
+            ("http", r)
+        } else {
+            return Err("SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN must start with https://".to_owned());
+        }
+    } else {
+        return Err(
+            "SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN must use https:// in staging/production".to_owned(),
+        );
+    };
+
+    if rest.is_empty()
+        || rest
+            .chars()
+            .any(|c| matches!(c, '/' | '?' | '#' | '@' | '\\') || c.is_whitespace())
+    {
+        return Err(
+            "SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN must be an origin without path, query, fragment, or credentials"
+                .to_owned(),
+        );
+    }
+
+    let (host, port_raw) = match rest.rsplit_once(':') {
+        Some((h, p)) => (h, Some(p)),
+        None => (rest, None),
+    };
+    if host.is_empty() || host.starts_with('[') || host.contains(':') {
+        return Err("SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN has an invalid host".to_owned());
+    }
+
+    let port = match port_raw {
+        Some(p) => {
+            if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
+                return Err("SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN has an invalid port".to_owned());
+            }
+            let parsed: u16 = p
+                .parse()
+                .map_err(|_| "SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN port out of range".to_owned())?;
+            if parsed == 0 {
+                return Err("SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN port out of range".to_owned());
+            }
+            if (scheme == "https" && parsed == 443) || (scheme == "http" && parsed == 80) {
+                None
+            } else {
+                Some(parsed)
+            }
+        }
+        None => None,
+    };
+
+    if scheme == "http" {
+        if host != "127.0.0.1" && host != "localhost" {
+            return Err(
+                "SF-SYS-032: http:// SAFI_PUBLIC_WEB_ORIGIN is only permitted for loopback dev/test"
+                    .to_owned(),
+            );
+        }
+    } else {
+        if host == "localhost" || host.ends_with(".localhost") {
+            return Err(
+                "SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN must not point at localhost".to_owned(),
+            );
+        }
+        if host.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            return Err("SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN must not be an IP literal".to_owned());
+        }
+        let valid_labels = host.contains('.')
+            && host.split('.').all(|label| {
+                !label.is_empty()
+                    && label.len() <= 63
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+                    && label
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            });
+        if !valid_labels {
+            return Err(
+                "SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN must use a valid multi-label DNS host"
+                    .to_owned(),
+            );
+        }
+        if strict && is_reserved_public_host(host) {
+            return Err(
+                "SF-SYS-032: SAFI_PUBLIC_WEB_ORIGIN must not use a reserved placeholder domain in staging/production"
+                    .to_owned(),
+            );
+        }
+    }
+
+    Ok(match port {
+        Some(p) => format!("{scheme}://{host}:{p}"),
+        None => format!("{scheme}://{host}"),
+    })
+}
+
 impl ServerConfig {
     /// Load configuration from real OS environment variables.
     pub fn from_env() -> Result<Self, String> {
@@ -153,6 +290,10 @@ impl ServerConfig {
         let bind_addr =
             non_empty_var(&lookup, "SAFI_BIND_ADDR").unwrap_or_else(|| "127.0.0.1:8080".to_owned());
         let api_base_url = non_empty_var(&lookup, "SAFI_API_BASE_URL");
+        let public_web_origin = match non_empty_var(&lookup, "SAFI_PUBLIC_WEB_ORIGIN") {
+            Some(raw) => Some(validate_public_web_origin(&raw, environment.is_strict())?),
+            None => None,
+        };
         let database_url = non_empty_var(&lookup, "DATABASE_URL");
         let valkey_url = non_empty_var(&lookup, "SAFI_VALKEY_URL");
 
@@ -242,6 +383,7 @@ impl ServerConfig {
             environment,
             bind_addr,
             api_base_url,
+            public_web_origin,
             database_url,
             valkey_url,
             totp_encryption_key,
@@ -295,11 +437,29 @@ impl ServerConfig {
         self.ai_provider_url.is_some() && self.ai_api_key.is_some() && self.ai_model.is_some()
     }
 
+    /// Resolve the approved public website origin used for browser billing/auth redirects.
+    ///
+    /// - Never falls back to `SAFI_API_BASE_URL` in strict staging/production builds.
+    /// - In non-strict local tests/dev, uses `public_web_origin` first (defaulting to
+    ///   `https://safidata.app` when omitted).
+    pub fn resolved_public_web_origin(&self) -> Result<&str, crate::error::AuthError> {
+        if let Some(origin) = self.public_web_origin.as_deref() {
+            return Ok(origin);
+        }
+        if self.environment.is_strict() {
+            return Err(crate::error::AuthError::BackendUnavailable);
+        }
+        Ok("https://safidata.app")
+    }
+
     /// Build a secret-safe readiness report showing every integration's status.
     #[must_use]
     pub fn readiness_report(&self) -> ReadinessReport {
         let mut missing_required = Vec::new();
         if self.environment.is_strict() {
+            if self.public_web_origin.is_none() {
+                missing_required.push("SAFI_PUBLIC_WEB_ORIGIN".to_owned());
+            }
             if self.database_url.is_none() {
                 missing_required.push("DATABASE_URL".to_owned());
             }
@@ -329,6 +489,10 @@ impl ServerConfig {
         };
 
         let mut integrations = BTreeMap::new();
+        integrations.insert(
+            "public_web_origin".to_owned(),
+            flag(self.public_web_origin.is_some()),
+        );
         integrations.insert("postgresql".to_owned(), flag(self.database_url.is_some()));
         integrations.insert("valkey".to_owned(), flag(self.valkey_url.is_some()));
         integrations.insert(
@@ -395,6 +559,7 @@ impl ServerConfig {
             environment: AppEnvironment::Test,
             bind_addr: "127.0.0.1:0".to_owned(),
             api_base_url: Some("http://127.0.0.1:8080".to_owned()),
+            public_web_origin: Some("https://safidata.app".to_owned()),
             database_url: None,
             valkey_url: None,
             totp_encryption_key: Some([0x42u8; 32]),
@@ -444,9 +609,32 @@ mod tests {
             .validate_for_startup()
             .expect_err("production must fail closed");
         assert!(err.contains("SF-SYS-032"));
+        assert!(err.contains("SAFI_PUBLIC_WEB_ORIGIN"));
         assert!(err.contains("DATABASE_URL"));
         assert!(err.contains("SAFI_VALKEY_URL"));
         assert!(err.contains("SAFI_TOTP_ENCRYPTION_KEY"));
+    }
+
+    #[test]
+    fn strict_env_rejects_malformed_http_localhost_and_reserved_public_web_origin() {
+        for bad in [
+            "http://safidata.app",
+            "https://safidata.app/billing",
+            "https://user@safidata.app",
+            "https://localhost",
+            "https://127.0.0.1",
+            "https://safidata.example",
+            "https://billing.test",
+            "not-a-url",
+        ] {
+            let env = HashMap::from([
+                ("SAFI_ENV".to_owned(), "production".to_owned()),
+                ("SAFI_PUBLIC_WEB_ORIGIN".to_owned(), bad.to_owned()),
+            ]);
+            let err = ServerConfig::from_lookup(|k| env.get(k).cloned())
+                .expect_err(&format!("must reject bad origin: {bad}"));
+            assert!(err.contains("SF-SYS-032"), "bad={bad} err={err}");
+        }
     }
 
     #[test]
@@ -455,12 +643,17 @@ mod tests {
             ("SAFI_ENV".to_owned(), "production".to_owned()),
             ("DATABASE_URL".to_owned(), "CHANGE_ME_DB_URL".to_owned()),
             (
+                "SAFI_PUBLIC_WEB_ORIGIN".to_owned(),
+                "CHANGE_ME_WEB_ORIGIN".to_owned(),
+            ),
+            (
                 "SAFI_TOTP_ENCRYPTION_KEY".to_owned(),
                 "CHANGE_ME_64_HEX_BYTES".to_owned(),
             ),
         ]);
         let cfg = ServerConfig::from_lookup(|k| env.get(k).cloned()).expect("parse");
         assert!(cfg.database_url.is_none());
+        assert!(cfg.public_web_origin.is_none());
         assert!(cfg.totp_encryption_key.is_none());
         assert!(cfg.validate_for_startup().is_err());
     }
@@ -470,6 +663,14 @@ mod tests {
         let hex32 = "aa".repeat(32);
         let env = HashMap::from([
             ("SAFI_ENV".to_owned(), "production".to_owned()),
+            (
+                "SAFI_API_BASE_URL".to_owned(),
+                "https://api.safidata.app".to_owned(),
+            ),
+            (
+                "SAFI_PUBLIC_WEB_ORIGIN".to_owned(),
+                "https://SAFIDATA.APP:443".to_owned(),
+            ),
             (
                 "DATABASE_URL".to_owned(),
                 "postgres://safi:pw@127.0.0.1:6432/safi".to_owned(),
@@ -484,8 +685,24 @@ mod tests {
             ("SAFI_TOKEN_SIGNING_KEY".to_owned(), hex32),
         ]);
         let cfg = ServerConfig::from_lookup(|k| env.get(k).cloned()).expect("parse");
+        assert_eq!(
+            cfg.api_base_url.as_deref(),
+            Some("https://api.safidata.app")
+        );
+        assert_eq!(
+            cfg.public_web_origin.as_deref(),
+            Some("https://safidata.app")
+        );
+        assert_eq!(
+            cfg.resolved_public_web_origin().expect("resolved"),
+            "https://safidata.app"
+        );
         let report = cfg.validate_for_startup().expect("valid production config");
         assert!(report.ready);
+        assert_eq!(
+            report.integrations.get("public_web_origin"),
+            Some(&IntegrationStatus::Configured)
+        );
         assert_eq!(
             report.integrations.get("billing_paddle"),
             Some(&IntegrationStatus::NotConfigured)

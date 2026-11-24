@@ -4,8 +4,12 @@
 //! malformed `SAFI_API_BASE_URL` is an error, and a valid origin is injected
 //! into both the web bundle and the Tauri `connect-src` policy.
 
-/// Environment variable read at desktop build time.
+/// Environment variable read at desktop build time for the backend API origin.
 pub const API_ORIGIN_ENV: &str = "SAFI_API_BASE_URL";
+
+/// Environment variable read at desktop build time for the official public website origin
+/// (used for external browser billing & PKCE auth redirects, e.g. `https://safidata.app`).
+pub const PUBLIC_WEB_ORIGIN_ENV: &str = "SAFI_PUBLIC_WEB_ORIGIN";
 
 /// Pinned loopback origin permitted exclusively for opt-in local Ollama inference.
 pub const LOCAL_OLLAMA_ORIGIN: &str = "http://127.0.0.1:11434";

@@ -1,0 +1,811 @@
+/* ============================================================================
+ * SafiData Website Billing Portal (`/billing`) — Scoped Stylesheet
+ *
+ * Uses SafiData's existing theme tokens (`vision-glass`, `apple-light`,
+ * `google-gemini` / `dark`), logical RTL/LTR properties, WCAG 2.2 AA contrast,
+ * >= 44px tap targets, responsive 2-column desktop -> comfortable tablet/mobile
+ * layout, and full `prefers-reduced-motion` compliance.
+ * ========================================================================== */
+
+.safi-billing-portal {
+  --bp-card-item-bg: rgba(255, 255, 255, 0.92);
+  --bp-control-bg: #ffffff;
+  --bp-control-readonly-bg: #f1f5f9;
+  --bp-control-border: rgba(15, 23, 42, 0.16);
+  --bp-control-border-hover: rgba(15, 23, 42, 0.3);
+  --bp-accent: #2563eb;
+  --bp-accent-tint: rgba(37, 99, 235, 0.08);
+  --bp-check-ink: #ffffff;
+  font-family: var(--safi-font-sans);
+  width: 100%;
+  max-width: 1140px;
+  margin-inline: auto;
+  padding-block: clamp(20px, 3vw, 40px) clamp(40px, 5vw, 72px);
+  padding-inline: clamp(14px, 3vw, 28px);
+  display: grid;
+  gap: 20px;
+  color: var(--text-primary);
+  box-sizing: border-box;
+  overflow-x: clip;
+}
+
+:root[data-theme="dark"] .safi-billing-portal,
+:root[data-theme="google-gemini"] .safi-billing-portal {
+  --bp-card-item-bg: rgba(15, 23, 42, 0.52);
+  --bp-control-bg: rgba(15, 23, 42, 0.72);
+  --bp-control-readonly-bg: rgba(30, 41, 59, 0.56);
+  --bp-control-border: rgba(148, 163, 184, 0.22);
+  --bp-control-border-hover: rgba(148, 163, 184, 0.42);
+  --bp-accent: #3b82f6;
+  --bp-accent-tint: rgba(59, 130, 246, 0.14);
+  --bp-check-ink: #ffffff;
+}
+
+/* Prevent global `[dir="ltr"]` monospace rule from overriding prose inside Billing Portal */
+.safi-billing-portal[dir="ltr"],
+.safi-billing-portal [dir="ltr"] {
+  font-family: var(--safi-font-sans);
+}
+
+.safi-billing-portal *,
+.safi-billing-portal *::before,
+.safi-billing-portal *::after {
+  box-sizing: border-box;
+}
+
+/* --- Compact Top Bar --- */
+.safi-bp-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.safi-bp-topbar__nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.safi-bp-trust-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.safi-bp-trust-pill svg {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+/* --- Surface Card --- */
+.safi-bp-card {
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  padding: clamp(18px, 2.4vw, 26px);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  gap: 16px;
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.safi-bp-card--hero {
+  gap: 12px;
+}
+
+.safi-bp-hero-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.safi-bp-title-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.safi-bp-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+}
+
+.safi-bp-heading {
+  margin: 0;
+  font-size: clamp(1.45rem, 2.5vw, 1.95rem);
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.safi-bp-subtitle {
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 68ch;
+}
+
+/* --- Account Strip --- */
+.safi-bp-account-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.safi-bp-account-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.safi-bp-account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--status-ok) 14%, transparent);
+  color: var(--status-ok);
+  border: 1px solid color-mix(in srgb, var(--status-ok) 32%, transparent);
+}
+
+.safi-bp-account-email {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+/* --- Alerts & Notices --- */
+.safi-bp-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  font-weight: 500;
+  border: 1px solid var(--border-subtle);
+}
+
+.safi-bp-alert svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.safi-bp-alert--info {
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--accent-primary) 34%, transparent);
+  color: var(--text-primary);
+}
+
+.safi-bp-alert--success {
+  background: color-mix(in srgb, var(--status-ok) 11%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--status-ok) 38%, transparent);
+  color: var(--text-primary);
+}
+
+.safi-bp-alert--warn {
+  background: color-mix(in srgb, var(--status-warn) 12%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--status-warn) 42%, transparent);
+  color: var(--text-primary);
+}
+
+.safi-bp-alert--danger {
+  background: color-mix(in srgb, var(--status-danger) 11%, var(--bg-surface));
+  border-color: color-mix(in srgb, var(--status-danger) 42%, transparent);
+  color: var(--text-primary);
+}
+
+/* --- 2-Column Checkout Layout --- */
+.safi-bp-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.48fr) minmax(320px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.safi-bp-main-col {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+.safi-bp-summary-col {
+  display: grid;
+  gap: 16px;
+  position: sticky;
+  top: 84px;
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  .safi-bp-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .safi-bp-summary-col {
+    position: static;
+  }
+}
+
+/* --- Section Headings inside Cards --- */
+.safi-bp-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.safi-bp-section-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.safi-bp-section-hint {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* --- Plan Selection Grid --- */
+.safi-bp-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.safi-bp-plan-card {
+  appearance: none;
+  width: 100%;
+  min-height: 76px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1.5px solid var(--bp-control-border);
+  background: var(--bp-card-item-bg);
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: start;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.18s ease;
+}
+
+.safi-bp-plan-card:hover:not(:disabled) {
+  border-color: var(--bp-control-border-hover);
+  transform: translateY(-1px);
+}
+
+.safi-bp-plan-card:focus-visible {
+  outline: 2px solid var(--bp-accent);
+  outline-offset: 2px;
+}
+
+.safi-bp-plan-card[data-selected="true"] {
+  border-color: var(--bp-accent);
+  background: var(--bp-accent-tint);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bp-accent) 45%, transparent),
+    0 8px 24px -12px color-mix(in srgb, var(--bp-accent) 40%, transparent);
+}
+
+.safi-bp-plan-card:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.safi-bp-plan-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.safi-bp-plan-card__name {
+  font-size: 0.94rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.safi-bp-plan-card__check {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1.5px solid var(--bp-control-border-hover);
+  color: transparent;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.safi-bp-plan-card[data-selected="true"] .safi-bp-plan-card__check {
+  background: var(--bp-accent);
+  border-color: var(--bp-accent);
+  color: var(--bp-check-ink);
+}
+
+.safi-bp-plan-card__price {
+  font-size: 1.02rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.safi-bp-plan-card__meta {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+/* --- Form Controls --- */
+.safi-bp-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .safi-bp-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.safi-bp-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.safi-bp-field--full {
+  grid-column: 1 / -1;
+}
+
+.safi-bp-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.safi-bp-label__req {
+  color: var(--status-danger);
+  font-weight: 700;
+}
+
+.safi-bp-label__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--status-ok) 14%, transparent);
+  color: var(--status-ok);
+  border: 1px solid color-mix(in srgb, var(--status-ok) 30%, transparent);
+}
+
+.safi-bp-input,
+.safi-bp-select {
+  width: 100%;
+  min-height: 46px;
+  padding-block: 10px;
+  padding-inline: 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--bp-control-border);
+  background: var(--bp-control-bg);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.94rem;
+  line-height: 1.4;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.safi-bp-input::placeholder {
+  color: var(--text-muted);
+}
+
+.safi-bp-input:hover:not(:disabled):not([readonly]),
+.safi-bp-select:hover:not(:disabled) {
+  border-color: var(--bp-control-border-hover);
+}
+
+.safi-bp-input:focus-visible,
+.safi-bp-select:focus-visible {
+  outline: none;
+  border-color: var(--bp-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bp-accent) 22%, transparent);
+}
+
+.safi-bp-input[readonly] {
+  background: var(--bp-control-readonly-bg);
+  color: var(--text-primary);
+  border-style: dashed;
+  cursor: default;
+}
+
+.safi-bp-input[aria-invalid="true"],
+.safi-bp-select[aria-invalid="true"] {
+  border-color: var(--status-danger);
+  background: color-mix(in srgb, var(--status-danger) 5%, var(--bg-surface));
+}
+
+.safi-bp-input[aria-invalid="true"]:focus-visible,
+.safi-bp-select[aria-invalid="true"]:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-danger) 24%, transparent);
+}
+
+/* Custom Select Wrapper (Crisp RTL/LTR Chevron, Zero Clipping) */
+.safi-bp-select-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.safi-bp-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-inline-end: 40px;
+  cursor: pointer;
+}
+
+.safi-bp-select option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.safi-bp-select-chevron {
+  position: absolute;
+  inset-inline-end: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-secondary);
+}
+
+/* Field helper & error text */
+.safi-bp-helper {
+  margin: 0;
+  font-size: 0.79rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.safi-bp-field-error {
+  margin: 0;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.81rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--status-danger);
+}
+
+.safi-bp-field-error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* --- Smooth Paymob Details Reveal / Hide --- */
+.safi-bp-paymob-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease;
+}
+
+.safi-bp-paymob-reveal[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.safi-bp-paymob-reveal__inner {
+  overflow: hidden;
+  display: grid;
+  gap: 14px;
+  padding-top: 2px;
+}
+
+/* --- Seat Stepper & Coupon Row --- */
+.safi-bp-seat-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  max-width: 260px;
+}
+
+.safi-bp-seat-btn {
+  appearance: none;
+  min-width: 46px;
+  min-height: 46px;
+  border-radius: 12px;
+  border: 1.5px solid var(--bp-control-border);
+  background: var(--bp-control-bg);
+  color: var(--text-primary);
+  font-size: 1.15rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.safi-bp-seat-btn:hover:not(:disabled) {
+  border-color: var(--bp-control-border-hover);
+  background: var(--bp-control-readonly-bg);
+}
+
+.safi-bp-seat-btn:focus-visible {
+  outline: 2px solid var(--bp-accent);
+  outline-offset: 2px;
+}
+
+.safi-bp-seat-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.safi-bp-coupon-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.safi-bp-coupon-row .safi-bp-input {
+  flex: 1 1 200px;
+}
+
+/* --- Order Summary Card --- */
+.safi-bp-summary-card {
+  background: var(--bg-glass);
+  border: 1.5px solid var(--border-strong);
+  border-radius: 20px;
+  padding: clamp(18px, 2.4vw, 24px);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  gap: 14px;
+}
+
+.safi-bp-summary-lines {
+  display: grid;
+  gap: 10px;
+  padding-block: 10px;
+  border-block: 1px solid var(--border-subtle);
+}
+
+.safi-bp-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.safi-bp-summary-row__label {
+  color: var(--text-secondary);
+}
+
+.safi-bp-summary-row__value {
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.safi-bp-summary-row--discount .safi-bp-summary-row__value {
+  color: var(--status-ok);
+}
+
+.safi-bp-total-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.safi-bp-total-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.safi-bp-total-value {
+  font-size: clamp(1.35rem, 2.2vw, 1.65rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  transition: color 0.2s ease;
+}
+
+.safi-bp-checkout-btn {
+  width: 100%;
+  min-height: 50px;
+  justify-content: center;
+  font-size: 0.98rem;
+  font-weight: 700;
+  border-radius: 14px;
+}
+
+.safi-bp-security-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.79rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.safi-bp-security-foot svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--status-ok);
+}
+
+/* --- Status & Lifecycle Card --- */
+.safi-bp-status-card {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1.5px solid var(--border-subtle);
+  background: var(--bg-surface);
+  display: grid;
+  gap: 12px;
+}
+
+.safi-bp-status-card[data-billing-state="paid"] {
+  border-color: color-mix(in srgb, var(--status-ok) 55%, transparent);
+  background: color-mix(in srgb, var(--status-ok) 8%, var(--bg-surface));
+}
+
+.safi-bp-status-card[data-billing-state="checkout_pending"] {
+  border-color: color-mix(in srgb, var(--accent-primary) 50%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-surface));
+}
+
+.safi-bp-status-card[data-billing-state="reconciliation_required"],
+.safi-bp-status-card[data-billing-state="failed"] {
+  border-color: color-mix(in srgb, var(--status-warn) 55%, transparent);
+  background: color-mix(in srgb, var(--status-warn) 9%, var(--bg-surface));
+}
+
+.safi-bp-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.safi-bp-status-actions > * {
+  min-height: 44px;
+}
+
+/* --- Pre-Auth Gate Grid --- */
+.safi-bp-auth-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .safi-bp-auth-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.safi-bp-preauth-summary {
+  padding: 18px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-surface));
+  border: 1.5px solid color-mix(in srgb, var(--accent-primary) 32%, transparent);
+  display: grid;
+  gap: 10px;
+}
+
+.safi-bp-org-list {
+  display: grid;
+  gap: 8px;
+}
+
+.safi-bp-org-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.87rem;
+}
+
+/* --- Spinner --- */
+@keyframes safiBpSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.safi-bp-spin {
+  animation: safiBpSpin 0.9s linear infinite;
+}
+
+/* --- Reduced Motion Compliance (WCAG 2.2 AA) --- */
+@media (prefers-reduced-motion: reduce) {
+  .safi-billing-portal *,
+  .safi-billing-portal *::before,
+  .safi-billing-portal *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .safi-bp-plan-card:hover:not(:disabled) {
+    transform: none;
+  }
+}

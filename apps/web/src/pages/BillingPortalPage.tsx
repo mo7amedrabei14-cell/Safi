@@ -16,21 +16,33 @@
  * - Integrates `BillingCheckoutController` directly for double-click locking, refresh/back-forward
  *   idempotency key stability, reconciliation blocking, hosted checkout redirect, and authoritative
  *   server-only payment confirmation (NEVER trusts `?checkout=success` or client-side URL params).
+ * - Full field-level validation (Paymob Egypt phone normalization, name validation, verified account
+ *   email display & syntax check, seat min/max bounds, coupon error states, focus-first-invalid-field).
  * - NEVER exposes Desktop Studio or local customer data on the website.
  */
 import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertCircle,
   AlertTriangle,
   ArrowLeft,
+  Building2,
+  Check,
   CheckCircle2,
+  ChevronDown,
   CreditCard,
   Download,
   ExternalLink,
+  Globe,
+  Loader2,
   Lock,
+  Mail,
   RefreshCw,
-  ShieldCheck
+  ShieldCheck,
+  Tag,
+  Users
 } from "lucide-react";
+import "./billing-portal.css";
 import type { SafiLang } from "../components/layout/FloatingGlassDock";
 import { getDefaultAuthApiBaseUrl, postSafiAuth, SafiAuthApiError } from "../lib/auth-api";
 import {
@@ -44,6 +56,13 @@ import {
   type PaymentOrderState,
   type ServerEntitlementVerification
 } from "../lib/billing-checkout";
+import {
+  BILLING_MAX_ORGANIZATION_SEATS,
+  BILLING_MIN_ORGANIZATION_SEATS,
+  validateAndNormalizeEgyptianPhone,
+  validateBillingCheckoutForm,
+  type BillingFieldKey
+} from "../lib/billing-validation";
 import {
   AUTHORITATIVE_CATALOG,
   BUSINESS_PRICING,
@@ -62,6 +81,7 @@ import {
 
 export interface BillingPortalPageProps {
   readonly lang?: SafiLang;
+  readonly onToggleLang?: () => void;
   readonly onBackToShowcase?: () => void;
   readonly onOpenPricing?: () => void;
   readonly onOpenTeam?: () => void;
@@ -149,6 +169,7 @@ function formatMinorPrice(minor: number, currency: "USD" | "EGP"): string {
 
 export function BillingPortalPage({
   lang = "en",
+  onToggleLang,
   onBackToShowcase,
   onOpenPricing,
   onOpenTeam,
@@ -191,16 +212,19 @@ export function BillingPortalPage({
 
   // Selected purchase intent (hydrated from URL query or persistent localStorage so it survives
   // signup + email verification links opened in a new tab!)
+  const initialSeatsValue = initialUrl.directIntent?.seats ?? ORG_MIN_SEATS;
   const [product, setProduct] = useState<CheckoutProduct>(
     initialUrl.directIntent?.product ?? "individual_monthly"
   );
-  const [seats, setSeats] = useState<number>(initialUrl.directIntent?.seats ?? ORG_MIN_SEATS);
+  const [seats, setSeats] = useState<number>(initialSeatsValue);
+  const [seatsInput, setSeatsInput] = useState<string>(String(initialSeatsValue));
   const [countryIso2, setCountryIso2] = useState<"US" | "EG">(
     initialUrl.directIntent?.billing_country_iso2 ?? "US"
   );
   const [couponCode, setCouponCode] = useState<string>("");
   const [couponPreview, setCouponPreview] = useState<CouponPreviewApiResponse | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
+  const [applyingCoupon, setApplyingCoupon] = useState<boolean>(false);
   const [fromDesktopHandoff, setFromDesktopHandoff] = useState<boolean>(
     initialUrl.handoff !== null
   );
@@ -226,6 +250,17 @@ export function BillingPortalPage({
   const [lastName, setLastName] = useState("");
   const [billingPhone, setBillingPhone] = useState("");
 
+  // Field-level touch & submit validation state (no premature nagging before blur or submit)
+  const [touched, setTouched] = useState<Partial<Record<BillingFieldKey, boolean>>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
+  // Input refs for focusing the first invalid field on submit
+  const seatsInputRef = useRef<HTMLInputElement | null>(null);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const firstNameInputRef = useRef<HTMLInputElement | null>(null);
+  const lastNameInputRef = useRef<HTMLInputElement | null>(null);
+  const phoneInputRef = useRef<HTMLInputElement | null>(null);
+
   // Handoff & Checkout lifecycle state
   const [handoffNotice, setHandoffNotice] = useState<string | null>(null);
   const [handoffError, setHandoffError] = useState<string | null>(null);
@@ -238,6 +273,61 @@ export function BillingPortalPage({
   const [verifyingServer, setVerifyingServer] = useState(false);
 
   const selectedPlan: PricingCatalogEntry = useMemo(() => getCatalogEntry(product), [product]);
+  const effectiveBillingEmail = (authEmail || loginEmail).trim();
+
+  const validation = useMemo(
+    () =>
+      validateBillingCheckoutForm(
+        {
+          product,
+          country: countryIso2,
+          email: effectiveBillingEmail,
+          firstName,
+          lastName,
+          phone: billingPhone,
+          seatsInput
+        },
+        isAr
+      ),
+    [
+      product,
+      countryIso2,
+      effectiveBillingEmail,
+      firstName,
+      lastName,
+      billingPhone,
+      seatsInput,
+      isAr
+    ]
+  );
+
+  const getVisibleFieldError = useCallback(
+    (field: BillingFieldKey): string | undefined => {
+      if (!submitAttempted && !touched[field]) return undefined;
+      return validation.errors[field];
+    },
+    [submitAttempted, touched, validation.errors]
+  );
+
+  const markTouched = useCallback((field: BillingFieldKey) => {
+    setTouched((prev) => (prev[field] ? prev : { ...prev, [field]: true }));
+  }, []);
+
+  const focusField = useCallback((field: BillingFieldKey | null) => {
+    if (!field) return;
+    const map: Record<BillingFieldKey, HTMLInputElement | null> = {
+      seats: seatsInputRef.current,
+      email: emailInputRef.current,
+      firstName: firstNameInputRef.current,
+      lastName: lastNameInputRef.current,
+      phone: phoneInputRef.current
+    };
+    const el = map[field];
+    if (el) {
+      el.focus();
+      el.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    }
+  }, []);
 
   const effectiveSeats =
     product === "organization_seat_annual" ? normalizeOrganizationSeats(seats) : 1;
@@ -292,6 +382,7 @@ export function BillingPortalPage({
         );
       });
   }, [initialVerificationToken, L]);
+
   const currency: "USD" | "EGP" = countryIso2 === "EG" ? "EGP" : "USD";
   const providerLabel = countryIso2 === "EG" ? "Paymob (EGP)" : "Paddle (USD)";
   const baseMinor =
@@ -299,6 +390,13 @@ export function BillingPortalPage({
     100 *
     (selectedPlan.perSeat ? effectiveSeats : 1);
   const finalMinor = couponPreview ? couponPreview.final_amount_minor : baseMinor;
+  const discountMinor = couponPreview ? couponPreview.discount_amount_minor : 0;
+
+  const normalizedPhoneForProvider = useMemo(() => {
+    if (countryIso2 !== "EG") return "";
+    const parsed = validateAndNormalizeEgyptianPhone(billingPhone, isAr);
+    return parsed.normalized ?? billingPhone.trim();
+  }, [countryIso2, billingPhone, isAr]);
 
   const currentIntent: CheckoutIntent = useMemo(() => {
     const trimmedCoupon = couponCode.trim();
@@ -307,8 +405,8 @@ export function BillingPortalPage({
         ? {
             first_name: firstName.trim(),
             last_name: lastName.trim(),
-            email: authEmail.trim() || loginEmail.trim(),
-            phone_number: billingPhone.trim(),
+            email: effectiveBillingEmail,
+            phone_number: normalizedPhoneForProvider,
             country: "EG"
           }
         : undefined;
@@ -326,9 +424,8 @@ export function BillingPortalPage({
     couponCode,
     firstName,
     lastName,
-    authEmail,
-    loginEmail,
-    billingPhone
+    effectiveBillingEmail,
+    normalizedPhoneForProvider
   ]);
 
   // Restore any persisted checkout attempt for this intent on page refresh / back-forward!
@@ -365,8 +462,10 @@ export function BillingPortalPage({
             authToken
           );
           if (!active) return;
+          const redeemedSeats = normalizeOrganizationSeats(redeemed.seats);
           setProduct(redeemed.product);
-          setSeats(normalizeOrganizationSeats(redeemed.seats));
+          setSeats(redeemedSeats);
+          setSeatsInput(String(redeemedSeats));
           setCountryIso2(redeemed.billing_country_iso2 === "EG" ? "EG" : "US");
           if (redeemed.coupon_code) setCouponCode(redeemed.coupon_code);
           setFromDesktopHandoff(true);
@@ -491,7 +590,16 @@ export function BillingPortalPage({
   };
 
   const handlePreviewCoupon = async (): Promise<void> => {
-    if (!authToken || !couponCode.trim()) return;
+    if (!authToken) return;
+    const trimmed = couponCode.trim();
+    if (!trimmed) {
+      setCouponPreview(null);
+      setCouponError(
+        L("أدخل رمز الخصم أولًا قبل الضغط على تطبيق.", "Enter a coupon code before applying.")
+      );
+      return;
+    }
+    setApplyingCoupon(true);
     setCouponError(null);
     try {
       const preview = await controller.previewCoupon(currentIntent, authToken);
@@ -499,24 +607,66 @@ export function BillingPortalPage({
     } catch (err) {
       setCouponPreview(null);
       const code = err instanceof CheckoutLifecycleError ? err.code : "SF-PAY-005";
-      setCouponError(L(`رمز الخصم غير صالح (${code}).`, `Coupon code is not valid (${code}).`));
+      setCouponError(
+        L(
+          `رمز الخصم «${trimmed}» غير صالح أو منتهي الصلاحية (${code}).`,
+          `Coupon code "${trimmed}" is invalid or expired (${code}).`
+        )
+      );
+    } finally {
+      setApplyingCoupon(false);
     }
+  };
+
+  const handleSeatsInputChange = (raw: string): void => {
+    setSeatsInput(raw);
+    setCouponPreview(null);
+    setCheckoutError(null);
+    const trimmed = raw.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const parsed = Number.parseInt(trimmed, 10);
+      if (parsed >= BILLING_MIN_ORGANIZATION_SEATS && parsed <= BILLING_MAX_ORGANIZATION_SEATS) {
+        setSeats(parsed);
+      }
+    }
+  };
+
+  const handleStepSeats = (delta: number): void => {
+    const base = /^\d+$/.test(seatsInput.trim()) ? Number.parseInt(seatsInput.trim(), 10) : seats;
+    const next = Math.min(
+      BILLING_MAX_ORGANIZATION_SEATS,
+      Math.max(BILLING_MIN_ORGANIZATION_SEATS, base + delta)
+    );
+    setSeats(next);
+    setSeatsInput(String(next));
+    setCouponPreview(null);
+    setCheckoutError(null);
+    markTouched("seats");
   };
 
   const checkoutInFlightRef = useRef(false);
 
   const executeCheckout = async (allowReconcileRetry: boolean): Promise<void> => {
     if (!authToken || checkoutInFlightRef.current) return;
-    if (countryIso2 === "EG") {
-      if (!firstName.trim() || !lastName.trim() || !billingPhone.trim()) {
-        setCheckoutError(
-          L(
-            "الدفع بالجنيه المصري عبر Paymob يتطلب الاسم الأول واسم العائلة ورقم الهاتف الحقيقي.",
-            "Paymob EGP checkout requires your real first name, last name, and phone number."
-          )
-        );
-        return;
-      }
+
+    // Strict client-side validation BEFORE issuing any network checkout request!
+    if (!validation.valid) {
+      setSubmitAttempted(true);
+      setTouched({
+        seats: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true
+      });
+      setCheckoutError(
+        L(
+          "يرجى مراجعة الحقول المميّزة باللون الأحمر أدناه قبل المتابعة إلى الدفع.",
+          "Please fix the highlighted billing fields before continuing to checkout."
+        )
+      );
+      focusField(validation.firstInvalidField);
+      return;
     }
 
     checkoutInFlightRef.current = true;
@@ -599,37 +749,23 @@ export function BillingPortalPage({
     }
   };
 
+  const seatsError = getVisibleFieldError("seats");
+  const emailError = getVisibleFieldError("email");
+  const firstNameError = getVisibleFieldError("firstName");
+  const lastNameError = getVisibleFieldError("lastName");
+  const phoneError = getVisibleFieldError("phone");
+
   return (
-    <section
-      className="safi-panel"
-      data-billing-portal="true"
-      style={{
-        maxWidth: "780px",
-        margin: "32px auto",
-        padding: "28px",
-        display: "grid",
-        gap: "20px"
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "12px"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <CreditCard size={22} aria-hidden="true" />
-          <h1 style={{ fontSize: "22px", fontWeight: 800, margin: 0 }}>
-            {L(
-              "بوابة الاشتراكات والدفع الرسمية — صافي البيانات",
-              "Official SafiData Billing Portal"
-            )}
-          </h1>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+    <section className="safi-billing-portal" dir={isAr ? "rtl" : "ltr"} data-billing-portal="true">
+      {/* Compact Header & Security Context */}
+      <div className="safi-bp-topbar">
+        <div className="safi-bp-topbar__nav">
+          {onBackToShowcase ? (
+            <button type="button" className="safi-btn safi-btn-ghost" onClick={onBackToShowcase}>
+              <ArrowLeft size={16} aria-hidden="true" />
+              <span>{L("العودة للموقع", "Back to Website")}</span>
+            </button>
+          ) : null}
           {onOpenPricing ? (
             <button
               type="button"
@@ -640,783 +776,1155 @@ export function BillingPortalPage({
               <span>{L("الأسعار والاشتراك", "Plans & Pricing")}</span>
             </button>
           ) : null}
-          {onBackToShowcase ? (
-            <button type="button" className="safi-btn safi-btn-ghost" onClick={onBackToShowcase}>
-              <ArrowLeft size={16} aria-hidden="true" />
-              <span>{L("العودة للموقع", "Back to Website")}</span>
+        </div>
+
+        <div className="safi-bp-topbar__nav">
+          <div className="safi-bp-trust-pill">
+            <ShieldCheck size={15} aria-hidden="true" />
+            <span>
+              {L(
+                "بوابة دفع رسمية مستضافة · لا نجمع أرقام بطاقات داخل التطبيق",
+                "Official Hosted Checkout · Zero Card Data Stored"
+              )}
+            </span>
+          </div>
+          {onToggleLang ? (
+            <button
+              type="button"
+              className="safi-btn safi-btn-ghost"
+              onClick={onToggleLang}
+              aria-label={isAr ? "Switch to English" : "Switch to Arabic"}
+              data-billing-toggle-lang="true"
+              style={{ minHeight: "40px" }}
+            >
+              <Globe size={15} aria-hidden="true" />
+              <span>{isAr ? "English" : "العربية"}</span>
             </button>
           ) : null}
         </div>
       </div>
 
-      <p style={{ fontSize: "13px", color: "var(--text-secondary)", margin: 0 }}>
-        {L(
-          "تتم جميع المدفوعات عبر بوابات Paddle (دولار) وPaymob (جنيه مصري) المستضافة رسميًا. لا يتم حفظ بيانات بطاقاتك داخل تطبيق سطح المكتب ولا تُفعّل أي باقة إلا بعد تأكيد Webhook موقّع من الخادم.",
-          "All purchases complete through official hosted Paddle (USD) or Paymob (EGP) checkouts. Card details never touch SafiData Desktop, and entitlements activate strictly after verified server webhook confirmation."
-        )}
-      </p>
+      {/* Hero Title Card */}
+      <header className="safi-bp-card safi-bp-card--hero">
+        <div className="safi-bp-hero-row">
+          <div className="safi-bp-title-group">
+            <span className="safi-bp-kicker">
+              <CreditCard size={14} aria-hidden="true" />
+              {L("فوترة صافي البيانات الآمنة", "SafiData Secure Billing")}
+            </span>
+            <h1 className="safi-bp-heading">
+              {L(
+                "بوابة الاشتراكات والدفع الرسمية — صافي البيانات",
+                "Official SafiData Billing Portal"
+              )}
+            </h1>
+            <p className="safi-bp-subtitle">
+              {L(
+                "تتم جميع المدفوعات عبر بوابات Paddle (دولار) وPaymob (جنيه مصري) المستضافة رسميًا. لا تُفعّل أي باقة إلا بعد تأكيد Webhook موقّع من الخادم.",
+                "All purchases complete through official hosted Paddle (USD) or Paymob (EGP) checkouts. Card details never touch SafiData Desktop, and entitlements activate strictly after verified server webhook confirmation."
+              )}
+            </p>
+          </div>
+        </div>
 
-      {verificationNotice ? (
-        <div
-          role="status"
-          data-billing-verification-notice="true"
-          style={{
-            padding: "12px 14px",
-            borderRadius: "10px",
-            background: "rgba(16, 185, 129, 0.14)",
-            border: "1px solid rgba(16, 185, 129, 0.4)",
-            fontSize: "13px",
-            fontWeight: 600
-          }}
-        >
-          {verificationNotice}
-        </div>
-      ) : null}
-      {verificationError ? (
-        <div
-          role="alert"
-          data-billing-verification-error="true"
-          style={{
-            padding: "12px 14px",
-            borderRadius: "10px",
-            border: "1px solid var(--safi-danger, #ef4444)",
-            color: "var(--safi-danger, #ef4444)",
-            fontSize: "13px"
-          }}
-        >
-          {verificationError}
-        </div>
-      ) : null}
+        {verificationNotice ? (
+          <div
+            role="status"
+            className="safi-bp-alert safi-bp-alert--success"
+            data-billing-verification-notice="true"
+          >
+            <CheckCircle2 size={17} aria-hidden="true" />
+            <span>{verificationNotice}</span>
+          </div>
+        ) : null}
 
-      {sawRedirectReturn && orderState !== "paid" ? (
-        <div
-          role="status"
-          data-billing-redirect-notice="true"
-          style={{
-            padding: "12px 14px",
-            borderRadius: "10px",
-            border: "1px solid var(--border-subtle, #3f3f46)",
-            fontSize: "13px"
-          }}
-        >
-          {L(
-            "عدت من بوابة الدفع — جارٍ التحقق من تأكيد الخادم الفعلي فقط (العودة من المتصفح وحدها ليست إثباتًا للدفع).",
-            "Returned from checkout provider — awaiting authoritative server confirmation (browser redirect parameters are never treated as proof of payment)."
-          )}
-        </div>
-      ) : null}
+        {verificationError ? (
+          <div
+            role="alert"
+            className="safi-bp-alert safi-bp-alert--danger"
+            data-billing-verification-error="true"
+          >
+            <AlertCircle size={17} aria-hidden="true" />
+            <span>{verificationError}</span>
+          </div>
+        ) : null}
+
+        {sawRedirectReturn && orderState !== "paid" ? (
+          <div
+            role="status"
+            className="safi-bp-alert safi-bp-alert--info"
+            data-billing-redirect-notice="true"
+          >
+            <ShieldCheck size={17} aria-hidden="true" />
+            <span>
+              {L(
+                "عدت من بوابة الدفع — جارٍ التحقق من تأكيد الخادم الفعلي فقط (العودة من المتصفح وحدها ليست إثباتًا للدفع).",
+                "Returned from checkout provider — awaiting authoritative server confirmation (browser redirect parameters are never treated as proof of payment)."
+              )}
+            </span>
+          </div>
+        ) : null}
+      </header>
 
       {!authToken ? (
-        <div style={{ display: "grid", gap: "18px" }}>
-          {/* Selected Purchase Summary & Quick Plan Chooser (visible BEFORE login!) */}
-          <div
-            data-billing-preauth-summary="true"
-            style={{
-              display: "grid",
-              gap: "12px",
-              padding: "16px",
-              borderRadius: "14px",
-              border: "1px solid var(--border-subtle, #3f3f46)",
-              background: "var(--surface-elevated, rgba(255,255,255,0.03))"
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "8px"
-              }}
+        /* =========================================================================
+         * PRE-AUTHENTICATION EXPERIENCE (Plan Summary + Login/Signup side-by-side)
+         * ========================================================================= */
+        <div className="safi-bp-auth-grid">
+          <div className="safi-bp-card">
+            <form
+              onSubmit={(e) => void handleWebsiteAuthSubmit(e)}
+              data-billing-auth-gate="true"
+              style={{ display: "grid", gap: "14px" }}
             >
-              <div>
-                <div style={{ fontSize: "12px", opacity: 0.78 }}>
-                  {L("الخطة المختارة للشراء", "Selected purchase")}
-                </div>
-                <strong data-billing-preauth-product={product} style={{ fontSize: "16px" }}>
-                  {isAr ? selectedPlan.titleAr : selectedPlan.titleEn}
-                  {product === "organization_seat_annual" ? ` × ${effectiveSeats}` : ""}
-                </strong>
-                <div style={{ fontSize: "12.5px", opacity: 0.8 }}>
-                  {isAr ? selectedPlan.periodAr : selectedPlan.periodEn} · {providerLabel}
-                </div>
+              <div className="safi-bp-section-head">
+                <h2 className="safi-bp-section-title">
+                  <Lock size={17} aria-hidden="true" />
+                  <span>
+                    {pendingHandoff
+                      ? L(
+                          "سجّل الدخول لإكمال الترقية من تطبيق سطح المكتب",
+                          "Sign in to continue your Desktop upgrade"
+                        )
+                      : authMode === "signup"
+                        ? L(
+                            "أنشئ حساب صافي البيانات لإكمال اشتراكك",
+                            "Create your SafiData account"
+                          )
+                        : L(
+                            "سجّل الدخول للمتابعة إلى الدفع الرسمي",
+                            "Sign in to continue to checkout"
+                          )}
+                  </span>
+                </h2>
               </div>
-              <strong data-billing-preauth-price="true" style={{ fontSize: "18px" }}>
-                {formatMinorPrice(baseMinor, currency)}
+
+              <p className="safi-bp-section-hint">
+                {L(
+                  "تسجيل الدخول في بوابة الفوترة على الموقع يصدر جلسة مستقلة ولا يؤثر على جلسة تطبيق سطح المكتب.",
+                  "Signing in to the billing portal uses an isolated web billing session and never revokes your Desktop app."
+                )}
+              </p>
+
+              {authError ? (
+                <div
+                  role="alert"
+                  className="safi-bp-alert safi-bp-alert--danger"
+                  data-billing-auth-error="true"
+                >
+                  <AlertCircle size={16} aria-hidden="true" />
+                  <span>{authError}</span>
+                </div>
+              ) : null}
+
+              {authMessage ? (
+                <div
+                  role="status"
+                  className="safi-bp-alert safi-bp-alert--success"
+                  data-billing-auth-message="true"
+                >
+                  <CheckCircle2 size={16} aria-hidden="true" />
+                  <span>{authMessage}</span>
+                </div>
+              ) : null}
+
+              {authMode === "signup" ? (
+                <div className="safi-bp-field">
+                  <label className="safi-bp-label" htmlFor="safi-bp-signup-name">
+                    <span>{L("الاسم الكامل", "Full name")}</span>
+                  </label>
+                  <input
+                    id="safi-bp-signup-name"
+                    type="text"
+                    required
+                    className="safi-bp-input"
+                    value={loginName}
+                    onChange={(e) => setLoginName(e.target.value)}
+                    placeholder={L("مثال: محمد ربيع", "e.g. Mohamed Rabei")}
+                    data-billing-signup-name="true"
+                  />
+                </div>
+              ) : null}
+
+              <div className="safi-bp-field">
+                <label className="safi-bp-label" htmlFor="safi-bp-login-email">
+                  <span>{L("البريد الإلكتروني", "Email address")}</span>
+                </label>
+                <input
+                  id="safi-bp-login-email"
+                  type="email"
+                  dir="ltr"
+                  required
+                  autoComplete="username"
+                  className="safi-bp-input"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="name@company.com"
+                  data-billing-login-email="true"
+                />
+              </div>
+
+              <div className="safi-bp-field">
+                <label className="safi-bp-label" htmlFor="safi-bp-login-password">
+                  <span>{L("كلمة المرور", "Password")}</span>
+                </label>
+                <input
+                  id="safi-bp-login-password"
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+                  className="safi-bp-input"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  data-billing-login-password="true"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="safi-btn safi-btn-primary safi-bp-checkout-btn"
+                disabled={authBusy}
+                data-billing-login-submit="true"
+              >
+                {authBusy ? (
+                  <Loader2 size={16} className="safi-bp-spin" aria-hidden="true" />
+                ) : null}
+                <span>
+                  {authBusy
+                    ? L("جارٍ التحقق...", "Signing in...")
+                    : authMode === "signup"
+                      ? L("إنشاء الحساب والمتابعة", "Create Account & Continue")
+                      : L("تسجيل الدخول والمتابعة للدفع", "Sign In & Continue to Billing")}
+                </span>
+              </button>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  data-billing-toggle-auth-mode="true"
+                  onClick={() => {
+                    setAuthError(null);
+                    setAuthMode((prev) => (prev === "signin" ? "signup" : "signin"));
+                  }}
+                >
+                  {authMode === "signin"
+                    ? L("ليس لديك حساب؟ أنشئ حسابًا جديدًا", "New to SafiData? Create an account")
+                    : L("لديك حساب بالفعل؟ سجّل الدخول", "Already have an account? Sign in")}
+                </button>
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  disabled={authBusy}
+                  data-billing-resend-verification="true"
+                  onClick={() => void handleResendVerification()}
+                >
+                  {L("إعادة إرسال رابط التحقق", "Resend verification email")}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Pre-auth Selected Purchase Summary & Quick Plan Chooser */}
+          <aside className="safi-bp-card" data-billing-preauth-summary="true">
+            <div className="safi-bp-preauth-summary">
+              <div className="safi-bp-section-head">
+                <span className="safi-bp-helper">
+                  {L("الخطة المختارة للشراء", "Selected purchase")}
+                </span>
+                <span className="safi-bp-account-badge">{providerLabel}</span>
+              </div>
+              <strong data-billing-preauth-product={product} style={{ fontSize: "1.1rem" }}>
+                {isAr ? selectedPlan.titleAr : selectedPlan.titleEn}
+                {product === "organization_seat_annual" ? ` × ${effectiveSeats}` : ""}
               </strong>
+              <div className="safi-bp-helper">
+                {isAr ? selectedPlan.periodAr : selectedPlan.periodEn} ·{" "}
+                {isAr ? selectedPlan.subtitleAr : selectedPlan.subtitleEn}
+              </div>
+              <div className="safi-bp-total-row" style={{ paddingTop: "6px" }}>
+                <span className="safi-bp-total-label">
+                  {L("السعر المعتمد", "Authoritative total")}
+                </span>
+                <strong className="safi-bp-total-value" data-billing-preauth-price="true">
+                  {formatMinorPrice(baseMinor, currency)}
+                </strong>
+              </div>
             </div>
 
             {!pendingHandoff ? (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-                  gap: "8px"
-                }}
-              >
-                <label style={{ display: "grid", gap: "4px", fontSize: "12px", fontWeight: 600 }}>
-                  <span>{L("المنتج", "Product")}</span>
-                  <select
-                    className="safi-input"
-                    value={product}
-                    onChange={(e) => {
-                      const val = e.target.value as CheckoutProduct;
-                      setProduct(val);
-                      setCouponPreview(null);
-                    }}
-                    data-billing-preauth-select-product="true"
-                  >
-                    {CATALOG.map((item) => (
-                      <option key={item.product} value={item.product}>
-                        {isAr ? item.titleAr : item.titleEn}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <div style={{ display: "grid", gap: "12px" }}>
+                <div className="safi-bp-field">
+                  <label className="safi-bp-label" htmlFor="safi-bp-preauth-product">
+                    <span>{L("المنتج", "Product")}</span>
+                  </label>
+                  <div className="safi-bp-select-wrap">
+                    <select
+                      id="safi-bp-preauth-product"
+                      className="safi-bp-select"
+                      value={product}
+                      onChange={(e) => {
+                        const val = e.target.value as CheckoutProduct;
+                        setProduct(val);
+                        setCouponPreview(null);
+                      }}
+                      data-billing-preauth-select-product="true"
+                    >
+                      {CATALOG.map((item) => (
+                        <option key={item.product} value={item.product}>
+                          {isAr ? item.titleAr : item.titleEn}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={16} className="safi-bp-select-chevron" aria-hidden="true" />
+                  </div>
+                </div>
 
-                <label style={{ display: "grid", gap: "4px", fontSize: "12px", fontWeight: 600 }}>
-                  <span>{L("العملة / الدولة", "Country / Currency")}</span>
-                  <select
-                    className="safi-input"
-                    value={countryIso2}
-                    onChange={(e) => setCountryIso2(e.target.value === "EG" ? "EG" : "US")}
-                    data-billing-preauth-select-country="true"
-                  >
-                    <option value="US">USD (Paddle)</option>
-                    <option value="EG">EGP — مصر (Paymob)</option>
-                  </select>
-                </label>
+                <div className="safi-bp-field">
+                  <label className="safi-bp-label" htmlFor="safi-bp-preauth-country">
+                    <span>{L("العملة / الدولة", "Country / Currency")}</span>
+                  </label>
+                  <div className="safi-bp-select-wrap">
+                    <select
+                      id="safi-bp-preauth-country"
+                      className="safi-bp-select"
+                      value={countryIso2}
+                      onChange={(e) => setCountryIso2(e.target.value === "EG" ? "EG" : "US")}
+                      data-billing-preauth-select-country="true"
+                    >
+                      <option value="US">USD — International (Paddle)</option>
+                      <option value="EG">EGP — {L("مصر", "Egypt")} (Paymob)</option>
+                    </select>
+                    <ChevronDown size={16} className="safi-bp-select-chevron" aria-hidden="true" />
+                  </div>
+                </div>
 
                 {product === "organization_seat_annual" ? (
-                  <label style={{ display: "grid", gap: "4px", fontSize: "12px", fontWeight: 600 }}>
-                    <span>{L(`المقاعد (≥ ${ORG_MIN_SEATS})`, `Seats (≥ ${ORG_MIN_SEATS})`)}</span>
+                  <div className="safi-bp-field">
+                    <label className="safi-bp-label" htmlFor="safi-bp-preauth-seats">
+                      <span>{L(`المقاعد (≥ ${ORG_MIN_SEATS})`, `Seats (≥ ${ORG_MIN_SEATS})`)}</span>
+                    </label>
                     <input
+                      id="safi-bp-preauth-seats"
                       type="number"
                       min={ORG_MIN_SEATS}
-                      max={5000}
-                      className="safi-input"
+                      max={BILLING_MAX_ORGANIZATION_SEATS}
+                      className="safi-bp-input"
                       value={seats}
-                      onChange={(e) => setSeats(normalizeOrganizationSeats(Number(e.target.value)))}
+                      onChange={(e) => {
+                        const next = normalizeOrganizationSeats(Number(e.target.value));
+                        setSeats(next);
+                        setSeatsInput(String(next));
+                      }}
                       data-billing-preauth-seats="true"
                     />
-                  </label>
+                  </div>
                 ) : null}
               </div>
             ) : null}
-          </div>
-
-          <form
-            onSubmit={(e) => void handleWebsiteAuthSubmit(e)}
-            data-billing-auth-gate="true"
-            style={{ display: "grid", gap: "12px", maxWidth: "460px" }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700 }}>
-              <Lock size={16} aria-hidden="true" />
-              <span>
-                {pendingHandoff
-                  ? L(
-                      "سجّل الدخول بحسابك لإكمال الترقية القادمة من تطبيق سطح المكتب",
-                      "Sign in to your SafiData account to continue your Desktop upgrade"
-                    )
-                  : authMode === "signup"
-                    ? L(
-                        "أنشئ حساب صافي البيانات لإكمال اشتراكك مباشرة عبر الموقع",
-                        "Create your SafiData account to complete checkout on the web"
-                      )
-                    : L(
-                        "سجّل الدخول أو أنشئ حسابًا للمتابعة إلى الدفع الرسمي",
-                        "Sign in or create an account to continue to secure checkout"
-                      )}
-              </span>
-            </div>
-
-            {authError ? (
-              <div
-                role="alert"
-                data-billing-auth-error="true"
-                style={{ color: "var(--safi-danger, #ef4444)", fontSize: "13px" }}
-              >
-                {authError}
-              </div>
-            ) : null}
-            {authMessage ? (
-              <div role="status" data-billing-auth-message="true" style={{ fontSize: "13px" }}>
-                {authMessage}
-              </div>
-            ) : null}
-
-            {authMode === "signup" ? (
-              <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
-                <span>{L("الاسم الكامل", "Full name")}</span>
-                <input
-                  type="text"
-                  required
-                  className="safi-input"
-                  value={loginName}
-                  onChange={(e) => setLoginName(e.target.value)}
-                  data-billing-signup-name="true"
-                />
-              </label>
-            ) : null}
-
-            <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
-              <span>{L("البريد الإلكتروني", "Email")}</span>
-              <input
-                type="email"
-                required
-                autoComplete="username"
-                className="safi-input"
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                data-billing-login-email="true"
-              />
-            </label>
-
-            <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
-              <span>{L("كلمة المرور", "Password")}</span>
-              <input
-                type="password"
-                required
-                minLength={8}
-                autoComplete={authMode === "signup" ? "new-password" : "current-password"}
-                className="safi-input"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                data-billing-login-password="true"
-              />
-            </label>
-
-            <button
-              type="submit"
-              className="safi-btn safi-btn-primary"
-              disabled={authBusy}
-              data-billing-login-submit="true"
-            >
-              {authBusy
-                ? L("جارٍ التحقق...", "Signing in...")
-                : authMode === "signup"
-                  ? L("إنشاء الحساب والمتابعة", "Create Account & Continue")
-                  : L("تسجيل الدخول والمتابعة للدفع", "Sign In & Continue to Billing")}
-            </button>
-
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-              <button
-                type="button"
-                className="safi-btn safi-btn-ghost"
-                data-billing-toggle-auth-mode="true"
-                onClick={() => {
-                  setAuthError(null);
-                  setAuthMode((prev) => (prev === "signin" ? "signup" : "signin"));
-                }}
-              >
-                {authMode === "signin"
-                  ? L("ليس لديك حساب؟ أنشئ حسابًا جديدًا", "New to SafiData? Create an account")
-                  : L("لديك حساب بالفعل؟ سجّل الدخول", "Already have an account? Sign in")}
-              </button>
-              <button
-                type="button"
-                className="safi-btn safi-btn-ghost"
-                disabled={authBusy}
-                data-billing-resend-verification="true"
-                onClick={() => void handleResendVerification()}
-              >
-                {L("إعادة إرسال رابط التحقق", "Resend verification email")}
-              </button>
-            </div>
-          </form>
+          </aside>
         </div>
       ) : (
+        /* =========================================================================
+         * AUTHENTICATED CHECKOUT EXPERIENCE (Account Strip + 2-Column Order Layout)
+         * ========================================================================= */
         <div data-billing-authenticated="true" style={{ display: "grid", gap: "18px" }}>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "10px",
-              padding: "12px 14px",
-              borderRadius: "10px",
-              background: "var(--surface-elevated, rgba(255,255,255,0.04))"
-            }}
-          >
-            <div style={{ fontSize: "13px" }}>
-              <strong>{authEmail || L("حساب موثّق", "Authenticated Account")}</strong>
+          {/* Account Context Strip */}
+          <div className="safi-bp-account-strip">
+            <div className="safi-bp-account-meta">
+              <span className="safi-bp-account-badge">
+                <ShieldCheck size={13} aria-hidden="true" />
+                {L("حساب موثّق", "Verified Account")}
+              </span>
+              <span className="safi-bp-account-email" dir="ltr">
+                {effectiveBillingEmail || L("حساب موثّق", "Authenticated Account")}
+              </span>
               {entitlements ? (
                 <span
+                  className="safi-bp-helper"
                   data-billing-current-plan={entitlements.effective_plan}
-                  style={{ marginInlineStart: "10px" }}
                 >
                   · {L("الخطة الحالية:", "Current plan:")}{" "}
                   <strong>{entitlements.effective_plan}</strong> ({entitlements.state})
                 </span>
               ) : null}
             </div>
-            <button
-              type="button"
-              className="safi-btn safi-btn-ghost"
-              onClick={() => void handleVerifyServerStatus()}
-              disabled={verifyingServer}
-              data-billing-verify-status="true"
-            >
-              <RefreshCw size={14} aria-hidden="true" />
-              <span>{L("تحديث الحالة من الخادم", "Verify Payment Status")}</span>
-            </button>
-            {onOpenTeam ? (
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
               <button
                 type="button"
                 className="safi-btn safi-btn-ghost"
-                onClick={onOpenTeam}
-                data-billing-open-team="true"
+                onClick={() => void handleVerifyServerStatus()}
+                disabled={verifyingServer}
+                data-billing-verify-status="true"
               >
-                <span>{L("مساحة عمل الفريق (/team)", "Team Workspace (/team)")}</span>
+                <RefreshCw
+                  size={14}
+                  className={verifyingServer ? "safi-bp-spin" : undefined}
+                  aria-hidden="true"
+                />
+                <span>{L("تحديث الحالة من الخادم", "Verify Payment Status")}</span>
               </button>
-            ) : null}
+              {onOpenTeam ? (
+                <button
+                  type="button"
+                  className="safi-btn safi-btn-ghost"
+                  onClick={onOpenTeam}
+                  data-billing-open-team="true"
+                >
+                  <Users size={14} aria-hidden="true" />
+                  <span>{L("مساحة عمل الفريق (/team)", "Team Workspace (/team)")}</span>
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {userOrganizations.length > 0 ? (
-            <div
-              data-billing-org-summary="true"
-              style={{
-                padding: "12px 14px",
-                borderRadius: "10px",
-                border: "1px solid rgba(56, 189, 248, 0.25)",
-                background: "rgba(56, 189, 248, 0.06)",
-                display: "grid",
-                gap: "8px",
-                fontSize: "13px"
-              }}
-            >
-              <strong>
-                {L(
-                  "المؤسسات ومساحات العمل المرتبطة بحسابك:",
-                  "Organizations Linked to Your Account:"
-                )}
-              </strong>
-              {userOrganizations.map((item) => (
-                <div
-                  key={item.organization.id}
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    justifyContent: "space-between",
-                    gap: "8px"
-                  }}
-                >
-                  <span>
-                    <strong>{item.organization.name}</strong> · [{item.my_role.toUpperCase()}] ·{" "}
-                    {item.active_members_count + item.pending_invitations_count}/{item.paid_seats}{" "}
-                    {L("مقاعد", "seats")}
-                  </span>
-                  <span>{item.teams_enabled ? L("نشط", "Active") : L("غير نشط", "Inactive")}</span>
-                </div>
-              ))}
+            <div className="safi-bp-card" data-billing-org-summary="true" style={{ gap: "10px" }}>
+              <div className="safi-bp-section-head">
+                <strong className="safi-bp-section-title" style={{ fontSize: "0.95rem" }}>
+                  <Building2 size={16} aria-hidden="true" />
+                  {L(
+                    "المؤسسات ومساحات العمل المرتبطة بحسابك",
+                    "Organizations Linked to Your Account"
+                  )}
+                </strong>
+              </div>
+              <div className="safi-bp-org-list">
+                {userOrganizations.map((item) => (
+                  <div key={item.organization.id} className="safi-bp-org-item">
+                    <span>
+                      <strong>{item.organization.name}</strong> · [{item.my_role.toUpperCase()}] ·{" "}
+                      {item.active_members_count + item.pending_invitations_count}/{item.paid_seats}{" "}
+                      {L("مقاعد", "seats")}
+                    </span>
+                    <span className="safi-bp-account-badge">
+                      {item.teams_enabled ? L("نشط", "Active") : L("غير نشط", "Inactive")}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 
           {handoffNotice ? (
             <div
               role="status"
+              className="safi-bp-alert safi-bp-alert--success"
               data-billing-handoff-redeemed="true"
-              style={{ fontSize: "13px", fontWeight: 600 }}
             >
-              <ShieldCheck
-                size={16}
-                aria-hidden="true"
-                style={{ verticalAlign: "middle", marginInlineEnd: "6px" }}
-              />
-              {handoffNotice}
+              <ShieldCheck size={17} aria-hidden="true" />
+              <span>{handoffNotice}</span>
             </div>
           ) : null}
+
           {handoffError ? (
             <div
               role="alert"
+              className="safi-bp-alert safi-bp-alert--danger"
               data-billing-handoff-error="true"
-              style={{ fontSize: "13px", color: "var(--safi-danger, #ef4444)" }}
             >
-              {handoffError}
+              <AlertTriangle size={17} aria-hidden="true" />
+              <span>{handoffError}</span>
             </div>
           ) : null}
 
-          {/* Plan Selection Grid (ALL 5 approved purchase types) */}
-          <div style={{ display: "grid", gap: "10px" }}>
-            <h2 style={{ fontSize: "15px", fontWeight: 700, margin: 0 }}>
-              {L("1. اختر الخطة أو الحزمة", "1. Choose your plan or add-on")}
-            </h2>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "10px"
-              }}
-            >
-              {CATALOG.map((item) => {
-                const active = item.product === product;
-                const priceDisplay =
-                  currency === "EGP"
-                    ? `${item.egpMajor.toLocaleString("en-US")} EGP`
-                    : `$${item.usdMajor.toLocaleString("en-US")}`;
-                return (
-                  <button
-                    key={item.product}
-                    type="button"
-                    data-billing-plan-option={item.product}
-                    aria-pressed={active}
-                    onClick={() => {
-                      setProduct(item.product);
-                      setCouponPreview(null);
-                      setCheckoutError(null);
-                    }}
-                    style={{
-                      textAlign: isAr ? "right" : "left",
-                      padding: "14px",
-                      borderRadius: "12px",
-                      cursor: "pointer",
-                      border: active
-                        ? "2px solid var(--accent-primary, #10b981)"
-                        : "1px solid var(--border-subtle, #3f3f46)",
-                      background: active ? "rgba(16, 185, 129, 0.1)" : "transparent",
-                      color: "inherit",
-                      display: "grid",
-                      gap: "4px"
-                    }}
-                  >
-                    <strong>{isAr ? item.titleAr : item.titleEn}</strong>
-                    <span style={{ fontSize: "16px", fontWeight: 800 }}>
-                      {priceDisplay}
-                      {item.perSeat ? (isAr ? " / مقعد / سنة" : " / seat / yr") : ""}
-                    </span>
-                    <span style={{ fontSize: "12px", opacity: 0.8 }}>
-                      {isAr ? item.periodAr : item.periodEn}
-                    </span>
-                    <span style={{ fontSize: "12px", opacity: 0.75 }}>
-                      {isAr ? item.subtitleAr : item.subtitleEn}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          {/* Two-Column Checkout Grid */}
+          <div className="safi-bp-grid">
+            {/* LEFT / START COLUMN: Plan Selection, Configuration & Billing Information */}
+            <div className="safi-bp-main-col">
+              {/* Step 1: Plan Selector */}
+              <div className="safi-bp-card">
+                <div className="safi-bp-section-head">
+                  <h2 className="safi-bp-section-title">
+                    {L("1. اختر الخطة أو الحزمة", "1. Choose your plan or add-on")}
+                  </h2>
+                  <span className="safi-bp-helper">
+                    {L("الأسعار معتمدة من الخادم", "Server-authoritative pricing")}
+                  </span>
+                </div>
 
-          {/* Organization seats & Billing Country */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: "12px"
-            }}
-          >
-            <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
-              <span>{L("بلد الفوترة والعملة", "Billing country & currency")}</span>
-              <select
-                className="safi-input"
-                value={countryIso2}
-                onChange={(e) => {
-                  setCountryIso2(e.target.value === "EG" ? "EG" : "US");
-                  setCouponPreview(null);
-                }}
-                data-billing-country="true"
-              >
-                <option value="US">
-                  {L("دولي — USD (Paddle)", "International — USD (Paddle)")}
-                </option>
-                <option value="EG">{L("مصر — EGP (Paymob)", "Egypt — EGP (Paymob)")}</option>
-              </select>
-            </label>
-
-            {product === "organization_seat_annual" ? (
-              <label style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
-                <span>
-                  {L(
-                    `عدد المقاعد (الحد الأدنى ${ORG_MIN_SEATS})`,
-                    `Seats (minimum ${ORG_MIN_SEATS})`
-                  )}
-                </span>
-                <input
-                  type="number"
-                  min={ORG_MIN_SEATS}
-                  max={5000}
-                  className="safi-input"
-                  value={seats}
-                  onChange={(e) => {
-                    const parsed = Number.parseInt(e.target.value, 10);
-                    setSeats(
-                      Number.isFinite(parsed) ? Math.max(ORG_MIN_SEATS, parsed) : ORG_MIN_SEATS
+                <div className="safi-bp-plan-grid">
+                  {CATALOG.map((item) => {
+                    const active = item.product === product;
+                    const priceDisplay =
+                      currency === "EGP"
+                        ? `${item.egpMajor.toLocaleString("en-US")} EGP`
+                        : `$${item.usdMajor.toLocaleString("en-US")}`;
+                    return (
+                      <button
+                        key={item.product}
+                        type="button"
+                        className="safi-bp-plan-card"
+                        data-billing-plan-option={item.product}
+                        data-selected={active ? "true" : "false"}
+                        aria-pressed={active}
+                        disabled={submittingCheckout}
+                        onClick={() => {
+                          setProduct(item.product);
+                          setCouponPreview(null);
+                          setCheckoutError(null);
+                        }}
+                      >
+                        <div className="safi-bp-plan-card__top">
+                          <span className="safi-bp-plan-card__name">
+                            {isAr ? item.titleAr : item.titleEn}
+                          </span>
+                          <span className="safi-bp-plan-card__check" aria-hidden="true">
+                            <Check size={13} strokeWidth={3} />
+                          </span>
+                        </div>
+                        <span className="safi-bp-plan-card__price">
+                          {priceDisplay}
+                          {item.perSeat ? (isAr ? " / مقعد / سنة" : " / seat / yr") : ""}
+                        </span>
+                        <span className="safi-bp-plan-card__meta">
+                          {isAr ? item.periodAr : item.periodEn} ·{" "}
+                          {isAr ? item.subtitleAr : item.subtitleEn}
+                        </span>
+                      </button>
                     );
-                    setCouponPreview(null);
-                  }}
-                  data-billing-seats="true"
-                />
-              </label>
-            ) : null}
-
-            <div style={{ display: "grid", gap: "6px", fontSize: "13px", fontWeight: 600 }}>
-              <span>{L("كود خصم (اختياري)", "Coupon code (optional)")}</span>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <input
-                  type="text"
-                  className="safi-input"
-                  value={couponCode}
-                  onChange={(e) => setCouponCode(e.target.value)}
-                  placeholder="WELCOME20"
-                  data-billing-coupon-input="true"
-                />
-                <button
-                  type="button"
-                  className="safi-btn safi-btn-ghost"
-                  onClick={() => void handlePreviewCoupon()}
-                  data-billing-coupon-apply="true"
-                >
-                  {L("تطبيق", "Apply")}
-                </button>
-              </div>
-              {couponError ? (
-                <span style={{ fontSize: "12px", color: "var(--safi-danger, #ef4444)" }}>
-                  {couponError}
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          {/* Real Customer Billing Details for Paymob Egypt (zero fake PII) */}
-          {countryIso2 === "EG" ? (
-            <div
-              data-billing-paymob-details="true"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: "10px",
-                padding: "14px",
-                borderRadius: "10px",
-                border: "1px solid var(--border-subtle, #3f3f46)"
-              }}
-            >
-              <label style={{ display: "grid", gap: "4px", fontSize: "12px", fontWeight: 600 }}>
-                <span>{L("الاسم الأول (مطلوب لـ Paymob)", "First Name (Paymob)")}</span>
-                <input
-                  type="text"
-                  required
-                  className="safi-input"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  data-billing-first-name="true"
-                />
-              </label>
-              <label style={{ display: "grid", gap: "4px", fontSize: "12px", fontWeight: 600 }}>
-                <span>{L("اسم العائلة (مطلوب لـ Paymob)", "Last Name (Paymob)")}</span>
-                <input
-                  type="text"
-                  required
-                  className="safi-input"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  data-billing-last-name="true"
-                />
-              </label>
-              <label style={{ display: "grid", gap: "4px", fontSize: "12px", fontWeight: 600 }}>
-                <span>{L("رقم الهاتف (+20...)", "Phone Number (+20...)")}</span>
-                <input
-                  type="tel"
-                  required
-                  className="safi-input"
-                  value={billingPhone}
-                  onChange={(e) => setBillingPhone(e.target.value)}
-                  placeholder="+201012345678"
-                  data-billing-phone="true"
-                />
-              </label>
-            </div>
-          ) : null}
-
-          {/* Order Summary & Protected Pay Button */}
-          <div
-            data-billing-summary="true"
-            style={{
-              display: "grid",
-              gap: "12px",
-              padding: "16px",
-              borderRadius: "12px",
-              border: "1px solid var(--border-subtle, #3f3f46)"
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px" }}>
-              <span>
-                {isAr ? selectedPlan.titleAr : selectedPlan.titleEn}
-                {product === "organization_seat_annual" ? ` × ${effectiveSeats}` : ""}
-              </span>
-              <strong data-billing-final-price="true">
-                {formatMinorPrice(finalMinor, currency)}
-              </strong>
-            </div>
-            <div style={{ fontSize: "12px", opacity: 0.8 }}>
-              {L("مزود الدفع المعتمد من الخادم:", "Authoritative payment provider:")}{" "}
-              <strong>{providerLabel}</strong> ·{" "}
-              {isAr ? selectedPlan.periodAr : selectedPlan.periodEn}
-            </div>
-
-            {checkoutError ? (
-              <div
-                role="alert"
-                data-billing-checkout-error="true"
-                style={{ fontSize: "13px", color: "var(--safi-danger, #ef4444)" }}
-              >
-                {checkoutError}
-              </div>
-            ) : null}
-
-            {/* Payment Lifecycle State Display */}
-            {orderState === "paid" ? (
-              <div
-                role="status"
-                data-billing-state="paid"
-                style={{
-                  display: "grid",
-                  gap: "10px",
-                  padding: "12px",
-                  borderRadius: "10px",
-                  background: "rgba(16,185,129,0.12)"
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700 }}>
-                  <CheckCircle2 size={18} aria-hidden="true" />
-                  <span>
-                    {L(
-                      "تم تأكيد الدفع وتفعيل استحقاقك من الخادم بنجاح!",
-                      "Payment confirmed by server and entitlements activated!"
-                    )}
-                  </span>
+                  })}
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-                  <a
-                    href={
-                      activeOrder
-                        ? `safi://billing?order_id=${activeOrder.order_id}`
-                        : "safi://billing"
-                    }
-                    className="safi-btn safi-btn-primary"
-                    data-billing-return-desktop="true"
-                  >
-                    {L("العودة إلى تطبيق صافي لسطح المكتب", "Return to SafiData Desktop")}
-                  </a>
-                  {onDownloadDesktop ? (
-                    <button
-                      type="button"
-                      className="safi-btn safi-btn-ghost"
-                      onClick={onDownloadDesktop}
-                      data-billing-download-desktop="true"
-                    >
-                      <Download size={15} aria-hidden="true" />
-                      <span>
-                        {L("حمّل تطبيق سطح المكتب وسجّل الدخول بحسابك", "Download Desktop App")}
-                      </span>
-                    </button>
+              </div>
+
+              {/* Step 2: Currency, Seats & Coupon */}
+              <div className="safi-bp-card">
+                <div className="safi-bp-section-head">
+                  <h2 className="safi-bp-section-title">
+                    <Globe size={17} aria-hidden="true" />
+                    {L("2. العملة، المقاعد ورمز الخصم", "2. Currency, Seats & Coupon")}
+                  </h2>
+                </div>
+
+                <div className="safi-bp-form-grid">
+                  <div className="safi-bp-field">
+                    <label className="safi-bp-label" htmlFor="safi-bp-country">
+                      <span>{L("بلد الفوترة والعملة", "Billing country & currency")}</span>
+                    </label>
+                    <div className="safi-bp-select-wrap">
+                      <select
+                        id="safi-bp-country"
+                        className="safi-bp-select"
+                        value={countryIso2}
+                        disabled={submittingCheckout}
+                        onChange={(e) => {
+                          setCountryIso2(e.target.value === "EG" ? "EG" : "US");
+                          setCouponPreview(null);
+                          setCheckoutError(null);
+                        }}
+                        data-billing-country="true"
+                      >
+                        <option value="US">
+                          {L("دولي — USD (Paddle)", "International — USD (Paddle)")}
+                        </option>
+                        <option value="EG">
+                          {L("مصر — EGP (Paymob)", "Egypt — EGP (Paymob)")}
+                        </option>
+                      </select>
+                      <ChevronDown
+                        size={16}
+                        className="safi-bp-select-chevron"
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <p className="safi-bp-helper">
+                      {countryIso2 === "EG"
+                        ? L(
+                            "الدفع بالجنيه المصري يتم عبر بوابة Paymob الرسمية.",
+                            "Egyptian Pound payments process via official Paymob hosted checkout."
+                          )
+                        : L(
+                            "الدفع بالدولار الأمريكي يتم عبر بوابة Paddle الرسمية.",
+                            "US Dollar payments process via official Paddle hosted checkout."
+                          )}
+                    </p>
+                  </div>
+
+                  {product === "organization_seat_annual" ? (
+                    <div className="safi-bp-field">
+                      <label className="safi-bp-label" htmlFor="safi-bp-seats">
+                        <span>
+                          {L(
+                            `عدد المقاعد (الحد الأدنى ${ORG_MIN_SEATS})`,
+                            `Organization Seats (min ${ORG_MIN_SEATS})`
+                          )}
+                        </span>
+                      </label>
+                      <div className="safi-bp-seat-stepper">
+                        <button
+                          type="button"
+                          className="safi-bp-seat-btn"
+                          aria-label={L("تقليل المقاعد", "Decrease seats")}
+                          data-billing-seat-dec="true"
+                          disabled={submittingCheckout || effectiveSeats <= ORG_MIN_SEATS}
+                          onClick={() => handleStepSeats(-1)}
+                        >
+                          −
+                        </button>
+                        <input
+                          ref={seatsInputRef}
+                          id="safi-bp-seats"
+                          type="number"
+                          inputMode="numeric"
+                          min={ORG_MIN_SEATS}
+                          max={BILLING_MAX_ORGANIZATION_SEATS}
+                          className="safi-bp-input"
+                          value={seatsInput}
+                          disabled={submittingCheckout}
+                          aria-invalid={seatsError ? "true" : "false"}
+                          aria-describedby={seatsError ? "safi-bp-err-seats" : "safi-bp-help-seats"}
+                          onChange={(e) => handleSeatsInputChange(e.target.value)}
+                          onBlur={() => markTouched("seats")}
+                          data-billing-seats="true"
+                        />
+                        <button
+                          type="button"
+                          className="safi-bp-seat-btn"
+                          aria-label={L("زيادة المقاعد", "Increase seats")}
+                          data-billing-seat-inc="true"
+                          disabled={
+                            submittingCheckout || effectiveSeats >= BILLING_MAX_ORGANIZATION_SEATS
+                          }
+                          onClick={() => handleStepSeats(1)}
+                        >
+                          +
+                        </button>
+                      </div>
+                      {seatsError ? (
+                        <p
+                          id="safi-bp-err-seats"
+                          role="alert"
+                          className="safi-bp-field-error"
+                          data-billing-field-error="seats"
+                        >
+                          <AlertCircle size={14} aria-hidden="true" />
+                          <span>{seatsError}</span>
+                        </p>
+                      ) : (
+                        <p id="safi-bp-help-seats" className="safi-bp-helper">
+                          {L(
+                            `من ${ORG_MIN_SEATS} إلى ${BILLING_MAX_ORGANIZATION_SEATS} مقعدًا في الفاتورة السنوية الواحدة.`,
+                            `Supports ${ORG_MIN_SEATS} to ${BILLING_MAX_ORGANIZATION_SEATS} seats per annual subscription.`
+                          )}
+                        </p>
+                      )}
+                    </div>
                   ) : null}
+
+                  <div className="safi-bp-field safi-bp-field--full">
+                    <label className="safi-bp-label" htmlFor="safi-bp-coupon">
+                      <span>
+                        <Tag
+                          size={13}
+                          aria-hidden="true"
+                          style={{ verticalAlign: "middle", marginInlineEnd: "6px" }}
+                        />
+                        {L("كود خصم (اختياري)", "Coupon code (optional)")}
+                      </span>
+                    </label>
+                    <div className="safi-bp-coupon-row">
+                      <input
+                        id="safi-bp-coupon"
+                        type="text"
+                        dir="ltr"
+                        className="safi-bp-input"
+                        value={couponCode}
+                        disabled={submittingCheckout || applyingCoupon}
+                        aria-invalid={couponError ? "true" : "false"}
+                        aria-describedby={couponError ? "safi-bp-err-coupon" : undefined}
+                        onChange={(e) => {
+                          setCouponCode(e.target.value);
+                          setCouponError(null);
+                          if (!e.target.value.trim()) setCouponPreview(null);
+                        }}
+                        placeholder="WELCOME20"
+                        data-billing-coupon-input="true"
+                      />
+                      <button
+                        type="button"
+                        className="safi-btn safi-btn-ghost"
+                        disabled={submittingCheckout || applyingCoupon}
+                        onClick={() => void handlePreviewCoupon()}
+                        data-billing-coupon-apply="true"
+                        style={{ minHeight: "46px" }}
+                      >
+                        {applyingCoupon ? (
+                          <Loader2 size={14} className="safi-bp-spin" aria-hidden="true" />
+                        ) : null}
+                        <span>{L("تطبيق", "Apply")}</span>
+                      </button>
+                    </div>
+                    {couponError ? (
+                      <p
+                        id="safi-bp-err-coupon"
+                        role="alert"
+                        className="safi-bp-field-error"
+                        data-billing-field-error="coupon"
+                      >
+                        <AlertCircle size={14} aria-hidden="true" />
+                        <span>{couponError}</span>
+                      </p>
+                    ) : couponPreview ? (
+                      <p
+                        className="safi-bp-helper"
+                        style={{ color: "var(--status-ok)", fontWeight: 600 }}
+                        data-billing-coupon-applied="true"
+                      >
+                        {L(
+                          `تم تطبيق الخصم (${formatMinorPrice(couponPreview.discount_amount_minor, currency)}).`,
+                          `Discount applied (${formatMinorPrice(couponPreview.discount_amount_minor, currency)}).`
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-            ) : reconciliationRequired ? (
-              <div
-                role="alert"
-                data-billing-state="reconciliation_required"
-                style={{
-                  display: "grid",
-                  gap: "10px",
-                  padding: "12px",
-                  borderRadius: "10px",
-                  background: "rgba(245,158,11,0.12)"
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700 }}>
-                  <AlertTriangle size={18} aria-hidden="true" />
-                  <span>
-                    {L(
-                      "مطلوب التحقق من الطلب السابق قبل أي محاولة دفع جديدة (منع الخصم المزدوج).",
-                      "Reconciliation required before starting a new charge (duplicate-charge protection)."
-                    )}
-                  </span>
+
+              {/* Step 3: Billing Information (Verified Account Email + Paymob Egypt Fields) */}
+              <div className="safi-bp-card">
+                <div className="safi-bp-section-head">
+                  <h2 className="safi-bp-section-title">
+                    <Mail size={17} aria-hidden="true" />
+                    {L("3. بيانات الفوترة والحساب", "3. Billing & Account Information")}
+                  </h2>
                 </div>
-                <button
-                  type="button"
-                  className="safi-btn safi-btn-primary"
-                  disabled={submittingCheckout}
-                  onClick={() => void executeCheckout(true)}
-                  data-billing-reconcile-retry="true"
-                >
-                  {L("التحقق من الطلب القائم بنفس المفتاح", "Reconcile Existing Order")}
-                </button>
-              </div>
-            ) : orderState === "checkout_pending" || orderState === "payment_pending" ? (
-              <div
-                role="status"
-                data-billing-state="checkout_pending"
-                style={{
-                  display: "grid",
-                  gap: "10px",
-                  padding: "12px",
-                  borderRadius: "10px",
-                  background: "rgba(59,130,246,0.12)"
-                }}
-              >
-                <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                  {L(
-                    "بوابة الدفع جاهزة. أكمل الدفع في صفحة المزود الرسمية ثم اضغط «تحديث الحالة من الخادم».",
-                    "Official hosted checkout created. Complete payment on the provider page, then click Verify Payment Status."
+
+                {/* Verified Account Email — Always Visible & Read-Only (Binds Receipt & Entitlements) */}
+                <div className="safi-bp-field">
+                  <label className="safi-bp-label" htmlFor="safi-bp-verified-email">
+                    <span>{L("البريد الإلكتروني للفوترة والحساب", "Billing & Account Email")}</span>
+                    <span className="safi-bp-label__tag">
+                      <ShieldCheck size={12} aria-hidden="true" />
+                      {L("حساب موثّق", "Verified Account")}
+                    </span>
+                  </label>
+                  <input
+                    ref={emailInputRef}
+                    id="safi-bp-verified-email"
+                    type="email"
+                    dir="ltr"
+                    readOnly
+                    className="safi-bp-input"
+                    value={effectiveBillingEmail}
+                    aria-invalid={emailError ? "true" : "false"}
+                    aria-describedby={emailError ? "safi-bp-err-email" : "safi-bp-help-email"}
+                    data-billing-verified-email="true"
+                  />
+                  {emailError ? (
+                    <p
+                      id="safi-bp-err-email"
+                      role="alert"
+                      className="safi-bp-field-error"
+                      data-billing-field-error="email"
+                    >
+                      <AlertCircle size={14} aria-hidden="true" />
+                      <span>{emailError}</span>
+                    </p>
+                  ) : (
+                    <p id="safi-bp-help-email" className="safi-bp-helper">
+                      {countryIso2 === "EG"
+                        ? L(
+                            "يُربط الاشتراك وإيصال الدفع وبيانات Paymob تلقائيًا ببريد حسابك الموثّق هذا (للقراءة فقط).",
+                            "Your subscription, receipt, and Paymob billing record bind automatically to this verified account email (read-only)."
+                          )
+                        : L(
+                            "يُربط الاشتراك وإيصال الدفع تلقائيًا ببريد حسابك الموثّق هذا (للقراءة فقط).",
+                            "Your subscription and payment receipt bind automatically to this verified account email (read-only)."
+                          )}
+                    </p>
                   )}
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                  {activeOrder?.checkout_url ? (
-                    <a
-                      href={activeOrder.checkout_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="safi-btn safi-btn-primary"
-                      data-billing-hosted-link="true"
-                    >
-                      <ExternalLink size={15} aria-hidden="true" />
-                      <span>{L("فتح صفحة الدفع الرسمية", "Open Hosted Checkout")}</span>
-                    </a>
-                  ) : null}
-                  <a
-                    href={
-                      activeOrder
-                        ? `safi://billing?order_id=${activeOrder.order_id}`
-                        : "safi://billing"
-                    }
-                    className="safi-btn safi-btn-ghost"
-                    data-billing-return-desktop="true"
-                  >
-                    {L("العودة إلى تطبيق سطح المكتب", "Return to Desktop App")}
-                  </a>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-                <button
-                  type="button"
-                  className="safi-btn safi-btn-primary"
-                  disabled={submittingCheckout}
-                  onClick={() => void executeCheckout(false)}
-                  data-billing-pay-submit="true"
-                >
-                  <CreditCard size={16} aria-hidden="true" />
-                  <span>
-                    {submittingCheckout
-                      ? L("جارٍ تجهيز جلسة الدفع...", "Creating protected checkout...")
-                      : L("المتابعة إلى الدفع الآمن", "Continue to Secure Checkout")}
-                  </span>
-                </button>
-                {orderState === "failed" ||
-                orderState === "canceled" ||
-                orderState === "expired" ? (
-                  <button
-                    type="button"
-                    className="safi-btn safi-btn-ghost"
-                    onClick={handleResetFailedAttempt}
-                    data-billing-state={orderState}
-                  >
-                    {L("بدء محاولة جديدة", "Start Fresh Attempt")}
-                  </button>
+
+                {/* Paymob Egypt Customer Details (Revealed cleanly when Egypt / EGP is selected) */}
+                {countryIso2 === "EG" ? (
+                  <div className="safi-bp-paymob-panel" data-billing-paymob-details="true">
+                    <p className="safi-bp-section-hint">
+                      {L(
+                        "مطلوب بواسطة بوابة Paymob مصر لإصدار جلسة الدفع بالجنيه المصري (بياناتك الحقيقية فقط):",
+                        "Required by Paymob Egypt to initialize your EGP hosted checkout (real billing details only):"
+                      )}
+                    </p>
+
+                    <div className="safi-bp-form-grid">
+                      <div className="safi-bp-field">
+                        <label className="safi-bp-label" htmlFor="safi-bp-first-name">
+                          <span>
+                            {L("الاسم الأول", "First Name")}{" "}
+                            <span className="safi-bp-label__req" aria-hidden="true">
+                              *
+                            </span>
+                          </span>
+                        </label>
+                        <input
+                          ref={firstNameInputRef}
+                          id="safi-bp-first-name"
+                          type="text"
+                          autoComplete="given-name"
+                          required
+                          className="safi-bp-input"
+                          value={firstName}
+                          disabled={submittingCheckout}
+                          placeholder={L("مثال: محمد", "e.g. Mohamed")}
+                          aria-invalid={firstNameError ? "true" : "false"}
+                          aria-describedby={firstNameError ? "safi-bp-err-first" : undefined}
+                          onChange={(e) => {
+                            setFirstName(e.target.value);
+                            setCheckoutError(null);
+                          }}
+                          onBlur={() => markTouched("firstName")}
+                          data-billing-first-name="true"
+                        />
+                        {firstNameError ? (
+                          <p
+                            id="safi-bp-err-first"
+                            role="alert"
+                            className="safi-bp-field-error"
+                            data-billing-field-error="firstName"
+                          >
+                            <AlertCircle size={14} aria-hidden="true" />
+                            <span>{firstNameError}</span>
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="safi-bp-field">
+                        <label className="safi-bp-label" htmlFor="safi-bp-last-name">
+                          <span>
+                            {L("اسم العائلة", "Last Name")}{" "}
+                            <span className="safi-bp-label__req" aria-hidden="true">
+                              *
+                            </span>
+                          </span>
+                        </label>
+                        <input
+                          ref={lastNameInputRef}
+                          id="safi-bp-last-name"
+                          type="text"
+                          autoComplete="family-name"
+                          required
+                          className="safi-bp-input"
+                          value={lastName}
+                          disabled={submittingCheckout}
+                          placeholder={L("مثال: ربيع", "e.g. Rabei")}
+                          aria-invalid={lastNameError ? "true" : "false"}
+                          aria-describedby={lastNameError ? "safi-bp-err-last" : undefined}
+                          onChange={(e) => {
+                            setLastName(e.target.value);
+                            setCheckoutError(null);
+                          }}
+                          onBlur={() => markTouched("lastName")}
+                          data-billing-last-name="true"
+                        />
+                        {lastNameError ? (
+                          <p
+                            id="safi-bp-err-last"
+                            role="alert"
+                            className="safi-bp-field-error"
+                            data-billing-field-error="lastName"
+                          >
+                            <AlertCircle size={14} aria-hidden="true" />
+                            <span>{lastNameError}</span>
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="safi-bp-field safi-bp-field--full">
+                        <label className="safi-bp-label" htmlFor="safi-bp-phone">
+                          <span>
+                            {L("رقم الهاتف المصري", "Egyptian Mobile Number")}{" "}
+                            <span className="safi-bp-label__req" aria-hidden="true">
+                              *
+                            </span>
+                          </span>
+                        </label>
+                        <input
+                          ref={phoneInputRef}
+                          id="safi-bp-phone"
+                          type="tel"
+                          dir="ltr"
+                          inputMode="tel"
+                          autoComplete="tel"
+                          required
+                          className="safi-bp-input"
+                          value={billingPhone}
+                          disabled={submittingCheckout}
+                          placeholder="01012345678 / +201012345678"
+                          aria-invalid={phoneError ? "true" : "false"}
+                          aria-describedby={phoneError ? "safi-bp-err-phone" : "safi-bp-help-phone"}
+                          onChange={(e) => {
+                            setBillingPhone(e.target.value);
+                            setCheckoutError(null);
+                          }}
+                          onBlur={() => markTouched("phone")}
+                          data-billing-phone="true"
+                        />
+                        {phoneError ? (
+                          <p
+                            id="safi-bp-err-phone"
+                            role="alert"
+                            className="safi-bp-field-error"
+                            data-billing-field-error="phone"
+                          >
+                            <AlertCircle size={14} aria-hidden="true" />
+                            <span>{phoneError}</span>
+                          </p>
+                        ) : (
+                          <p id="safi-bp-help-phone" className="safi-bp-helper">
+                            {L(
+                              "يقبل الصيغة المحلية (010/011/012/015) أو الدولية (+201...) ويُنسّق تلقائيًا لـ Paymob.",
+                              "Accepts local (010/011/012/015) or international (+201...) Egyptian mobile numbers; normalized automatically for Paymob."
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 ) : null}
               </div>
-            )}
+            </div>
+
+            {/* RIGHT / END COLUMN: Sticky Order Summary, Checkout CTA & Payment Lifecycle */}
+            <aside className="safi-bp-summary-col">
+              <div className="safi-bp-summary-card" data-billing-summary="true">
+                <div className="safi-bp-section-head">
+                  <h2 className="safi-bp-section-title">{L("ملخص الطلب", "Order Summary")}</h2>
+                  <span className="safi-bp-account-badge">{providerLabel}</span>
+                </div>
+
+                <div className="safi-bp-summary-lines">
+                  <div className="safi-bp-summary-row">
+                    <span className="safi-bp-summary-row__label">{L("الباقة", "Plan")}</span>
+                    <span className="safi-bp-summary-row__value">
+                      {isAr ? selectedPlan.titleAr : selectedPlan.titleEn}
+                    </span>
+                  </div>
+                  <div className="safi-bp-summary-row">
+                    <span className="safi-bp-summary-row__label">
+                      {L("دورة الفوترة", "Billing period")}
+                    </span>
+                    <span className="safi-bp-summary-row__value">
+                      {isAr ? selectedPlan.periodAr : selectedPlan.periodEn}
+                    </span>
+                  </div>
+                  {product === "organization_seat_annual" ? (
+                    <div className="safi-bp-summary-row">
+                      <span className="safi-bp-summary-row__label">{L("المقاعد", "Seats")}</span>
+                      <span className="safi-bp-summary-row__value">× {effectiveSeats}</span>
+                    </div>
+                  ) : null}
+                  <div className="safi-bp-summary-row">
+                    <span className="safi-bp-summary-row__label">
+                      {L("حساب الفوترة", "Billing account")}
+                    </span>
+                    <span
+                      className="safi-bp-summary-row__value"
+                      dir="ltr"
+                      style={{ maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }}
+                    >
+                      {effectiveBillingEmail || "—"}
+                    </span>
+                  </div>
+                  <div className="safi-bp-summary-row">
+                    <span className="safi-bp-summary-row__label">
+                      {L("المجموع الفرعي", "Subtotal")}
+                    </span>
+                    <span className="safi-bp-summary-row__value">
+                      {formatMinorPrice(baseMinor, currency)}
+                    </span>
+                  </div>
+                  {discountMinor > 0 ? (
+                    <div className="safi-bp-summary-row safi-bp-summary-row--discount">
+                      <span className="safi-bp-summary-row__label">
+                        {L("الخصم", "Coupon discount")}
+                      </span>
+                      <span className="safi-bp-summary-row__value">
+                        − {formatMinorPrice(discountMinor, currency)}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="safi-bp-total-row">
+                  <span className="safi-bp-total-label">{L("الإجمالي المستحق", "Total due")}</span>
+                  <strong className="safi-bp-total-value" data-billing-final-price="true">
+                    {formatMinorPrice(finalMinor, currency)}
+                  </strong>
+                </div>
+
+                {checkoutError ? (
+                  <div
+                    role="alert"
+                    className="safi-bp-alert safi-bp-alert--danger"
+                    data-billing-checkout-error="true"
+                  >
+                    <AlertCircle size={16} aria-hidden="true" />
+                    <span>{checkoutError}</span>
+                  </div>
+                ) : null}
+
+                {/* Payment Lifecycle State Display */}
+                {orderState === "paid" ? (
+                  <div role="status" className="safi-bp-status-card" data-billing-state="paid">
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700 }}
+                    >
+                      <CheckCircle2
+                        size={18}
+                        aria-hidden="true"
+                        style={{ color: "var(--status-ok)", flexShrink: 0 }}
+                      />
+                      <span>
+                        {L(
+                          "تم تأكيد الدفع وتفعيل استحقاقك من الخادم بنجاح!",
+                          "Payment confirmed by server and entitlements activated!"
+                        )}
+                      </span>
+                    </div>
+                    <div className="safi-bp-status-actions">
+                      <a
+                        href={
+                          activeOrder
+                            ? `safi://billing?order_id=${activeOrder.order_id}`
+                            : "safi://billing"
+                        }
+                        className="safi-btn safi-btn-primary"
+                        data-billing-return-desktop="true"
+                      >
+                        {L("العودة إلى تطبيق صافي لسطح المكتب", "Return to SafiData Desktop")}
+                      </a>
+                      {onDownloadDesktop ? (
+                        <button
+                          type="button"
+                          className="safi-btn safi-btn-ghost"
+                          onClick={onDownloadDesktop}
+                          data-billing-download-desktop="true"
+                        >
+                          <Download size={15} aria-hidden="true" />
+                          <span>
+                            {L("حمّل تطبيق سطح المكتب وسجّل الدخول بحسابك", "Download Desktop App")}
+                          </span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : reconciliationRequired ? (
+                  <div
+                    role="alert"
+                    className="safi-bp-status-card"
+                    data-billing-state="reconciliation_required"
+                  >
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700 }}
+                    >
+                      <AlertTriangle
+                        size={18}
+                        aria-hidden="true"
+                        style={{ color: "var(--status-warn)", flexShrink: 0 }}
+                      />
+                      <span>
+                        {L(
+                          "مطلوب التحقق من الطلب السابق قبل أي محاولة دفع جديدة (منع الخصم المزدوج).",
+                          "Reconciliation required before starting a new charge (duplicate-charge protection)."
+                        )}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="safi-btn safi-btn-primary safi-bp-checkout-btn"
+                      disabled={submittingCheckout}
+                      onClick={() => void executeCheckout(true)}
+                      data-billing-reconcile-retry="true"
+                    >
+                      {L("التحقق من الطلب القائم بنفس المفتاح", "Reconcile Existing Order")}
+                    </button>
+                  </div>
+                ) : orderState === "checkout_pending" || orderState === "payment_pending" ? (
+                  <div
+                    role="status"
+                    className="safi-bp-status-card"
+                    data-billing-state="checkout_pending"
+                  >
+                    <div style={{ fontSize: "0.88rem", fontWeight: 600, lineHeight: 1.5 }}>
+                      {L(
+                        "بوابة الدفع جاهزة. أكمل الدفع في صفحة المزود الرسمية ثم اضغط «تحديث الحالة من الخادم».",
+                        "Official hosted checkout created. Complete payment on the provider page, then click Verify Payment Status."
+                      )}
+                    </div>
+                    <div className="safi-bp-status-actions">
+                      {activeOrder?.checkout_url ? (
+                        <a
+                          href={activeOrder.checkout_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="safi-btn safi-btn-primary"
+                          data-billing-hosted-link="true"
+                        >
+                          <ExternalLink size={15} aria-hidden="true" />
+                          <span>{L("فتح صفحة الدفع الرسمية", "Open Hosted Checkout")}</span>
+                        </a>
+                      ) : null}
+                      <a
+                        href={
+                          activeOrder
+                            ? `safi://billing?order_id=${activeOrder.order_id}`
+                            : "safi://billing"
+                        }
+                        className="safi-btn safi-btn-ghost"
+                        data-billing-return-desktop="true"
+                      >
+                        {L("العودة إلى تطبيق سطح المكتب", "Return to Desktop App")}
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    <button
+                      type="button"
+                      className="safi-btn safi-btn-primary safi-bp-checkout-btn"
+                      disabled={submittingCheckout}
+                      onClick={() => void executeCheckout(false)}
+                      data-billing-pay-submit="true"
+                    >
+                      {submittingCheckout ? (
+                        <Loader2 size={16} className="safi-bp-spin" aria-hidden="true" />
+                      ) : (
+                        <CreditCard size={16} aria-hidden="true" />
+                      )}
+                      <span>
+                        {submittingCheckout
+                          ? L("جارٍ تجهيز جلسة الدفع...", "Creating protected checkout...")
+                          : L("المتابعة إلى الدفع الآمن", "Continue to Secure Checkout")}
+                      </span>
+                    </button>
+                    {orderState === "failed" ||
+                    orderState === "canceled" ||
+                    orderState === "expired" ? (
+                      <button
+                        type="button"
+                        className="safi-btn safi-btn-ghost"
+                        onClick={handleResetFailedAttempt}
+                        data-billing-state={orderState}
+                        style={{ width: "100%", justifyContent: "center", minHeight: "44px" }}
+                      >
+                        {L("بدء محاولة جديدة", "Start Fresh Attempt")}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+
+                <div className="safi-bp-security-foot">
+                  <Lock size={14} aria-hidden="true" />
+                  <span>
+                    {L(
+                      "دفع محمي بمفاتيح Idempotency لمنع الخصم المزدوج، ولا يتم جمع أو تخزين أي بيانات بطاقة ائتمان على خوادم صافي.",
+                      "Protected with stable idempotency keys to prevent duplicate charges. SafiData never collects or stores raw card numbers."
+                    )}
+                  </span>
+                </div>
+              </div>
+            </aside>
           </div>
         </div>
       )}

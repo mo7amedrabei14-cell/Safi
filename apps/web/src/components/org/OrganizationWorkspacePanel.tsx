@@ -9,13 +9,19 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
+  BarChart3,
   Building2,
   Check,
   Copy,
   CreditCard,
+  Download,
+  Edit3,
+  FolderOpen,
   KeyRound,
+  LayoutTemplate,
   Lock,
   RefreshCw,
+  Share2,
   ShieldCheck,
   Trash2,
   UserMinus,
@@ -26,18 +32,38 @@ import {
 import type { SafiLang } from "../layout/FloatingGlassDock";
 import {
   getDesktopSyncStatus,
+  listDesktopRecipes,
   listDesktopSyncConflicts,
   listDesktopSyncedResources,
+  listDesktopWorkflowMemories,
   prepareDesktopWorkspaceKeyRotation,
   resolveDesktopSyncConflict,
   rotateDesktopLocalDeviceKey,
+  saveDesktopRecipeAsNew,
+  saveDesktopSheetWorkflowMemory,
   selectDesktopSyncWorkspace,
   stageDesktopSharedResourceDelete,
   stageDesktopSharedResourceUpsert,
+  type DesktopLocalRecipeRecord,
+  type DesktopMetric,
   type DesktopSharedWorkspaceResource,
   type DesktopSyncConflictItem,
-  type DesktopWorkspaceSyncStatus
+  type DesktopWorkspaceSyncStatus,
+  type SheetWorkflowMemoryRecord,
+  type StudioChartArtifact,
+  type StudioDocBlockArtifact,
+  type StudioSlideArtifact,
+  type StudioTemplateConfigArtifact
 } from "../../desktop/studio-bridge";
+import {
+  buildEditedSharedResourcePayload,
+  buildSharedDashboardDraft,
+  buildSharedProjectBlueprintDraft,
+  buildSharedRecipeDraft,
+  buildSharedWorkflowDraft,
+  parseSharedResourcePayload,
+  type TeamShareDraft
+} from "../../lib/team-shared-resources";
 import { launchDesktopWebsiteBilling } from "../../lib/desktop-billing-handoff";
 import { BUSINESS_PRICING, normalizeOrganizationSeats } from "../../lib/business-pricing";
 import {
@@ -103,12 +129,25 @@ function clearSavedInviteToken(): void {
   }
 }
 
+export interface LocalStudioShareContext {
+  readonly charts: readonly StudioChartArtifact[];
+  readonly slides: readonly StudioSlideArtifact[];
+  readonly docBlocks: readonly StudioDocBlockArtifact[];
+  readonly metrics: readonly DesktopMetric[];
+  readonly templateConfig: StudioTemplateConfigArtifact | null;
+}
+
 export interface OrganizationWorkspacePanelProps {
   readonly lang?: SafiLang;
   readonly sessionToken: string | null;
   readonly desktopRuntime?: boolean;
   readonly readOnlyOffline?: boolean;
   readonly apiBaseUrlOverride?: string;
+  readonly localStudioContext?: LocalStudioShareContext | null;
+  readonly onOpenSharedResource?: (
+    resource: DesktopSharedWorkspaceResource,
+    mode: "open" | "import"
+  ) => Promise<void> | void;
   readonly onRequestSignIn?: () => void;
   readonly onOpenBillingPortal?: (seats: number) => void;
   readonly onBackToShowcase?: () => void;
@@ -128,6 +167,8 @@ export function OrganizationWorkspacePanel({
   desktopRuntime = false,
   readOnlyOffline = false,
   apiBaseUrlOverride,
+  localStudioContext = null,
+  onOpenSharedResource,
   onRequestSignIn,
   onOpenBillingPortal,
   onBackToShowcase,
@@ -174,10 +215,12 @@ export function OrganizationWorkspacePanel({
     []
   );
   const [conflicts, setConflicts] = useState<readonly DesktopSyncConflictItem[]>([]);
-  const [resKind, setResKind] = useState<"recipe" | "project" | "dashboard" | "document">("recipe");
-  const [resId, setResId] = useState("shared-cleaning-01");
-  const [resTitle, setResTitle] = useState("");
-  const [resContent, setResContent] = useState('{"steps":["trim_whitespace"]}');
+  const [localRecipes, setLocalRecipes] = useState<readonly DesktopLocalRecipeRecord[]>([]);
+  const [localWorkflows, setLocalWorkflows] = useState<readonly SheetWorkflowMemoryRecord[]>([]);
+  const [editingResourceKey, setEditingResourceKey] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editAppendStep, setEditAppendStep] = useState(false);
 
   const selectedOrg = organizations.find((o) => o.organization.id === selectedOrgId) ?? null;
 
@@ -185,8 +228,14 @@ export function OrganizationWorkspacePanel({
     async (workspaceId: string | null) => {
       if (!desktopRuntime) return;
       try {
-        const st = await getDesktopSyncStatus(workspaceId);
+        const [st, recRes, wfRes] = await Promise.all([
+          getDesktopSyncStatus(workspaceId),
+          listDesktopRecipes().catch(() => ({ officialTemplates: [], myRecipes: [] })),
+          listDesktopWorkflowMemories().catch(() => ({ workflows: [] }))
+        ]);
         setSyncStatus(st);
+        setLocalRecipes(recRes.myRecipes);
+        setLocalWorkflows(wfRes.workflows);
         if (workspaceId) {
           const [resList, confList] = await Promise.all([
             listDesktopSyncedResources(workspaceId, false),
@@ -627,19 +676,18 @@ export function OrganizationWorkspacePanel({
     }
   };
 
-  const handleStageAndSyncResource = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
-    if (!desktopRuntime || !selectedOrg || !resTitle.trim() || !resId.trim()) return;
+  const handleShareLocalDraft = async (draft: TeamShareDraft): Promise<void> => {
+    if (!desktopRuntime || !selectedOrg) return;
     setBusy(true);
     setBanner(null);
     try {
       await stageDesktopSharedResourceUpsert({
         organizationId: selectedOrg.organization.id,
         workspaceId: selectedOrg.organization.workspace_id,
-        resourceKind: resKind,
-        resourceId: resId.trim(),
-        title: resTitle.trim(),
-        payloadJson: resContent
+        resourceKind: draft.resourceKind,
+        resourceId: draft.resourceId,
+        title: draft.title,
+        payloadJson: JSON.stringify(draft.payload)
       });
       await refreshLocalDesktopState(selectedOrg.organization.workspace_id);
       if (sessionToken && !readOnlyOffline) {
@@ -655,20 +703,156 @@ export function OrganizationWorkspacePanel({
         setBanner({
           kind: "success",
           text: L(
-            "تم تشفير المورد محليًا ومزامنته مع مساحة عمل الفريق.",
-            "Resource encrypted locally on Desktop and synced to the shared workspace."
+            `تم تشفير ومشاركة «${draft.title}» مع الفريق بنجاح (دون رفع أي صفوف بيانات خام).`,
+            `Encrypted & shared "${draft.title}" with your team (0 raw data rows uploaded).`
           )
         });
       } else {
         setBanner({
           kind: "success",
           text: L(
-            "تم حفظ التغيير مشفّرًا في قائمة الانتظار دون إنترنت — سيُرفع عند عودة الاتصال.",
-            "Saved encrypted in local offline queue — will sync when online."
+            `تم حفظ «${draft.title}» مشفّرًا في قائمة الانتظار دون إنترنت وسيُرفع تلقائيًا عند عودة الاتصال.`,
+            `Saved "${draft.title}" encrypted in offline queue — will sync when online.`
           )
         });
       }
-      setResTitle("");
+    } catch (err) {
+      await refreshLocalDesktopState(selectedOrg.organization.workspace_id);
+      setBanner({ kind: "error", text: describeOrgError(err, isAr) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleOpenOrImportSharedResource = async (
+    resource: DesktopSharedWorkspaceResource,
+    mode: "open" | "import"
+  ): Promise<void> => {
+    if (!desktopRuntime) return;
+    setBusy(true);
+    setBanner(null);
+    try {
+      if (onOpenSharedResource) {
+        await onOpenSharedResource(resource, mode);
+        await refreshLocalDesktopState(selectedOrg?.organization.workspace_id ?? null);
+        if (mode === "import") {
+          setBanner({
+            kind: "success",
+            text: L(
+              `تم استيراد نسخة شخصية من «${resource.title}» إلى مساحتك المحلية.`,
+              `Imported a personal copy of "${resource.title}" into your local workspace.`
+            )
+          });
+        }
+        return;
+      }
+
+      const parsed = parseSharedResourcePayload(resource);
+      if (parsed.typedPayload?.schema === "safi.shared_recipe.v1") {
+        await saveDesktopRecipeAsNew({
+          name:
+            mode === "import"
+              ? `${parsed.typedPayload.name} (Personal Copy)`
+              : parsed.typedPayload.name,
+          description: parsed.typedPayload.description,
+          category: parsed.typedPayload.category,
+          recipeType: parsed.typedPayload.recipe_type,
+          requiredColumns: parsed.typedPayload.required_columns,
+          steps: parsed.typedPayload.steps,
+          conflictPolicy: "rename"
+        });
+        await refreshLocalDesktopState(selectedOrg?.organization.workspace_id ?? null);
+        setBanner({
+          kind: "success",
+          text: L(
+            `تم حفظ الوصفة «${resource.title}» في مكتبة «وصفاتي المحلية».`,
+            `Saved recipe "${resource.title}" into your local My Recipes library.`
+          )
+        });
+        return;
+      }
+
+      if (parsed.typedPayload?.schema === "safi.shared_workflow.v1") {
+        await saveDesktopSheetWorkflowMemory({
+          displayName:
+            mode === "import"
+              ? `${parsed.typedPayload.display_name} (Personal Copy)`
+              : parsed.typedPayload.display_name,
+          sheetName: "SharedSheet",
+          tableId: "tbl_shared",
+          headers: parsed.typedPayload.headers.length > 0 ? parsed.typedPayload.headers : ["col_1"],
+          duplicatePolicy: parsed.typedPayload.duplicate_policy,
+          missingValuePolicy: parsed.typedPayload.missing_value_policy,
+          businessRules: parsed.typedPayload.business_rules,
+          cleaningOperations: parsed.typedPayload.cleaning_operations,
+          metrics: parsed.typedPayload.metrics
+        });
+        await refreshLocalDesktopState(selectedOrg?.organization.workspace_id ?? null);
+        setBanner({
+          kind: "success",
+          text: L(
+            `تم استيراد مسار الورقة «${resource.title}» إلى ذاكرة مسار العمل.`,
+            `Imported workflow "${resource.title}" into Workflow Memory.`
+          )
+        });
+      }
+    } catch (err) {
+      setBanner({ kind: "error", text: describeOrgError(err, isAr) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const beginStructuredEdit = (resource: DesktopSharedWorkspaceResource): void => {
+    const parsed = parseSharedResourcePayload(resource);
+    setEditingResourceKey(`${resource.resource_kind}:${resource.resource_id}`);
+    setEditTitle(resource.title);
+    setEditNotes(parsed.teamNotes);
+    setEditAppendStep(false);
+  };
+
+  const handleSaveStructuredEdit = async (
+    resource: DesktopSharedWorkspaceResource
+  ): Promise<void> => {
+    if (!desktopRuntime || !selectedOrg) return;
+    setBusy(true);
+    setBanner(null);
+    try {
+      const nextTitle = editTitle.trim() || resource.title;
+      const nextPayloadJson = buildEditedSharedResourcePayload(resource, {
+        title: nextTitle,
+        teamNotes: editNotes,
+        appendNormalizeStep: editAppendStep
+      });
+
+      await stageDesktopSharedResourceUpsert({
+        organizationId: selectedOrg.organization.id,
+        workspaceId: selectedOrg.organization.workspace_id,
+        resourceKind: resource.resource_kind,
+        resourceId: resource.resource_id,
+        title: nextTitle,
+        payloadJson: nextPayloadJson
+      });
+
+      if (sessionToken && !readOnlyOffline) {
+        await synchronizeDesktopOrganizationWorkspace({
+          sessionToken,
+          organizationId: selectedOrg.organization.id,
+          workspaceId: selectedOrg.organization.workspace_id,
+          activeKeyEpoch: selectedOrg.organization.active_key_epoch,
+          myRole: selectedOrg.my_role,
+          ...(apiBaseUrlOverride !== undefined ? { apiBaseUrlOverride } : {})
+        });
+      }
+      setEditingResourceKey(null);
+      await refreshLocalDesktopState(selectedOrg.organization.workspace_id);
+      setBanner({
+        kind: "success",
+        text: L(
+          `تم تحديث ومزامنة الإصدار الجديد من «${nextTitle}» بنجاح.`,
+          `Updated & synced new revision of "${nextTitle}".`
+        )
+      });
     } catch (err) {
       await refreshLocalDesktopState(selectedOrg.organization.workspace_id);
       setBanner({ kind: "error", text: describeOrgError(err, isAr) });
@@ -1782,14 +1966,14 @@ export function OrganizationWorkspacePanel({
                 </div>
               </div>
 
-              {/* Conflict Resolution UI */}
+              {/* Conflict Resolution UI (Human-Readable Side-by-Side Comparison) */}
               {conflicts.length > 0 ? (
                 <div
                   data-testid="desktop-sync-conflicts-box"
                   style={{
                     padding: "14px",
                     borderRadius: "12px",
-                    border: "1px solid var(--safi-warning, #f59e0b)",
+                    border: "1px solid var(--status-warn, #f59e0b)",
                     background: "rgba(245, 158, 11, 0.1)",
                     display: "grid",
                     gap: "10px"
@@ -1804,162 +1988,298 @@ export function OrganizationWorkspacePanel({
                       "Version conflict detected — choose which revision to keep:"
                     )}
                   </div>
-                  {conflicts.map((c) => (
-                    <div
-                      key={`${c.resource_kind}:${c.resource_id}`}
-                      data-testid={`sync-conflict-${c.resource_id}`}
-                      style={{
-                        padding: "10px",
-                        borderRadius: "8px",
-                        background: "rgba(0,0,0,0.25)",
-                        display: "grid",
-                        gap: "8px"
-                      }}
-                    >
-                      <div style={{ fontSize: "13px" }}>
-                        <strong>
-                          {c.resource_kind} / {c.resource_id}
-                        </strong>{" "}
-                        · {L("نسختك المحلية:", "Your local:")} «{c.local_title}» vs{" "}
-                        {L("نسخة الفريق (v", "Team remote (v")}
-                        {c.remote_version}): «{c.remote_title}»
-                      </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                        <button
-                          type="button"
-                          className="safi-btn safi-btn-primary"
-                          data-testid={`conflict-keep-local-${c.resource_id}`}
-                          disabled={busy}
-                          onClick={() => void handleResolveConflict(c, "keep_local")}
+                  {conflicts.map((c) => {
+                    const localView = parseSharedResourcePayload({
+                      resource_kind: c.resource_kind,
+                      payload_json: c.local_payload_json
+                    });
+                    const remoteView = parseSharedResourcePayload({
+                      resource_kind: c.resource_kind,
+                      payload_json: c.remote_payload_json
+                    });
+                    return (
+                      <div
+                        key={`${c.resource_kind}:${c.resource_id}`}
+                        data-testid={`sync-conflict-${c.resource_id}`}
+                        style={{
+                          padding: "12px",
+                          borderRadius: "10px",
+                          background: "rgba(0,0,0,0.22)",
+                          display: "grid",
+                          gap: "10px"
+                        }}
+                      >
+                        <div style={{ fontSize: "13px", fontWeight: 700 }}>
+                          {isAr ? localView.typeLabelAr : localView.typeLabelEn} ·{" "}
+                          <span>{c.remote_title || c.local_title}</span>
+                        </div>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                            gap: "8px",
+                            fontSize: "12.5px"
+                          }}
                         >
-                          {L("الاحتفاظ بنسختي المحلية", "Keep My Local Version")}
-                        </button>
-                        <button
-                          type="button"
-                          className="safi-btn safi-btn-ghost"
-                          data-testid={`conflict-accept-remote-${c.resource_id}`}
-                          disabled={busy}
-                          onClick={() => void handleResolveConflict(c, "accept_remote")}
-                        >
-                          {L("اعتماد نسخة الفريق", "Accept Team Version")}
-                        </button>
+                          <div
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: "8px",
+                              border: "1px solid var(--border-subtle)"
+                            }}
+                          >
+                            <div style={{ fontWeight: 700 }}>
+                              {L("نسختك المحلية:", "Your Local Draft:")} «{c.local_title}»
+                            </div>
+                            <div style={{ opacity: 0.85 }}>
+                              {isAr ? localView.summaryAr : localView.summaryEn}
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: "8px",
+                              border: "1px solid var(--border-subtle)"
+                            }}
+                          >
+                            <div style={{ fontWeight: 700 }}>
+                              {L(
+                                `نسخة الفريق (v${c.remote_version}):`,
+                                `Team Version (v${c.remote_version}):`
+                              )}{" "}
+                              «{c.remote_title}»
+                            </div>
+                            <div style={{ opacity: 0.85 }}>
+                              {isAr ? remoteView.summaryAr : remoteView.summaryEn}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                          <button
+                            type="button"
+                            className="safi-btn safi-btn-primary"
+                            data-testid={`conflict-keep-local-${c.resource_id}`}
+                            disabled={busy}
+                            onClick={() => void handleResolveConflict(c, "keep_local")}
+                          >
+                            {L("الاحتفاظ بنسختي المحلية", "Keep My Local Version")}
+                          </button>
+                          <button
+                            type="button"
+                            className="safi-btn safi-btn-ghost"
+                            data-testid={`conflict-accept-remote-${c.resource_id}`}
+                            disabled={busy}
+                            onClick={() => void handleResolveConflict(c, "accept_remote")}
+                          >
+                            {L("اعتماد نسخة الفريق", "Accept Team Version")}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : null}
 
-              {/* Create / Update Shared Encrypted Resource */}
+              {/* Local-First Privacy Policy Notice */}
+              <div
+                data-testid="team-sharing-privacy-boundary"
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: "10px",
+                  background: "rgba(16, 185, 129, 0.08)",
+                  border: "1px solid rgba(16, 185, 129, 0.28)",
+                  fontSize: "12.5px",
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "8px"
+                }}
+              >
+                <ShieldCheck
+                  size={16}
+                  aria-hidden="true"
+                  style={{ flexShrink: 0, marginTop: "2px" }}
+                />
+                <span>
+                  {L(
+                    "الخصوصية المحلية أولًا: يمكن مشاركة الوصفات المحفوظة، مسارات الورقة، اللوحات، ومخططات المشاريع فقط (مشفّرة محليًا). ملفات CSV/XLSX الأصلية وصفوف بيانات العملاء لا تُرفع إلى الخادم أبدًا.",
+                    "Local-First Privacy: Only Saved Recipes, Sheet Workflows, Dashboard Definitions, and Project Blueprints can be shared (encrypted locally). Raw CSV/XLSX files and customer data rows are never uploaded."
+                  )}
+                </span>
+              </div>
+
+              {/* Local Desktop Studio Resources Available to Share */}
               {canModifyResources && !readOnlyOffline ? (
-                <form
-                  onSubmit={(e) => void handleStageAndSyncResource(e)}
-                  data-testid="desktop-shared-resource-form"
-                  style={{ display: "grid", gap: "8px" }}
+                <div
+                  data-testid="desktop-local-unshared-resources"
+                  style={{
+                    display: "grid",
+                    gap: "10px",
+                    padding: "14px",
+                    borderRadius: "12px",
+                    border: "1px solid var(--border-subtle)"
+                  }}
                 >
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                    <select
-                      value={resKind}
-                      onChange={(e) =>
-                        setResKind(
-                          e.target.value as "recipe" | "project" | "dashboard" | "document"
-                        )
-                      }
-                      data-testid="shared-resource-kind-select"
-                      style={{
-                        minHeight: "42px",
-                        padding: "6px 10px",
-                        borderRadius: "8px",
-                        background: "rgba(0,0,0,0.3)",
-                        color: "inherit"
-                      }}
-                    >
-                      <option value="recipe">Recipe</option>
-                      <option value="project">Project</option>
-                      <option value="dashboard">Dashboard</option>
-                      <option value="document">Document</option>
-                    </select>
-                    <input
-                      type="text"
-                      required
-                      dir="ltr"
-                      value={resId}
-                      onChange={(e) => setResId(e.target.value)}
-                      placeholder="resource-id"
-                      data-testid="shared-resource-id-input"
-                      style={{
-                        width: "180px",
-                        minHeight: "42px",
-                        padding: "6px 10px",
-                        borderRadius: "8px",
-                        background: "rgba(0,0,0,0.2)",
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        color: "inherit"
-                      }}
-                    />
-                    <input
-                      type="text"
-                      required
-                      value={resTitle}
-                      onChange={(e) => setResTitle(e.target.value)}
-                      placeholder={L("عنوان المورد المشترك", "Shared resource title")}
-                      data-testid="shared-resource-title-input"
-                      style={{
-                        flex: "1 1 200px",
-                        minHeight: "42px",
-                        padding: "6px 10px",
-                        borderRadius: "8px",
-                        background: "rgba(0,0,0,0.2)",
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        color: "inherit"
-                      }}
-                    />
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "8px"
+                    }}
+                  >
+                    <strong style={{ fontSize: "13.5px" }}>
+                      {L(
+                        "مواردك المحلية في الاستوديو (غير مشتركة بعد أو جاهزة للمشاركة)",
+                        "Your Local Desktop Studio Resources (Ready to Share)"
+                      )}
+                    </strong>
+                    <span style={{ fontSize: "12px", opacity: 0.78 }}>
+                      {L(
+                        "مشفّر قبل الرفع · 0 صفوف بيانات خام",
+                        "Encrypted before sync · 0 raw rows"
+                      )}
+                    </span>
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={resContent}
-                      onChange={(e) => setResContent(e.target.value)}
-                      data-testid="shared-resource-payload-input"
-                      style={{
-                        flex: "1 1 280px",
-                        minHeight: "42px",
-                        padding: "6px 10px",
-                        borderRadius: "8px",
-                        background: "rgba(0,0,0,0.2)",
-                        border: "1px solid rgba(255,255,255,0.14)",
-                        color: "inherit"
-                      }}
-                    />
-                    <button
-                      type="submit"
-                      className="safi-btn safi-btn-primary"
-                      data-testid="shared-resource-save-sync-btn"
-                      disabled={busy || !resTitle.trim() || !resId.trim()}
-                      style={{ minHeight: "42px" }}
-                    >
-                      <Lock size={14} aria-hidden="true" />
-                      {L("تشفير ومزامنة", "Encrypt & Sync")}
-                    </button>
-                  </div>
-                </form>
+
+                  {(() => {
+                    const sharedIds = new Set(sharedResources.map((s) => s.resource_id));
+                    const localDrafts: TeamShareDraft[] = [
+                      ...localRecipes.map((rec) => buildSharedRecipeDraft(rec)),
+                      ...localWorkflows.map((wf) => buildSharedWorkflowDraft(wf)),
+                      ...(localStudioContext && localStudioContext.charts.length > 0
+                        ? [
+                            buildSharedDashboardDraft(
+                              localStudioContext.templateConfig?.titleOverride ||
+                                L("لوحة المؤشرات الحالية", "Active Studio Dashboard"),
+                              localStudioContext.charts,
+                              localStudioContext.templateConfig
+                            )
+                          ]
+                        : []),
+                      ...(localStudioContext &&
+                      (localStudioContext.slides.length > 0 ||
+                        localStudioContext.docBlocks.length > 0 ||
+                        localStudioContext.charts.length > 0)
+                        ? [
+                            buildSharedProjectBlueprintDraft({
+                              title:
+                                localStudioContext.templateConfig?.titleOverride ||
+                                L("مخطط المشروع الحالي", "Active Project Blueprint"),
+                              charts: localStudioContext.charts,
+                              slides: localStudioContext.slides,
+                              docBlocks: localStudioContext.docBlocks,
+                              metrics: localStudioContext.metrics,
+                              templateConfig: localStudioContext.templateConfig
+                            })
+                          ]
+                        : [])
+                    ];
+
+                    if (localDrafts.length === 0) {
+                      return (
+                        <p style={{ margin: 0, fontSize: "12.5px", opacity: 0.78 }}>
+                          {L(
+                            "احفظ وصفة في «القوالب والوصفات» أو مسار عمل أو لوحة رسوم داخل الاستوديو، ثم شاركها مباشرة مع فريقك بضغطة واحدة.",
+                            "Save a Recipe in Templates & Recipes, a Sheet Workflow, or a Dashboard in Desktop Studio to share it directly with your team."
+                          )}
+                        </p>
+                      );
+                    }
+
+                    return (
+                      <div style={{ display: "grid", gap: "8px" }}>
+                        {localDrafts.map((draft) => {
+                          const alreadyShared = sharedIds.has(draft.resourceId);
+                          return (
+                            <div
+                              key={draft.resourceId}
+                              data-testid={`local-shareable-item-${draft.resourceId}`}
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: "10px",
+                                padding: "10px 12px",
+                                borderRadius: "10px",
+                                background: "rgba(255,255,255,0.03)",
+                                border: "1px solid var(--border-subtle)"
+                              }}
+                            >
+                              <div style={{ display: "grid", gap: "2px" }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                    fontWeight: 700,
+                                    fontSize: "13px"
+                                  }}
+                                >
+                                  {draft.resourceKind === "dashboard" ? (
+                                    <BarChart3 size={14} aria-hidden="true" />
+                                  ) : draft.resourceKind === "project" ? (
+                                    <LayoutTemplate size={14} aria-hidden="true" />
+                                  ) : (
+                                    <FolderOpen size={14} aria-hidden="true" />
+                                  )}
+                                  <span>{draft.title}</span>
+                                  <span style={{ fontSize: "11px", opacity: 0.75 }}>
+                                    [
+                                    {alreadyShared
+                                      ? L("مشترك مع الفريق", "Shared")
+                                      : L("محلي فقط", "Local Only")}
+                                    ]
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: "12px", opacity: 0.8 }}>
+                                  {isAr ? draft.summaryAr : draft.summaryEn}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                className="safi-btn safi-btn-primary"
+                                data-testid={`quick-share-local-${draft.resourceId}`}
+                                disabled={busy}
+                                onClick={() => void handleShareLocalDraft(draft)}
+                                style={{ minHeight: "40px" }}
+                              >
+                                <Share2 size={14} aria-hidden="true" />
+                                <span>
+                                  {alreadyShared
+                                    ? L("تحديث نسخة الفريق", "Update Team Copy")
+                                    : L("مشاركة مع الفريق", "Share to Team")}
+                                </span>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
               ) : (
                 <p
                   data-testid="viewer-readonly-sync-notice"
-                  style={{ margin: 0, fontSize: "13px", opacity: 0.8 }}
+                  style={{ margin: 0, fontSize: "13px", opacity: 0.85 }}
                 >
                   {L(
-                    "دور المشاهد (Viewer) أو وضع القراءة فقط يسمح بفك تشفير وعرض الموارد المشتركة دون تعديلها.",
-                    "Viewer role / Offline Read-Only mode can decrypt and view shared resources but cannot modify them."
+                    "دور المشاهد (Viewer) أو وضع القراءة فقط يسمح بفك تشفير وفتح واستيراد الموارد المشتركة دون تعديلها أو مشاركة تعديلات جديدة.",
+                    "Viewer role / Offline Read-Only mode can decrypt, open, and import shared resources but cannot share or modify team resources."
                   )}
                 </p>
               )}
 
-              {/* Decrypted Shared Resources List */}
+              {/* Decrypted Shared Team Resources List */}
               <div
                 data-testid="desktop-shared-resources-list"
-                style={{ display: "grid", gap: "8px" }}
+                style={{ display: "grid", gap: "10px" }}
               >
+                <strong style={{ fontSize: "13.5px" }}>
+                  {L("الموارد المشتركة مع الفريق", "Resources Shared with Team")} (
+                  {sharedResources.length})
+                </strong>
+
                 {sharedResources.length === 0 ? (
                   <span style={{ fontSize: "13px", opacity: 0.72 }}>
                     {L(
@@ -1968,55 +2288,288 @@ export function OrganizationWorkspacePanel({
                     )}
                   </span>
                 ) : (
-                  sharedResources.map((r) => (
-                    <div
-                      key={`${r.resource_kind}:${r.resource_id}`}
-                      data-testid={`shared-resource-item-${r.resource_id}`}
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "10px",
-                        padding: "10px 12px",
-                        borderRadius: "10px",
-                        background: "rgba(255,255,255,0.03)"
-                      }}
-                    >
-                      <div style={{ display: "grid", gap: "2px" }}>
-                        <div>
-                          <strong>{r.title}</strong> ·{" "}
-                          <code dir="ltr">
-                            {r.resource_kind}/{r.resource_id}
-                          </code>{" "}
-                          · <span dir="ltr">v{r.version}</span> (Epoch #{r.key_epoch})
-                          {r.dirty ? (
-                            <span style={{ marginInlineStart: "8px", color: "#fbbf24" }}>
-                              [{L("بانتظار الرفع", "Queued Offline")}]
-                            </span>
-                          ) : null}
-                        </div>
-                        <code dir="ltr" style={{ fontSize: "12px", opacity: 0.78 }}>
-                          {r.payload_json}
-                        </code>
-                      </div>
+                  sharedResources.map((r) => {
+                    const view = parseSharedResourcePayload(r);
+                    const itemKey = `${r.resource_kind}:${r.resource_id}`;
+                    const isEditing = editingResourceKey === itemKey;
+                    const hasConflict = conflicts.some(
+                      (c) => c.resource_kind === r.resource_kind && c.resource_id === r.resource_id
+                    );
 
-                      {canModifyResources && !readOnlyOffline ? (
-                        <button
-                          type="button"
-                          className="safi-btn safi-btn-ghost"
-                          data-testid={`delete-shared-resource-${r.resource_id}`}
-                          disabled={busy}
-                          onClick={() =>
-                            void handleDeleteSharedResource(r.resource_kind, r.resource_id)
-                          }
+                    return (
+                      <article
+                        key={itemKey}
+                        data-testid={`shared-resource-item-${r.resource_id}`}
+                        style={{
+                          display: "grid",
+                          gap: "10px",
+                          padding: "14px",
+                          borderRadius: "12px",
+                          background: "rgba(255,255,255,0.03)",
+                          border: "1px solid var(--border-subtle)"
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            gap: "10px"
+                          }}
                         >
-                          <Trash2 size={14} aria-hidden="true" />
-                          {L("حذف", "Delete")}
-                        </button>
-                      ) : null}
-                    </div>
-                  ))
+                          <div style={{ display: "grid", gap: "4px", minWidth: 0 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                alignItems: "center",
+                                gap: "8px"
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  fontWeight: 700,
+                                  padding: "2px 8px",
+                                  borderRadius: "999px",
+                                  border: "1px solid var(--border-strong)"
+                                }}
+                              >
+                                {isAr ? view.typeLabelAr : view.typeLabelEn}
+                              </span>
+                              <strong style={{ fontSize: "14px" }}>{r.title}</strong>
+                              <span style={{ fontSize: "12px", opacity: 0.78 }} dir="ltr">
+                                v{r.version} · Epoch #{r.key_epoch}
+                              </span>
+                              {hasConflict ? (
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    color: "var(--status-warn)"
+                                  }}
+                                >
+                                  [{L("تعارض", "Conflict")}]
+                                </span>
+                              ) : r.dirty ? (
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    color: "var(--status-warn)"
+                                  }}
+                                >
+                                  [{L("قيد الانتظار دون إنترنت", "Queued Offline")}]
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    color: "var(--status-ok)"
+                                  }}
+                                >
+                                  [{L("متزامن ومشفّر", "Synced E2EE")}]
+                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ fontSize: "12.5px", opacity: 0.88 }}>
+                              {isAr ? view.summaryAr : view.summaryEn}
+                              {view.privacyVerified
+                                ? ` · ${L("0 صفوف بيانات خام", "0 raw rows")}`
+                                : ""}
+                            </div>
+
+                            {view.teamNotes ? (
+                              <div style={{ fontSize: "12px", opacity: 0.78 }}>
+                                {view.teamNotes}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                            <button
+                              type="button"
+                              className="safi-btn safi-btn-primary"
+                              data-testid={`open-shared-resource-${r.resource_id}`}
+                              disabled={busy}
+                              onClick={() => void handleOpenOrImportSharedResource(r, "open")}
+                              style={{ minHeight: "38px" }}
+                            >
+                              <FolderOpen size={14} aria-hidden="true" />
+                              <span>{L("فتح في الاستوديو", "Open in Studio")}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              className="safi-btn safi-btn-ghost"
+                              data-testid={`import-shared-resource-${r.resource_id}`}
+                              disabled={busy}
+                              onClick={() => void handleOpenOrImportSharedResource(r, "import")}
+                              style={{ minHeight: "38px" }}
+                            >
+                              <Download size={14} aria-hidden="true" />
+                              <span>{L("نسخة شخصية", "Import Copy")}</span>
+                            </button>
+
+                            {canModifyResources && !readOnlyOffline ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="safi-btn safi-btn-ghost"
+                                  data-testid={`edit-shared-resource-${r.resource_id}`}
+                                  disabled={busy}
+                                  onClick={() =>
+                                    isEditing ? setEditingResourceKey(null) : beginStructuredEdit(r)
+                                  }
+                                  style={{ minHeight: "38px" }}
+                                >
+                                  <Edit3 size={14} aria-hidden="true" />
+                                  <span>{L("تحديث", "Edit")}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="safi-btn safi-btn-ghost"
+                                  data-testid={`delete-shared-resource-${r.resource_id}`}
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void handleDeleteSharedResource(r.resource_kind, r.resource_id)
+                                  }
+                                  style={{ minHeight: "38px" }}
+                                >
+                                  <Trash2 size={14} aria-hidden="true" />
+                                  <span>{L("إزالة", "Remove")}</span>
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {/* Structured Inline Editor (Permitted Roles ONLY; Zero Raw JSON) */}
+                        {isEditing && canModifyResources && !readOnlyOffline ? (
+                          <div
+                            data-testid={`edit-shared-resource-panel-${r.resource_id}`}
+                            style={{
+                              padding: "12px",
+                              borderRadius: "10px",
+                              background: "rgba(0,0,0,0.18)",
+                              display: "grid",
+                              gap: "8px"
+                            }}
+                          >
+                            <label
+                              style={{
+                                display: "grid",
+                                gap: "4px",
+                                fontSize: "12px",
+                                fontWeight: 700
+                              }}
+                            >
+                              <span>{L("العنوان المحدث", "Updated Title")}</span>
+                              <input
+                                type="text"
+                                className="safi-input"
+                                value={editTitle}
+                                data-testid={`edit-shared-title-input-${r.resource_id}`}
+                                onChange={(e) => setEditTitle(e.target.value)}
+                              />
+                            </label>
+                            <label
+                              style={{
+                                display: "grid",
+                                gap: "4px",
+                                fontSize: "12px",
+                                fontWeight: 700
+                              }}
+                            >
+                              <span>{L("ملاحظات الفريق", "Team Notes")}</span>
+                              <input
+                                type="text"
+                                className="safi-input"
+                                value={editNotes}
+                                data-testid={`edit-shared-notes-input-${r.resource_id}`}
+                                onChange={(e) => setEditNotes(e.target.value)}
+                              />
+                            </label>
+                            {view.typedPayload?.schema === "safi.shared_recipe.v1" ? (
+                              <label
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  fontSize: "12.5px"
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={editAppendStep}
+                                  data-testid={`edit-shared-add-step-${r.resource_id}`}
+                                  onChange={(e) => setEditAppendStep(e.target.checked)}
+                                />
+                                <span>
+                                  {L(
+                                    "إضافة خطوة تطبيع نص عربي جديدة لهذا الإصدار",
+                                    "Append Arabic text normalization step in this revision"
+                                  )}
+                                </span>
+                              </label>
+                            ) : null}
+                            <div
+                              style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}
+                            >
+                              <button
+                                type="button"
+                                className="safi-btn safi-btn-ghost"
+                                onClick={() => setEditingResourceKey(null)}
+                              >
+                                {L("إلغاء", "Cancel")}
+                              </button>
+                              <button
+                                type="button"
+                                className="safi-btn safi-btn-primary"
+                                data-testid={`save-shared-edit-${r.resource_id}`}
+                                disabled={busy || !editTitle.trim()}
+                                onClick={() => void handleSaveStructuredEdit(r)}
+                              >
+                                <Lock size={14} aria-hidden="true" />
+                                <span>
+                                  {L("تشفير وحفظ الإصدار الجديد", "Encrypt & Sync Update")}
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Optional Collapsed Technical Details (Hidden by default from normal UX) */}
+                        <details style={{ fontSize: "11.5px", opacity: 0.74 }}>
+                          <summary style={{ cursor: "pointer" }}>
+                            {L("تفاصيل تقنية متقدمة (للمراجعة)", "Advanced / Technical Details")}
+                          </summary>
+                          <div style={{ marginTop: "6px", display: "grid", gap: "4px" }}>
+                            <code dir="ltr">
+                              id={r.resource_kind}/{r.resource_id} · version={r.version} · epoch=
+                              {r.key_epoch}
+                            </code>
+                            <pre
+                              dir="ltr"
+                              style={{
+                                margin: 0,
+                                padding: "8px",
+                                borderRadius: "8px",
+                                background: "rgba(0,0,0,0.2)",
+                                overflowX: "auto",
+                                maxHeight: "140px"
+                              }}
+                            >
+                              {r.payload_json}
+                            </pre>
+                          </div>
+                        </details>
+                      </article>
+                    );
+                  })
                 )}
               </div>
             </div>

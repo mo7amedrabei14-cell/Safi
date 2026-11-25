@@ -48,6 +48,7 @@ import {
 import type {
   DesktopGroup,
   DesktopRowPage,
+  DesktopSharedWorkspaceResource,
   DesktopStudioState,
   DesktopWorkbookDetails,
   DesktopWorkspaceSyncStatus,
@@ -96,6 +97,8 @@ import {
   renameScenario,
   resetScenario,
   restoreProject,
+  saveDesktopRecipeAsNew,
+  saveDesktopSheetWorkflowMemory,
   saveProjectBundle,
   selectRegion,
   setArtifacts,
@@ -116,7 +119,16 @@ import { DesktopLocalSearchPanel } from "./components/DesktopLocalSearchPanel";
 import { DesktopRecipeLibraryPanel } from "./components/DesktopRecipeLibraryPanel";
 import { DesktopUpgradeModal } from "./DesktopUpgradeModal";
 import { OrganizationWorkspacePanel } from "../components/org/OrganizationWorkspacePanel";
+import { ShareToTeamDialog } from "../components/org/ShareToTeamDialog";
 import type { OrgRole } from "../lib/organization-api";
+import {
+  buildSharedDashboardDraft,
+  buildSharedProjectBlueprintDraft,
+  buildSharedRecipeDraft,
+  buildSharedWorkflowDraft,
+  parseSharedResourcePayload,
+  type TeamShareDraft
+} from "../lib/team-shared-resources";
 import { DesktopWorkflowMemoryPanel } from "./components/DesktopWorkflowMemoryPanel";
 import {
   DeliverableExportModal,
@@ -200,6 +212,10 @@ export function DesktopStudio({
   const desktop = isDesktopRuntime();
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const [shareDraft, setShareDraft] = useState<TeamShareDraft | null>(null);
+  const [teamActionNotice, setTeamActionNotice] = useState<string | null>(null);
+  const [recipePanelRefreshNonce, setRecipePanelRefreshNonce] = useState(0);
+  const [workflowPanelRefreshNonce, setWorkflowPanelRefreshNonce] = useState(0);
   const [activeTeamSelection, setActiveTeamSelection] = useState<{
     readonly organizationId: string | null;
     readonly organizationName: string | null;
@@ -1039,6 +1055,30 @@ export function DesktopStudio({
         onClose={() => setUpgradeModalOpen(false)}
       />
 
+      <ShareToTeamDialog
+        open={shareDraft !== null}
+        draft={shareDraft}
+        lang={lang}
+        sessionToken={sessionToken}
+        readOnlyOffline={readOnlyOffline}
+        defaultOrganizationId={activeTeamSelection.organizationId}
+        onClose={() => setShareDraft(null)}
+        onOpenTeamWorkspace={() => setTeamModalOpen(true)}
+        onSharedSuccess={(res) => {
+          setTeamActionNotice(
+            res.syncedOnline
+              ? L(
+                  `تم تشفير ومشاركة «${res.title}» مع فريق «${res.organizationName}».`,
+                  `Encrypted & shared "${res.title}" with "${res.organizationName}".`
+                )
+              : L(
+                  `تم تشفير «${res.title}» وحفظه في قائمة المزامنة دون إنترنت.`,
+                  `Encrypted "${res.title}" and queued for team sync.`
+                )
+          );
+        }}
+      />
+
       {teamModalOpen ? (
         <div
           role="dialog"
@@ -1058,9 +1098,137 @@ export function DesktopStudio({
             sessionToken={sessionToken}
             desktopRuntime={true}
             readOnlyOffline={readOnlyOffline}
+            localStudioContext={{
+              charts: artifacts.charts,
+              slides: artifacts.slides,
+              docBlocks: artifacts.docBlocks,
+              metrics: state?.metrics ?? [],
+              templateConfig: artifacts.templateConfig
+            }}
+            onOpenSharedResource={async (
+              resource: DesktopSharedWorkspaceResource,
+              openMode: "open" | "import"
+            ) => {
+              const parsed = parseSharedResourcePayload(resource);
+              if (parsed.typedPayload?.schema === "safi.shared_recipe.v1") {
+                const p = parsed.typedPayload;
+                await saveDesktopRecipeAsNew({
+                  name: openMode === "import" ? `${p.name} (Personal Copy)` : p.name,
+                  description: p.description,
+                  category: p.category,
+                  recipeType: p.recipe_type,
+                  requiredColumns: p.required_columns,
+                  steps: p.steps,
+                  conflictPolicy: "rename"
+                });
+                setRecipePanelRefreshNonce((n) => n + 1);
+                if (openMode === "open") {
+                  setTeamModalOpen(false);
+                  setActiveDesktopUtility("recipe-library");
+                }
+                setTeamActionNotice(
+                  L(
+                    `تم استيراد وفتح الوصفة المشتركة «${resource.title}» في مكتبة وصفاتي المحلية.`,
+                    `Imported & opened shared recipe "${resource.title}" in your My Recipes library.`
+                  )
+                );
+                return;
+              }
+              if (parsed.typedPayload?.schema === "safi.shared_workflow.v1") {
+                const p = parsed.typedPayload;
+                await saveDesktopSheetWorkflowMemory({
+                  displayName:
+                    openMode === "import" ? `${p.display_name} (Personal Copy)` : p.display_name,
+                  sheetName: wbDetails?.activeSheet ?? "SharedSheet",
+                  tableId: wbDetails?.activeTableId ?? "tbl_shared",
+                  headers: p.headers.length > 0 ? p.headers : ["col_1"],
+                  duplicatePolicy: p.duplicate_policy,
+                  missingValuePolicy: p.missing_value_policy,
+                  businessRules: p.business_rules,
+                  cleaningOperations: p.cleaning_operations,
+                  metrics: p.metrics
+                });
+                setWorkflowPanelRefreshNonce((n) => n + 1);
+                if (openMode === "open") {
+                  setTeamModalOpen(false);
+                  setActiveDesktopUtility("workflow-memory");
+                }
+                setTeamActionNotice(
+                  L(
+                    `تم استيراد مسار العمل المشترك «${resource.title}» إلى ذاكرة مسار العمل.`,
+                    `Imported shared sheet workflow "${resource.title}" into Workflow Memory.`
+                  )
+                );
+                return;
+              }
+              if (parsed.typedPayload?.schema === "safi.shared_dashboard.v1") {
+                const p = parsed.typedPayload;
+                await persistArtifacts({
+                  ...artifacts,
+                  charts: p.charts,
+                  ...(p.template_config ? { templateConfig: p.template_config } : {})
+                });
+                if (openMode === "open") {
+                  setTeamModalOpen(false);
+                  setMode("dashboard");
+                }
+                setTeamActionNotice(
+                  L(
+                    `تم فتح لوحة الفريق المشتركة «${resource.title}» (${p.charts.length} رسوم بيانية).`,
+                    `Opened shared team dashboard "${resource.title}" (${p.charts.length} charts).`
+                  )
+                );
+                return;
+              }
+              if (parsed.typedPayload?.schema === "safi.shared_project_blueprint.v1") {
+                const p = parsed.typedPayload;
+                await persistArtifacts({
+                  ...artifacts,
+                  charts: p.charts,
+                  slides: p.slides,
+                  docBlocks: p.doc_blocks,
+                  templateConfig: p.template_config
+                });
+                if (openMode === "open") {
+                  setTeamModalOpen(false);
+                  setMode("dashboard");
+                }
+                setTeamActionNotice(
+                  L(
+                    `تم فتح مخطط المشروع المشترك «${resource.title}» (بدون بيانات خام).`,
+                    `Opened shared project blueprint "${resource.title}" (no raw rows).`
+                  )
+                );
+              }
+            }}
             onCloseModal={() => setTeamModalOpen(false)}
             onActiveWorkspaceChanged={setActiveTeamSelection}
           />
+        </div>
+      ) : null}
+
+      {teamActionNotice !== null ? (
+        <div
+          className="safi-desktop-studio__note"
+          data-testid="desktop-team-action-notice"
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "10px"
+          }}
+        >
+          <span>{teamActionNotice}</span>
+          <button
+            type="button"
+            className="safi-btn safi-btn-ghost"
+            onClick={() => setTeamActionNotice(null)}
+          >
+            {L("إغلاق", "Dismiss")}
+          </button>
         </div>
       ) : null}
 
@@ -1129,16 +1297,19 @@ export function DesktopStudio({
 
       {activeDesktopUtility === "recipe-library" ? (
         <DesktopRecipeLibraryPanel
+          key={`recipe-lib-${recipePanelRefreshNonce}`}
           lang={lang}
           sessionToken={sessionToken}
           readOnlyOffline={readOnlyOffline}
           activeProjectId={state ? PROJECT : null}
           onStateUpdated={(nextState) => setState(nextState)}
+          onShareRecipeToTeam={(recipe) => setShareDraft(buildSharedRecipeDraft(recipe))}
         />
       ) : null}
 
       {activeDesktopUtility === "workflow-memory" ? (
         <DesktopWorkflowMemoryPanel
+          key={`wf-mem-${workflowPanelRefreshNonce}`}
           lang={lang}
           readOnlyOffline={readOnlyOffline}
           projectId={PROJECT}
@@ -1151,6 +1322,7 @@ export function DesktopStudio({
           state={state}
           questionResolutions={artifacts.questionResolutions ?? []}
           onStateUpdated={(nextState) => setState(nextState)}
+          onShareWorkflowToTeam={(wf) => setShareDraft(buildSharedWorkflowDraft(wf))}
         />
       ) : null}
 
@@ -1491,6 +1663,16 @@ export function DesktopStudio({
                 onOpenFilteredSheet={() => {
                   setMode("sheet");
                 }}
+                onShareDashboardToTeam={() =>
+                  setShareDraft(
+                    buildSharedDashboardDraft(
+                      artifacts.templateConfig?.titleOverride ||
+                        L("لوحة مؤشرات الاستوديو", "Studio Reactive Dashboard"),
+                      artifacts.charts,
+                      artifacts.templateConfig
+                    )
+                  )
+                }
               />
             </div>
           ) : null}
@@ -1608,6 +1790,18 @@ export function DesktopStudio({
                 onLoadBundle={async (savedId: string) => {
                   await run(() => loadProjectBundle(PROJECT, savedId));
                 }}
+                onShareProjectBlueprintToTeam={(title: string) =>
+                  setShareDraft(
+                    buildSharedProjectBlueprintDraft({
+                      title,
+                      charts: artifacts.charts,
+                      slides: artifacts.slides,
+                      docBlocks: artifacts.docBlocks,
+                      metrics: state.metrics,
+                      templateConfig: artifacts.templateConfig
+                    })
+                  )
+                }
               />
             </div>
           ) : null}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, BarChart3, Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, BarChart3, Check, Pencil, Plus, Share2, Trash2 } from "lucide-react";
 import {
   chartData as fetchChartData,
   grouped,
@@ -115,6 +115,7 @@ export interface DashboardChartsViewProps {
   readonly onCrossFilter?: (column: string, label: string) => void;
   readonly onOpenFilteredSheet?: () => void;
   readonly onInspectMetric?: (metric: DesktopMetric) => void;
+  readonly onShareDashboardToTeam?: () => void;
 }
 
 export function DashboardChartsView({
@@ -131,7 +132,8 @@ export function DashboardChartsView({
   onUpdateCharts,
   onCrossFilter,
   onOpenFilteredSheet,
-  onInspectMetric
+  onInspectMetric,
+  onShareDashboardToTeam
 }: DashboardChartsViewProps): React.ReactElement {
   const isAr = language === "ar";
   const [seriesByChart, setSeriesByChart] = useState<Record<string, DesktopChartSeries>>(() => ({
@@ -320,35 +322,48 @@ export function DashboardChartsView({
               : "Every KPI and all 21 chart types are computed in Rust and update automatically on edits or What-If scenarios."}
           </p>
         </div>
-        {effectiveCrossFilter ? (
-          <div className="studio-quick-templates" data-testid="active-cross-filter-bar">
-            {onOpenFilteredSheet ? (
+        <div className="studio-quick-templates">
+          {onShareDashboardToTeam && charts.length > 0 ? (
+            <button
+              type="button"
+              className="studio-btn-primary"
+              data-testid="dashboard-share-to-team"
+              onClick={onShareDashboardToTeam}
+            >
+              <Share2 size={14} aria-hidden="true" />{" "}
+              {isAr ? "مشاركة اللوحة مع الفريق" : "Share Dashboard to Team"}
+            </button>
+          ) : null}
+          {effectiveCrossFilter ? (
+            <div className="studio-quick-templates" data-testid="active-cross-filter-bar">
+              {onOpenFilteredSheet ? (
+                <button
+                  type="button"
+                  className="studio-chip-btn"
+                  data-testid="view-filtered-sheet-btn"
+                  onClick={onOpenFilteredSheet}
+                >
+                  {isAr
+                    ? `عرض صفوف الجدول (${effectiveCrossFilter.val})`
+                    : `View sheet rows (${effectiveCrossFilter.val})`}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="studio-chip-btn"
-                data-testid="view-filtered-sheet-btn"
-                onClick={onOpenFilteredSheet}
+                data-testid="clear-cross-filter-btn"
+                onClick={() => {
+                  setLocalCrossFilter(null);
+                  onCrossFilter?.(effectiveCrossFilter.col, "");
+                }}
               >
                 {isAr
-                  ? `عرض صفوف الجدول (${effectiveCrossFilter.val})`
-                  : `View sheet rows (${effectiveCrossFilter.val})`}
+                  ? `إلغاء التصفية (${effectiveCrossFilter.val})`
+                  : `Clear filter (${effectiveCrossFilter.val})`}
               </button>
-            ) : null}
-            <button
-              type="button"
-              className="studio-chip-btn"
-              data-testid="clear-cross-filter-btn"
-              onClick={() => {
-                setLocalCrossFilter(null);
-                onCrossFilter?.(effectiveCrossFilter.col, "");
-              }}
-            >
-              {isAr
-                ? `إلغاء التصفية (${effectiveCrossFilter.val})`
-                : `Clear filter (${effectiveCrossFilter.val})`}
-            </button>
-          </div>
-        ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {/* KPI Showcase */}

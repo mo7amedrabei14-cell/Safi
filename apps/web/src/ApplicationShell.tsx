@@ -880,6 +880,7 @@ export function ApplicationShell({
           <main id="safi-main" className="safi-container safi-stage">
             <BillingPortalPage
               lang={lang}
+              onToggleLang={toggleLang}
               initialVerificationToken={initialVerificationToken}
               onOpenPricing={navigateToPricing}
               onOpenTeam={navigateToTeam}

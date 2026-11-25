@@ -67,8 +67,26 @@ describe("Website Billing Portal (/billing) & BillingCheckoutController UI integ
     expect(html).toContain("$5");
     expect(html).toContain("$2");
     expect(html).toContain('data-billing-pay-submit="true"');
+    expect(html).toContain('data-billing-verified-email="true"');
+    expect(html).toContain('value="buyer@example.test"');
+    expect(html).toContain("readOnly");
     expect(html).not.toContain('autocomplete="cc-number"');
     expect(html).not.toContain('autocomplete="cc-csc"');
+  });
+
+  it("renders scoped Billing Portal cleanly in Arabic RTL and English LTR with verified email display", () => {
+    const htmlAr = renderToString(
+      createElement(BillingPortalPage, {
+        lang: "ar",
+        initialSessionToken: "sfb_test_session_token_value_1234567890",
+        initialEmail: "arabic.buyer@example.test"
+      })
+    );
+    expect(htmlAr).toContain('class="safi-billing-portal"');
+    expect(htmlAr).toContain('dir="rtl"');
+    expect(htmlAr).toContain('data-billing-verified-email="true"');
+    expect(htmlAr).toContain('value="arabic.buyer@example.test"');
+    expect(htmlAr).toContain("ملخص الطلب");
   });
 
   it("strips handoff & state immediately from URL bar via history.replaceState on mount", () => {

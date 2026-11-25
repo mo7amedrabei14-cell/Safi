@@ -21,6 +21,7 @@ import {
   Play,
   RefreshCw,
   Send,
+  Share2,
   ShieldAlert,
   Sparkles,
   Trash2,
@@ -54,6 +55,7 @@ export interface DesktopRecipeLibraryPanelProps {
   readonly readOnlyOffline?: boolean;
   readonly activeProjectId?: string | null;
   readonly onStateUpdated?: (state: DesktopStudioState) => void;
+  readonly onShareRecipeToTeam?: (recipe: DesktopLocalRecipeRecord) => void;
 }
 
 const DEFAULT_CUSTOM_STEPS: readonly DesktopLocalRecipeStep[] = [
@@ -80,7 +82,8 @@ export function DesktopRecipeLibraryPanel({
   sessionToken = null,
   readOnlyOffline = false,
   activeProjectId = null,
-  onStateUpdated
+  onStateUpdated,
+  onShareRecipeToTeam
 }: DesktopRecipeLibraryPanelProps): ReactNode {
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const [officialTemplates, setOfficialTemplates] = useState<readonly DesktopLocalRecipeRecord[]>(
@@ -898,6 +901,19 @@ export function DesktopRecipeLibraryPanel({
                   <Copy size={14} aria-hidden="true" />
                   <span>{L("تكرار", "Duplicate")}</span>
                 </button>
+                {onShareRecipeToTeam ? (
+                  <button
+                    type="button"
+                    className="safi-btn safi-btn-primary"
+                    onClick={() => onShareRecipeToTeam(rec)}
+                    disabled={readOnlyOffline || busy}
+                    data-testid={`recipe-share-to-team-${rec.id}`}
+                    data-share-recipe-to-team-btn={rec.id}
+                  >
+                    <Share2 size={14} aria-hidden="true" />
+                    <span>{L("مشاركة مع الفريق", "Share to Team")}</span>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="safi-btn safi-btn-ghost"

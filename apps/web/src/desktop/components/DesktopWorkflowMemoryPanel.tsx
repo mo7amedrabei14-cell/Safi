@@ -22,6 +22,7 @@ import {
   Play,
   RotateCcw,
   Save,
+  Share2,
   Sparkles,
   Trash2
 } from "lucide-react";
@@ -57,6 +58,7 @@ export interface DesktopWorkflowMemoryPanelProps {
     reused: readonly SavedQuestionDecision[],
     suppressedTopics: readonly string[]
   ) => void;
+  readonly onShareWorkflowToTeam?: (workflow: SheetWorkflowMemoryRecord) => void;
 }
 
 function inferTopicAndConceptFromQuestionId(
@@ -89,7 +91,8 @@ export function DesktopWorkflowMemoryPanel({
   questionResolutions,
   readOnlyOffline = false,
   onStateUpdated,
-  onReusedQuestionsApplied
+  onReusedQuestionsApplied,
+  onShareWorkflowToTeam
 }: DesktopWorkflowMemoryPanelProps): ReactNode {
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const [workflows, setWorkflows] = useState<readonly SheetWorkflowMemoryRecord[]>([]);
@@ -700,6 +703,18 @@ export function DesktopWorkflowMemoryPanel({
                   <CopyPlus size={13} aria-hidden="true" />
                   <span>{L("نسخ", "Duplicate")}</span>
                 </button>
+                {onShareWorkflowToTeam ? (
+                  <button
+                    type="button"
+                    className="safi-btn safi-btn-primary"
+                    disabled={readOnlyOffline || busy}
+                    data-testid={`workflow-share-to-team-${wf.workflowId}`}
+                    onClick={() => onShareWorkflowToTeam(wf)}
+                  >
+                    <Share2 size={13} aria-hidden="true" />
+                    <span>{L("مشاركة مع الفريق", "Share to Team")}</span>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="safi-btn safi-btn-ghost"

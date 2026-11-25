@@ -767,6 +767,200 @@ try {
   // Refresh viewerAuth session after web login
   const viewerRefreshed = await loginVerifiedUser("viewer@safidata.com", "SafiViewer#2026", "Viewer Refreshed");
 
+  // Helper to mount a real Chromium Desktop Studio wired to a native Rust `studio_ipc_harness`
+  async function mountRealDesktopStudio(device, email, password, fallbackInstallId) {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 960 }, reducedMotion: "reduce" });
+    const page = await ctx.newPage();
+    await page.exposeFunction("__safiRustInvoke", async (command, args) => {
+      const safeArgs = args ?? {};
+      if (command === "studio_set_auth_session") {
+        const token = String(safeArgs.token ?? "");
+        const installationId = String(safeArgs.installationId ?? safeArgs.installation_id ?? fallbackInstallId);
+        const cur = await apiJson("GET", "/v1/auth/sessions/current", { token, installationId });
+        if (cur.status === 200) {
+          await device.bindAuthenticatedSession(token, cur.data, installationId);
+          return "null";
+        }
+      }
+      return device.call(command, safeArgs);
+    });
+    await page.addInitScript(() => {
+      window.__TAURI_INTERNALS__ = {
+        invoke: (command, args) => window.__safiRustInvoke(command, args ?? {})
+      };
+    });
+
+    await page.goto(webOrigin, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 20_000 });
+    await page.locator('[data-desktop-pkce-signin="true"]').waitFor({ state: "visible", timeout: 15_000 });
+    await page.locator('[data-desktop-pkce-signin="true"]').click();
+    await page.locator('[data-desktop-pkce-waiting="true"]').waitFor({ state: "visible", timeout: 10_000 });
+    const openedRaw = JSON.parse(await device.call("__harness_take_opened_auth_url"));
+    const authCtx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
+    const authPage = await authCtx.newPage();
+    await authPage.goto(openedRaw.url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await authPage.waitForSelector("#root .safi-intro-splash", { state: "detached", timeout: 20_000 });
+    await authPage.fill('[data-desktop-auth-email="true"]', email);
+    await authPage.fill('[data-desktop-auth-password="true"]', password);
+    await authPage.click('[data-desktop-auth-submit="true"]');
+    const cbLink = authPage.locator('[data-desktop-auth-callback-link="true"]');
+    await cbLink.waitFor({ state: "visible", timeout: 15_000 });
+    const callbackUri = await cbLink.getAttribute("href");
+    await authCtx.close();
+    await device.call("__harness_queue_deep_link", { url: callbackUri });
+    await page.locator('button[data-desktop-studio-trigger="true"]').waitFor({ state: "visible", timeout: 15_000 });
+    await page.locator('button[data-desktop-studio-trigger="true"]').click();
+    await page.locator('[data-testid="desktop-open-team-sync-modal"]').waitFor({ state: "visible", timeout: 15_000 });
+    return { ctx, page };
+  }
+
+  // ---------------------------------------------------------------------------
+  // STEP 7B: REAL UI-DRIVEN DESKTOP STUDIO TEAM SHARING (ZERO MANUAL JSON!)
+  //   1. Account A (Alice) creates a real saved Recipe in Desktop Studio -> clicks "Share to Team"
+  //      -> confirms privacy preview ("0 raw CSV/XLSX data rows") -> encrypts & syncs to PG 18.
+  //   2. Verify raw PostgreSQL 18 `encrypted_sync_records` has ZERO plaintext of the recipe name!
+  //   3. Account B (Bob) signs in on isolated Desktop Client B -> opens Team & E2EE Sync -> sees
+  //      decrypted Recipe card -> clicks "Open in Studio" -> appears in Bob's real My Recipes!
+  //   4. Account B (Member) edits & syncs v2 via structured Edit UI (no raw JSON!).
+  //   5. Viewer signs in on isolated Desktop Client C -> sees read-only notice, ZERO edit buttons,
+  //      can open/import the shared recipe locally.
+  // ---------------------------------------------------------------------------
+  console.log("[7B/10] Real UI-driven Desktop Studio Team Sharing: Recipe -> Share -> Open -> Edit v2 -> Viewer Read-Only...");
+  const uiRecipeMarker = "Cairo_Q4_VAT_UI_Recipe_2026";
+  const uiRecipeV2Title = "Cairo Q4 VAT UI Recipe v2 (Bob)";
+
+  const desktopA = await mountRealDesktopStudio(
+    deviceA,
+    "alice@safidata.com",
+    "SafiAlice#2026",
+    aliceDesktop.installationId
+  );
+  await desktopA.page.locator('[data-testid="toggle-recipe-library-panel"]').click();
+  await desktopA.page.locator('[data-recipe-draft-name="true"]').waitFor({ state: "visible", timeout: 10_000 });
+  await desktopA.page.fill('[data-recipe-draft-name="true"]', uiRecipeMarker);
+  await desktopA.page.fill('[data-recipe-draft-desc="true"]', "Real Desktop Studio recipe shared via E2EE UI");
+  await desktopA.page.click('[data-recipe-save-new-btn="true"]');
+
+  // Click the real "Share to Team" button directly on the saved recipe card!
+  const shareRecipeBtn = desktopA.page.locator('[data-share-recipe-to-team-btn]').first();
+  await shareRecipeBtn.waitFor({ state: "visible", timeout: 10_000 });
+  await shareRecipeBtn.click();
+  await desktopA.page.locator('[data-testid="share-to-team-dialog"]').waitFor({ state: "visible", timeout: 10_000 });
+  const previewText = await desktopA.page.locator('[data-testid="share-to-team-privacy-preview"]').innerText();
+  assert.ok(previewText.includes("0 raw CSV/XLSX data rows"), `Missing privacy disclosure: ${previewText}`);
+  await desktopA.page.fill('[data-testid="share-to-team-notes-input"]', "Approved Q4 VAT workflow");
+  await desktopA.page.click('[data-testid="share-to-team-confirm-btn"]');
+  await desktopA.page.locator('[data-testid="share-to-team-success"]').waitFor({ state: "visible", timeout: 15_000 });
+  await desktopA.ctx.close();
+
+  // Inspect raw PostgreSQL 18 ciphertext: ZERO plaintext of `uiRecipeMarker`!
+  const pgUiRecipePlaintextHits = execFileSync(
+    psqlBin,
+    [
+      dbUrl,
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-tAc",
+      `SELECT count(*) FROM encrypted_sync_records WHERE workspace_id = '${sharedWorkspaceId}' AND position(convert_to('${uiRecipeMarker}', 'UTF8') in ciphertext) > 0;`
+    ],
+    { encoding: "utf8" }
+  ).trim();
+  assert.equal(pgUiRecipePlaintextHits, "0", "PostgreSQL 18 MUST store ZERO plaintext of UI-shared recipe!");
+
+  // Isolated Desktop Client B (Bob Member) receives, decrypts, opens in Studio, and edits v2!
+  const desktopB = await mountRealDesktopStudio(
+    deviceB,
+    "bob@safidata.com",
+    "SafiBob#2026",
+    bobDesktop.installationId
+  );
+  await desktopB.page.locator('[data-testid="desktop-open-team-sync-modal"]').click();
+  await desktopB.page.locator('[data-testid="desktop-e2ee-sync-section"]').waitFor({ state: "visible", timeout: 15_000 });
+  await desktopB.page.locator('[data-testid="desktop-sync-now-btn"]').click();
+  await desktopB.page.waitForFunction(
+    (marker) => {
+      const el = document.querySelector('[data-testid="desktop-shared-resources-list"]');
+      return Boolean(el && (el.textContent ?? "").includes(marker));
+    },
+    uiRecipeMarker,
+    { timeout: 15_000 }
+  );
+
+  // Bob clicks "Open in Studio" -> modal closes and recipe is imported into Bob's real My Recipes!
+  const bobOpenSharedBtn = desktopB.page
+    .locator('[data-testid^="shared-resource-item-recipe-"] [data-testid^="open-shared-resource-"]')
+    .first();
+  await bobOpenSharedBtn.click();
+  await desktopB.page.locator('[data-my-recipes-list="true"]').waitFor({ state: "visible", timeout: 15_000 });
+  const bobMyRecipesText = await desktopB.page.locator('[data-my-recipes-list="true"]').innerText();
+  assert.ok(
+    bobMyRecipesText.includes(uiRecipeMarker),
+    `Bob's My Recipes MUST contain opened shared recipe "${uiRecipeMarker}"`
+  );
+
+  // Bob re-opens Team & E2EE Sync and edits the shared recipe via structured Edit UI (v2)!
+  await desktopB.page.locator('[data-testid="desktop-open-team-sync-modal"]').click();
+  await desktopB.page.locator('[data-testid="desktop-shared-resources-list"]').waitFor({ state: "visible", timeout: 15_000 });
+  const bobEditBtn = desktopB.page
+    .locator('[data-testid^="shared-resource-item-recipe-"] [data-testid^="edit-shared-resource-"]')
+    .first();
+  await bobEditBtn.click();
+  const bobTitleInput = desktopB.page.locator('[data-testid^="edit-shared-title-input-recipe-"]').first();
+  await bobTitleInput.fill(uiRecipeV2Title);
+  const bobAddStepCheckbox = desktopB.page.locator('[data-testid^="edit-shared-add-step-recipe-"]').first();
+  await bobAddStepCheckbox.check();
+  await desktopB.page.locator('[data-testid^="save-shared-edit-recipe-"]').first().click();
+  await desktopB.page.waitForFunction(
+    (v2Title) => {
+      const el = document.querySelector('[data-testid="desktop-shared-resources-list"]');
+      const txt = el ? el.textContent ?? "" : "";
+      return txt.includes(v2Title) && txt.includes("v2");
+    },
+    uiRecipeV2Title,
+    { timeout: 15_000 }
+  );
+  await desktopB.ctx.close();
+
+  // Isolated Desktop Client C (Viewer) verifies read-only UI enforcement + ability to view/import!
+  const deviceCVaultDir = resolve(workDir, "device-c-viewer-vault");
+  await mkdir(deviceCVaultDir, { recursive: true });
+  const deviceC = spawnDesktopClient(deviceCVaultDir, "Device C (Viewer)");
+  try {
+    const viewerInstallId = randomUUID();
+    const desktopC = await mountRealDesktopStudio(
+      deviceC,
+      "viewer@safidata.com",
+      "SafiViewer#2026",
+      viewerInstallId
+    );
+    await desktopC.page.locator('[data-testid="desktop-open-team-sync-modal"]').click();
+    await desktopC.page.locator('[data-testid="desktop-e2ee-sync-section"]').waitFor({ state: "visible", timeout: 15_000 });
+    await desktopC.page.locator('[data-testid="viewer-readonly-sync-notice"]').waitFor({ state: "visible", timeout: 10_000 });
+    assert.equal(
+      await desktopC.page.locator('[data-testid^="edit-shared-resource-"]').count(),
+      0,
+      "Viewer MUST NOT see edit buttons on shared resources in Desktop Studio!"
+    );
+    assert.equal(
+      await desktopC.page.locator('[data-testid="desktop-local-unshared-resources"]').count(),
+      0,
+      "Viewer MUST NOT see local share controls in Desktop Studio!"
+    );
+    await desktopC.ctx.close();
+  } finally {
+    await deviceC.stop();
+  }
+
+  // Re-bind fresh Alice & Bob sessions for Steps 8-10 (Member Removal, Key Rotation Epoch 2, Cold Restart)
+  const alicePostUi = await loginVerifiedUser("alice@safidata.com", "SafiAlice#2026", "Alice Desktop Post-UI", aliceDesktop.installationId);
+  await deviceA.bindAuthenticatedSession(alicePostUi.token, alicePostUi.sessionInfo, alicePostUi.installationId);
+  const bobPostUi = await loginVerifiedUser("bob@safidata.com", "SafiBob#2026", "Bob Desktop Post-UI", bobDesktop.installationId);
+  await deviceB.bindAuthenticatedSession(bobPostUi.token, bobPostUi.sessionInfo, bobPostUi.installationId);
+  const viewerPostUi = await loginVerifiedUser("viewer@safidata.com", "SafiViewer#2026", "Viewer Post-UI");
+  Object.assign(aliceDesktop, alicePostUi);
+  Object.assign(bobDesktop, bobPostUi);
+  Object.assign(viewerRefreshed, viewerPostUi);
+
   // ---------------------------------------------------------------------------
   // STEP 8 & 9: Owner removes Bob + rotates Workspace Key to Epoch 2 -> Bob blocked from future sync!
   // ---------------------------------------------------------------------------
@@ -869,7 +1063,7 @@ try {
     workspaceId: sharedWorkspaceId
   });
   assert.equal(viewerAfterRestart.status, 200);
-  assert.equal(viewerAfterRestart.data.records.length, 2);
+  assert.equal(viewerAfterRestart.data.records.length, 3);
 
   const bobStillBlocked = await apiJson("GET", "/v1/sync/changes?since_seq=0", {
     token: bobDesktop.token,
@@ -926,15 +1120,21 @@ try {
   await desktopPage.locator('[data-testid="desktop-e2ee-sync-section"]').waitFor({ state: "visible", timeout: 10_000 });
   await desktopPage.locator('[data-testid="desktop-sync-now-btn"]').click();
   await desktopPage.waitForFunction(
-    () => {
+    (v2Title) => {
       const el = document.querySelector('[data-testid="desktop-e2ee-sync-section"]');
       const txt = el ? el.textContent ?? "" : "";
-      return txt.includes("Epoch 2 Confidential Plan") && txt.includes("Alice Committed v2");
+      return (
+        txt.includes("Epoch 2 Confidential Plan") &&
+        txt.includes("Alice Committed v2") &&
+        txt.includes(v2Title)
+      );
     },
+    uiRecipeV2Title,
     { timeout: 15_000 }
   );
   const syncPanelText = await desktopPage.locator('[data-testid="desktop-e2ee-sync-section"]').innerText();
   assert.ok(syncPanelText.includes("Epoch 2 Confidential Plan"));
+  assert.ok(syncPanelText.includes(uiRecipeV2Title));
 
   await desktopCtx.close();
   await aliceCtx.close();

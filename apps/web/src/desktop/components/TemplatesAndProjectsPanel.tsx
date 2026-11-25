@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FolderOpen, LayoutTemplate, RotateCcw, Save, Trash2 } from "lucide-react";
+import { FolderOpen, LayoutTemplate, RotateCcw, Save, Share2, Trash2 } from "lucide-react";
 import {
   deleteProjectBundle,
   instantiateTemplate,
@@ -35,6 +35,7 @@ export interface TemplatesAndProjectsPanelProps {
   ) => void;
   readonly onSaveBundle: (savedId: string, displayName: string) => Promise<void>;
   readonly onLoadBundle: (savedId: string) => Promise<void>;
+  readonly onShareProjectBlueprintToTeam?: (title: string) => void;
 }
 
 export function TemplatesAndProjectsPanel({
@@ -45,7 +46,8 @@ export function TemplatesAndProjectsPanel({
   currentTemplateConfig,
   onApplyTemplateToWorkspace,
   onSaveBundle,
-  onLoadBundle
+  onLoadBundle,
+  onShareProjectBlueprintToTeam
 }: TemplatesAndProjectsPanelProps): React.ReactElement {
   const isAr = language === "ar";
   const [templates, setTemplates] = useState<readonly DesktopTemplateSummary[]>([]);
@@ -224,10 +226,29 @@ export function TemplatesAndProjectsPanel({
               <LayoutTemplate size={15} aria-hidden="true" />{" "}
               {isAr ? "معرض القوالب الحيّة الخمسة" : "Living Templates Gallery (5 Built-In)"}
             </h3>
-            <button type="button" className="studio-chip-btn" onClick={resetTemplateDefaults}>
-              <RotateCcw size={12} aria-hidden="true" />{" "}
-              {isAr ? "إعادة للافتراضي" : "Reset Template"}
-            </button>
+            <div className="studio-quick-templates">
+              {onShareProjectBlueprintToTeam && projectLoaded ? (
+                <button
+                  type="button"
+                  className="studio-btn-primary"
+                  data-testid="project-blueprint-share-to-team"
+                  onClick={() =>
+                    onShareProjectBlueprintToTeam(
+                      titleOverride.trim() || saveName.trim() || "Project Blueprint"
+                    )
+                  }
+                >
+                  <Share2 size={13} aria-hidden="true" />{" "}
+                  {isAr
+                    ? "مشاركة مخطط المشروع مع الفريق (دون بيانات خام)"
+                    : "Share Project Blueprint to Team (No Raw Rows)"}
+                </button>
+              ) : null}
+              <button type="button" className="studio-chip-btn" onClick={resetTemplateDefaults}>
+                <RotateCcw size={12} aria-hidden="true" />{" "}
+                {isAr ? "إعادة للافتراضي" : "Reset Template"}
+              </button>
+            </div>
           </div>
 
           <div className="studio-quick-templates">

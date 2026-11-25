@@ -1518,11 +1518,25 @@ impl PgControlPlaneStore {
         .map_err(|_| AuthError::BackendUnavailable)?;
         let next_gen = u64::try_from(next_gen_i64).unwrap_or(1);
 
-        let new_device_id = Uuid::now_v7();
+        let canonical_inst_hash = crate::auth::device::DeviceRegistration::from_installation_id(
+            user_id,
+            installation_id,
+            crate::auth::device::DevicePlatform::Windows,
+        )?
+        .installation_key_hash;
+
         let prev_device_id: Option<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM devices WHERE user_id = $1 AND revoked_at IS NULL LIMIT 1",
+            r"
+            SELECT id FROM devices
+            WHERE user_id = $1
+              AND installation_key_hash <> $2
+              AND replaced_by_device_id IS NULL
+            ORDER BY last_seen_at DESC
+            LIMIT 1
+            ",
         )
         .bind(user_id)
+        .bind(canonical_inst_hash.as_slice())
         .fetch_optional(&mut *tx)
         .await
         .map_err(|_| AuthError::BackendUnavailable)?;
@@ -1545,7 +1559,7 @@ impl PgControlPlaneStore {
         .await
         .map_err(|_| AuthError::BackendUnavailable)?;
 
-        // Revoke any previous active device for this user.
+        // Revoke any OTHER active device for this user (preserving same-installation login).
         sqlx::query(
             r"
             UPDATE devices
@@ -1553,18 +1567,17 @@ impl PgControlPlaneStore {
                 status = 'replaced_by_new_device',
                 active_session_id = NULL
             WHERE user_id = $1
+              AND installation_key_hash <> $3
               AND revoked_at IS NULL
             ",
         )
         .bind(user_id)
         .bind(now_secs)
+        .bind(canonical_inst_hash.as_slice())
         .execute(&mut *tx)
         .await
         .map_err(|_| AuthError::BackendUnavailable)?;
 
-        let inst_hash = blake3::hash(
-            format!("safi:pg-device:{user_id}:{installation_id}:{new_device_id}").as_bytes(),
-        );
         let norm_platform = match platform.trim().to_ascii_lowercase().as_str() {
             "windows" | "linux" | "macos" | "web" => platform.trim().to_ascii_lowercase(),
             _ => "windows".to_owned(),
@@ -1574,35 +1587,78 @@ impl PgControlPlaneStore {
         } else {
             device_name.trim()
         };
+        let norm_pub_key = public_key_hex.map(|s| s.trim().to_ascii_lowercase());
 
-        sqlx::query(
-            r"
-            INSERT INTO devices (
-                id, workspace_id, user_id, device_name, platform, installation_key_hash,
-                registered_at, last_seen_at, public_key_hex, installation_id,
-                active_session_id, session_generation, status
-            )
-            VALUES (
-                $1, $2, $3, $4, $5, $6,
-                to_timestamp($7), to_timestamp($7), $8, $9,
-                $10, $11, 'active'
-            )
-            ",
+        let existing_same_inst_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM devices WHERE user_id = $1 AND installation_key_hash = $2 LIMIT 1",
         )
-        .bind(new_device_id)
-        .bind(workspace_id)
         .bind(user_id)
-        .bind(clean_name)
-        .bind(&norm_platform)
-        .bind(inst_hash.as_bytes().as_slice())
-        .bind(now_secs)
-        .bind(public_key_hex.map(|s| s.trim().to_ascii_lowercase()))
-        .bind(installation_id)
-        .bind(new_session_id)
-        .bind(next_gen_i64)
-        .execute(&mut *tx)
+        .bind(canonical_inst_hash.as_slice())
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|_| AuthError::BackendUnavailable)?;
+
+        let new_device_id = if let Some(existing_id) = existing_same_inst_id {
+            sqlx::query(
+                r"
+                UPDATE devices
+                SET device_name = $2,
+                    platform = $3,
+                    last_seen_at = to_timestamp($4),
+                    revoked_at = NULL,
+                    public_key_hex = COALESCE($5, public_key_hex),
+                    installation_id = $6,
+                    active_session_id = $7,
+                    session_generation = $8,
+                    status = 'active',
+                    replaced_by_device_id = NULL
+                WHERE id = $1
+                ",
+            )
+            .bind(existing_id)
+            .bind(clean_name)
+            .bind(&norm_platform)
+            .bind(now_secs)
+            .bind(norm_pub_key.as_deref())
+            .bind(installation_id)
+            .bind(new_session_id)
+            .bind(next_gen_i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+            existing_id
+        } else {
+            let created_id = Uuid::now_v7();
+            sqlx::query(
+                r"
+                INSERT INTO devices (
+                    id, workspace_id, user_id, device_name, platform, installation_key_hash,
+                    registered_at, last_seen_at, public_key_hex, installation_id,
+                    active_session_id, session_generation, status
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    to_timestamp($7), to_timestamp($7), $8, $9,
+                    $10, $11, 'active'
+                )
+                ",
+            )
+            .bind(created_id)
+            .bind(workspace_id)
+            .bind(user_id)
+            .bind(clean_name)
+            .bind(&norm_platform)
+            .bind(canonical_inst_hash.as_slice())
+            .bind(now_secs)
+            .bind(norm_pub_key.as_deref())
+            .bind(installation_id)
+            .bind(new_session_id)
+            .bind(next_gen_i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| AuthError::BackendUnavailable)?;
+            created_id
+        };
 
         if let Some(prev_id) = prev_device_id {
             sqlx::query("UPDATE devices SET replaced_by_device_id = $2 WHERE id = $1")

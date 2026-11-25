@@ -10,6 +10,7 @@ pub mod error;
 pub mod installer;
 pub mod license;
 pub mod local_search;
+pub mod org_sync;
 pub mod recipe_library;
 pub mod signing;
 pub mod studio;

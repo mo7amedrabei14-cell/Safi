@@ -31,6 +31,7 @@ import {
   ShieldCheck,
   Trash2,
   Undo2,
+  Users,
   XCircle
 } from "lucide-react";
 import "./desktop-studio.css";
@@ -49,6 +50,7 @@ import type {
   DesktopRowPage,
   DesktopStudioState,
   DesktopWorkbookDetails,
+  DesktopWorkspaceSyncStatus,
   SheetWorkflowMatchReport,
   SheetWorkflowMemoryRecord,
   StudioAssetArtifact,
@@ -113,6 +115,8 @@ import { DesktopDecisionEnginePanel } from "./components/DesktopDecisionEnginePa
 import { DesktopLocalSearchPanel } from "./components/DesktopLocalSearchPanel";
 import { DesktopRecipeLibraryPanel } from "./components/DesktopRecipeLibraryPanel";
 import { DesktopUpgradeModal } from "./DesktopUpgradeModal";
+import { OrganizationWorkspacePanel } from "../components/org/OrganizationWorkspacePanel";
+import type { OrgRole } from "../lib/organization-api";
 import { DesktopWorkflowMemoryPanel } from "./components/DesktopWorkflowMemoryPanel";
 import {
   DeliverableExportModal,
@@ -195,6 +199,20 @@ export function DesktopStudio({
   const L = useCallback((ar: string, en: string): string => (lang === "ar" ? ar : en), [lang]);
   const desktop = isDesktopRuntime();
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const [activeTeamSelection, setActiveTeamSelection] = useState<{
+    readonly organizationId: string | null;
+    readonly organizationName: string | null;
+    readonly workspaceId: string | null;
+    readonly myRole: OrgRole | null;
+    readonly syncStatus: DesktopWorkspaceSyncStatus | null;
+  }>({
+    organizationId: null,
+    organizationName: null,
+    workspaceId: null,
+    myRole: null,
+    syncStatus: null
+  });
   const [activeDesktopUtility, setActiveDesktopUtility] = useState<
     "none" | "local-search" | "recipe-library" | "workflow-memory" | "decision-engine"
   >("none");
@@ -961,6 +979,20 @@ export function DesktopStudio({
         >
           <Crown size={16} aria-hidden="true" /> {L("الخطة والترقية", "Plan & Upgrade")}
         </button>
+        <button
+          type="button"
+          onClick={() => setTeamModalOpen(true)}
+          data-testid="desktop-open-team-sync-modal"
+        >
+          <Users size={16} aria-hidden="true" />{" "}
+          {activeTeamSelection.organizationName
+            ? `${activeTeamSelection.organizationName} · ${(activeTeamSelection.myRole ?? "member").toUpperCase()}${
+                activeTeamSelection.syncStatus
+                  ? ` · ${activeTeamSelection.syncStatus.health.toUpperCase()}`
+                  : ""
+              }`
+            : L("الفريق والمزامنة المشفّرة", "Team & E2EE Sync")}
+        </button>
         {analysisProgress ? (
           <button
             type="button"
@@ -1006,6 +1038,31 @@ export function DesktopStudio({
         refreshNonce={entitlementRefreshNonce}
         onClose={() => setUpgradeModalOpen(false)}
       />
+
+      {teamModalOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          data-testid="desktop-team-sync-modal"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9500,
+            background: "rgba(5, 8, 16, 0.82)",
+            overflowY: "auto",
+            padding: "24px 16px"
+          }}
+        >
+          <OrganizationWorkspacePanel
+            lang={lang}
+            sessionToken={sessionToken}
+            desktopRuntime={true}
+            readOnlyOffline={readOnlyOffline}
+            onCloseModal={() => setTeamModalOpen(false)}
+            onActiveWorkspaceChanged={setActiveTeamSelection}
+          />
+        </div>
+      ) : null}
 
       {recalculating ? (
         <p className="safi-desktop-studio__note" role="status" aria-live="polite">

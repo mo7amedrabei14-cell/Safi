@@ -13,7 +13,7 @@ use axum::body::Bytes;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::from_fn_with_state;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -52,7 +52,7 @@ use crate::device_authority::{
 };
 use crate::encrypted_sync::{
     CreateShareLinkRequest, CreatedShareLink, EncryptedSyncRecord, PushEncryptedSyncRequest,
-    ShareLinkRecord,
+    ShareLinkRecord, SyncChangesResponse,
 };
 use crate::entitlements::{
     ConsumeUsageRequest, ConsumeUsageResult, EffectiveEntitlements, EntitlementAggregateStats,
@@ -60,7 +60,11 @@ use crate::entitlements::{
 };
 use crate::error::AuthError;
 use crate::log_center::{AuditLogEntry, AuditOutcome};
-use crate::organizations::{OrgRole, Organization, OrganizationMember};
+use crate::organizations::{
+    MemberDevicePublicKey, OrgRole, Organization, OrganizationInvitationView, OrganizationMember,
+    OrganizationMembershipSummary, PendingUserInvitationView, WrappedKeyEntryInput,
+    WrappedWorkspaceKeyRecord, DEFAULT_INVITATION_TTL_SECS,
+};
 use crate::owner_mfa::{ElevatedOwnerSession, OwnerMfaStatus, TotpEnrollmentBundle};
 use crate::routes_updates::{get_latest_update, issue_offline_license};
 use crate::templates_hub::{
@@ -848,10 +852,23 @@ pub async fn oauth_start(
     if !configured {
         return Err(AuthError::OAuthNotConfigured);
     }
-    if query.pkce_challenge.trim().len() < 32
-        || (!query.redirect_uri.starts_with("https://")
-            && !query.redirect_uri.starts_with("safidata://"))
+    if query.pkce_challenge.trim().len() < 32 {
+        return Err(AuthError::InvalidRequest);
+    }
+    let redirect_allowed = if query.redirect_uri.starts_with("safidata://")
+        || query.redirect_uri.starts_with("safi://")
     {
+        true
+    } else if query.redirect_uri.starts_with("https://")
+        || query.redirect_uri.starts_with("http://")
+    {
+        let web_origin = state.config.resolved_public_web_origin()?;
+        query.redirect_uri == web_origin
+            || query.redirect_uri.starts_with(&format!("{web_origin}/"))
+    } else {
+        false
+    };
+    if !redirect_allowed {
         return Err(AuthError::InvalidRequest);
     }
     let state_token = format!("oauth_{}", Uuid::new_v4().simple());
@@ -2968,24 +2985,28 @@ pub async fn owner_publish_release(
 // ============================================================================
 
 /// `GET /v1/entitlements/me` — server-authoritative plan, watermark, and usage limits.
+/// Supports `X-Safi-Workspace-Id` so active Organization members can inspect the shared
+/// workspace's effective entitlements while non-members are rejected (`403 SF-SYN-005`).
 pub async fn get_my_entitlements(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
 ) -> Result<Json<EffectiveEntitlements>, AuthError> {
-    let is_owner = state
-        .owner_mfa
-        .is_owner_user(session.principal.user_id)
-        .await;
-    let ent = state
-        .entitlements
-        .effective_at_checked(
-            session.principal.workspace_id,
-            session.principal.user_id,
-            is_owner,
-            unix_now(),
-        )
-        .await?;
-    Ok(Json(ent))
+    let now = unix_now();
+    match resolve_workspace_access(&state, &session, &headers, now).await? {
+        ResolvedWorkspaceAccess::Personal { workspace_id } => {
+            let is_owner = state
+                .owner_mfa
+                .is_owner_user(session.principal.user_id)
+                .await;
+            let ent = state
+                .entitlements
+                .effective_at_checked(workspace_id, session.principal.user_id, is_owner, now)
+                .await?;
+            Ok(Json(ent))
+        }
+        ResolvedWorkspaceAccess::Organization { entitlement, .. } => Ok(Json(entitlement)),
+    }
 }
 
 /// `POST /v1/entitlements/consume` — atomic, idempotent quota enforcement.
@@ -3126,7 +3147,18 @@ pub async fn billing_checkout(
         30,
     )
     .await?;
-    body.workspace_id = session.principal.workspace_id;
+    let billing_ws_id =
+        match resolve_workspace_access(&state, &session, &headers, unix_now()).await? {
+            ResolvedWorkspaceAccess::Personal { workspace_id } => workspace_id,
+            ResolvedWorkspaceAccess::Organization { org, my_role, .. } => {
+                if !my_role.can_manage_subscription() {
+                    return Err(AuthError::OrgPermissionDenied);
+                }
+                org.billing_workspace_id
+                    .unwrap_or(session.principal.workspace_id)
+            }
+        };
+    body.workspace_id = billing_ws_id;
     body.user_id = session.principal.user_id;
     if body
         .idempotency_key
@@ -3282,12 +3314,23 @@ pub async fn billing_handoff_start(
         30,
     )
     .await?;
+    let handoff_ws_id =
+        match resolve_workspace_access(&state, &session, &headers, unix_now()).await? {
+            ResolvedWorkspaceAccess::Personal { workspace_id } => workspace_id,
+            ResolvedWorkspaceAccess::Organization { org, my_role, .. } => {
+                if !my_role.can_manage_subscription() {
+                    return Err(AuthError::OrgPermissionDenied);
+                }
+                org.billing_workspace_id
+                    .unwrap_or(session.principal.workspace_id)
+            }
+        };
     let origin = state.config.resolved_public_web_origin()?;
     let resp = state
         .billing_handoff
         .start_handoff_at(
             session.principal.user_id,
-            session.principal.workspace_id,
+            handoff_ws_id,
             &body,
             origin,
             unix_now(),
@@ -3426,17 +3469,324 @@ pub async fn paymob_webhook(
     Ok(Json(rec))
 }
 
+const WORKSPACE_ID_HEADER: &str = "x-safi-workspace-id";
+
+#[allow(clippy::large_enum_variant)]
+enum ResolvedWorkspaceAccess {
+    Personal {
+        workspace_id: Uuid,
+    },
+    Organization {
+        org: Organization,
+        my_role: OrgRole,
+        entitlement: EffectiveEntitlements,
+    },
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_org_audit(
+    state: &AppState,
+    actor_user_id: Uuid,
+    action: &str,
+    target_type: &str,
+    target_id: String,
+    outcome: AuditOutcome,
+    before_state: Option<Value>,
+    after_state: Option<Value>,
+) {
+    let entry = state
+        .log_center
+        .record(
+            Some(actor_user_id),
+            action,
+            target_type,
+            target_id,
+            outcome,
+            before_state,
+            after_state,
+        )
+        .await;
+    if let Some(pg) = &state.pg_store {
+        let _ = pg.insert_audit_entry(&entry).await;
+    }
+}
+
+async fn resolve_verified_account_identity(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<(String, Option<String>), AuthError> {
+    if let Some(pg) = &state.pg_store {
+        let row = sqlx::query(
+            r"
+            SELECT lower(btrim(email)) AS email_norm,
+                   display_name,
+                   (email_verified_at IS NOT NULL) AS is_verified,
+                   (deleted_at IS NOT NULL OR suspended_at IS NOT NULL) AS is_inactive
+            FROM users
+            WHERE id = $1
+            ",
+        )
+        .bind(user_id)
+        .fetch_optional(pg.pool())
+        .await
+        .map_err(|_| AuthError::BackendUnavailable)?;
+        if let Some(r) = row {
+            use sqlx::Row;
+            let inactive: bool = r.try_get("is_inactive").unwrap_or(false);
+            let verified: bool = r.try_get("is_verified").unwrap_or(false);
+            if inactive || !verified {
+                return Err(AuthError::OrgPermissionDenied);
+            }
+            let email: String = r
+                .try_get("email_norm")
+                .map_err(|_| AuthError::BackendUnavailable)?;
+            let display_name: Option<String> = r.try_get("display_name").ok();
+            return Ok((email, display_name));
+        }
+    }
+
+    if let Some(acct) = state.get_managed_account(user_id).await {
+        if acct.suspended {
+            return Err(AuthError::AccountSuspended);
+        }
+        let email_norm = crate::organizations::normalize_email(&acct.email)?;
+        return Ok((email_norm, Some(acct.display_name)));
+    }
+
+    Err(AuthError::OrgPermissionDenied)
+}
+
+async fn resolve_organization_entitlement(
+    state: &AppState,
+    org: &Organization,
+    now_secs: i64,
+) -> Result<EffectiveEntitlements, AuthError> {
+    let owner_is_platform_owner = state.owner_mfa.is_owner_user(org.owner_user_id).await;
+    let direct_ent = state
+        .entitlements
+        .effective_at_checked(
+            org.workspace_id,
+            org.owner_user_id,
+            owner_is_platform_owner,
+            now_secs,
+        )
+        .await?;
+    let effective = if direct_ent.teams_enabled {
+        direct_ent
+    } else if let Some(billing_ws) = org.billing_workspace_id {
+        let billing_ent = state
+            .entitlements
+            .effective_at_checked(
+                billing_ws,
+                org.owner_user_id,
+                owner_is_platform_owner,
+                now_secs,
+            )
+            .await?;
+        if billing_ent.teams_enabled {
+            let mut mapped = billing_ent;
+            mapped.workspace_id = org.workspace_id;
+            mapped
+        } else {
+            direct_ent
+        }
+    } else {
+        direct_ent
+    };
+
+    if effective.teams_enabled && effective.seats >= 3 && effective.seats != org.purchased_seats {
+        let _ = state
+            .organizations
+            .sync_purchased_seats(org.id, effective.seats)
+            .await;
+    }
+
+    Ok(effective)
+}
+
+async fn resolve_workspace_access(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    headers: &HeaderMap,
+    now_secs: i64,
+) -> Result<ResolvedWorkspaceAccess, AuthError> {
+    let requested_ws = match headers
+        .get(WORKSPACE_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(raw) => Some(Uuid::parse_str(raw).map_err(|_| AuthError::InvalidRequest)?),
+        None => None,
+    };
+
+    match requested_ws {
+        None => {
+            if let Some(org) = state
+                .organizations
+                .get_organization_by_workspace(session.principal.workspace_id)
+                .await?
+            {
+                let (org_checked, my_role) = state
+                    .organizations
+                    .require_workspace_member_role(org.workspace_id, session.principal.user_id)
+                    .await?;
+                let entitlement =
+                    resolve_organization_entitlement(state, &org_checked, now_secs).await?;
+                Ok(ResolvedWorkspaceAccess::Organization {
+                    org: org_checked,
+                    my_role,
+                    entitlement,
+                })
+            } else {
+                Ok(ResolvedWorkspaceAccess::Personal {
+                    workspace_id: session.principal.workspace_id,
+                })
+            }
+        }
+        Some(ws_id) if ws_id == session.principal.workspace_id => {
+            if let Some(org) = state
+                .organizations
+                .get_organization_by_workspace(ws_id)
+                .await?
+            {
+                let (org_checked, my_role) = state
+                    .organizations
+                    .require_workspace_member_role(org.workspace_id, session.principal.user_id)
+                    .await?;
+                let entitlement =
+                    resolve_organization_entitlement(state, &org_checked, now_secs).await?;
+                Ok(ResolvedWorkspaceAccess::Organization {
+                    org: org_checked,
+                    my_role,
+                    entitlement,
+                })
+            } else {
+                Ok(ResolvedWorkspaceAccess::Personal {
+                    workspace_id: ws_id,
+                })
+            }
+        }
+        Some(ws_id) => {
+            let (org, my_role) = state
+                .organizations
+                .require_workspace_member_role(ws_id, session.principal.user_id)
+                .await?;
+            let entitlement = resolve_organization_entitlement(state, &org, now_secs).await?;
+            Ok(ResolvedWorkspaceAccess::Organization {
+                org,
+                my_role,
+                entitlement,
+            })
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateOrgRequest {
     pub name: String,
+    #[serde(default = "default_org_seats")]
     pub seats: u32,
+    #[serde(default)]
+    pub billing_cycle: Option<String>,
+}
+
+const fn default_org_seats() -> u32 {
+    3
+}
+
+#[derive(Debug, Serialize)]
+pub struct EnrichedOrganizationSummary {
+    pub organization: Organization,
+    pub my_role: OrgRole,
+    pub active_members_count: u32,
+    pub pending_invitations_count: u32,
+    pub paid_seats: u32,
+    pub teams_enabled: bool,
+    pub subscription_state: SubscriptionState,
+    pub effective_plan: PlanTier,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MyOrganizationsResponse {
+    pub personal_workspace_id: Uuid,
+    pub verified_email: Option<String>,
+    pub organizations: Vec<EnrichedOrganizationSummary>,
+    pub pending_invitations: Vec<PendingUserInvitationView>,
+}
+
+/// `GET /v1/organizations/mine` & `GET /v1/billing/organizations-summary` — list caller's active
+/// team memberships, shared workspace IDs, roles, seat usage, subscription status, and pending
+/// invitations matching caller's verified email.
+pub async fn list_my_organizations(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+) -> Result<Json<MyOrganizationsResponse>, AuthError> {
+    let now = unix_now();
+    let verified_email = resolve_verified_account_identity(&state, session.principal.user_id)
+        .await
+        .ok()
+        .map(|(em, _)| em);
+    let (summaries, pending_invitations): (
+        Vec<OrganizationMembershipSummary>,
+        Vec<PendingUserInvitationView>,
+    ) = state
+        .organizations
+        .list_user_organizations_and_invites(
+            session.principal.user_id,
+            verified_email.as_deref(),
+            now,
+        )
+        .await?;
+
+    let mut enriched = Vec::with_capacity(summaries.len());
+    for item in summaries {
+        let ent = resolve_organization_entitlement(&state, &item.organization, now).await?;
+        let paid_seats = if ent.teams_enabled {
+            ent.seats.max(item.organization.purchased_seats)
+        } else {
+            item.organization.purchased_seats
+        };
+        let mut org_copy = item.organization;
+        if ent.teams_enabled && ent.seats >= 3 {
+            org_copy.purchased_seats = ent.seats;
+        }
+        enriched.push(EnrichedOrganizationSummary {
+            organization: org_copy,
+            my_role: item.my_role,
+            active_members_count: item.active_members_count,
+            pending_invitations_count: item.pending_invitations_count,
+            paid_seats,
+            teams_enabled: ent.teams_enabled,
+            subscription_state: ent.state,
+            effective_plan: ent.effective_plan,
+        });
+    }
+
+    Ok(Json(MyOrganizationsResponse {
+        personal_workspace_id: session.principal.workspace_id,
+        verified_email,
+        organizations: enriched,
+        pending_invitations,
+    }))
 }
 
 pub async fn create_organization(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Json(body): Json<CreateOrgRequest>,
 ) -> Result<(StatusCode, Json<Organization>), AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:create",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        20,
+        10,
+    )
+    .await?;
+    let now = unix_now();
     let is_owner = state
         .owner_mfa
         .is_owner_user(session.principal.user_id)
@@ -3447,79 +3797,413 @@ pub async fn create_organization(
             session.principal.workspace_id,
             session.principal.user_id,
             is_owner,
-            unix_now(),
+            now,
         )
         .await?;
     if !ent.teams_enabled {
         return Err(AuthError::PaidPlanRequired);
     }
+    let max_paid_seats = if is_owner {
+        body.seats.max(ent.seats).max(3)
+    } else {
+        ent.seats
+    };
+    let cycle = body.billing_cycle.as_deref().unwrap_or("annual_per_seat");
     let org = state
         .organizations
-        .create_org(
+        .create_organization_with_shared_workspace(
             session.principal.workspace_id,
             session.principal.user_id,
             &body.name,
             body.seats,
+            max_paid_seats,
+            cycle,
         )
         .await?;
+
+    // If caller had a verified ManagedAccountRecord in memory, enrich member display info safely.
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.create",
+        "organization",
+        org.id.to_string(),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({
+            "workspace_id": org.workspace_id,
+            "purchased_seats": org.purchased_seats,
+            "billing_cycle": org.billing_cycle
+        })),
+    )
+    .await;
+    state.persist_durable_state().await;
     Ok((StatusCode::CREATED, Json(org)))
+}
+
+pub async fn get_organization_details(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Path(org_id): Path<Uuid>,
+) -> Result<Json<EnrichedOrganizationSummary>, AuthError> {
+    let now = unix_now();
+    let is_platform_owner = state
+        .owner_mfa
+        .is_owner_user(session.principal.user_id)
+        .await;
+    let (mut org, my_role_opt, active_members_count, pending_invitations_count) = state
+        .organizations
+        .get_organization_for_actor(org_id, session.principal.user_id, is_platform_owner)
+        .await?;
+    let ent = resolve_organization_entitlement(&state, &org, now).await?;
+    if ent.teams_enabled && ent.seats >= 3 {
+        org.purchased_seats = ent.seats;
+    }
+    Ok(Json(EnrichedOrganizationSummary {
+        paid_seats: org.purchased_seats,
+        organization: org,
+        my_role: my_role_opt.unwrap_or(OrgRole::Viewer),
+        active_members_count,
+        pending_invitations_count,
+        teams_enabled: ent.teams_enabled,
+        subscription_state: ent.state,
+        effective_plan: ent.effective_plan,
+    }))
+}
+
+pub async fn delete_organization_handler(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path(org_id): Path<Uuid>,
+) -> Result<StatusCode, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:delete",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        10,
+        5,
+    )
+    .await?;
+    let now = unix_now();
+    if let Err(err) = state
+        .organizations
+        .delete_organization(org_id, session.principal.user_id, now)
+        .await
+    {
+        record_org_audit(
+            &state,
+            session.principal.user_id,
+            "org.delete",
+            "organization",
+            org_id.to_string(),
+            AuditOutcome::Denied,
+            None,
+            Some(json!({ "error": err.code() })),
+        )
+        .await;
+        return Err(err);
+    }
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.delete",
+        "organization",
+        org_id.to_string(),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({ "deleted_at": now })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize)]
 pub struct InviteOrgMemberRequest {
     pub email: String,
     pub role: OrgRole,
+    #[serde(default)]
+    pub ttl_secs: Option<i64>,
 }
 
 pub async fn invite_org_member(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Path(org_id): Path<Uuid>,
     Json(body): Json<InviteOrgMemberRequest>,
 ) -> Result<(StatusCode, Json<Value>), AuthError> {
-    let is_owner = state
-        .owner_mfa
-        .is_owner_user(session.principal.user_id)
-        .await;
-    let ent = state
-        .entitlements
-        .effective_at_checked(
-            session.principal.workspace_id,
-            session.principal.user_id,
-            is_owner,
-            unix_now(),
-        )
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:invite",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        40,
+        25,
+    )
+    .await?;
+    let now = unix_now();
+    let (org, my_role_opt, _, _) = state
+        .organizations
+        .get_organization_for_actor(org_id, session.principal.user_id, false)
         .await?;
+    let my_role = my_role_opt.ok_or(AuthError::OrgPermissionDenied)?;
+    if !my_role.can_send_invitations() {
+        record_org_audit(
+            &state,
+            session.principal.user_id,
+            "org.invite",
+            "organization",
+            org_id.to_string(),
+            AuditOutcome::Denied,
+            None,
+            Some(json!({ "actor_role": my_role.as_str(), "requested_role": body.role.as_str() })),
+        )
+        .await;
+        return Err(AuthError::OrgPermissionDenied);
+    }
+
+    let ent = resolve_organization_entitlement(&state, &org, now).await?;
     if !ent.teams_enabled {
         return Err(AuthError::PaidPlanRequired);
     }
+
+    let member_emails: std::collections::HashMap<Uuid, String> = {
+        let cp = state.control_plane.read().await;
+        cp.managed_accounts
+            .values()
+            .map(|a| (a.user_id, a.email.clone()))
+            .collect()
+    };
+    let ttl_secs = body.ttl_secs.unwrap_or(DEFAULT_INVITATION_TTL_SECS);
     let (invite, token) = state
         .organizations
-        .invite_member(org_id, session.principal.user_id, &body.email, body.role)
+        .invite_member_checked(
+            org_id,
+            session.principal.user_id,
+            &body.email,
+            body.role,
+            Some(ent.seats),
+            &member_emails,
+            ttl_secs,
+            now,
+        )
         .await?;
+
+    let web_origin = state.config.resolved_public_web_origin()?;
+    let invite_url = format!("{web_origin}/team?invite={token}");
+
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.invite.create",
+        "organization_invitation",
+        invite.id.to_string(),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({
+            "organization_id": org_id,
+            "role": invite.role.as_str(),
+            "expires_at": invite.expires_at
+        })),
+    )
+    .await;
+    state.persist_durable_state().await;
+
     Ok((
         StatusCode::CREATED,
-        Json(
-            json!({ "invitation_id": invite.id, "token": token, "expires_at": invite.expires_at }),
-        ),
+        Json(json!({
+            "invitation_id": invite.id,
+            "invitation": invite.to_view(now),
+            "token": token,
+            "invite_url": invite_url,
+            "expires_at": invite.expires_at
+        })),
     ))
 }
 
+pub async fn list_org_invitations(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Path(org_id): Path<Uuid>,
+) -> Result<Json<Vec<OrganizationInvitationView>>, AuthError> {
+    let views = state
+        .organizations
+        .list_invitations(org_id, session.principal.user_id, unix_now())
+        .await?;
+    Ok(Json(views))
+}
+
+pub async fn revoke_org_invitation(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path((org_id, invite_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<OrganizationInvitationView>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:invite_revoke",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        40,
+        25,
+    )
+    .await?;
+    let view = state
+        .organizations
+        .revoke_invitation(org_id, invite_id, session.principal.user_id, unix_now())
+        .await?;
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.invite.revoke",
+        "organization_invitation",
+        invite_id.to_string(),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({ "organization_id": org_id })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(Json(view))
+}
+
 #[derive(Debug, Deserialize)]
-pub struct AcceptOrgInviteRequest {
-    pub token: String,
+pub struct AcceptOrDeclineOrgInviteRequest {
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub invitation_id: Option<Uuid>,
 }
 
 pub async fn accept_org_invite(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
-    Json(body): Json<AcceptOrgInviteRequest>,
+    headers: HeaderMap,
+    Json(body): Json<AcceptOrDeclineOrgInviteRequest>,
 ) -> Result<Json<OrganizationMember>, AuthError> {
-    let member = state
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:invite_accept",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        30,
+        15,
+    )
+    .await?;
+    let now = unix_now();
+    let (verified_email, display_name) =
+        resolve_verified_account_identity(&state, session.principal.user_id).await?;
+
+    let member = match state
         .organizations
-        .accept_invitation(&body.token, session.principal.user_id)
+        .accept_invitation_verified(
+            body.token.as_deref(),
+            body.invitation_id,
+            session.principal.user_id,
+            &verified_email,
+            display_name.as_deref(),
+            None,
+            now,
+        )
+        .await
+    {
+        Ok(m) => m,
+        Err(err) => {
+            record_org_audit(
+                &state,
+                session.principal.user_id,
+                "org.invite.accept",
+                "organization_invitation",
+                body.invitation_id
+                    .map_or_else(|| "token".to_owned(), |id| id.to_string()),
+                AuditOutcome::Denied,
+                None,
+                Some(json!({ "error": err.code() })),
+            )
+            .await;
+            return Err(err);
+        }
+    };
+
+    // Verify organization's paid entitlement is still active (`teams_enabled`); if expired, roll back removal!
+    let (org, _, active_count, _) = state
+        .organizations
+        .get_organization_for_actor(member.organization_id, session.principal.user_id, true)
         .await?;
+    let ent = resolve_organization_entitlement(&state, &org, now).await?;
+    if !ent.teams_enabled || active_count > ent.seats {
+        let _ = state
+            .organizations
+            .remove_member(org.id, org.owner_user_id, session.principal.user_id)
+            .await;
+        return Err(if !ent.teams_enabled {
+            AuthError::PaidPlanRequired
+        } else {
+            AuthError::QuotaExceeded
+        });
+    }
+
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.invite.accept",
+        "organization",
+        member.organization_id.to_string(),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({
+            "workspace_id": member.workspace_id,
+            "role": member.role.as_str()
+        })),
+    )
+    .await;
+    state.persist_durable_state().await;
     Ok(Json(member))
+}
+
+pub async fn decline_org_invite(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Json(body): Json<AcceptOrDeclineOrgInviteRequest>,
+) -> Result<Json<OrganizationInvitationView>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:invite_decline",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        30,
+        15,
+    )
+    .await?;
+    let (verified_email, _) =
+        resolve_verified_account_identity(&state, session.principal.user_id).await?;
+    let view = state
+        .organizations
+        .decline_invitation_verified(
+            body.token.as_deref(),
+            body.invitation_id,
+            session.principal.user_id,
+            &verified_email,
+            unix_now(),
+        )
+        .await?;
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.invite.decline",
+        "organization_invitation",
+        view.id.to_string(),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({ "organization_id": view.organization_id })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(Json(view))
 }
 
 pub async fn list_org_members(
@@ -3531,14 +4215,442 @@ pub async fn list_org_members(
         .owner_mfa
         .is_owner_user(session.principal.user_id)
         .await;
-    let members = state.organizations.list_members(org_id).await;
+    let mut members = state.organizations.list_members(org_id).await;
     let is_member = members
         .iter()
         .any(|m| m.user_id == session.principal.user_id && m.removed_at.is_none());
     if !is_owner && !is_member {
         return Err(AuthError::OrgPermissionDenied);
     }
+    // Enrich missing email/display_name from managed_accounts when running without PG.
+    {
+        let cp = state.control_plane.read().await;
+        for m in &mut members {
+            if m.email.is_none() {
+                if let Some(acct) = cp.managed_accounts.get(&m.user_id) {
+                    m.email = Some(acct.email.clone());
+                    m.display_name = Some(acct.display_name.clone());
+                }
+            }
+        }
+    }
     Ok(Json(members))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChangeOrgMemberRoleRequest {
+    pub role: OrgRole,
+}
+
+pub async fn change_org_member_role(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path((org_id, target_user_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<ChangeOrgMemberRoleRequest>,
+) -> Result<Json<OrganizationMember>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:change_role",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        40,
+        25,
+    )
+    .await?;
+    let updated = match state
+        .organizations
+        .change_member_role(
+            org_id,
+            session.principal.user_id,
+            target_user_id,
+            body.role,
+            unix_now(),
+        )
+        .await
+    {
+        Ok(m) => m,
+        Err(err) => {
+            record_org_audit(
+                &state,
+                session.principal.user_id,
+                "org.member.role_change",
+                "organization_member",
+                format!("{org_id}:{target_user_id}"),
+                AuditOutcome::Denied,
+                None,
+                Some(json!({ "requested_role": body.role.as_str(), "error": err.code() })),
+            )
+            .await;
+            return Err(err);
+        }
+    };
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.member.role_change",
+        "organization_member",
+        format!("{org_id}:{target_user_id}"),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({ "new_role": updated.role.as_str() })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(Json(updated))
+}
+
+pub async fn remove_org_member(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path((org_id, target_user_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:remove_member",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        40,
+        25,
+    )
+    .await?;
+    if let Err(err) = state
+        .organizations
+        .remove_member(org_id, session.principal.user_id, target_user_id)
+        .await
+    {
+        record_org_audit(
+            &state,
+            session.principal.user_id,
+            "org.member.remove",
+            "organization_member",
+            format!("{org_id}:{target_user_id}"),
+            AuditOutcome::Denied,
+            None,
+            Some(json!({ "error": err.code() })),
+        )
+        .await;
+        return Err(err);
+    }
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.member.remove",
+        "organization_member",
+        format!("{org_id}:{target_user_id}"),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({ "keys_revoked": true })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransferOrgOwnershipRequest {
+    pub new_owner_user_id: Uuid,
+}
+
+pub async fn transfer_org_ownership(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path(org_id): Path<Uuid>,
+    Json(body): Json<TransferOrgOwnershipRequest>,
+) -> Result<Json<Organization>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:transfer_ownership",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        10,
+        5,
+    )
+    .await?;
+    let org = match state
+        .organizations
+        .transfer_ownership(
+            org_id,
+            session.principal.user_id,
+            body.new_owner_user_id,
+            unix_now(),
+        )
+        .await
+    {
+        Ok(o) => o,
+        Err(err) => {
+            record_org_audit(
+                &state,
+                session.principal.user_id,
+                "org.ownership.transfer",
+                "organization",
+                org_id.to_string(),
+                AuditOutcome::Denied,
+                None,
+                Some(json!({ "new_owner_user_id": body.new_owner_user_id, "error": err.code() })),
+            )
+            .await;
+            return Err(err);
+        }
+    };
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.ownership.transfer",
+        "organization",
+        org_id.to_string(),
+        AuditOutcome::Allowed,
+        Some(json!({ "previous_owner_user_id": session.principal.user_id })),
+        Some(json!({ "new_owner_user_id": body.new_owner_user_id })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(Json(org))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterDeviceKeyRequest {
+    pub device_id: String,
+    #[serde(default)]
+    pub device_label: String,
+    pub x25519_public_key_b64: String,
+}
+
+pub async fn register_org_device_key(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path(org_id): Path<Uuid>,
+    Json(body): Json<RegisterDeviceKeyRequest>,
+) -> Result<(StatusCode, Json<MemberDevicePublicKey>), AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:key_register",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        40,
+        25,
+    )
+    .await?;
+    let rec = state
+        .organizations
+        .register_device_public_key(
+            org_id,
+            session.principal.user_id,
+            &body.device_id,
+            &body.device_label,
+            &body.x25519_public_key_b64,
+            unix_now(),
+        )
+        .await?;
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.key.device_register",
+        "organization_device_key",
+        format!("{org_id}:{}", rec.device_id),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({ "key_fingerprint": rec.key_fingerprint })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok((StatusCode::CREATED, Json(rec)))
+}
+
+pub async fn list_org_device_keys(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Path(org_id): Path<Uuid>,
+) -> Result<Json<Vec<MemberDevicePublicKey>>, AuthError> {
+    let keys = state
+        .organizations
+        .list_active_member_device_keys(org_id, session.principal.user_id)
+        .await?;
+    Ok(Json(keys))
+}
+
+pub async fn revoke_org_device_key(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path((org_id, target_user_id, device_id)): Path<(Uuid, Uuid, String)>,
+) -> Result<StatusCode, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:key_revoke",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        30,
+        15,
+    )
+    .await?;
+    state
+        .organizations
+        .revoke_device_public_key(
+            org_id,
+            session.principal.user_id,
+            target_user_id,
+            &device_id,
+            unix_now(),
+        )
+        .await?;
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.key.device_revoke",
+        "organization_device_key",
+        format!("{org_id}:{target_user_id}:{device_id}"),
+        AuditOutcome::Allowed,
+        None,
+        None,
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PublishWrappedKeysRequest {
+    pub key_epoch: u32,
+    pub entries: Vec<WrappedKeyEntryInput>,
+}
+
+pub async fn publish_org_wrapped_keys(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path(org_id): Path<Uuid>,
+    Json(body): Json<PublishWrappedKeysRequest>,
+) -> Result<Json<Value>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:key_wrap",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        60,
+        40,
+    )
+    .await?;
+    let now = unix_now();
+    let (org, _, _, _) = state
+        .organizations
+        .get_organization_for_actor(org_id, session.principal.user_id, false)
+        .await?;
+    let ent = resolve_organization_entitlement(&state, &org, now).await?;
+    if !ent.teams_enabled {
+        return Err(AuthError::PaidPlanRequired);
+    }
+    let count = state
+        .organizations
+        .publish_wrapped_workspace_keys(
+            org_id,
+            session.principal.user_id,
+            body.key_epoch,
+            &body.entries,
+            now,
+        )
+        .await?;
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.key.wrap",
+        "organization",
+        org_id.to_string(),
+        AuditOutcome::Allowed,
+        None,
+        Some(json!({ "key_epoch": body.key_epoch, "wrapped_count": count })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(Json(
+        json!({ "key_epoch": body.key_epoch, "wrapped_count": count }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RotateWorkspaceKeyRequest {
+    pub expected_current_epoch: u32,
+    pub entries: Vec<WrappedKeyEntryInput>,
+}
+
+pub async fn rotate_org_workspace_key(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Path(org_id): Path<Uuid>,
+    Json(body): Json<RotateWorkspaceKeyRequest>,
+) -> Result<Json<Value>, AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "org:key_rotate",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        30,
+        15,
+    )
+    .await?;
+    let now = unix_now();
+    let (org, _, _, _) = state
+        .organizations
+        .get_organization_for_actor(org_id, session.principal.user_id, false)
+        .await?;
+    let ent = resolve_organization_entitlement(&state, &org, now).await?;
+    if !ent.teams_enabled {
+        return Err(AuthError::PaidPlanRequired);
+    }
+    let new_epoch = state
+        .organizations
+        .rotate_workspace_key(
+            org_id,
+            session.principal.user_id,
+            body.expected_current_epoch,
+            &body.entries,
+            now,
+        )
+        .await?;
+    record_org_audit(
+        &state,
+        session.principal.user_id,
+        "org.key.rotate",
+        "organization",
+        org_id.to_string(),
+        AuditOutcome::Allowed,
+        Some(json!({ "previous_epoch": body.expected_current_epoch })),
+        Some(json!({ "active_key_epoch": new_epoch, "wrapped_count": body.entries.len() })),
+    )
+    .await;
+    state.persist_durable_state().await;
+    Ok(Json(json!({
+        "organization_id": org_id,
+        "active_key_epoch": new_epoch,
+        "wrapped_count": body.entries.len()
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MyWrappedKeysQuery {
+    #[serde(default)]
+    pub device_id: Option<String>,
+}
+
+pub async fn list_my_org_wrapped_keys(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    Path(org_id): Path<Uuid>,
+    Query(query): Query<MyWrappedKeysQuery>,
+) -> Result<Json<Vec<WrappedWorkspaceKeyRecord>>, AuthError> {
+    let keys = state
+        .organizations
+        .list_my_wrapped_keys(
+            org_id,
+            session.principal.user_id,
+            query.device_id.as_deref(),
+        )
+        .await?;
+    Ok(Json(keys))
 }
 
 pub async fn org_sso_status(State(state): State<AppState>) -> Result<Json<Value>, AuthError> {
@@ -3549,68 +4661,174 @@ pub async fn org_sso_status(State(state): State<AppState>) -> Result<Json<Value>
 pub async fn sync_push(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Json(body): Json<PushEncryptedSyncRequest>,
 ) -> Result<Json<EncryptedSyncRecord>, AuthError> {
-    let is_owner = state
-        .owner_mfa
-        .is_owner_user(session.principal.user_id)
-        .await;
-    let ent = state
-        .entitlements
-        .effective_at_checked(
-            session.principal.workspace_id,
-            session.principal.user_id,
-            is_owner,
-            unix_now(),
-        )
-        .await?;
-    if !ent.saved_recipes_write_enabled {
-        return Err(AuthError::PaidPlanRequired);
-    }
+    check_ip_and_account_rate_limit(
+        &state,
+        "sync:push",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        240,
+        180,
+    )
+    .await?;
+    let now = unix_now();
+    let (target_ws_id, min_epoch) =
+        match resolve_workspace_access(&state, &session, &headers, now).await? {
+            ResolvedWorkspaceAccess::Personal { workspace_id } => {
+                let is_owner = state
+                    .owner_mfa
+                    .is_owner_user(session.principal.user_id)
+                    .await;
+                let ent = state
+                    .entitlements
+                    .effective_at_checked(workspace_id, session.principal.user_id, is_owner, now)
+                    .await?;
+                if !ent.saved_recipes_write_enabled {
+                    return Err(AuthError::PaidPlanRequired);
+                }
+                (workspace_id, 1)
+            }
+            ResolvedWorkspaceAccess::Organization {
+                org,
+                my_role,
+                entitlement,
+            } => {
+                if !my_role.can_modify_shared_resources() {
+                    record_org_audit(
+                        &state,
+                        session.principal.user_id,
+                        "sync.push",
+                        "encrypted_sync",
+                        org.workspace_id.to_string(),
+                        AuditOutcome::Denied,
+                        None,
+                        Some(json!({ "actor_role": my_role.as_str() })),
+                    )
+                    .await;
+                    return Err(AuthError::OrgPermissionDenied);
+                }
+                if !entitlement.teams_enabled {
+                    return Err(AuthError::PaidPlanRequired);
+                }
+                (org.workspace_id, org.active_key_epoch)
+            }
+        };
+
     let rec = state
         .encrypted_sync
-        .push_envelope(
-            session.principal.workspace_id,
-            session.principal.user_id,
-            &body,
-        )
+        .push_envelope_with_min_epoch(target_ws_id, session.principal.user_id, &body, min_epoch)
         .await?;
+    state.persist_durable_state().await;
     Ok(Json(rec))
 }
 
 pub async fn sync_pull(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Path((resource_kind, resource_id)): Path<(String, String)>,
 ) -> Result<Json<EncryptedSyncRecord>, AuthError> {
+    let target_ws_id =
+        match resolve_workspace_access(&state, &session, &headers, unix_now()).await? {
+            ResolvedWorkspaceAccess::Personal { workspace_id } => workspace_id,
+            ResolvedWorkspaceAccess::Organization { org, my_role, .. } => {
+                if !my_role.can_view_workspace() {
+                    return Err(AuthError::OrgPermissionDenied);
+                }
+                org.workspace_id
+            }
+        };
     state
         .encrypted_sync
-        .pull_envelope(session.principal.workspace_id, &resource_kind, &resource_id)
-        .await
+        .pull_envelope_checked(target_ws_id, &resource_kind, &resource_id)
+        .await?
         .map(Json)
         .ok_or(AuthError::SyncEnvelopeInvalid)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SyncChangesQuery {
+    #[serde(default)]
+    pub since_seq: u64,
+    #[serde(default = "default_sync_changes_limit")]
+    pub limit: usize,
+}
+
+const fn default_sync_changes_limit() -> usize {
+    100
+}
+
+pub async fn sync_list_changes(
+    State(state): State<AppState>,
+    Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
+    Query(query): Query<SyncChangesQuery>,
+) -> Result<Json<SyncChangesResponse>, AuthError> {
+    let target_ws_id =
+        match resolve_workspace_access(&state, &session, &headers, unix_now()).await? {
+            ResolvedWorkspaceAccess::Personal { workspace_id } => workspace_id,
+            ResolvedWorkspaceAccess::Organization { org, my_role, .. } => {
+                if !my_role.can_view_workspace() {
+                    return Err(AuthError::OrgPermissionDenied);
+                }
+                org.workspace_id
+            }
+        };
+    let changes = state
+        .encrypted_sync
+        .list_changes_since(target_ws_id, query.since_seq, query.limit)
+        .await?;
+    Ok(Json(changes))
 }
 
 pub async fn sync_create_share_link(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Json(body): Json<CreateShareLinkRequest>,
 ) -> Result<(StatusCode, Json<CreatedShareLink>), AuthError> {
+    check_ip_and_account_rate_limit(
+        &state,
+        "sync:share_create",
+        &headers,
+        Some(&session.principal.user_id.to_string()),
+        60,
+        40,
+    )
+    .await?;
+    let target_ws_id =
+        match resolve_workspace_access(&state, &session, &headers, unix_now()).await? {
+            ResolvedWorkspaceAccess::Personal { workspace_id } => workspace_id,
+            ResolvedWorkspaceAccess::Organization {
+                org,
+                my_role,
+                entitlement,
+            } => {
+                if !my_role.can_modify_shared_resources() {
+                    return Err(AuthError::OrgPermissionDenied);
+                }
+                if !entitlement.teams_enabled {
+                    return Err(AuthError::PaidPlanRequired);
+                }
+                org.workspace_id
+            }
+        };
     let created = state
         .encrypted_sync
-        .create_share_link(
-            session.principal.workspace_id,
-            session.principal.user_id,
-            &body,
-        )
+        .create_share_link(target_ws_id, session.principal.user_id, &body)
         .await?;
+    state.persist_durable_state().await;
     Ok((StatusCode::CREATED, Json(created)))
 }
 
 pub async fn sync_resolve_share_link(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(token): Path<String>,
 ) -> Result<Json<ShareLinkRecord>, AuthError> {
+    check_ip_and_account_rate_limit(&state, "sync:share_resolve", &headers, None, 60, 60).await?;
     let rec = state
         .encrypted_sync
         .resolve_share_link_at(&token, unix_now())
@@ -3621,12 +4839,24 @@ pub async fn sync_resolve_share_link(
 pub async fn sync_revoke_share_link(
     State(state): State<AppState>,
     Extension(session): Extension<AuthenticatedSession>,
+    headers: HeaderMap,
     Path(link_id): Path<Uuid>,
 ) -> Result<StatusCode, AuthError> {
+    let target_ws_id =
+        match resolve_workspace_access(&state, &session, &headers, unix_now()).await? {
+            ResolvedWorkspaceAccess::Personal { workspace_id } => workspace_id,
+            ResolvedWorkspaceAccess::Organization { org, my_role, .. } => {
+                if !my_role.can_modify_shared_resources() {
+                    return Err(AuthError::OrgPermissionDenied);
+                }
+                org.workspace_id
+            }
+        };
     state
         .encrypted_sync
-        .revoke_share_link(session.principal.workspace_id, link_id)
+        .revoke_share_link(target_ws_id, link_id)
         .await?;
+    state.persist_durable_state().await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -3730,6 +4960,10 @@ pub fn build_router(state: AppState) -> Router {
 
     let billing_session_routes = Router::new()
         .route("/v1/entitlements/me", get(get_my_entitlements))
+        .route(
+            "/v1/billing/organizations-summary",
+            get(list_my_organizations),
+        )
         .route("/v1/billing/handoff/redeem", post(billing_handoff_redeem))
         .route("/v1/billing/coupons/preview", post(billing_preview_coupon))
         .route("/v1/billing/checkout", post(billing_checkout))
@@ -3771,17 +5005,67 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/community/submissions/mine",
             get(list_my_community_submissions),
         )
-        // Organizations & encrypted sync
+        // Organizations, 4-role RBAC, verified-email invitations, X25519 keys & encrypted sync
         .route("/v1/organizations", post(create_organization))
-        .route("/v1/organizations/{org_id}/invite", post(invite_org_member))
-        .route("/v1/organizations/invitations/accept", post(accept_org_invite))
-        .route("/v1/organizations/{org_id}/members", get(list_org_members))
+        .route("/v1/organizations/mine", get(list_my_organizations))
         .route("/v1/organizations/sso/status", get(org_sso_status))
+        .route("/v1/organizations/invitations/accept", post(accept_org_invite))
+        .route(
+            "/v1/organizations/invitations/decline",
+            post(decline_org_invite),
+        )
+        .route(
+            "/v1/organizations/{org_id}",
+            get(get_organization_details).delete(delete_organization_handler),
+        )
+        .route("/v1/organizations/{org_id}/members", get(list_org_members))
+        .route(
+            "/v1/organizations/{org_id}/members/{target_user_id}/role",
+            patch(change_org_member_role),
+        )
+        .route(
+            "/v1/organizations/{org_id}/members/{target_user_id}",
+            delete(remove_org_member),
+        )
+        .route(
+            "/v1/organizations/{org_id}/transfer-ownership",
+            post(transfer_org_ownership),
+        )
+        .route(
+            "/v1/organizations/{org_id}/invitations",
+            get(list_org_invitations),
+        )
+        .route("/v1/organizations/{org_id}/invite", post(invite_org_member))
+        .route(
+            "/v1/organizations/{org_id}/invitations/{invite_id}/revoke",
+            post(revoke_org_invitation),
+        )
+        .route(
+            "/v1/organizations/{org_id}/keys/devices",
+            get(list_org_device_keys).post(register_org_device_key),
+        )
+        .route(
+            "/v1/organizations/{org_id}/keys/devices/{target_user_id}/{device_id}",
+            delete(revoke_org_device_key),
+        )
+        .route(
+            "/v1/organizations/{org_id}/keys/wrap",
+            post(publish_org_wrapped_keys),
+        )
+        .route(
+            "/v1/organizations/{org_id}/keys/rotate",
+            post(rotate_org_workspace_key),
+        )
+        .route(
+            "/v1/organizations/{org_id}/keys/my-wrapped",
+            get(list_my_org_wrapped_keys),
+        )
         .route("/v1/sync/envelopes", post(sync_push))
         .route(
             "/v1/sync/envelopes/{resource_kind}/{resource_id}",
             get(sync_pull),
         )
+        .route("/v1/sync/changes", get(sync_list_changes))
         .route("/v1/sync/share-links", post(sync_create_share_link))
         .route(
             "/v1/sync/share-links/{link_id}/revoke",

@@ -1371,6 +1371,175 @@ fn desktop_decision_engine_apply(
     store.desktop_decision_engine_apply(&project, &decision_id, now_ms())
 }
 
+#[tauri::command]
+fn desktop_sync_status(
+    store: tauri::State<'_, StudioStore>,
+    workspace_id: Option<String>,
+) -> Result<String, String> {
+    store.desktop_sync_status(workspace_id.as_deref())
+}
+
+#[tauri::command]
+fn desktop_sync_select_workspace(
+    store: tauri::State<'_, StudioStore>,
+    organization_id: Option<String>,
+    workspace_id: Option<String>,
+    active_key_epoch: Option<u32>,
+) -> Result<String, String> {
+    store.desktop_sync_select_workspace(
+        organization_id.as_deref(),
+        workspace_id.as_deref(),
+        active_key_epoch.unwrap_or(1),
+    )
+}
+
+#[tauri::command]
+fn desktop_sync_list_resources(
+    store: tauri::State<'_, StudioStore>,
+    workspace_id: String,
+    include_deleted: Option<bool>,
+) -> Result<String, String> {
+    store.desktop_sync_list_resources(&workspace_id, include_deleted.unwrap_or(false))
+}
+
+#[tauri::command]
+fn desktop_sync_list_conflicts(
+    store: tauri::State<'_, StudioStore>,
+    workspace_id: String,
+) -> Result<String, String> {
+    store.desktop_sync_list_conflicts(&workspace_id)
+}
+
+#[tauri::command]
+fn desktop_sync_rotate_device_key(
+    store: tauri::State<'_, StudioStore>,
+    new_device_id: Option<String>,
+) -> Result<String, String> {
+    store.desktop_sync_rotate_device_key(new_device_id.as_deref(), now_ms())
+}
+
+#[tauri::command]
+fn desktop_sync_wrap_epoch_keys(
+    store: tauri::State<'_, StudioStore>,
+    organization_id: String,
+    workspace_id: String,
+    key_epoch: u32,
+    devices_json: String,
+) -> Result<String, String> {
+    store.desktop_sync_wrap_epoch_keys(
+        &organization_id,
+        &workspace_id,
+        key_epoch,
+        &devices_json,
+        now_ms(),
+    )
+}
+
+#[tauri::command]
+fn desktop_sync_prepare_key_rotation(
+    store: tauri::State<'_, StudioStore>,
+    organization_id: String,
+    workspace_id: String,
+    current_epoch: u32,
+    remaining_devices_json: String,
+) -> Result<String, String> {
+    store.desktop_sync_prepare_key_rotation(
+        &organization_id,
+        &workspace_id,
+        current_epoch,
+        &remaining_devices_json,
+        now_ms(),
+    )
+}
+
+#[tauri::command]
+fn desktop_sync_ingest_wrapped_keys(
+    store: tauri::State<'_, StudioStore>,
+    envelopes_json: String,
+) -> Result<String, String> {
+    store.desktop_sync_ingest_wrapped_keys(&envelopes_json, now_ms())
+}
+
+#[tauri::command]
+fn desktop_sync_stage_upsert(
+    store: tauri::State<'_, StudioStore>,
+    organization_id: String,
+    workspace_id: String,
+    resource_kind: String,
+    resource_id: String,
+    title: String,
+    payload_json: String,
+) -> Result<String, String> {
+    store.desktop_sync_stage_upsert(
+        &organization_id,
+        &workspace_id,
+        &resource_kind,
+        &resource_id,
+        &title,
+        &payload_json,
+        now_ms(),
+    )
+}
+
+#[tauri::command]
+fn desktop_sync_stage_delete(
+    store: tauri::State<'_, StudioStore>,
+    organization_id: String,
+    workspace_id: String,
+    resource_kind: String,
+    resource_id: String,
+) -> Result<String, String> {
+    store.desktop_sync_stage_delete(
+        &organization_id,
+        &workspace_id,
+        &resource_kind,
+        &resource_id,
+        now_ms(),
+    )
+}
+
+#[tauri::command]
+fn desktop_sync_peek_outbound(
+    store: tauri::State<'_, StudioStore>,
+    workspace_id: String,
+) -> Result<String, String> {
+    store.desktop_sync_peek_outbound(&workspace_id, now_ms())
+}
+
+#[tauri::command]
+fn desktop_sync_complete_outbound(
+    store: tauri::State<'_, StudioStore>,
+    outcome_json: String,
+) -> Result<String, String> {
+    store.desktop_sync_complete_outbound(&outcome_json, now_ms())
+}
+
+#[tauri::command]
+fn desktop_sync_apply_pulled(
+    store: tauri::State<'_, StudioStore>,
+    workspace_id: String,
+    envelopes_json: String,
+) -> Result<String, String> {
+    store.desktop_sync_apply_pulled(&workspace_id, &envelopes_json, now_ms())
+}
+
+#[tauri::command]
+fn desktop_sync_resolve_conflict(
+    store: tauri::State<'_, StudioStore>,
+    workspace_id: String,
+    resource_kind: String,
+    resource_id: String,
+    choice: String,
+) -> Result<String, String> {
+    store.desktop_sync_resolve_conflict(
+        &workspace_id,
+        &resource_kind,
+        &resource_id,
+        &choice,
+        now_ms(),
+    )
+}
+
 fn studio_generated_handler(
 ) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
@@ -1456,7 +1625,21 @@ fn studio_generated_handler(
         desktop_learning_delete_rule,
         desktop_learning_reset_profile,
         desktop_decision_engine_evaluate,
-        desktop_decision_engine_apply
+        desktop_decision_engine_apply,
+        desktop_sync_status,
+        desktop_sync_select_workspace,
+        desktop_sync_list_resources,
+        desktop_sync_list_conflicts,
+        desktop_sync_rotate_device_key,
+        desktop_sync_wrap_epoch_keys,
+        desktop_sync_prepare_key_rotation,
+        desktop_sync_ingest_wrapped_keys,
+        desktop_sync_stage_upsert,
+        desktop_sync_stage_delete,
+        desktop_sync_peek_outbound,
+        desktop_sync_complete_outbound,
+        desktop_sync_apply_pulled,
+        desktop_sync_resolve_conflict
     ]
 }
 

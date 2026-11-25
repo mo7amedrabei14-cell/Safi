@@ -25,9 +25,11 @@ use crate::billing::BillingSnapshot;
 use crate::coupons::{CouponRecord, CouponRedemptionRecord, CouponSnapshot};
 use crate::desktop_auth::{DesktopAuthSnapshot, OwnerWebSessionRecord};
 use crate::device_authority::{DeviceAuthoritySnapshot, DeviceReplacementEvent};
+use crate::encrypted_sync::EncryptedSyncSnapshot;
 use crate::entitlements::EntitlementSnapshot;
 use crate::error::AuthError;
 use crate::log_center::AuditLogEntry;
+use crate::organizations::OrganizationSnapshot;
 use crate::owner_mfa::OwnerMfaSnapshot;
 use crate::templates_hub::{
     AppReleaseRecord, CommunitySubmissionRecord, OfficialTemplateRecord, TemplatesHubSnapshot,
@@ -563,6 +565,10 @@ pub struct DurableServerSnapshot {
     pub desktop_auth: DesktopAuthSnapshot,
     #[serde(default)]
     pub templates_hub: TemplatesHubSnapshot,
+    #[serde(default)]
+    pub organizations: OrganizationSnapshot,
+    #[serde(default)]
+    pub encrypted_sync: EncryptedSyncSnapshot,
     pub maintenance_mode: bool,
     pub maintenance_reason: Option<String>,
     pub feature_flags: BTreeMap<String, FeatureFlag>,

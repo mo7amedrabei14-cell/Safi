@@ -736,6 +736,8 @@ pub struct BillingService {
     paddle_prices: PaddlePriceCatalog,
     paymob_adapter: Option<PaymobApiAdapter>,
     paymob_hmac_secret: Option<String>,
+    safi_api_origin: Option<String>,
+    safi_public_web_origin: Option<String>,
     /// Single exclusive mutex for non-PG in-memory ledger fallback (eliminates TOCTOU races).
     store: Arc<Mutex<BillingStore>>,
     /// Per-(workspace_id, idempotency_key) in-flight gate so concurrent clicks never invoke provider twice.
@@ -791,6 +793,8 @@ impl BillingService {
             },
             paymob_adapter,
             paymob_hmac_secret: config.paymob_hmac_secret.clone(),
+            safi_api_origin: config.api_base_url.clone(),
+            safi_public_web_origin: config.public_web_origin.clone(),
             store: Arc::new(Mutex::new(BillingStore::default())),
             in_flight_checkouts: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -1125,6 +1129,16 @@ impl BillingService {
                     .as_ref()
                     .ok_or(AuthError::BillingNotConfigured)?;
                 let billing_data = req.billing_data.as_ref().ok_or(AuthError::InvalidRequest)?;
+                let notification_url = self
+                    .safi_api_origin
+                    .as_deref()
+                    .filter(|o| o.starts_with("https://"))
+                    .map(|o| format!("{}/v1/billing/webhooks/paymob", o.trim_end_matches('/')));
+                let redirection_url = self
+                    .safi_public_web_origin
+                    .as_deref()
+                    .filter(|o| o.starts_with("https://"))
+                    .map(|o| format!("{}/billing?order_id={}", o.trim_end_matches('/'), order.id));
                 adapter
                     .create_intention(
                         order.id,
@@ -1132,8 +1146,8 @@ impl BillingService {
                         order.seats,
                         order.expected_amount_minor,
                         billing_data,
-                        None,
-                        None,
+                        notification_url.as_deref(),
+                        redirection_url.as_deref(),
                     )
                     .await
                     .map(|created| {

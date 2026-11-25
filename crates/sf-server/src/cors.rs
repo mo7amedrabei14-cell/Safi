@@ -19,10 +19,15 @@ pub const ALLOWED_ORIGINS: [&str; 5] = [
     "http://127.0.0.1:1420",
 ];
 
-const ALLOWED_METHODS: [&str; 4] = ["GET", "POST", "DELETE", "OPTIONS"];
-const ALLOWED_HEADERS: [&str; 3] = ["accept", "authorization", "content-type"];
-const ALLOWED_METHODS_HEADER: &str = "GET, POST, DELETE, OPTIONS";
-const ALLOWED_HEADERS_HEADER: &str = "accept, authorization, content-type";
+const ALLOWED_METHODS: [&str; 5] = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"];
+const ALLOWED_HEADERS: [&str; 4] = [
+    "accept",
+    "authorization",
+    "content-type",
+    "x-safi-workspace-id",
+];
+const ALLOWED_METHODS_HEADER: &str = "GET, POST, PATCH, DELETE, OPTIONS";
+const ALLOWED_HEADERS_HEADER: &str = "accept, authorization, content-type, x-safi-workspace-id";
 const PREFLIGHT_MAX_AGE_SECONDS: &str = "600";
 
 /// Apply the static allowlist to account API requests.
@@ -254,7 +259,7 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_rejects_a_method_outside_the_allowlist() {
-        for method in ["PATCH", "PUT"] {
+        for method in ["PUT", "TRACE"] {
             let response = send(
                 Request::builder()
                     .method(Method::OPTIONS)
@@ -267,6 +272,25 @@ mod tests {
             .await;
             assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method}");
         }
+    }
+
+    #[tokio::test]
+    async fn preflight_allows_patch_and_workspace_header_for_trusted_origin() {
+        let response = send(
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/v1/organizations")
+                .header(header::ORIGIN, "tauri://localhost")
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+                .header(
+                    header::ACCESS_CONTROL_REQUEST_HEADERS,
+                    "authorization, content-type, x-safi-workspace-id",
+                )
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]

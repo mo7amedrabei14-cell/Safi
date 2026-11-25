@@ -20,7 +20,7 @@ use crate::error::{DesktopError, DesktopErrorCode};
 pub const MAX_IPC_BYTES: usize = 1_048_576;
 
 /// Commands the shell exposes today.
-pub const ALLOWED_COMMANDS: [&str; 83] = [
+pub const ALLOWED_COMMANDS: [&str; 97] = [
     "app_info",
     "take_pending_deep_link",
     "desktop_open_external_auth_url",
@@ -104,6 +104,20 @@ pub const ALLOWED_COMMANDS: [&str; 83] = [
     "desktop_learning_reset_profile",
     "desktop_decision_engine_evaluate",
     "desktop_decision_engine_apply",
+    "desktop_sync_status",
+    "desktop_sync_select_workspace",
+    "desktop_sync_list_resources",
+    "desktop_sync_list_conflicts",
+    "desktop_sync_rotate_device_key",
+    "desktop_sync_wrap_epoch_keys",
+    "desktop_sync_prepare_key_rotation",
+    "desktop_sync_ingest_wrapped_keys",
+    "desktop_sync_stage_upsert",
+    "desktop_sync_stage_delete",
+    "desktop_sync_peek_outbound",
+    "desktop_sync_complete_outbound",
+    "desktop_sync_apply_pulled",
+    "desktop_sync_resolve_conflict",
 ];
 
 /// Access classification separating offline read-only viewing of saved local projects
@@ -140,7 +154,11 @@ pub fn classify_command_access(command: &str) -> CommandAccessClass {
         | "desktop_workflow_memory_list"
         | "desktop_workflow_memory_match_sheet"
         | "desktop_learning_profile_get"
-        | "desktop_decision_engine_evaluate" => CommandAccessClass::ReadOnlyOffline,
+        | "desktop_decision_engine_evaluate"
+        | "desktop_sync_status"
+        | "desktop_sync_select_workspace"
+        | "desktop_sync_list_resources"
+        | "desktop_sync_list_conflicts" => CommandAccessClass::ReadOnlyOffline,
         _ => CommandAccessClass::ProtectedOnline,
     }
 }
@@ -262,6 +280,12 @@ impl IpcJsonValueLen for usize {
 }
 
 impl IpcJsonValueLen for u64 {
+    fn ipc_json_value_len(&self) -> usize {
+        json_serialized_len(self)
+    }
+}
+
+impl IpcJsonValueLen for u32 {
     fn ipc_json_value_len(&self) -> usize {
         json_serialized_len(self)
     }

@@ -713,6 +713,7 @@ pub struct StudioStore {
     search_index: Mutex<Option<LocalSearchIndex>>,
     recipe_library: Mutex<Option<LocalRecipeLibrary>>,
     workflow_memory: Mutex<Option<LocalWorkflowMemoryStore>>,
+    org_sync: Mutex<Option<Arc<crate::org_sync::OrgSyncStore>>>,
     ollama_probe: Mutex<Option<crate::decision_engine::OllamaRuntimeProbe>>,
 }
 
@@ -739,6 +740,7 @@ impl Default for StudioStore {
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
             workflow_memory: Mutex::new(None),
+            org_sync: Mutex::new(None),
             ollama_probe: Mutex::new(None),
         }
     }
@@ -777,6 +779,7 @@ impl StudioStore {
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
             workflow_memory: Mutex::new(None),
+            org_sync: Mutex::new(None),
             ollama_probe: Mutex::new(None),
         }
     }
@@ -809,6 +812,7 @@ impl StudioStore {
             search_index: Mutex::new(None),
             recipe_library: Mutex::new(None),
             workflow_memory: Mutex::new(None),
+            org_sync: Mutex::new(None),
             ollama_probe: Mutex::new(None),
         }
     }
@@ -4164,6 +4168,367 @@ impl StudioStore {
         }
 
         self.state_unlocked(project)
+    }
+
+    fn ensure_org_sync_loaded(&self) -> Result<Arc<crate::org_sync::OrgSyncStore>, String> {
+        let key = self.ensure_local_vault_key()?;
+        let mut slot = self.org_sync.lock().map_err(|_| "SF-SYS-001".to_owned())?;
+        if let Some(ref existing) = *slot {
+            return Ok(existing.clone());
+        }
+        let dir = self.resolve_storage_dir()?;
+        let default_dev_id = self
+            .active_session
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|s| s.installation_id.clone()))
+            .unwrap_or_default();
+        let store = Arc::new(crate::org_sync::OrgSyncStore::open_or_init(
+            dir,
+            key,
+            &default_dev_id,
+            "SafiData Desktop",
+        )?);
+        *slot = Some(store.clone());
+        Ok(store)
+    }
+
+    /// Return current Organization & E2EE Sync status for `workspace_id` (or active workspace).
+    pub fn desktop_sync_status(&self, workspace_id: Option<&str>) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("workspaceId", workspace_id));
+        self.gate_command("desktop_sync_status", payload_len, None)?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let status = sync.status_for_workspace(workspace_id)?;
+        serde_json::to_string(&status).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Switch active Desktop workspace between Personal (`None`) and Shared Team Workspace.
+    pub fn desktop_sync_select_workspace(
+        &self,
+        organization_id: Option<&str>,
+        workspace_id: Option<&str>,
+        active_key_epoch: u32,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("organizationId", organization_id),
+            ("workspaceId", workspace_id),
+            ("activeKeyEpoch", active_key_epoch)
+        );
+        self.gate_command("desktop_sync_select_workspace", payload_len, None)?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let status =
+            sync.select_active_workspace(organization_id, workspace_id, active_key_epoch)?;
+        serde_json::to_string(&status).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// List decrypted shared resources stored in the local encrypted vault for `workspace_id`.
+    pub fn desktop_sync_list_resources(
+        &self,
+        workspace_id: &str,
+        include_deleted: bool,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("workspaceId", workspace_id),
+            ("includeDeleted", include_deleted)
+        );
+        self.gate_command("desktop_sync_list_resources", payload_len, None)?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let resources = sync.list_shared_resources(workspace_id, include_deleted)?;
+        serde_json::to_string(&resources).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// List unresolved E2EE sync conflicts for `workspace_id`.
+    pub fn desktop_sync_list_conflicts(&self, workspace_id: &str) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("workspaceId", workspace_id));
+        self.gate_command("desktop_sync_list_conflicts", payload_len, None)?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let conflicts = sync.list_conflicts(workspace_id)?;
+        serde_json::to_string(&conflicts).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Rotate this installation's local X25519 device keypair.
+    pub fn desktop_sync_rotate_device_key(
+        &self,
+        new_device_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("newDeviceId", new_device_id));
+        self.gate_command("desktop_sync_rotate_device_key", payload_len, Some(now_ms))?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let pub_id = sync.rotate_local_device_keypair(new_device_id)?;
+        serde_json::to_string(&pub_id).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Bootstrap/wrap the active epoch's 256-bit Workspace Key for authorized member devices.
+    pub fn desktop_sync_wrap_epoch_keys(
+        &self,
+        organization_id: &str,
+        workspace_id: &str,
+        key_epoch: u32,
+        devices_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("organizationId", organization_id),
+            ("workspaceId", workspace_id),
+            ("keyEpoch", key_epoch),
+            ("devicesJson", devices_json)
+        );
+        self.gate_command("desktop_sync_wrap_epoch_keys", payload_len, Some(now_ms))?;
+        let devices: Vec<crate::org_sync::RemoteMemberDeviceKey> =
+            serde_json::from_str(devices_json).map_err(|_| "SF-AUTH-006".to_owned())?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let wrapped = sync.ensure_and_wrap_epoch_key_for_devices(
+            organization_id,
+            workspace_id,
+            key_epoch,
+            &devices,
+        )?;
+        serde_json::to_string(&wrapped).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Generate a rotated `current_epoch + 1` Workspace Key and wrap it ONLY for remaining devices.
+    pub fn desktop_sync_prepare_key_rotation(
+        &self,
+        organization_id: &str,
+        workspace_id: &str,
+        current_epoch: u32,
+        remaining_devices_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("organizationId", organization_id),
+            ("workspaceId", workspace_id),
+            ("currentEpoch", current_epoch),
+            ("remainingDevicesJson", remaining_devices_json)
+        );
+        self.gate_command(
+            "desktop_sync_prepare_key_rotation",
+            payload_len,
+            Some(now_ms),
+        )?;
+        let devices: Vec<crate::org_sync::RemoteMemberDeviceKey> =
+            serde_json::from_str(remaining_devices_json).map_err(|_| "SF-AUTH-006".to_owned())?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let (next_epoch, entries) = sync.prepare_rotated_workspace_key(
+            organization_id,
+            workspace_id,
+            current_epoch,
+            &devices,
+        )?;
+        serde_json::to_string(&serde_json::json!({
+            "nextKeyEpoch": next_epoch,
+            "entries": entries
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Unwrap wrapped Workspace Keys fetched from `/v1/organizations/{id}/keys/my-wrapped`.
+    pub fn desktop_sync_ingest_wrapped_keys(
+        &self,
+        envelopes_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("envelopesJson", envelopes_json));
+        self.gate_command(
+            "desktop_sync_ingest_wrapped_keys",
+            payload_len,
+            Some(now_ms),
+        )?;
+        let envelopes: Vec<crate::org_sync::RemoteWrappedKeyEnvelope> =
+            serde_json::from_str(envelopes_json).map_err(|_| "SF-SYN-001".to_owned())?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let unlocked = sync.ingest_wrapped_workspace_keys(&envelopes)?;
+        serde_json::to_string(&serde_json::json!({ "unlockedCount": unlocked }))
+            .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Stage a local shared resource upsert into the encrypted offline queue.
+    #[allow(clippy::too_many_arguments)]
+    pub fn desktop_sync_stage_upsert(
+        &self,
+        organization_id: &str,
+        workspace_id: &str,
+        resource_kind: &str,
+        resource_id: &str,
+        title: &str,
+        payload_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("organizationId", organization_id),
+            ("workspaceId", workspace_id),
+            ("resourceKind", resource_kind),
+            ("resourceId", resource_id),
+            ("title", title),
+            ("payloadJson", payload_json)
+        );
+        self.gate_command("desktop_sync_stage_upsert", payload_len, Some(now_ms))?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let staged = sync.stage_shared_resource_upsert(
+            organization_id,
+            workspace_id,
+            resource_kind,
+            resource_id,
+            title,
+            payload_json,
+        )?;
+        serde_json::to_string(&staged).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Stage a deletion tombstone (`deleted = true`) into the encrypted offline queue.
+    pub fn desktop_sync_stage_delete(
+        &self,
+        organization_id: &str,
+        workspace_id: &str,
+        resource_kind: &str,
+        resource_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("organizationId", organization_id),
+            ("workspaceId", workspace_id),
+            ("resourceKind", resource_kind),
+            ("resourceId", resource_id)
+        );
+        self.gate_command("desktop_sync_stage_delete", payload_len, Some(now_ms))?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let staged = sync.stage_shared_resource_delete(
+            organization_id,
+            workspace_id,
+            resource_kind,
+            resource_id,
+        )?;
+        serde_json::to_string(&staged).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Seal and return the next queued encrypted envelope for `workspace_id` (`null` if queue empty).
+    pub fn desktop_sync_peek_outbound(
+        &self,
+        workspace_id: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("workspaceId", workspace_id));
+        self.gate_command("desktop_sync_peek_outbound", payload_len, Some(now_ms))?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let next = sync.peek_next_outbound_envelope(workspace_id)?;
+        serde_json::to_string(&next).map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Record outcome (`committed`, `conflict`, or `error`) of an outbound encrypted push.
+    pub fn desktop_sync_complete_outbound(
+        &self,
+        outcome_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(("outcomeJson", outcome_json));
+        self.gate_command("desktop_sync_complete_outbound", payload_len, Some(now_ms))?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(outcome_json).map_err(|_| "SF-AUTH-006".to_owned())?;
+        let kind = parsed
+            .get("outcome")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let sync = self.ensure_org_sync_loaded()?;
+        match kind {
+            "committed" => {
+                let idem = parsed
+                    .get("idempotencyKey")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let ver = parsed
+                    .get("version")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(1);
+                let seq = parsed
+                    .get("workspaceSeq")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(1);
+                let author = parsed
+                    .get("authorUserId")
+                    .and_then(serde_json::Value::as_str);
+                sync.mark_outbound_pushed(idem, ver, seq, author)?;
+                Ok(r#"{"status":"committed"}"#.to_owned())
+            }
+            "conflict" => {
+                let idem = parsed
+                    .get("idempotencyKey")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let remote_val = parsed
+                    .get("remoteEnvelope")
+                    .cloned()
+                    .ok_or_else(|| "SF-SYN-001".to_owned())?;
+                let remote_env: crate::org_sync::InboundEncryptedEnvelope =
+                    serde_json::from_value(remote_val).map_err(|_| "SF-SYN-001".to_owned())?;
+                let conflict = sync.record_push_conflict(idem, &remote_env)?;
+                serde_json::to_string(&conflict).map_err(|_| "SF-SYS-001".to_owned())
+            }
+            "error" => {
+                let ws_id = parsed
+                    .get("workspaceId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let code = parsed
+                    .get("errorCode")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("SF-AUTH-005");
+                sync.record_sync_error(ws_id, code)?;
+                Ok(r#"{"status":"error_recorded"}"#.to_owned())
+            }
+            _ => Err("SF-AUTH-006".to_owned()),
+        }
+    }
+
+    /// Verify BLAKE3 integrity, decrypt, and apply pulled encrypted envelopes for `workspace_id`.
+    pub fn desktop_sync_apply_pulled(
+        &self,
+        workspace_id: &str,
+        envelopes_json: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("workspaceId", workspace_id),
+            ("envelopesJson", envelopes_json)
+        );
+        self.gate_command("desktop_sync_apply_pulled", payload_len, Some(now_ms))?;
+        let envelopes: Vec<crate::org_sync::InboundEncryptedEnvelope> =
+            serde_json::from_str(envelopes_json).map_err(|_| "SF-SYN-001".to_owned())?;
+        let sync = self.ensure_org_sync_loaded()?;
+        let applied = sync.apply_pulled_changes(workspace_id, &envelopes)?;
+        let status = sync.status_for_workspace(Some(workspace_id))?;
+        serde_json::to_string(&serde_json::json!({
+            "appliedCount": applied,
+            "status": status
+        }))
+        .map_err(|_| "SF-SYS-001".to_owned())
+    }
+
+    /// Resolve a detected conflict (`keep_local` vs `accept_remote`).
+    pub fn desktop_sync_resolve_conflict(
+        &self,
+        workspace_id: &str,
+        resource_kind: &str,
+        resource_id: &str,
+        choice: &str,
+        now_ms: u64,
+    ) -> Result<String, String> {
+        let payload_len = crate::ipc_payload_len!(
+            ("workspaceId", workspace_id),
+            ("resourceKind", resource_kind),
+            ("resourceId", resource_id),
+            ("choice", choice)
+        );
+        self.gate_command("desktop_sync_resolve_conflict", payload_len, Some(now_ms))?;
+        let parsed_choice = match choice.trim() {
+            "keep_local" => crate::org_sync::ConflictResolutionChoice::KeepLocal,
+            "accept_remote" => crate::org_sync::ConflictResolutionChoice::AcceptRemote,
+            _ => return Err("SF-AUTH-006".to_owned()),
+        };
+        let sync = self.ensure_org_sync_loaded()?;
+        let resolved =
+            sync.resolve_conflict(workspace_id, resource_kind, resource_id, parsed_choice)?;
+        serde_json::to_string(&resolved).map_err(|_| "SF-SYS-001".to_owned())
     }
 
     fn mutate(

@@ -578,6 +578,8 @@ echo "[test-migrations] applying migrations 0007..0016 for multi-instance, durab
     -f "$MIGRATIONS/0015_durable_entitlements_usage_and_idempotency.up.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0016_desktop_billing_handoffs.up.sql" >/dev/null
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0017_production_org_rbac_and_e2ee_sync.up.sql" >/dev/null
 
 echo "[test-migrations] exercising multi-instance & restart PostgreSQL 18 source-of-truth E2E"
 SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test postgres_multi_instance_e2e -- --ignored --test-threads=1
@@ -591,7 +593,12 @@ SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test enti
 echo "[test-migrations] exercising Desktop-to-Website billing handoff, direct HTTP Free-plan isolation & PG fail-closed E2E"
 SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test desktop_billing_handoff_and_pg_e2e -- --ignored --test-threads=1
 
-echo "[test-migrations] rolling back 0016 and 0015"
+echo "[test-migrations] exercising Organization shared workspace, 4-role RBAC, verified-email invites, RLS & zero-knowledge E2EE sync PostgreSQL 18 E2E"
+SF_TEST_DATABASE_URL="$SF_TEST_DATABASE_URL" cargo test -p sf-server --test organization_rbac_and_encrypted_sync_pg_e2e -- --ignored --test-threads=1
+
+echo "[test-migrations] rolling back 0017, 0016, and 0015"
+"$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -f "$MIGRATIONS/0017_production_org_rbac_and_e2ee_sync.down.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
     -f "$MIGRATIONS/0016_desktop_billing_handoffs.down.sql" >/dev/null
 "$PSQL_BIN" "$SF_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \

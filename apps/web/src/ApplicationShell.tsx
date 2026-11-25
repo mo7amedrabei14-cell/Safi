@@ -54,6 +54,7 @@ import { OwnerWebPortal } from "./pages/OwnerWebPortal";
 import { DesktopBrowserAuthPage } from "./pages/DesktopBrowserAuthPage";
 import { BillingPortalPage } from "./pages/BillingPortalPage";
 import { PricingPage } from "./pages/PricingPage";
+import { OrganizationWorkspacePanel } from "./components/org/OrganizationWorkspacePanel";
 import { buildBillingUrlFromIntent, loadPendingWebPurchaseIntent } from "./lib/business-pricing";
 import { canAnimate } from "./components/ui/motion-preference";
 import { postSafiHeartbeat, SafiAuthApiError } from "./lib/auth-api";
@@ -206,7 +207,7 @@ export function ApplicationShell({
   const [pkceError, setPkceError] = useState<string | null>(null);
   const [entitlementRefreshNonce, setEntitlementRefreshNonce] = useState(0);
   const [browserRoute, setBrowserRoute] = useState<
-    "showcase" | "pricing" | "owner" | "desktop-auth" | "billing"
+    "showcase" | "pricing" | "owner" | "desktop-auth" | "billing" | "team"
   >(() => {
     if (typeof window === "undefined" || isDesktopRuntime()) {
       return "showcase";
@@ -216,6 +217,17 @@ export function ApplicationShell({
     if (path === "/auth/desktop") return "desktop-auth";
     if (path === "/billing") return "billing";
     if (path === "/pricing") return "pricing";
+    if (path === "/team") return "team";
+    try {
+      if (
+        initialVerificationToken !== null &&
+        (window.sessionStorage.getItem("safi.org.pending_invite.v1") ?? "").startsWith("sfi_")
+      ) {
+        return "team";
+      }
+    } catch {
+      // Ignore storage lookup error.
+    }
     // Preserve direct website purchase flow across email-verification link navigation:
     // if the customer clicked a verification link while holding a pending web purchase intent,
     // resume directly in `/billing` with their selected plan, currency, and seat count intact!
@@ -233,6 +245,7 @@ export function ApplicationShell({
       else if (path === "/auth/desktop") setBrowserRoute("desktop-auth");
       else if (path === "/billing") setBrowserRoute("billing");
       else if (path === "/pricing") setBrowserRoute("pricing");
+      else if (path === "/team") setBrowserRoute("team");
       else setBrowserRoute("showcase");
     };
     window.addEventListener("popstate", onPopState);
@@ -247,6 +260,14 @@ export function ApplicationShell({
       window.scrollTo?.({ top: 0, behavior: "auto" });
     }
     setBrowserRoute("pricing");
+  }, []);
+
+  const navigateToTeam = useCallback((): void => {
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", "/team");
+      window.scrollTo?.({ top: 0, behavior: "auto" });
+    }
+    setBrowserRoute("team");
   }, []);
 
   const navigateToShowcase = useCallback((hash?: string): void => {
@@ -429,6 +450,7 @@ export function ApplicationShell({
       setHasPreviouslyAuthenticated(true);
       setOfflineReadOnly(false);
       setRevocationNotice(null);
+      setAccountOpen(false);
     },
     [desktopRuntime]
   );
@@ -773,6 +795,7 @@ export function ApplicationShell({
             onToggleLang={toggleLang}
             onOpenAccount={() => setAccountOpen(true)}
             onOpenPricing={navigateToPricing}
+            onOpenTeam={navigateToTeam}
             onOpenHomeSection={(hash) => navigateToShowcase(hash)}
             activeBrowserRoute="pricing"
             authenticated={hasActiveSession}
@@ -784,6 +807,57 @@ export function ApplicationShell({
               onSelectPurchase={navigateToBillingWithIntent}
               onBackToShowcase={() => navigateToShowcase()}
               onDownloadDesktop={() => navigateToShowcase("#download")}
+            />
+          </main>
+        </div>
+        {accountAccessPortal}
+        {authPortal}
+        {passwordResetPortal}
+      </>
+    );
+  }
+
+  if (!desktopRuntime && browserRoute === "team") {
+    return (
+      <>
+        <AmbientBackground />
+        <div
+          className="safi-shell"
+          dir={lang === "ar" ? "rtl" : "ltr"}
+          data-runtime="team-web-portal"
+        >
+          <FloatingGlassDock
+            tabs={dockTabs}
+            activeTab={activeTab}
+            onSelect={selectTab}
+            onOpenCommandPalette={() => setPaletteOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            theme={theme}
+            onSelectTheme={selectTheme}
+            lang={lang}
+            onToggleLang={toggleLang}
+            onOpenAccount={() => setAccountOpen(true)}
+            onOpenPricing={navigateToPricing}
+            onOpenTeam={navigateToTeam}
+            onOpenHomeSection={(hash) => navigateToShowcase(hash)}
+            activeBrowserRoute="team"
+            authenticated={hasActiveSession}
+            ownerAccount={false}
+          />
+          <main id="safi-main" className="safi-container safi-stage">
+            <OrganizationWorkspacePanel
+              lang={lang}
+              sessionToken={sessionToken}
+              desktopRuntime={false}
+              onRequestSignIn={() => setAccountOpen(true)}
+              onOpenBillingPortal={(seats) =>
+                navigateToBillingWithIntent({
+                  product: "organization_seat_annual",
+                  billing_country_iso2: "US",
+                  seats
+                })
+              }
+              onBackToShowcase={() => navigateToShowcase()}
             />
           </main>
         </div>
@@ -808,6 +882,7 @@ export function ApplicationShell({
               lang={lang}
               initialVerificationToken={initialVerificationToken}
               onOpenPricing={navigateToPricing}
+              onOpenTeam={navigateToTeam}
               onBackToShowcase={() => navigateToShowcase()}
               onDownloadDesktop={() => navigateToShowcase("#download")}
             />
@@ -893,6 +968,7 @@ export function ApplicationShell({
             onToggleLang={toggleLang}
             onOpenAccount={() => setAccountOpen(true)}
             onOpenPricing={navigateToPricing}
+            onOpenTeam={navigateToTeam}
             onOpenHomeSection={(hash) => navigateToShowcase(hash)}
             activeBrowserRoute="showcase"
             authenticated={hasActiveSession}

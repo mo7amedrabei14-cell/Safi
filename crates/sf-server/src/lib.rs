@@ -13,11 +13,13 @@ pub mod coupons;
 pub mod desktop_auth;
 pub mod device_authority;
 pub mod encrypted_sync;
+pub(crate) mod encrypted_sync_pg;
 pub mod entitlements;
 pub mod entitlements_pg;
 pub mod error;
 pub mod log_center;
 pub mod organizations;
+pub(crate) mod organizations_pg;
 pub mod owner_mfa;
 pub mod pg_source_of_truth;
 pub mod pg_store;
@@ -199,6 +201,10 @@ impl AppState {
         let signer =
             ReleaseAndLicenseSigner::new(config.update_signing_seed, config.license_signing_seed);
         let device_authority = DeviceAuthorityService::new();
+        let organizations =
+            OrganizationService::new().with_require_durable_pg(config.environment.is_strict());
+        let encrypted_sync =
+            EncryptedSyncService::new().with_require_durable_pg(config.environment.is_strict());
         Self {
             config: Arc::new(config),
             auth: Arc::new(auth),
@@ -211,8 +217,8 @@ impl AppState {
             desktop_auth: DesktopAuthService::new(),
             device_authority,
             templates_hub: TemplatesHubService::new(),
-            organizations: OrganizationService::new(),
-            encrypted_sync: EncryptedSyncService::new(),
+            organizations,
+            encrypted_sync,
             signer,
             log_center: AuditLogCenter::new(),
             control_plane: Arc::new(RwLock::new(ControlPlaneState::default())),
@@ -229,6 +235,8 @@ impl AppState {
         self.entitlements = self.entitlements.with_pg_store(pg_store.clone());
         self.billing = self.billing.with_pg_store(pg_store.clone());
         self.billing_handoff = self.billing_handoff.with_pg_store(pg_store.clone());
+        self.organizations = self.organizations.with_pg_store(pg_store.clone());
+        self.encrypted_sync = self.encrypted_sync.with_pg_store(pg_store.clone());
         self.pg_store = Some(pg_store);
         self
     }
@@ -251,6 +259,10 @@ impl AppState {
             self.owner_mfa.import_snapshot(snap.owner_mfa).await;
             self.desktop_auth.import_snapshot(snap.desktop_auth).await;
             self.templates_hub.import_snapshot(snap.templates_hub).await;
+            self.organizations.import_snapshot(snap.organizations).await;
+            self.encrypted_sync
+                .import_snapshot(snap.encrypted_sync)
+                .await;
             self.log_center.import_entries(snap.audit_entries).await;
             if let Some(repo) = &self.in_memory_sessions {
                 repo.import_snapshot(snap.sessions).await;
@@ -301,6 +313,8 @@ impl AppState {
             sessions,
             desktop_auth: self.desktop_auth.export_snapshot().await,
             templates_hub: self.templates_hub.export_snapshot().await,
+            organizations: self.organizations.export_snapshot().await,
+            encrypted_sync: self.encrypted_sync.export_snapshot().await,
             maintenance_mode,
             maintenance_reason,
             feature_flags,

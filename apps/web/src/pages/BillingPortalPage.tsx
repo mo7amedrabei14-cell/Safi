@@ -55,11 +55,16 @@ import {
   savePendingWebPurchaseIntent,
   type PricingCatalogEntry
 } from "../lib/business-pricing";
+import {
+  fetchBillingOrganizationsSummary,
+  type EnrichedOrganizationSummary
+} from "../lib/organization-api";
 
 export interface BillingPortalPageProps {
   readonly lang?: SafiLang;
   readonly onBackToShowcase?: () => void;
   readonly onOpenPricing?: () => void;
+  readonly onOpenTeam?: () => void;
   readonly onDownloadDesktop?: () => void;
   readonly initialVerificationToken?: string | null;
   readonly controller?: BillingCheckoutController;
@@ -146,6 +151,7 @@ export function BillingPortalPage({
   lang = "en",
   onBackToShowcase,
   onOpenPricing,
+  onOpenTeam,
   onDownloadDesktop,
   initialVerificationToken = null,
   controller: injectedController,
@@ -201,6 +207,19 @@ export function BillingPortalPage({
   const [verificationNotice, setVerificationNotice] = useState<string | null>(null);
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const verificationAttemptedRef = useRef<string | null>(null);
+  const [userOrganizations, setUserOrganizations] = useState<
+    readonly EnrichedOrganizationSummary[]
+  >([]);
+
+  useEffect(() => {
+    if (!authToken) {
+      setUserOrganizations([]);
+      return;
+    }
+    void fetchBillingOrganizationsSummary(authToken)
+      .then((res) => setUserOrganizations(res.organizations))
+      .catch(() => setUserOrganizations([]));
+  }, [authToken]);
 
   // Real Paymob EGP customer billing details (zero fake personal data!)
   const [firstName, setFirstName] = useState("");
@@ -942,7 +961,57 @@ export function BillingPortalPage({
               <RefreshCw size={14} aria-hidden="true" />
               <span>{L("تحديث الحالة من الخادم", "Verify Payment Status")}</span>
             </button>
+            {onOpenTeam ? (
+              <button
+                type="button"
+                className="safi-btn safi-btn-ghost"
+                onClick={onOpenTeam}
+                data-billing-open-team="true"
+              >
+                <span>{L("مساحة عمل الفريق (/team)", "Team Workspace (/team)")}</span>
+              </button>
+            ) : null}
           </div>
+
+          {userOrganizations.length > 0 ? (
+            <div
+              data-billing-org-summary="true"
+              style={{
+                padding: "12px 14px",
+                borderRadius: "10px",
+                border: "1px solid rgba(56, 189, 248, 0.25)",
+                background: "rgba(56, 189, 248, 0.06)",
+                display: "grid",
+                gap: "8px",
+                fontSize: "13px"
+              }}
+            >
+              <strong>
+                {L(
+                  "المؤسسات ومساحات العمل المرتبطة بحسابك:",
+                  "Organizations Linked to Your Account:"
+                )}
+              </strong>
+              {userOrganizations.map((item) => (
+                <div
+                  key={item.organization.id}
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    justifyContent: "space-between",
+                    gap: "8px"
+                  }}
+                >
+                  <span>
+                    <strong>{item.organization.name}</strong> · [{item.my_role.toUpperCase()}] ·{" "}
+                    {item.active_members_count + item.pending_invitations_count}/{item.paid_seats}{" "}
+                    {L("مقاعد", "seats")}
+                  </span>
+                  <span>{item.teams_enabled ? L("نشط", "Active") : L("غير نشط", "Inactive")}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           {handoffNotice ? (
             <div

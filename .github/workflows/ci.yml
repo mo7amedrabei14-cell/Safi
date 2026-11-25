@@ -57,8 +57,9 @@ jobs:
     name: Desktop shell compile (windows-latest)
     runs-on: windows-latest
     env:
-      # Non-production CI verification origin shared identically by Frontend and Native builds.
+      # Non-production CI verification origins kept explicitly distinct between API and Public Web.
       SAFI_API_BASE_URL: https://ci-verify.safidata.dev
+      SAFI_PUBLIC_WEB_ORIGIN: https://ci-web.safidata.dev
 
     steps:
       - name: Checkout repository

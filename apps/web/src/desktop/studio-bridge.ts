@@ -1799,3 +1799,289 @@ export async function applyDesktopDecisionEngineAction(
 ): Promise<DesktopStudioState> {
   return stateCall("desktop_decision_engine_apply", { project, decisionId });
 }
+
+// ============================================================================
+// Desktop Organization Shared Workspace & Zero-Knowledge E2EE Sync Bridge
+// ============================================================================
+
+export interface DesktopPublicDeviceSyncIdentity {
+  readonly device_id: string;
+  readonly device_label: string;
+  readonly x25519_public_key_b64: string;
+  readonly key_fingerprint: string;
+  readonly created_at: number;
+}
+
+export type DesktopSyncHealthState =
+  | "idle"
+  | "synced"
+  | "offline_queued"
+  | "conflict_detected"
+  | "key_required"
+  | "error";
+
+export interface DesktopWorkspaceSyncStatus {
+  readonly active_organization_id: string | null;
+  readonly active_workspace_id: string | null;
+  readonly device_identity: DesktopPublicDeviceSyncIdentity;
+  readonly active_key_epoch: number;
+  readonly unlocked_epochs: readonly number[];
+  readonly last_workspace_seq: number;
+  readonly pending_offline_count: number;
+  readonly conflict_count: number;
+  readonly resource_count: number;
+  readonly health: DesktopSyncHealthState;
+  readonly last_synced_at: number | null;
+  readonly last_error_code: string | null;
+}
+
+export interface DesktopSharedWorkspaceResource {
+  readonly workspace_id: string;
+  readonly resource_kind: string;
+  readonly resource_id: string;
+  readonly title: string;
+  readonly payload_json: string;
+  readonly version: number;
+  readonly key_epoch: number;
+  readonly deleted: boolean;
+  readonly dirty: boolean;
+  readonly last_author_user_id: string | null;
+  readonly origin_device_id: string;
+  readonly updated_at: number;
+}
+
+export interface DesktopSyncConflictItem {
+  readonly workspace_id: string;
+  readonly resource_kind: string;
+  readonly resource_id: string;
+  readonly local_title: string;
+  readonly local_payload_json: string;
+  readonly local_base_version: number;
+  readonly remote_title: string;
+  readonly remote_payload_json: string;
+  readonly remote_version: number;
+  readonly remote_deleted: boolean;
+  readonly remote_user_id: string;
+  readonly detected_at: number;
+}
+
+export interface DesktopOutboundEncryptedEnvelope {
+  readonly workspace_id: string;
+  readonly resource_kind: string;
+  readonly resource_id: string;
+  readonly expected_version: number;
+  readonly ciphertext_b64: string;
+  readonly nonce_b64: string;
+  readonly key_id: string;
+  readonly key_epoch: number;
+  readonly content_hash: string;
+  readonly deleted: boolean;
+  readonly origin_device_id: string;
+  readonly idempotency_key: string;
+}
+
+export interface DesktopWrappedKeyWireEntry {
+  readonly recipient_user_id: string;
+  readonly recipient_device_id: string;
+  readonly sender_ephemeral_pub_b64: string;
+  readonly wrapped_key_ciphertext_b64: string;
+  readonly wrapped_key_nonce_b64: string;
+}
+
+export interface DesktopRemoteMemberDeviceKey {
+  readonly user_id: string;
+  readonly device_id: string;
+  readonly device_label: string;
+  readonly x25519_public_key_b64: string;
+  readonly key_fingerprint: string;
+}
+
+export interface DesktopRemoteWrappedKeyEnvelope {
+  readonly organization_id: string;
+  readonly workspace_id: string;
+  readonly key_epoch: number;
+  readonly recipient_user_id: string;
+  readonly recipient_device_id: string;
+  readonly sender_ephemeral_pub_b64: string;
+  readonly wrapped_key_ciphertext_b64: string;
+  readonly wrapped_key_nonce_b64: string;
+}
+
+export async function getDesktopSyncStatus(
+  workspaceId?: string | null
+): Promise<DesktopWorkspaceSyncStatus> {
+  return JSON.parse(
+    await call("desktop_sync_status", { workspaceId: workspaceId ?? null })
+  ) as DesktopWorkspaceSyncStatus;
+}
+
+export async function selectDesktopSyncWorkspace(
+  organizationId: string | null,
+  workspaceId: string | null,
+  activeKeyEpoch = 1
+): Promise<DesktopWorkspaceSyncStatus> {
+  return JSON.parse(
+    await call("desktop_sync_select_workspace", {
+      organizationId,
+      workspaceId,
+      activeKeyEpoch
+    })
+  ) as DesktopWorkspaceSyncStatus;
+}
+
+export async function listDesktopSyncedResources(
+  workspaceId: string,
+  includeDeleted = false
+): Promise<readonly DesktopSharedWorkspaceResource[]> {
+  return JSON.parse(
+    await call("desktop_sync_list_resources", { workspaceId, includeDeleted })
+  ) as DesktopSharedWorkspaceResource[];
+}
+
+export async function listDesktopSyncConflicts(
+  workspaceId: string
+): Promise<readonly DesktopSyncConflictItem[]> {
+  return JSON.parse(
+    await call("desktop_sync_list_conflicts", { workspaceId })
+  ) as DesktopSyncConflictItem[];
+}
+
+export async function rotateDesktopLocalDeviceKey(
+  newDeviceId?: string | null
+): Promise<DesktopPublicDeviceSyncIdentity> {
+  return JSON.parse(
+    await call("desktop_sync_rotate_device_key", { newDeviceId: newDeviceId ?? null })
+  ) as DesktopPublicDeviceSyncIdentity;
+}
+
+export async function wrapDesktopEpochKeysForDevices(
+  organizationId: string,
+  workspaceId: string,
+  keyEpoch: number,
+  devices: readonly DesktopRemoteMemberDeviceKey[]
+): Promise<readonly DesktopWrappedKeyWireEntry[]> {
+  return JSON.parse(
+    await call("desktop_sync_wrap_epoch_keys", {
+      organizationId,
+      workspaceId,
+      keyEpoch,
+      devicesJson: JSON.stringify(devices)
+    })
+  ) as DesktopWrappedKeyWireEntry[];
+}
+
+export async function prepareDesktopWorkspaceKeyRotation(
+  organizationId: string,
+  workspaceId: string,
+  currentEpoch: number,
+  remainingDevices: readonly DesktopRemoteMemberDeviceKey[]
+): Promise<{
+  readonly nextKeyEpoch: number;
+  readonly entries: readonly DesktopWrappedKeyWireEntry[];
+}> {
+  return JSON.parse(
+    await call("desktop_sync_prepare_key_rotation", {
+      organizationId,
+      workspaceId,
+      currentEpoch,
+      remainingDevicesJson: JSON.stringify(remainingDevices)
+    })
+  ) as { readonly nextKeyEpoch: number; readonly entries: readonly DesktopWrappedKeyWireEntry[] };
+}
+
+export async function ingestDesktopWrappedKeys(
+  envelopes: readonly DesktopRemoteWrappedKeyEnvelope[]
+): Promise<{ readonly unlockedCount: number }> {
+  return JSON.parse(
+    await call("desktop_sync_ingest_wrapped_keys", {
+      envelopesJson: JSON.stringify(envelopes)
+    })
+  ) as { readonly unlockedCount: number };
+}
+
+export async function stageDesktopSharedResourceUpsert(params: {
+  readonly organizationId: string;
+  readonly workspaceId: string;
+  readonly resourceKind: string;
+  readonly resourceId: string;
+  readonly title: string;
+  readonly payloadJson: string;
+}): Promise<DesktopSharedWorkspaceResource> {
+  return JSON.parse(
+    await call("desktop_sync_stage_upsert", params)
+  ) as DesktopSharedWorkspaceResource;
+}
+
+export async function stageDesktopSharedResourceDelete(params: {
+  readonly organizationId: string;
+  readonly workspaceId: string;
+  readonly resourceKind: string;
+  readonly resourceId: string;
+}): Promise<DesktopSharedWorkspaceResource> {
+  return JSON.parse(
+    await call("desktop_sync_stage_delete", params)
+  ) as DesktopSharedWorkspaceResource;
+}
+
+export async function peekDesktopOutboundSyncEnvelope(
+  workspaceId: string
+): Promise<DesktopOutboundEncryptedEnvelope | null> {
+  return JSON.parse(
+    await call("desktop_sync_peek_outbound", { workspaceId })
+  ) as DesktopOutboundEncryptedEnvelope | null;
+}
+
+export async function completeDesktopOutboundSyncEnvelope(
+  outcome:
+    | {
+        readonly outcome: "committed";
+        readonly idempotencyKey: string;
+        readonly version: number;
+        readonly workspaceSeq: number;
+        readonly authorUserId?: string;
+      }
+    | {
+        readonly outcome: "conflict";
+        readonly idempotencyKey: string;
+        readonly remoteEnvelope: unknown;
+      }
+    | {
+        readonly outcome: "error";
+        readonly workspaceId: string;
+        readonly errorCode: string;
+      }
+): Promise<unknown> {
+  return JSON.parse(
+    await call("desktop_sync_complete_outbound", {
+      outcomeJson: JSON.stringify(outcome)
+    })
+  );
+}
+
+export async function applyDesktopPulledEnvelopes(
+  workspaceId: string,
+  envelopes: readonly unknown[]
+): Promise<{ readonly appliedCount: number; readonly status: DesktopWorkspaceSyncStatus }> {
+  return JSON.parse(
+    await call("desktop_sync_apply_pulled", {
+      workspaceId,
+      envelopesJson: JSON.stringify(envelopes)
+    })
+  ) as { readonly appliedCount: number; readonly status: DesktopWorkspaceSyncStatus };
+}
+
+export async function resolveDesktopSyncConflict(
+  workspaceId: string,
+  resourceKind: string,
+  resourceId: string,
+  choice: "keep_local" | "accept_remote"
+): Promise<DesktopSharedWorkspaceResource> {
+  return JSON.parse(
+    await call("desktop_sync_resolve_conflict", {
+      workspaceId,
+      resourceKind,
+      resourceId,
+      choice
+    })
+  ) as DesktopSharedWorkspaceResource;
+}

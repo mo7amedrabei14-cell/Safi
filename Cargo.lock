@@ -2072,6 +2072,8 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
+ "blake3",
+ "curve25519-dalek",
  "ed25519-dalek",
  "flate2",
  "hex",

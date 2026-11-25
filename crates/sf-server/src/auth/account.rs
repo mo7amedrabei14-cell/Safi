@@ -552,11 +552,12 @@ impl SmtpVerificationEmailSender {
             std::env::var("SAFI_SMTP_PASSWORD").map_err(|_| AuthError::BackendUnavailable)?;
         let from_raw =
             std::env::var("SAFI_SMTP_FROM").map_err(|_| AuthError::BackendUnavailable)?;
-        let public_base_url =
-            std::env::var("SAFI_PUBLIC_BASE_URL").map_err(|_| AuthError::BackendUnavailable)?;
-        if !public_base_url.starts_with("https://") {
-            return Err(AuthError::InvalidRequest);
-        }
+        let public_web_origin_raw = std::env::var("SAFI_PUBLIC_WEB_ORIGIN")
+            .or_else(|_| std::env::var("SAFI_PUBLIC_BASE_URL"))
+            .map_err(|_| AuthError::BackendUnavailable)?;
+        let public_web_origin =
+            crate::config::validate_public_web_origin(&public_web_origin_raw, true)
+                .map_err(|_| AuthError::InvalidRequest)?;
         let port = std::env::var("SAFI_SMTP_PORT")
             .ok()
             .map(|value| value.parse::<u16>().map_err(|_| AuthError::InvalidRequest))
@@ -573,10 +574,7 @@ impl SmtpVerificationEmailSender {
             .timeout(Some(Duration::from_secs(15)))
             .build();
 
-        Ok((
-            Self { transport, from },
-            public_base_url.trim_end_matches('/').to_owned(),
-        ))
+        Ok((Self { transport, from }, public_web_origin))
     }
 }
 

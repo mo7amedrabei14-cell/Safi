@@ -1,28 +1,43 @@
 //! Ephemeral local HTTP `sf-server` harness for real unmocked Chromium + Rust Desktop E2E tests.
 //!
-//! Spawns the genuine `sf-server` Axum router (`sf_server::app`) with:
-//! - Argon2id `AccountAuthService` + `AuthService` + `OwnerMfaService` + `TemplatesHubService`
-//!   + `DesktopPkceService` + `DeviceAuthorityService` + `EntitlementService`
-//! - Pre-verified accounts:
+//! Supports two modes:
+//! 1. Default in-memory mode (used by `verify-desktop-full-journey-real-e2e.mjs` when `AUTH_HARNESS_PG_URL` is unset).
+//! 2. Durable PostgreSQL 18 mode (`AUTH_HARNESS_PG_URL` set — used by `verify-org-sync-e2e.mjs` across
+//!    real process kills & cold restarts, backed by `SqlxAccountRepository`, `SqlxSessionRepository`,
+//!    and `PgControlPlaneStore` with `with_require_durable_pg(true)`).
+//!
+//! Pre-verified accounts:
 //!   - `analyst@safidata.com` / `SafiAnalyst#2026` (Free tier)
 //!   - `pro@safidata.com` / `SafiPro#2026` (Paid/VIP tier — entitled to `.safitemplate` export/import)
 //!   - `owner@safidata.com` / `SafiOwner#2026` (Bootstrapped Platform Owner with confirmed RFC 6238 TOTP)
-//! - Prints a single JSON readiness line containing `addr` and `ownerTotpBase32` to stdout.
+//!   - `alice@safidata.com` / `SafiAlice#2026` (Organization E2E Account A)
+//!   - `bob@safidata.com` / `SafiBob#2026` (Organization E2E Account B)
+//!   - `viewer@safidata.com` / `SafiViewer#2026` (Organization E2E Viewer Account)
+//!   - `mallory@safidata.com` / `SafiMallory#2026` (Organization E2E Outsider Account)
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use axum::http::StatusCode;
+use axum::routing::post;
+use axum::{Json, Router};
+use serde_json::{json, Value};
 use sf_server::auth::account::{
     AccountAuthService, AccountRepository, LoginAccount, RegisterAccountRequest,
-    VerificationEmailSender,
+    SqlxAccountRepository, VerificationEmailSender,
 };
-use sf_server::auth::service::in_memory_service;
+use sf_server::auth::cache::InMemoryAuthCache;
+use sf_server::auth::repository::{InMemoryApiKeyRepository, SqlxSessionRepository};
+use sf_server::auth::service::{in_memory_service, AuthService};
 use sf_server::auth::unix_now;
 use sf_server::config::ServerConfig;
 use sf_server::error::AuthError;
 use sf_server::owner_mfa::{compute_totp_code, decode_base32, TOTP_PERIOD_SECS};
-use sf_server::{app, AppState};
+use sf_server::pg_store::PgControlPlaneStore;
+use sf_server::{app, AppState, ManagedAccountRecord};
+use sqlx::postgres::PgPoolOptions;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -176,14 +191,88 @@ impl VerificationEmailSender for HarnessMailer {
     }
 }
 
-async fn seed_verified_account(
+fn spawn_local_paddle_mock() -> String {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mock_router = Router::new().route(
+        "/transactions",
+        post(move |Json(payload): Json<Value>| {
+            let calls = calls.clone();
+            async move {
+                let n = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                let txn_id = format!("txn_harness_{n:04}");
+                let price_id = payload["items"][0]["price_id"]
+                    .as_str()
+                    .unwrap_or("pri_org_usd")
+                    .to_owned();
+                let qty = payload["items"][0]["quantity"].as_u64().unwrap_or(1);
+                let unit_minor = match price_id.as_str() {
+                    "pri_monthly_usd" => 2_000,
+                    "pri_annual_usd" => 16_800,
+                    "pri_org_usd" => 20_400,
+                    "pri_ppf_usd" => 200,
+                    "pri_cp25_usd" => 500,
+                    _ => 2_000,
+                };
+                let total = (qty * unit_minor).to_string();
+                let rec = json!({
+                    "id": txn_id,
+                    "status": "draft",
+                    "currency_code": "USD",
+                    "items": [{ "price": { "id": price_id }, "quantity": qty }],
+                    "details": { "totals": { "total": total } },
+                    "custom_data": payload["custom_data"],
+                    "checkout": { "url": format!("https://checkout.paddle.com/{txn_id}") }
+                });
+                (StatusCode::CREATED, Json(json!({ "data": rec })))
+            }
+        }),
+    );
+
+    let std_listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+        Ok(l) => l,
+        Err(_) => std::process::exit(10),
+    };
+    if std_listener.set_nonblocking(true).is_err() {
+        std::process::exit(10);
+    }
+    let Ok(addr) = std_listener.local_addr() else {
+        std::process::exit(10);
+    };
+    let Ok(listener) = tokio::net::TcpListener::from_std(std_listener) else {
+        std::process::exit(10);
+    };
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, mock_router).await;
+    });
+    format!("http://{addr}")
+}
+
+async fn ensure_verified_account<R: AccountRepository + ?Sized>(
     account_auth: &AccountAuthService,
     mailer: &HarnessMailer,
-    repo: &HarnessAccountRepo,
+    repo: &R,
+    base_state: &AppState,
     email: &str,
     display_name: &str,
     password: &str,
 ) -> (Uuid, Uuid) {
+    let norm_email = email.trim().to_ascii_lowercase();
+    if let Ok(Some(existing)) = repo.find_for_login(&norm_email).await {
+        let ws = existing.workspace_id.unwrap_or_else(Uuid::now_v7);
+        base_state
+            .upsert_managed_account(ManagedAccountRecord {
+                user_id: existing.user_id,
+                workspace_id: ws,
+                email: norm_email,
+                display_name: display_name.to_owned(),
+                suspended: false,
+                verified_phone: None,
+                created_at: unix_now(),
+            })
+            .await;
+        return (existing.user_id, ws);
+    }
+
     if account_auth
         .register(RegisterAccountRequest {
             email: email.to_owned(),
@@ -200,10 +289,22 @@ async fn seed_verified_account(
     if account_auth.verify_email(verify_token).await.is_err() {
         std::process::exit(3);
     }
-    let Some(acc) = repo.find_for_login(email).await.ok().flatten() else {
+    let Some(acc) = repo.find_for_login(&norm_email).await.ok().flatten() else {
         std::process::exit(3);
     };
-    (acc.user_id, acc.workspace_id.unwrap_or_else(Uuid::now_v7))
+    let ws = acc.workspace_id.unwrap_or_else(Uuid::now_v7);
+    base_state
+        .upsert_managed_account(ManagedAccountRecord {
+            user_id: acc.user_id,
+            workspace_id: ws,
+            email: norm_email,
+            display_name: display_name.to_owned(),
+            suspended: false,
+            verified_phone: None,
+            created_at: unix_now(),
+        })
+        .await;
+    (acc.user_id, ws)
 }
 
 #[tokio::main]
@@ -211,50 +312,165 @@ async fn main() {
     let bind_addr = std::env::var("AUTH_HARNESS_ADDR").unwrap_or_else(|_| "127.0.0.1:0".to_owned());
     let public_origin = std::env::var("AUTH_HARNESS_PUBLIC_ORIGIN")
         .unwrap_or_else(|_| "http://127.0.0.1:4175".to_owned());
+    let web_origin =
+        std::env::var("AUTH_HARNESS_WEB_ORIGIN").unwrap_or_else(|_| public_origin.clone());
+    let paddle_secret = std::env::var("AUTH_HARNESS_PADDLE_SECRET")
+        .unwrap_or_else(|_| "pdl_harness_whsec_secret".to_owned());
+    let pg_url = std::env::var("AUTH_HARNESS_PG_URL")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty());
 
-    let repo = Arc::new(HarnessAccountRepo::default());
+    let paddle_mock_url = spawn_local_paddle_mock();
     let mailer = Arc::new(HarnessMailer::default());
-    let (auth_service, _, _, _) = in_memory_service();
 
     let mut cfg = ServerConfig::for_tests();
     cfg.api_base_url = Some(public_origin.clone());
+    cfg.public_web_origin = Some(web_origin.clone());
     cfg.license_signing_seed = Some([0x55u8; 32]);
+    cfg.paddle_api_base_url = paddle_mock_url;
+    cfg.paddle_api_key = Some("pdl_harness_api_key".to_owned());
+    cfg.paddle_webhook_secret = Some(paddle_secret);
+    cfg.paddle_price_individual_monthly = Some("pri_monthly_usd".to_owned());
+    cfg.paddle_price_individual_annual = Some("pri_annual_usd".to_owned());
+    cfg.paddle_price_org_seat_annual = Some("pri_org_usd".to_owned());
+    cfg.paddle_price_pay_per_file = Some("pri_ppf_usd".to_owned());
+    cfg.paddle_price_credit_pack_25 = Some("pri_cp25_usd".to_owned());
 
-    let base_state = AppState::with_config(auth_service, cfg);
-    let account_auth = AccountAuthService::new(
-        repo.clone(),
-        mailer.clone(),
-        base_state.auth.clone(),
-        public_origin,
-    );
+    let (base_state, account_auth, pro_uid, pro_ws, owner_uid, pg_backed) =
+        if let Some(ref db_url) = pg_url {
+            let Ok(pool) = PgPoolOptions::new()
+                .max_connections(8)
+                .connect(db_url)
+                .await
+            else {
+                std::process::exit(11);
+            };
+            let auth_service = AuthService::new(
+                Arc::new(InMemoryApiKeyRepository::default()),
+                Arc::new(SqlxSessionRepository::new(pool.clone())),
+                Arc::new(InMemoryAuthCache::new()),
+            );
+            let pg_store = PgControlPlaneStore::new(pool.clone());
+            let mut st = AppState::with_config(auth_service, cfg).with_pg_store(pg_store);
+            st.entitlements = st.entitlements.with_require_durable_pg(true);
+            st.billing = st.billing.with_require_durable_pg(true);
+            st.billing_handoff = st.billing_handoff.with_require_durable_pg(true);
+            st.organizations = st.organizations.with_require_durable_pg(true);
+            st.encrypted_sync = st.encrypted_sync.with_require_durable_pg(true);
 
-    let _free_ids = seed_verified_account(
-        &account_auth,
-        &mailer,
-        &repo,
-        "analyst@safidata.com",
-        "Safi Analyst",
-        "SafiAnalyst#2026",
-    )
-    .await;
-    let (pro_uid, pro_ws) = seed_verified_account(
-        &account_auth,
-        &mailer,
-        &repo,
-        "pro@safidata.com",
-        "Safi Pro User",
-        "SafiPro#2026",
-    )
-    .await;
-    let (owner_uid, _owner_ws) = seed_verified_account(
-        &account_auth,
-        &mailer,
-        &repo,
-        "owner@safidata.com",
-        "Platform Owner",
-        "SafiOwner#2026",
-    )
-    .await;
+            let sqlx_repo = Arc::new(SqlxAccountRepository::new(pool));
+            let acc_auth = AccountAuthService::new(
+                sqlx_repo.clone(),
+                mailer.clone(),
+                st.auth.clone(),
+                web_origin,
+            );
+
+            let _ = ensure_verified_account(
+                &acc_auth,
+                &mailer,
+                sqlx_repo.as_ref(),
+                &st,
+                "analyst@safidata.com",
+                "Safi Analyst",
+                "SafiAnalyst#2026",
+            )
+            .await;
+            let (p_uid, p_ws) = ensure_verified_account(
+                &acc_auth,
+                &mailer,
+                sqlx_repo.as_ref(),
+                &st,
+                "pro@safidata.com",
+                "Safi Pro User",
+                "SafiPro#2026",
+            )
+            .await;
+            let (o_uid, _) = ensure_verified_account(
+                &acc_auth,
+                &mailer,
+                sqlx_repo.as_ref(),
+                &st,
+                "owner@safidata.com",
+                "Platform Owner",
+                "SafiOwner#2026",
+            )
+            .await;
+            for (em, name, pw) in [
+                ("alice@safidata.com", "Alice Owner", "SafiAlice#2026"),
+                ("bob@safidata.com", "Bob Member", "SafiBob#2026"),
+                ("viewer@safidata.com", "Victor Viewer", "SafiViewer#2026"),
+                (
+                    "mallory@safidata.com",
+                    "Mallory Outsider",
+                    "SafiMallory#2026",
+                ),
+            ] {
+                let _ = ensure_verified_account(
+                    &acc_auth,
+                    &mailer,
+                    sqlx_repo.as_ref(),
+                    &st,
+                    em,
+                    name,
+                    pw,
+                )
+                .await;
+            }
+            (st, acc_auth, p_uid, p_ws, o_uid, true)
+        } else {
+            let repo = Arc::new(HarnessAccountRepo::default());
+            let (auth_service, _, _, _) = in_memory_service();
+            let st = AppState::with_config(auth_service, cfg);
+            let acc_auth =
+                AccountAuthService::new(repo.clone(), mailer.clone(), st.auth.clone(), web_origin);
+            let _ = ensure_verified_account(
+                &acc_auth,
+                &mailer,
+                repo.as_ref(),
+                &st,
+                "analyst@safidata.com",
+                "Safi Analyst",
+                "SafiAnalyst#2026",
+            )
+            .await;
+            let (p_uid, p_ws) = ensure_verified_account(
+                &acc_auth,
+                &mailer,
+                repo.as_ref(),
+                &st,
+                "pro@safidata.com",
+                "Safi Pro User",
+                "SafiPro#2026",
+            )
+            .await;
+            let (o_uid, _) = ensure_verified_account(
+                &acc_auth,
+                &mailer,
+                repo.as_ref(),
+                &st,
+                "owner@safidata.com",
+                "Platform Owner",
+                "SafiOwner#2026",
+            )
+            .await;
+            for (em, name, pw) in [
+                ("alice@safidata.com", "Alice Owner", "SafiAlice#2026"),
+                ("bob@safidata.com", "Bob Member", "SafiBob#2026"),
+                ("viewer@safidata.com", "Victor Viewer", "SafiViewer#2026"),
+                (
+                    "mallory@safidata.com",
+                    "Mallory Outsider",
+                    "SafiMallory#2026",
+                ),
+            ] {
+                let _ =
+                    ensure_verified_account(&acc_auth, &mailer, repo.as_ref(), &st, em, name, pw)
+                        .await;
+            }
+            (st, acc_auth, p_uid, p_ws, o_uid, false)
+        };
 
     // Bootstrap Owner + pre-confirm RFC 6238 TOTP so E2E verifies real TOTP codes live.
     if base_state
@@ -276,7 +492,6 @@ async fn main() {
         std::process::exit(8);
     };
     let now = unix_now();
-    // Confirm with previous 30s window so the current window remains unused for E2E live verify!
     let prev_step = (now / TOTP_PERIOD_SECS).saturating_sub(1);
     let Ok(confirm_code) = compute_totp_code(&secret_bytes, prev_step) else {
         std::process::exit(8);
@@ -309,7 +524,8 @@ async fn main() {
         serde_json::json!({
             "ready": true,
             "addr": addr.to_string(),
-            "ownerTotpBase32": bundle.manual_secret_base32
+            "ownerTotpBase32": bundle.manual_secret_base32,
+            "pgBacked": pg_backed
         })
     );
     let _ = std::io::Write::flush(&mut std::io::stdout());

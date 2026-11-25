@@ -485,6 +485,76 @@ fn dispatch(
             str_arg(args, "decisionId", "decision_id"),
             ts,
         ),
+        "desktop_sync_status" => {
+            store.desktop_sync_status(opt_str_arg(args, "workspaceId", "workspace_id"))
+        }
+        "desktop_sync_select_workspace" => store.desktop_sync_select_workspace(
+            opt_str_arg(args, "organizationId", "organization_id"),
+            opt_str_arg(args, "workspaceId", "workspace_id"),
+            u32::try_from(u64_arg(args, "activeKeyEpoch", "active_key_epoch").max(1)).unwrap_or(1),
+        ),
+        "desktop_sync_list_resources" => store.desktop_sync_list_resources(
+            str_arg(args, "workspaceId", "workspace_id"),
+            args.get("includeDeleted")
+                .or_else(|| args.get("include_deleted"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        ),
+        "desktop_sync_list_conflicts" => {
+            store.desktop_sync_list_conflicts(str_arg(args, "workspaceId", "workspace_id"))
+        }
+        "desktop_sync_rotate_device_key" => store
+            .desktop_sync_rotate_device_key(opt_str_arg(args, "newDeviceId", "new_device_id"), ts),
+        "desktop_sync_wrap_epoch_keys" => store.desktop_sync_wrap_epoch_keys(
+            str_arg(args, "organizationId", "organization_id"),
+            str_arg(args, "workspaceId", "workspace_id"),
+            u32::try_from(u64_arg(args, "keyEpoch", "key_epoch").max(1)).unwrap_or(1),
+            str_arg(args, "devicesJson", "devices_json"),
+            ts,
+        ),
+        "desktop_sync_prepare_key_rotation" => store.desktop_sync_prepare_key_rotation(
+            str_arg(args, "organizationId", "organization_id"),
+            str_arg(args, "workspaceId", "workspace_id"),
+            u32::try_from(u64_arg(args, "currentEpoch", "current_epoch").max(1)).unwrap_or(1),
+            str_arg(args, "remainingDevicesJson", "remaining_devices_json"),
+            ts,
+        ),
+        "desktop_sync_ingest_wrapped_keys" => store
+            .desktop_sync_ingest_wrapped_keys(str_arg(args, "envelopesJson", "envelopes_json"), ts),
+        "desktop_sync_stage_upsert" => store.desktop_sync_stage_upsert(
+            str_arg(args, "organizationId", "organization_id"),
+            str_arg(args, "workspaceId", "workspace_id"),
+            str_arg(args, "resourceKind", "resource_kind"),
+            str_arg(args, "resourceId", "resource_id"),
+            str_arg(args, "title", "title"),
+            str_arg(args, "payloadJson", "payload_json"),
+            ts,
+        ),
+        "desktop_sync_stage_delete" => store.desktop_sync_stage_delete(
+            str_arg(args, "organizationId", "organization_id"),
+            str_arg(args, "workspaceId", "workspace_id"),
+            str_arg(args, "resourceKind", "resource_kind"),
+            str_arg(args, "resourceId", "resource_id"),
+            ts,
+        ),
+        "desktop_sync_peek_outbound" => {
+            store.desktop_sync_peek_outbound(str_arg(args, "workspaceId", "workspace_id"), ts)
+        }
+        "desktop_sync_complete_outbound" => {
+            store.desktop_sync_complete_outbound(str_arg(args, "outcomeJson", "outcome_json"), ts)
+        }
+        "desktop_sync_apply_pulled" => store.desktop_sync_apply_pulled(
+            str_arg(args, "workspaceId", "workspace_id"),
+            str_arg(args, "envelopesJson", "envelopes_json"),
+            ts,
+        ),
+        "desktop_sync_resolve_conflict" => store.desktop_sync_resolve_conflict(
+            str_arg(args, "workspaceId", "workspace_id"),
+            str_arg(args, "resourceKind", "resource_kind"),
+            str_arg(args, "resourceId", "resource_id"),
+            str_arg(args, "choice", "choice"),
+            ts,
+        ),
         other => store
             .gate_command(other, 0, Some(ts))
             .map(|_| "null".to_owned()),

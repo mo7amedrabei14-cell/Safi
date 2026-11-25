@@ -219,3 +219,41 @@
   present (`isDesktopRuntime()`); the dock gains the seventh tab from `STUDIO_TAB`, and the public
   site keeps exactly six tabs. The bridge itself throws `SF-SYS-010` outside the app, so a browser
   tab cannot reach the engine even if the component is forced to render.
+
+
+## ADR-0015 — Origin Separation, Production Organizations + 4-Role RBAC, and Zero-Knowledge E2EE Sync
+
+**Status:** Accepted · 2026-11-24
+
+### 1. Explicit Origin Separation (`SAFI_PUBLIC_WEB_ORIGIN` vs `SAFI_API_BASE_URL`)
+- **`SAFI_API_BASE_URL`** represents ONLY the backend API origin (e.g. `https://api.safidata.app`), used for client-to-API requests and server-to-server webhook callback registration (`notification_url` -> `<SAFI_API_BASE_URL>/v1/billing/webhooks/paymob`).
+- **`SAFI_PUBLIC_WEB_ORIGIN`** represents ONLY the public website origin (e.g. `https://safidata.app`), used for browser redirects, Desktop-to-Web `/billing` handoffs, Desktop PKCE browser auth, OAuth web `redirect_uri` allowlisting, email verification links, CORS/CSRF trusted web origin matching, and Paymob browser return URLs (`redirection_url` -> `<SAFI_PUBLIC_WEB_ORIGIN>/billing?order_id=<uuid>`).
+- Both variables are validated independently at build time (`vite.config.ts`, `apps/desktop/src-tauri/build.rs`) and server startup (`crates/sf-server/src/config.rs`). Neither variable ever falls back to the other or to `localhost` in staging/production (`SF-SYS-032`).
+
+### 2. Durable PostgreSQL 18 Shared Team Workspace & 4-Role Server RBAC
+- Every Organization owns a dedicated row in `workspaces` (`organizations.workspace_id`) persisted in PostgreSQL 18 (`organizations`, `organization_members`, `organization_invitations` from Migration `0009` extended non-destructively by Migration `0017`).
+- Active workspace resolution (`X-Safi-Workspace-Id` header or organization path parameter) never trusts client UUIDs: the server verifies active membership in `organization_members`, `organizations.deleted_at IS NULL`, and an active `OrganizationSeat` subscription entitlement (`min 3` seats, server-enforced cap on `active_members + pending_unexpired_invitations <= purchased_seats`).
+- Invitations store ONLY `BLAKE3(token)` (`token_hash`) with single-use consumption (`accepted_at` / `declined_at` / `revoked_at`) and expiry (`expires_at`). Accepting or declining an invitation requires the authenticated caller's **verified, normalized account email** (`email_verified_at IS NOT NULL`) to match `invited_email_norm`; token possession alone is rejected (`403 SF-SYN-005`).
+- Server-enforced 4-role RBAC policy:
+  - **View shared workspace / members / sync envelopes**: `Owner`, `Admin`, `Member`, `Viewer`.
+  - **Modify shared workspace resources (push sync envelopes, create/revoke share links)**: `Owner`, `Admin`, `Member` (`Viewer` strictly blocked with `403 SF-SYN-005`).
+  - **Send / view / revoke invitations**: `Owner`, `Admin`.
+  - **Change member roles / remove members**: `Owner` (any non-last-Owner member; no self-demotion of last Owner without transfer), and `Admin` strictly scoped to `Member` and `Viewer` targets (`Admin` can never promote to `Owner`/`Admin`, modify an `Owner`/`Admin`, or remove an `Owner`/`Admin`). No user can self-promote.
+  - **Manage organization subscription / seats, transfer ownership, delete organization**: **`Owner` ONLY**.
+
+### 3. Production End-to-End Encrypted Sync & Key Management
+- **Client-side E2EE (`crates/sf-desktop/src/org_sync.rs`)**: All shared team resources are encrypted on Desktop BEFORE network transmission using `ChaCha20-Poly1305` (`ring = "=0.17.14"`) with fresh 96-bit CSPRNG nonces, domain-separated AAD (`safi-e2ee-sync-v1:<org_id>:<workspace_id>:<resource_kind>:<resource_id>:<key_epoch>:<deleted>`), and `BLAKE3` ciphertext integrity digests.
+- **Key Hierarchy & Wrapping**:
+  - Each authorized Desktop installation generates a static **X25519** device keypair (`curve25519-dalek = "=4.1.3"`), storing the private key exclusively inside the local encrypted Desktop Vault (`SFK2` / OS Keystore) and publishing only the 32-byte public key to `organization_member_public_keys`.
+  - Each Organization workspace epoch (`active_key_epoch >= 1`) uses a random 256-bit symmetric **Workspace Key**, wrapped individually per authorized member device via ephemeral-to-static **X25519 + HKDF-SHA256 + ChaCha20-Poly1305** (`organization_wrapped_keys`).
+  - **Member Removal & Key Rotation**: Removing a member immediately revokes their membership, device public keys, and wrapped key rows inside the same PostgreSQL transaction. Rotating the workspace key increments `organizations.active_key_epoch` and distributes new wrapped keys ONLY to remaining active members; `POST /v1/sync/envelopes` rejects stale `key_epoch < active_key_epoch`, guaranteeing forward confidentiality for all future revisions. (Explicit cryptographic boundary: as in all E2EE systems, a removed member who previously decrypted historical revisions on their own device prior to removal could have retained local copies of those historical revisions, though they are immediately blocked from pulling from the server and cannot decrypt any post-rotation revisions.)
+- **Sync Protocol**: Monotonic per-workspace revision cursor (`since_version`), per-resource `expected_version` optimistic concurrency (`409 SF-SYN-002` conflict detection with interactive Desktop `KeepLocal` / `AcceptRemote` resolution), durable `idempotency_key` + request fingerprint replay safety, encrypted local offline queue (`org_sync_vault.safi.enc`), and tombstones (`deleted = true`).
+
+### 4. Concise Threat Model
+- **Protected Assets**: Plaintext customer datasets/recipes/shared workspace artifacts, X25519 private device keys, unwrapped 256-bit Workspace Keys, session tokens (`sfs_*`), invitation tokens (`sfi_*`), and organization seat/subscription entitlements.
+- **Threat Actors**: Unauthenticated external attackers, authenticated users in foreign tenants (IDOR attempts), under-privileged insiders (`Viewer` attempting writes, `Member`/`Admin` attempting privilege escalation), recipients of leaked invitation tokens with non-matching or unverified emails, removed former members, and honest-but-curious database/infrastructure operators.
+- **Trust Boundaries**:
+  1. **Desktop Client (`sf-desktop` + OS Keystore)**: Trusted with plaintext for authorized workspaces and private X25519/Workspace keys. Enforces `ALLOWED_COMMANDS` IPC boundary and TLS verification (`rustls`).
+  2. **Backend API (`sf-server`)**: Trusted to enforce authentication, verified-email invitation binding, 4-role RBAC, rate limits, and paid seat entitlements — **UNTRUSTED** with plaintext data or decryption keys (receives only ciphertext + nonces + public keys + wrapped keys).
+  3. **PostgreSQL 18**: Durable authority enforcing FK/Unique constraints, transactional locks (`SELECT ... FOR UPDATE`), and defense-in-depth `ENABLE` + `FORCE ROW LEVEL SECURITY`; stores zero plaintext user data and zero raw tokens/private keys.
+- **Key Theft & Membership Compromise Mitigations**: Private keys zeroized in memory (`Zeroize`) and stored encrypted under OS Keystore (`SFK2`); device loss handled via per-device key revocation + Workspace Key epoch rotation; invitation hijacking blocked by `BLAKE3` token hashing + single-use lock + mandatory verified-email normalization match; seat/role tampering blocked by server-side PostgreSQL transactions and audit logging.

@@ -90,8 +90,9 @@ export interface FloatingGlassDockProps {
   readonly onToggleLang?: () => void;
   readonly onOpenAccount?: () => void;
   readonly onOpenPricing?: () => void;
+  readonly onOpenTeam?: () => void;
   readonly onOpenHomeSection?: (hash: string) => void;
-  readonly activeBrowserRoute?: "showcase" | "pricing" | "billing";
+  readonly activeBrowserRoute?: "showcase" | "pricing" | "billing" | "team";
   readonly authenticated?: boolean;
   readonly ownerAccount?: boolean;
 }
@@ -100,13 +101,14 @@ const WEBSITE_SECTIONS: ReadonlyArray<{
   readonly href: string;
   readonly ar: string;
   readonly en: string;
-  readonly kind?: "pricing";
+  readonly kind?: "pricing" | "team";
 }> = [
   { href: "#overview", ar: "نظرة عامة", en: "Overview" },
   { href: "#prompt-motion", ar: "الموشن التفاعلي", en: "Motion Studio" },
   { href: "#features", ar: "المميزات", en: "Features" },
   { href: "#compare", ar: "المقارنة", en: "Compare" },
   { href: "/pricing", ar: "الأسعار والاشتراك", en: "Plans & Pricing", kind: "pricing" },
+  { href: "/team", ar: "مساحة الفريق", en: "Team Workspace", kind: "team" },
   { href: "#download", ar: "تحميل التطبيق", en: "Download" }
 ];
 
@@ -122,6 +124,7 @@ export function FloatingGlassDock({
   onToggleLang,
   onOpenAccount,
   onOpenPricing,
+  onOpenTeam,
   onOpenHomeSection,
   activeBrowserRoute = "showcase",
   authenticated = false,
@@ -205,21 +208,28 @@ export function FloatingGlassDock({
           <div className="safi-strip-expanded-content">
             {WEBSITE_SECTIONS.map((sec, idx) => {
               const isPricing = sec.kind === "pricing";
+              const isTeam = sec.kind === "team";
               const isHighlighted =
-                (isPricing && activeBrowserRoute === "pricing") || idx === highlightedIdx;
+                (isPricing && activeBrowserRoute === "pricing") ||
+                (isTeam && activeBrowserRoute === "team") ||
+                idx === highlightedIdx;
               return (
                 <a
                   key={sec.href}
                   href={sec.href}
-                  data-strip-nav={isPricing ? "pricing" : undefined}
+                  data-strip-nav={isPricing ? "pricing" : isTeam ? "team" : undefined}
                   onPointerEnter={() => setHoveredNavIdx(idx)}
                   onClick={(e) => {
                     setActiveNavIdx(idx);
                     if (isPricing && onOpenPricing) {
                       e.preventDefault();
                       onOpenPricing();
+                    } else if (isTeam && onOpenTeam) {
+                      e.preventDefault();
+                      onOpenTeam();
                     } else if (
                       !isPricing &&
+                      !isTeam &&
                       onOpenHomeSection &&
                       activeBrowserRoute !== "showcase"
                     ) {
